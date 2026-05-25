@@ -1,3 +1,4 @@
+/// Generates Rust client and server bindings from the canonical protocol.
 fn main() {
     println!("cargo:rerun-if-changed=connector.proto");
     tonic_build::configure()

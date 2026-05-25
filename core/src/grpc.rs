@@ -1,3 +1,5 @@
+//! Tonic connector-stream adapter and online dispatch wakeup coordination.
+
 use crate::{sessions::SessionRegistry, Engine, EngineError};
 use std::pin::Pin;
 use tokio::sync::mpsc;
@@ -8,15 +10,20 @@ use wuphf_proto::v1::{
     CoreToConnector, RegistrationResult,
 };
 
+/// Erased outbound server stream type returned to Tonic.
 type OutputStream =
     Pin<Box<dyn Stream<Item = Result<CoreToConnector, Status>> + Send + Sync + 'static>>;
 #[derive(Clone)]
+/// gRPC connector service exposing one authenticated bidirectional stream per connector.
 pub struct ConnectorService {
+    /// Core application facade for authenticated operations and durable dispatch state.
     engine: Engine,
+    /// Registry enforcing one live usable stream per connector identity.
     sessions: SessionRegistry,
 }
 
 impl ConnectorService {
+    /// Creates connector service around initialized core engine.
     pub fn new(engine: Engine) -> Self {
         Self {
             engine,
@@ -24,6 +31,7 @@ impl ConnectorService {
         }
     }
 
+    /// Claims and sends currently eligible durable commands to an online connector.
     async fn send_pending(
         &self,
         connector_id: &str,
@@ -62,6 +70,7 @@ impl ConnectorService {
         Ok(())
     }
 
+    /// Schedules later recheck for acknowledgement expiry or transient retry deadline.
     fn schedule_wakeup(&self, connector_id: String, delay_ms: u64) {
         let service = self.clone();
         tokio::spawn(async move {
@@ -72,6 +81,7 @@ impl ConnectorService {
         });
     }
 
+    /// Applies one authenticated connector-to-core operation.
     async fn handle_operation(
         &self,
         connector_id: &str,
@@ -129,6 +139,7 @@ impl ConnectorService {
         }
     }
 
+    /// Checks whether stream task still represents active connector session.
     async fn is_active_session(&self, connector_id: &str, session_id: &str) -> bool {
         self.sessions.is_active(connector_id, session_id).await
     }
@@ -136,8 +147,10 @@ impl ConnectorService {
 
 #[tonic::async_trait]
 impl Connector for ConnectorService {
+    /// Stream returned by connector RPC.
     type ConnectorStreamStream = OutputStream;
 
+    /// Authenticates registration, installs stream session, and processes operations.
     async fn connector_stream(
         &self,
         request: Request<Streaming<ConnectorToCore>>,
@@ -234,6 +247,7 @@ impl Connector for ConnectorService {
     }
 }
 
+/// Maps domain failures to stable gRPC status classes.
 fn to_status(error: EngineError) -> Status {
     match error {
         EngineError::UnauthorizedEndpoint(_) | EngineError::UnauthorizedDispatch => {

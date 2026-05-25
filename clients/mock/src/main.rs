@@ -1,3 +1,5 @@
+//! Mock connector executable for manually exercising core protocol behavior.
+
 use anyhow::{bail, Context};
 use clap::Parser;
 use tokio::sync::mpsc;
@@ -9,34 +11,48 @@ use wuphf_proto::v1::{
 };
 
 #[derive(Parser)]
+/// Command-line options for one mock connector session and optional synthetic event.
 struct Args {
+    /// Core gRPC server URI.
     #[arg(long, default_value = "http://127.0.0.1:50051")]
     server: String,
+    /// Configured connector identity to register.
     #[arg(long)]
     connector: String,
+    /// Shared token configured for connector registration.
     #[arg(long)]
     token: String,
+    /// Origin endpoint ID used for optional submitted message.
     #[arg(long)]
     endpoint: String,
+    /// Optional text content for a synthetic inbound create-message event.
     #[arg(long)]
     send: Option<String>,
+    /// Stable event ID override for submission and deduplication testing.
     #[arg(long)]
     event_id: Option<String>,
+    /// Origin-native platform message ID override for submission.
     #[arg(long)]
     platform_message_id: Option<String>,
+    /// Optional origin-native parent platform message ID for reply submission.
     #[arg(long)]
     reply_to: Option<String>,
+    /// Leaves received dispatches unacknowledged to demonstrate durable replay.
     #[arg(long)]
     no_ack: bool,
+    /// Stable target-native message ID to include in acknowledgements.
     #[arg(long)]
     ack_platform_id: Option<String>,
+    /// Reports received dispatches as failed using this reason.
     #[arg(long)]
     fail_reason: Option<String>,
+    /// Marks a reported failure terminal rather than transient.
     #[arg(long, requires = "fail_reason")]
     permanent_failure: bool,
 }
 
 #[tokio::main]
+/// Registers mock connector, optionally submits one event, and handles dispatch commands.
 async fn main() -> anyhow::Result<()> {
     let args = Args::parse();
     let mut client = ConnectorClient::connect(args.server.clone())
@@ -130,6 +146,7 @@ async fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
+/// Returns current Unix timestamp in milliseconds for synthetic messages.
 fn now_ms() -> i64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)

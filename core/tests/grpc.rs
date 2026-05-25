@@ -1,3 +1,5 @@
+//! End-to-end tests for authenticated connector stream and durable delivery behavior.
+
 use std::{sync::Arc, time::Duration};
 use tempfile::TempDir;
 use tokio::{
@@ -13,24 +15,33 @@ use wuphf_proto::v1::{
     core_to_connector, ConnectorToCore, CreateMessage, DispatchFailed, DispatchSucceeded, Register,
 };
 
+/// Connected test connector with input sender and output stream.
 struct Client {
+    /// Sender for connector-to-core operations.
     input: mpsc::Sender<ConnectorToCore>,
+    /// Stream of core-to-connector responses and dispatch commands.
     output: tonic::Streaming<wuphf_proto::v1::CoreToConnector>,
 }
 
+/// Running local gRPC server that can be shut down to exercise restart recovery.
 struct TestServer {
+    /// HTTP URI accepted by generated Tonic client.
     url: String,
+    /// Signal sender used to gracefully stop local server.
     shutdown: oneshot::Sender<()>,
+    /// Serving task waited during shutdown.
     task: JoinHandle<()>,
 }
 
 impl TestServer {
+    /// Gracefully stops server and waits for serving task completion.
     async fn stop(self) {
         self.shutdown.send(()).unwrap();
         self.task.await.unwrap();
     }
 }
 
+/// Creates temporary persisted topology plus running test server.
 async fn setup() -> (TestServer, TempDir, Arc<Config>) {
     let temp = tempfile::tempdir().unwrap();
     let path = temp.path().join("grpc.sqlite");
@@ -71,6 +82,7 @@ async fn setup() -> (TestServer, TempDir, Arc<Config>) {
     (server, temp, config)
 }
 
+/// Starts service over supplied configuration and its existing SQLite state.
 async fn spawn_server(config: Arc<Config>) -> TestServer {
     let store = Store::open(&config).await.unwrap();
     let service = ConnectorService::new(Engine::new(config, store));
@@ -93,6 +105,7 @@ async fn spawn_server(config: Arc<Config>) -> TestServer {
     }
 }
 
+/// Registers connector stream against test server.
 async fn connect(server: &str, id: &str, token: &str) -> Client {
     let mut client = ConnectorClient::connect(server.to_string()).await.unwrap();
     let (input, messages) = mpsc::channel(8);
@@ -113,6 +126,7 @@ async fn connect(server: &str, id: &str, token: &str) -> Client {
     Client { input, output }
 }
 
+/// Asserts first server response is registration result with expected decision.
 async fn registered(client: &mut Client, accepted: bool) {
     let response = client.output.message().await.unwrap().unwrap();
     let core_to_connector::Operation::RegistrationResult(result) = response.operation.unwrap()
@@ -122,6 +136,7 @@ async fn registered(client: &mut Client, accepted: bool) {
     assert_eq!(result.accepted, accepted);
 }
 
+/// Builds normalized create-message operation originating from test endpoint A.
 fn create(event: &str, platform_id: &str, reply_to: Option<&str>) -> ConnectorToCore {
     ConnectorToCore {
         operation: Some(connector_to_core::Operation::CreateMessage(CreateMessage {
@@ -139,6 +154,7 @@ fn create(event: &str, platform_id: &str, reply_to: Option<&str>) -> ConnectorTo
 }
 
 #[tokio::test]
+/// Replicates parent and reply while proving reconnect replay and session replacement.
 async fn streams_create_reply_and_replays_unacknowledged_dispatch() {
     let (server, _temp, _config) = setup().await;
     let mut a = connect(&server.url, "a", "a-token").await;
@@ -203,6 +219,7 @@ async fn streams_create_reply_and_replays_unacknowledged_dispatch() {
 }
 
 #[tokio::test]
+/// Rejects connector stream registered with wrong shared token.
 async fn rejects_invalid_connector_token() {
     let (server, _temp, _config) = setup().await;
     let mut client = connect(&server.url, "a", "wrong").await;
@@ -210,6 +227,7 @@ async fn rejects_invalid_connector_token() {
 }
 
 #[tokio::test]
+/// Redelivers transient failure and does not redeliver terminal failure.
 async fn retries_transient_failure_and_does_not_retry_permanent_failure() {
     let (server, _temp, _config) = setup().await;
     let mut a = connect(&server.url, "a", "a-token").await;
@@ -276,6 +294,7 @@ async fn retries_transient_failure_and_does_not_retry_permanent_failure() {
 }
 
 #[tokio::test]
+/// Restores unacknowledged durable dispatch through a complete service restart.
 async fn replays_unacknowledged_dispatch_after_server_restart() {
     let (server, _temp, config) = setup().await;
     let mut a = connect(&server.url, "a", "a-token").await;

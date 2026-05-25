@@ -1,13 +1,19 @@
+//! Compiled routing and endpoint-ownership lookup tables.
+
 use crate::config::{Config, EndpointConfig};
 use std::collections::{BTreeSet, HashMap};
 
 #[derive(Clone, Debug)]
+/// Read-only topology indexes used while processing inbound messages.
 pub(crate) struct RoutingTable {
+    /// Connector owner keyed by endpoint ID.
     endpoint_owners: HashMap<String, String>,
+    /// Deterministic distinct fan-out destinations keyed by origin endpoint ID.
     targets: HashMap<String, Vec<EndpointConfig>>,
 }
 
 impl RoutingTable {
+    /// Compiles endpoint ownership and destinations from validated configuration.
     pub(crate) fn from_config(config: &Config) -> Self {
         let endpoint_owners = config
             .endpoints
@@ -44,12 +50,14 @@ impl RoutingTable {
         }
     }
 
+    /// Reports whether a connector may originate events for an endpoint.
     pub(crate) fn connector_owns_endpoint(&self, connector_id: &str, endpoint_id: &str) -> bool {
         self.endpoint_owners
             .get(endpoint_id)
             .is_some_and(|owner| owner == connector_id)
     }
 
+    /// Returns deterministic distinct replication targets for an origin endpoint.
     pub(crate) fn target_endpoints(&self, origin_endpoint_id: &str) -> &[EndpointConfig] {
         self.targets
             .get(origin_endpoint_id)
@@ -59,10 +67,12 @@ impl RoutingTable {
 }
 
 #[cfg(test)]
+/// Unit tests for topology compilation behavior.
 mod tests {
     use super::*;
 
     #[test]
+    /// Collapses duplicate fan-out membership introduced by overlapping groups.
     fn overlapping_groups_are_compiled_into_distinct_targets() {
         let config: Config = toml::from_str(
             r#"

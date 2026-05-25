@@ -1,3 +1,5 @@
+//! Transactional persistence for logical messages, message copies, and dispatch state.
+
 use crate::{
     config::EndpointConfig,
     delivery::{now_unix_ms, DeliveryPolicy},
@@ -11,28 +13,40 @@ use uuid::Uuid;
 use wuphf_proto::v1::{AttachmentDescriptor, CreateMessage, DispatchCreateMessage};
 
 #[derive(Clone)]
+/// Durable SQLite repository used by the application and inbound pipeline layers.
 pub(crate) struct Repository {
+    /// Initialized SQLite store containing migrations and configured topology.
     store: Store,
 }
 
+/// Persistence result when an inbound event is submitted.
 pub(crate) enum Ingestion {
+    /// The event or observed copy was already associated with this logical message.
     Existing(String),
+    /// A new logical message and its durable dispatch work were created.
     Created(String),
 }
 
 #[derive(Serialize, Deserialize)]
+/// JSON representation of attachment metadata persisted with a logical message.
 struct StoredAttachment {
+    /// Protocol attachment kind numeric value.
     kind: i32,
+    /// Connector-provided file name, when present.
     filename: String,
+    /// Connector-provided MIME type, when present.
     mime_type: String,
+    /// Connector-provided byte size metadata.
     size_bytes: u64,
 }
 
 impl Repository {
+    /// Wraps an initialized SQLite store as the transactional persistence boundary.
     pub(crate) fn new(store: Store) -> Self {
         Self { store }
     }
 
+    /// Atomically deduplicates an inbound create, records its origin copy, and persists fan-out.
     pub(crate) async fn ingest(
         &self,
         connector_id: &str,
@@ -148,6 +162,11 @@ impl Repository {
         Ok(Ingestion::Created(logical_id))
     }
 
+    /// Atomically leases all currently deliverable commands for one connector.
+    ///
+    /// When `allow_early_retry` is true, unfinished commands may be reclaimed
+    /// immediately after connector reconnect rather than waiting for a prior
+    /// acknowledgement lease or failure deadline to expire.
     pub(crate) async fn claim_dispatches(
         &self,
         connector_id: &str,
@@ -207,6 +226,9 @@ impl Repository {
         Ok(dispatches)
     }
 
+    /// Records successful dispatch completion and the resulting target message copy.
+    ///
+    /// Repeated acknowledgement with the same target message ID is idempotent.
     pub(crate) async fn acknowledge(
         &self,
         connector_id: &str,
@@ -257,6 +279,7 @@ impl Repository {
         Ok(())
     }
 
+    /// Records a transient or terminal dispatch failure and returns retry delay, if any.
     pub(crate) async fn fail(
         &self,
         connector_id: &str,
@@ -308,6 +331,7 @@ impl Repository {
     }
 }
 
+/// Serializes wire-level attachment descriptors for persistence without media bytes.
 fn serialize_attachments(
     attachments: &[AttachmentDescriptor],
 ) -> Result<String, serde_json::Error> {
@@ -324,6 +348,7 @@ fn serialize_attachments(
     )
 }
 
+/// Converts a joined dispatch query row back into its wire-level delivery command.
 fn dispatch_from_row(
     row: sqlx::sqlite::SqliteRow,
     dispatch_id: String,
@@ -351,6 +376,7 @@ fn dispatch_from_row(
     })
 }
 
+/// Calculates the remaining non-negative delay until a persisted retry deadline.
 fn remaining_until(deadline: i64) -> Duration {
     Duration::from_millis(
         deadline

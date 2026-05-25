@@ -1,3 +1,5 @@
+//! `wuphf` core server executable entry point.
+
 use anyhow::Context;
 use clap::Parser;
 use std::{net::SocketAddr, sync::Arc};
@@ -7,12 +9,15 @@ use wuphf_core::{Config, ConnectorService, Engine, Store};
 use wuphf_proto::v1::connector_server::ConnectorServer;
 
 #[derive(Parser)]
+/// Command-line options for starting core service.
 struct Args {
+    /// Path to TOML runtime topology and delivery configuration.
     #[arg(short, long, default_value = "config/example.toml")]
     config: String,
 }
 
 #[tokio::main]
+/// Loads configuration and serves authenticated connector streams.
 async fn main() -> anyhow::Result<()> {
     tracing_subscriber::fmt()
         .with_env_filter(EnvFilter::from_default_env())

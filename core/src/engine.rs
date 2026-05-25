@@ -1,3 +1,5 @@
+//! Application facade for authenticated ingestion and durable dispatch processing.
+
 use crate::{
     config::Config, delivery::DeliveryPolicy, pipeline::InboundPipeline, repository::Repository,
     routing::RoutingTable, store::Store,
@@ -6,33 +8,47 @@ use std::{sync::Arc, time::Duration};
 use thiserror::Error;
 use wuphf_proto::v1::{CreateMessage, DispatchCreateMessage};
 
+/// Result returned after processing an inbound normalized event.
 pub use crate::pipeline::IngestResult;
 
 #[derive(Debug, Error)]
+/// Application-level failure surfaced while processing connector operations.
 pub enum EngineError {
+    /// A connector submitted a message from an endpoint it does not own.
     #[error("connector is not authorized for endpoint '{0}'")]
     UnauthorizedEndpoint(String),
+    /// A reply referenced an origin-side message copy unknown to the core.
     #[error("reply target '{0}' does not identify a known message copy at the origin endpoint")]
     UnknownReply(String),
+    /// A connector reported an outcome for a dispatch outside its ownership.
     #[error("dispatch does not belong to the authenticated connector")]
     UnauthorizedDispatch,
+    /// A repeated acknowledgement supplied a different target platform ID.
     #[error("dispatch acknowledgement conflicts with its recorded platform message ID")]
     ConflictingAcknowledgement,
+    /// A durable SQLite operation failed.
     #[error("persistent state error: {0}")]
     Database(#[from] sqlx::Error),
+    /// Persisted normalized metadata could not be decoded.
     #[error("stored attachment metadata cannot be decoded: {0}")]
     Metadata(#[from] serde_json::Error),
 }
 
 #[derive(Clone)]
+/// Core application facade coordinating pipeline, persistence, and delivery policy.
 pub struct Engine {
+    /// Validated runtime configuration used for authentication and public inspection.
     pub config: Arc<Config>,
+    /// Durable state transactions for dispatch processing.
     repository: Repository,
+    /// Timing rules for leases and transient retries.
     delivery: DeliveryPolicy,
+    /// Ordered inbound create-message processing path.
     inbound: InboundPipeline,
 }
 
 impl Engine {
+    /// Constructs a core engine from validated configuration and initialized storage.
     pub fn new(config: Arc<Config>, store: Store) -> Self {
         let delivery = DeliveryPolicy::from_config(&config.delivery);
         let routing = RoutingTable::from_config(&config);
@@ -45,14 +61,17 @@ impl Engine {
         }
     }
 
+    /// Returns the acknowledgement lease applied after sending a dispatch command.
     pub fn acknowledgement_timeout(&self) -> Duration {
         self.delivery.acknowledgement_timeout()
     }
 
+    /// Checks connector registration credentials against validated configuration.
     pub fn authenticate_connector(&self, connector_id: &str, shared_token: &str) -> bool {
         self.config.connector_token(connector_id) == Some(shared_token)
     }
 
+    /// Processes an authenticated normalized create-message submission.
     pub async fn ingest(
         &self,
         connector_id: &str,
@@ -61,6 +80,7 @@ impl Engine {
         self.inbound.process_create(connector_id, message).await
     }
 
+    /// Claims commands currently deliverable to a connector instance.
     pub async fn claim_dispatches(
         &self,
         connector_id: &str,
@@ -71,6 +91,7 @@ impl Engine {
             .await
     }
 
+    /// Records successful creation of a target platform message copy.
     pub async fn acknowledge(
         &self,
         connector_id: &str,
@@ -82,6 +103,7 @@ impl Engine {
             .await
     }
 
+    /// Records connector delivery failure and returns transient retry delay, if applicable.
     pub async fn fail(
         &self,
         connector_id: &str,
@@ -96,11 +118,13 @@ impl Engine {
 }
 
 #[cfg(test)]
+/// Unit tests for engine-facing behavioral invariants.
 mod tests {
     use super::*;
     use tempfile::TempDir;
     use wuphf_proto::v1::AttachmentDescriptor;
 
+    /// Builds a persisted two-endpoint engine fixture.
     async fn setup() -> (Engine, TempDir) {
         let temp = tempfile::tempdir().unwrap();
         let config: Config = toml::from_str(&format!(
@@ -136,6 +160,7 @@ mod tests {
         (Engine::new(config, store), temp)
     }
 
+    /// Builds a normalized source message for the engine fixture.
     fn create(event: &str, platform_id: &str, reply: Option<&str>) -> CreateMessage {
         CreateMessage {
             event_id: event.into(),
@@ -151,6 +176,7 @@ mod tests {
     }
 
     #[tokio::test]
+    /// Deduplicates repeated source events and prevents acknowledged copies from re-entering.
     async fn deduplicates_ingestion_and_observed_dispatched_copies() {
         let (engine, _temp) = setup().await;
         let created = engine
@@ -180,6 +206,7 @@ mod tests {
     }
 
     #[tokio::test]
+    /// Resolves replies only after target parent copies exist and preserves metadata.
     async fn reply_waits_for_target_copy_and_preserves_attachment_metadata() {
         let (engine, _temp) = setup().await;
         let mut parent = create("parent", "a-parent", None);
@@ -208,6 +235,7 @@ mod tests {
     }
 
     #[tokio::test]
+    /// Leaves terminal failures blocked and keeps repeated failure processing idempotent.
     async fn failure_policy_is_idempotent_and_terminal_failure_stops_delivery() {
         let (engine, _temp) = setup().await;
         engine
@@ -240,6 +268,7 @@ mod tests {
     }
 
     #[tokio::test]
+    /// Leases commands once and delivers subsequent endpoint work in order.
     async fn claims_once_until_acknowledged_and_preserves_endpoint_order() {
         let (engine, _temp) = setup().await;
         engine

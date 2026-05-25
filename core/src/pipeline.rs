@@ -1,3 +1,5 @@
+//! Typed processing pipeline for normalized inbound connector operations.
+
 use crate::{
     engine::EngineError,
     repository::{Ingestion, Repository},
@@ -7,19 +9,27 @@ use std::collections::BTreeSet;
 use wuphf_proto::v1::CreateMessage;
 
 #[derive(Clone)]
+/// Core-owned stages applied to an inbound normalized create-message operation.
 pub(crate) struct InboundPipeline {
+    /// Transactional durable-state boundary used by ingestion.
     repository: Repository,
+    /// Precomputed routing and ownership policy used before persistence.
     routing: RoutingTable,
 }
 
 #[derive(Debug)]
+/// Outcome of processing one inbound message submission.
 pub struct IngestResult {
+    /// Logical message identity corresponding to the observed event.
     pub logical_message_id: String,
+    /// Connectors whose online sessions should be checked for new dispatches.
     pub target_connectors: BTreeSet<String>,
+    /// Whether this event created new logical-message and dispatch state.
     pub was_new: bool,
 }
 
 impl InboundPipeline {
+    /// Builds an inbound pipeline from durable state and compiled routing policy.
     pub(crate) fn new(repository: Repository, routing: RoutingTable) -> Self {
         Self {
             repository,
@@ -27,6 +37,7 @@ impl InboundPipeline {
         }
     }
 
+    /// Authorizes, ingests, deduplicates, and fans out a normalized create message.
     pub(crate) async fn process_create(
         &self,
         connector_id: &str,
@@ -57,6 +68,7 @@ impl InboundPipeline {
         }
     }
 
+    /// Rejects connector submissions for endpoints they do not own.
     fn authorize_origin(
         &self,
         connector_id: &str,

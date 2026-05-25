@@ -1,3 +1,5 @@
+//! SQLite setup, migrations, and durable configured-topology initialization.
+
 use crate::config::Config;
 use sqlx::{
     sqlite::{SqliteConnectOptions, SqlitePoolOptions},
@@ -6,11 +8,14 @@ use sqlx::{
 use std::str::FromStr;
 
 #[derive(Clone)]
+/// Initialized SQLite persistence handle shared by repository operations.
 pub struct Store {
+    /// SQLx connection pool used for durable core transactions.
     pub(crate) pool: SqlitePool,
 }
 
 impl Store {
+    /// Opens configured SQLite database, applies migrations, and persists topology references.
     pub async fn open(config: &Config) -> Result<Self, sqlx::Error> {
         let options = SqliteConnectOptions::from_str(&config.database.url)?.create_if_missing(true);
         let pool = SqlitePoolOptions::new()
@@ -23,6 +28,7 @@ impl Store {
         Ok(store)
     }
 
+    /// Stores validated configured connectors, endpoints, and group memberships transactionally.
     async fn persist_topology(&self, config: &Config) -> Result<(), sqlx::Error> {
         let mut tx = self.pool.begin().await?;
         for connector in &config.connectors {
