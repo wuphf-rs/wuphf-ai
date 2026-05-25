@@ -1,0 +1,27 @@
+[server]
+listen = "127.0.0.1:50051"
+
+[database]
+url = "sqlite://wuphf-example.sqlite?mode=rwc"
+
+[[connectors]]
+id = "mock-a"
+token = "development-token-a"
+
+[[connectors]]
+id = "mock-b"
+token = "development-token-b"
+
+[[endpoints]]
+id = "room-a"
+connector_id = "mock-a"
+address = "mock://room-a"
+
+[[endpoints]]
+id = "room-b"
+connector_id = "mock-b"
+address = "mock://room-b"
+
+[[replication_groups]]
+id = "demo"
+endpoints = ["room-a", "room-b"]

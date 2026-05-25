@@ -1,0 +1,25 @@
+# Nix and direnv
+/.direnv/
+/result
+/result-*
+
+# Rust build output
+/target/
+
+# Local runtime state and configuration
+*.db
+*.db-shm
+*.db-wal
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
+/.env
+/.env.*
+/config.local.toml
+
+# Editor and operating system files
+.DS_Store
+*.swp
+*.swo
+.idea/
+.vscode/

@@ -1,0 +1,83 @@
+syntax = "proto3";
+
+package wuphf.v1;
+
+service Connector {
+  rpc ConnectorStream(stream ConnectorToCore) returns (stream CoreToConnector);
+}
+
+message ConnectorToCore {
+  oneof operation {
+    Register register = 1;
+    CreateMessage create_message = 2;
+    DispatchSucceeded dispatch_succeeded = 3;
+    DispatchFailed dispatch_failed = 4;
+  }
+}
+
+message CoreToConnector {
+  oneof operation {
+    RegistrationResult registration_result = 1;
+    DispatchCreateMessage dispatch_create_message = 2;
+  }
+}
+
+message Register {
+  string connector_id = 1;
+  string shared_token = 2;
+}
+
+message RegistrationResult {
+  bool accepted = 1;
+  string message = 2;
+}
+
+message AttachmentDescriptor {
+  enum Kind {
+    KIND_UNSPECIFIED = 0;
+    IMAGE = 1;
+    VIDEO = 2;
+    AUDIO = 3;
+    FILE = 4;
+    STICKER = 5;
+  }
+
+  Kind kind = 1;
+  string filename = 2;
+  string mime_type = 3;
+  uint64 size_bytes = 4;
+}
+
+message CreateMessage {
+  string event_id = 1;
+  string endpoint_id = 2;
+  string platform_message_id = 3;
+  string sender_id = 4;
+  string sender_display_name = 5;
+  int64 sent_at_unix_ms = 6;
+  string text = 7;
+  optional string reply_to_platform_message_id = 8;
+  repeated AttachmentDescriptor attachments = 9;
+}
+
+message DispatchCreateMessage {
+  string dispatch_id = 1;
+  string logical_message_id = 2;
+  string endpoint_id = 3;
+  string text = 4;
+  string sender_id = 5;
+  string sender_display_name = 6;
+  int64 sent_at_unix_ms = 7;
+  optional string reply_to_platform_message_id = 8;
+  repeated AttachmentDescriptor attachments = 9;
+}
+
+message DispatchSucceeded {
+  string dispatch_id = 1;
+  string platform_message_id = 2;
+}
+
+message DispatchFailed {
+  string dispatch_id = 1;
+  string reason = 2;
+}
