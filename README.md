@@ -109,7 +109,8 @@ cargo run -p wuphf-mock -- \
 See [Development Workflow](docs/development.md) for reply mapping and durable
 replay/failure walkthroughs. The protocol and persistence invariants are described in
 [Connector Protocol](docs/protocol.md) and
-[System Architecture](docs/architecture.md).
+[System Architecture](docs/architecture.md). Planned pipeline and platform
+evolution is captured in [Future Architecture](docs/future-architecture.md).
 
 ## Verification
 

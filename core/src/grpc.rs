@@ -1,9 +1,8 @@
-use crate::{Engine, EngineError};
-use std::{collections::HashMap, pin::Pin, sync::Arc};
-use tokio::sync::{mpsc, Mutex};
+use crate::{sessions::SessionRegistry, Engine, EngineError};
+use std::pin::Pin;
+use tokio::sync::mpsc;
 use tokio_stream::{wrappers::ReceiverStream, Stream, StreamExt};
 use tonic::{Request, Response, Status, Streaming};
-use uuid::Uuid;
 use wuphf_proto::v1::{
     connector_server::Connector, connector_to_core, core_to_connector, ConnectorToCore,
     CoreToConnector, RegistrationResult,
@@ -11,19 +10,17 @@ use wuphf_proto::v1::{
 
 type OutputStream =
     Pin<Box<dyn Stream<Item = Result<CoreToConnector, Status>> + Send + Sync + 'static>>;
-type Sender = mpsc::Sender<Result<CoreToConnector, Status>>;
-
 #[derive(Clone)]
 pub struct ConnectorService {
     engine: Engine,
-    sessions: Arc<Mutex<HashMap<String, (String, Sender)>>>,
+    sessions: SessionRegistry,
 }
 
 impl ConnectorService {
     pub fn new(engine: Engine) -> Self {
         Self {
             engine,
-            sessions: Arc::new(Mutex::new(HashMap::new())),
+            sessions: SessionRegistry::default(),
         }
     }
 
@@ -32,12 +29,7 @@ impl ConnectorService {
         connector_id: &str,
         allow_early_retry: bool,
     ) -> Result<(), Status> {
-        let sender = self
-            .sessions
-            .lock()
-            .await
-            .get(connector_id)
-            .map(|(_, sender)| sender.clone());
+        let sender = self.sessions.sender(connector_id).await;
         let Some(sender) = sender else {
             return Ok(());
         };
@@ -60,7 +52,11 @@ impl ConnectorService {
             }
             self.schedule_wakeup(
                 connector_id.to_string(),
-                self.engine.config.delivery.acknowledgement_timeout_ms,
+                self.engine
+                    .acknowledgement_timeout()
+                    .as_millis()
+                    .try_into()
+                    .unwrap_or(u64::MAX),
             );
         }
         Ok(())
@@ -76,12 +72,65 @@ impl ConnectorService {
         });
     }
 
+    async fn handle_operation(
+        &self,
+        connector_id: &str,
+        message: ConnectorToCore,
+    ) -> Result<(), Status> {
+        match message.operation {
+            Some(connector_to_core::Operation::CreateMessage(message)) => {
+                let result = self
+                    .engine
+                    .ingest(connector_id, message)
+                    .await
+                    .map_err(to_status)?;
+                for target in result.target_connectors {
+                    if let Err(status) = self.send_pending(&target, false).await {
+                        tracing::warn!(%target, error = %status, "could not deliver dispatch");
+                    }
+                }
+                Ok(())
+            }
+            Some(connector_to_core::Operation::DispatchSucceeded(outcome)) => self
+                .engine
+                .acknowledge(
+                    connector_id,
+                    &outcome.dispatch_id,
+                    &outcome.platform_message_id,
+                )
+                .await
+                .map_err(to_status),
+            Some(connector_to_core::Operation::DispatchFailed(outcome)) => {
+                match self
+                    .engine
+                    .fail(
+                        connector_id,
+                        &outcome.dispatch_id,
+                        &outcome.reason,
+                        outcome.permanent,
+                    )
+                    .await
+                {
+                    Ok(Some(delay)) => {
+                        self.schedule_wakeup(
+                            connector_id.to_string(),
+                            delay.as_millis().try_into().unwrap_or(u64::MAX),
+                        );
+                        Ok(())
+                    }
+                    Ok(None) => Ok(()),
+                    Err(error) => Err(to_status(error)),
+                }
+            }
+            Some(connector_to_core::Operation::Register(_)) => {
+                Err(Status::invalid_argument("connector already registered"))
+            }
+            None => Err(Status::invalid_argument("empty connector operation")),
+        }
+    }
+
     async fn is_active_session(&self, connector_id: &str, session_id: &str) -> bool {
-        self.sessions
-            .lock()
-            .await
-            .get(connector_id)
-            .is_some_and(|(current_id, _)| current_id == session_id)
+        self.sessions.is_active(connector_id, session_id).await
     }
 }
 
@@ -108,8 +157,9 @@ impl Connector for ConnectorService {
         };
 
         let (sender, receiver) = mpsc::channel(32);
-        if self.engine.config.connector_token(&register.connector_id)
-            != Some(register.shared_token.as_str())
+        if !self
+            .engine
+            .authenticate_connector(&register.connector_id, &register.shared_token)
         {
             sender
                 .send(Ok(CoreToConnector {
@@ -126,13 +176,11 @@ impl Connector for ConnectorService {
         }
 
         let connector_id = register.connector_id;
-        let session_id = Uuid::new_v4().to_string();
-        let replaced = self
+        let session = self
             .sessions
-            .lock()
-            .await
-            .insert(connector_id.clone(), (session_id.clone(), sender.clone()));
-        if let Some((_, prior_sender)) = replaced {
+            .register(connector_id.clone(), sender.clone())
+            .await;
+        if let Some(prior_sender) = session.replaced_sender {
             let _ = prior_sender
                 .send(Err(Status::aborted(
                     "connector session replaced by a newer registration",
@@ -153,6 +201,7 @@ impl Connector for ConnectorService {
         self.send_pending(&connector_id, true).await?;
 
         let service = self.clone();
+        let session_id = session.id;
         tokio::spawn(async move {
             while let Some(operation) = input.next().await {
                 if !service.is_active_session(&connector_id, &session_id).await {
@@ -164,58 +213,7 @@ impl Connector for ConnectorService {
                     break;
                 }
                 let result = match operation {
-                    Ok(message) => match message.operation {
-                        Some(connector_to_core::Operation::CreateMessage(message)) => {
-                            match service.engine.ingest(&connector_id, message).await {
-                                Ok(result) => {
-                                    for target in result.target_connectors {
-                                        if let Err(status) =
-                                            service.send_pending(&target, false).await
-                                        {
-                                            tracing::warn!(%target, error = %status, "could not deliver dispatch");
-                                        }
-                                    }
-                                    Ok(())
-                                }
-                                Err(error) => Err(to_status(error)),
-                            }
-                        }
-                        Some(connector_to_core::Operation::DispatchSucceeded(outcome)) => service
-                            .engine
-                            .acknowledge(
-                                &connector_id,
-                                &outcome.dispatch_id,
-                                &outcome.platform_message_id,
-                            )
-                            .await
-                            .map_err(to_status),
-                        Some(connector_to_core::Operation::DispatchFailed(outcome)) => {
-                            match service
-                                .engine
-                                .fail(
-                                    &connector_id,
-                                    &outcome.dispatch_id,
-                                    &outcome.reason,
-                                    outcome.permanent,
-                                )
-                                .await
-                            {
-                                Ok(Some(delay)) => {
-                                    service.schedule_wakeup(
-                                        connector_id.clone(),
-                                        delay.as_millis().try_into().unwrap_or(u64::MAX),
-                                    );
-                                    Ok(())
-                                }
-                                Ok(None) => Ok(()),
-                                Err(error) => Err(to_status(error)),
-                            }
-                        }
-                        Some(connector_to_core::Operation::Register(_)) => {
-                            Err(Status::invalid_argument("connector already registered"))
-                        }
-                        None => Err(Status::invalid_argument("empty connector operation")),
-                    },
+                    Ok(message) => service.handle_operation(&connector_id, message).await,
                     Err(status) => Err(status),
                 };
                 if let Err(status) = result {
@@ -226,13 +224,10 @@ impl Connector for ConnectorService {
                     break;
                 }
             }
-            let mut sessions = service.sessions.lock().await;
-            if sessions
-                .get(&connector_id)
-                .is_some_and(|(current_id, _)| current_id == &session_id)
-            {
-                sessions.remove(&connector_id);
-            }
+            service
+                .sessions
+                .remove_if_active(&connector_id, &session_id)
+                .await;
         });
 
         Ok(Response::new(Box::pin(ReceiverStream::new(receiver))))
