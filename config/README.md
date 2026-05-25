@@ -5,3 +5,5 @@ credentials and machine-specific runtime configuration must not be committed.
 
 `example.toml` describes core server/database settings, two authenticated mock
 connector instances, their endpoints, and a replication group.
+Its `[delivery]` values configure acknowledgement timeout and bounded
+exponential retry backoff for unfinished transient dispatches.

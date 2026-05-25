@@ -40,6 +40,11 @@ Implemented behavior:
 - SQLite-backed logical messages, message copies, event deduplication, pending
   dispatches, and acknowledgement outcomes.
 - Redelivery of unfinished work after reconnects or core restarts.
+- Durable attempt accounting with configurable acknowledgement timeouts and
+  exponential retry backoff for transient dispatch failures.
+- Explicit permanent dispatch failure reporting, which leaves the endpoint
+  sequence blocked for operator investigation rather than silently dropping
+  later ordered work.
 - Deterministic per-endpoint dispatch order.
 - Idempotent event submission and acknowledgement processing.
 - Reply dispatch blocking until the parent message has a target-side
@@ -102,7 +107,7 @@ cargo run -p wuphf-mock -- \
 ```
 
 See [Development Workflow](docs/development.md) for reply mapping and durable
-replay walkthroughs. The protocol and persistence invariants are described in
+replay/failure walkthroughs. The protocol and persistence invariants are described in
 [Connector Protocol](docs/protocol.md) and
 [System Architecture](docs/architecture.md).
 

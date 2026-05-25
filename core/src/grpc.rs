@@ -27,7 +27,11 @@ impl ConnectorService {
         }
     }
 
-    async fn send_pending(&self, connector_id: &str) -> Result<(), Status> {
+    async fn send_pending(
+        &self,
+        connector_id: &str,
+        allow_early_retry: bool,
+    ) -> Result<(), Status> {
         let sender = self
             .sessions
             .lock()
@@ -39,7 +43,7 @@ impl ConnectorService {
         };
         for dispatch in self
             .engine
-            .eligible_dispatches(connector_id)
+            .claim_dispatches(connector_id, allow_early_retry)
             .await
             .map_err(to_status)?
         {
@@ -54,8 +58,22 @@ impl ConnectorService {
             {
                 break;
             }
+            self.schedule_wakeup(
+                connector_id.to_string(),
+                self.engine.config.delivery.acknowledgement_timeout_ms,
+            );
         }
         Ok(())
+    }
+
+    fn schedule_wakeup(&self, connector_id: String, delay_ms: u64) {
+        let service = self.clone();
+        tokio::spawn(async move {
+            tokio::time::sleep(std::time::Duration::from_millis(delay_ms)).await;
+            if let Err(status) = service.send_pending(&connector_id, false).await {
+                tracing::warn!(%connector_id, error = %status, "could not retry dispatch");
+            }
+        });
     }
 
     async fn is_active_session(&self, connector_id: &str, session_id: &str) -> bool {
@@ -132,7 +150,7 @@ impl Connector for ConnectorService {
             }))
             .await
             .map_err(|_| Status::internal("registration output stream closed"))?;
-        self.send_pending(&connector_id).await?;
+        self.send_pending(&connector_id, true).await?;
 
         let service = self.clone();
         tokio::spawn(async move {
@@ -151,7 +169,9 @@ impl Connector for ConnectorService {
                             match service.engine.ingest(&connector_id, message).await {
                                 Ok(result) => {
                                     for target in result.target_connectors {
-                                        if let Err(status) = service.send_pending(&target).await {
+                                        if let Err(status) =
+                                            service.send_pending(&target, false).await
+                                        {
                                             tracing::warn!(%target, error = %status, "could not deliver dispatch");
                                         }
                                     }
@@ -169,11 +189,28 @@ impl Connector for ConnectorService {
                             )
                             .await
                             .map_err(to_status),
-                        Some(connector_to_core::Operation::DispatchFailed(outcome)) => service
-                            .engine
-                            .fail(&connector_id, &outcome.dispatch_id, &outcome.reason)
-                            .await
-                            .map_err(to_status),
+                        Some(connector_to_core::Operation::DispatchFailed(outcome)) => {
+                            match service
+                                .engine
+                                .fail(
+                                    &connector_id,
+                                    &outcome.dispatch_id,
+                                    &outcome.reason,
+                                    outcome.permanent,
+                                )
+                                .await
+                            {
+                                Ok(Some(delay)) => {
+                                    service.schedule_wakeup(
+                                        connector_id.clone(),
+                                        delay.as_millis().try_into().unwrap_or(u64::MAX),
+                                    );
+                                    Ok(())
+                                }
+                                Ok(None) => Ok(()),
+                                Err(error) => Err(to_status(error)),
+                            }
+                        }
                         Some(connector_to_core::Operation::Register(_)) => {
                             Err(Status::invalid_argument("connector already registered"))
                         }
@@ -185,7 +222,7 @@ impl Connector for ConnectorService {
                     let _ = sender.send(Err(status)).await;
                     break;
                 }
-                if service.send_pending(&connector_id).await.is_err() {
+                if service.send_pending(&connector_id, false).await.is_err() {
                     break;
                 }
             }

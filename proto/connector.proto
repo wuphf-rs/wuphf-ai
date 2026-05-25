@@ -80,4 +80,6 @@ message DispatchSucceeded {
 message DispatchFailed {
   string dispatch_id = 1;
   string reason = 2;
+  // Defaults to retryable behavior for connectors using the original v1 shape.
+  bool permanent = 3;
 }

@@ -1,12 +1,16 @@
 use std::{sync::Arc, time::Duration};
 use tempfile::TempDir;
-use tokio::{net::TcpListener, sync::mpsc};
+use tokio::{
+    net::TcpListener,
+    sync::{mpsc, oneshot},
+    task::JoinHandle,
+};
 use tokio_stream::wrappers::{ReceiverStream, TcpListenerStream};
 use tonic::transport::Server;
 use wuphf_core::{Config, ConnectorService, Engine, Store};
 use wuphf_proto::v1::{
     connector_client::ConnectorClient, connector_server::ConnectorServer, connector_to_core,
-    core_to_connector, ConnectorToCore, CreateMessage, DispatchSucceeded, Register,
+    core_to_connector, ConnectorToCore, CreateMessage, DispatchFailed, DispatchSucceeded, Register,
 };
 
 struct Client {
@@ -14,7 +18,20 @@ struct Client {
     output: tonic::Streaming<wuphf_proto::v1::CoreToConnector>,
 }
 
-async fn setup() -> (String, TempDir) {
+struct TestServer {
+    url: String,
+    shutdown: oneshot::Sender<()>,
+    task: JoinHandle<()>,
+}
+
+impl TestServer {
+    async fn stop(self) {
+        self.shutdown.send(()).unwrap();
+        self.task.await.unwrap();
+    }
+}
+
+async fn setup() -> (TestServer, TempDir, Arc<Config>) {
     let temp = tempfile::tempdir().unwrap();
     let path = temp.path().join("grpc.sqlite");
     let config: Config = toml::from_str(&format!(
@@ -23,6 +40,10 @@ async fn setup() -> (String, TempDir) {
             listen = "127.0.0.1:0"
             [database]
             url = "sqlite://{}"
+            [delivery]
+            acknowledgement_timeout_ms = 1000
+            retry_initial_ms = 20
+            retry_max_ms = 100
             [[connectors]]
             id = "a"
             token = "a-token"
@@ -46,18 +67,30 @@ async fn setup() -> (String, TempDir) {
     .unwrap();
     config.validate().unwrap();
     let config = Arc::new(config);
+    let server = spawn_server(config.clone()).await;
+    (server, temp, config)
+}
+
+async fn spawn_server(config: Arc<Config>) -> TestServer {
     let store = Store::open(&config).await.unwrap();
     let service = ConnectorService::new(Engine::new(config, store));
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let address = listener.local_addr().unwrap();
-    tokio::spawn(async move {
+    let (shutdown, receiver) = oneshot::channel();
+    let task = tokio::spawn(async move {
         Server::builder()
             .add_service(ConnectorServer::new(service))
-            .serve_with_incoming(TcpListenerStream::new(listener))
+            .serve_with_incoming_shutdown(TcpListenerStream::new(listener), async {
+                receiver.await.ok();
+            })
             .await
             .unwrap();
     });
-    (format!("http://{address}"), temp)
+    TestServer {
+        url: format!("http://{address}"),
+        shutdown,
+        task,
+    }
 }
 
 async fn connect(server: &str, id: &str, token: &str) -> Client {
@@ -107,9 +140,9 @@ fn create(event: &str, platform_id: &str, reply_to: Option<&str>) -> ConnectorTo
 
 #[tokio::test]
 async fn streams_create_reply_and_replays_unacknowledged_dispatch() {
-    let (server, _temp) = setup().await;
-    let mut a = connect(&server, "a", "a-token").await;
-    let mut b = connect(&server, "b", "b-token").await;
+    let (server, _temp, _config) = setup().await;
+    let mut a = connect(&server.url, "a", "a-token").await;
+    let mut b = connect(&server.url, "b", "b-token").await;
     registered(&mut a, true).await;
     registered(&mut b, true).await;
 
@@ -127,7 +160,7 @@ async fn streams_create_reply_and_replays_unacknowledged_dispatch() {
         panic!("expected dispatch");
     };
 
-    let mut reconnected = connect(&server, "b", "b-token").await;
+    let mut reconnected = connect(&server.url, "b", "b-token").await;
     registered(&mut reconnected, true).await;
     let replaced_status = b.output.message().await.unwrap_err();
     assert_eq!(replaced_status.code(), tonic::Code::Aborted);
@@ -171,7 +204,105 @@ async fn streams_create_reply_and_replays_unacknowledged_dispatch() {
 
 #[tokio::test]
 async fn rejects_invalid_connector_token() {
-    let (server, _temp) = setup().await;
-    let mut client = connect(&server, "a", "wrong").await;
+    let (server, _temp, _config) = setup().await;
+    let mut client = connect(&server.url, "a", "wrong").await;
     registered(&mut client, false).await;
+}
+
+#[tokio::test]
+async fn retries_transient_failure_and_does_not_retry_permanent_failure() {
+    let (server, _temp, _config) = setup().await;
+    let mut a = connect(&server.url, "a", "a-token").await;
+    let mut b = connect(&server.url, "b", "b-token").await;
+    registered(&mut a, true).await;
+    registered(&mut b, true).await;
+
+    a.input
+        .send(create("transient", "a-transient", None))
+        .await
+        .unwrap();
+    let first = b.output.message().await.unwrap().unwrap();
+    let core_to_connector::Operation::DispatchCreateMessage(first) = first.operation.unwrap()
+    else {
+        panic!("expected transient dispatch");
+    };
+    b.input
+        .send(ConnectorToCore {
+            operation: Some(connector_to_core::Operation::DispatchFailed(
+                DispatchFailed {
+                    dispatch_id: first.dispatch_id.clone(),
+                    reason: "try again".into(),
+                    permanent: false,
+                },
+            )),
+        })
+        .await
+        .unwrap();
+    let retried = tokio::time::timeout(Duration::from_secs(1), b.output.message())
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap();
+    let core_to_connector::Operation::DispatchCreateMessage(retried) = retried.operation.unwrap()
+    else {
+        panic!("expected retried dispatch");
+    };
+    assert_eq!(retried.dispatch_id, first.dispatch_id);
+    b.input
+        .send(ConnectorToCore {
+            operation: Some(connector_to_core::Operation::DispatchFailed(
+                DispatchFailed {
+                    dispatch_id: retried.dispatch_id,
+                    reason: "invalid destination".into(),
+                    permanent: true,
+                },
+            )),
+        })
+        .await
+        .unwrap();
+
+    assert!(
+        tokio::time::timeout(Duration::from_millis(150), b.output.message())
+            .await
+            .is_err()
+    );
+    let mut reconnected = connect(&server.url, "b", "b-token").await;
+    registered(&mut reconnected, true).await;
+    assert!(
+        tokio::time::timeout(Duration::from_millis(100), reconnected.output.message())
+            .await
+            .is_err()
+    );
+}
+
+#[tokio::test]
+async fn replays_unacknowledged_dispatch_after_server_restart() {
+    let (server, _temp, config) = setup().await;
+    let mut a = connect(&server.url, "a", "a-token").await;
+    let mut b = connect(&server.url, "b", "b-token").await;
+    registered(&mut a, true).await;
+    registered(&mut b, true).await;
+    a.input
+        .send(create("restart", "a-restart", None))
+        .await
+        .unwrap();
+    let delivered = b.output.message().await.unwrap().unwrap();
+    let core_to_connector::Operation::DispatchCreateMessage(delivered) =
+        delivered.operation.unwrap()
+    else {
+        panic!("expected initial dispatch");
+    };
+    drop(a);
+    drop(b);
+    server.stop().await;
+
+    let restarted = spawn_server(config).await;
+    let mut b = connect(&restarted.url, "b", "b-token").await;
+    registered(&mut b, true).await;
+    let replayed = b.output.message().await.unwrap().unwrap();
+    let core_to_connector::Operation::DispatchCreateMessage(replayed) = replayed.operation.unwrap()
+    else {
+        panic!("expected restarted delivery");
+    };
+    assert_eq!(replayed.dispatch_id, delivered.dispatch_id);
 }

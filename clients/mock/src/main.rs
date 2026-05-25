@@ -5,7 +5,7 @@ use tokio_stream::wrappers::ReceiverStream;
 use uuid::Uuid;
 use wuphf_proto::v1::{
     connector_client::ConnectorClient, connector_to_core, core_to_connector, ConnectorToCore,
-    CreateMessage, DispatchSucceeded, Register,
+    CreateMessage, DispatchFailed, DispatchSucceeded, Register,
 };
 
 #[derive(Parser)]
@@ -30,6 +30,10 @@ struct Args {
     no_ack: bool,
     #[arg(long)]
     ack_platform_id: Option<String>,
+    #[arg(long)]
+    fail_reason: Option<String>,
+    #[arg(long, requires = "fail_reason")]
+    permanent_failure: bool,
 }
 
 #[tokio::main]
@@ -89,7 +93,20 @@ async fn main() -> anyhow::Result<()> {
                     dispatch.text,
                     dispatch.reply_to_platform_message_id
                 );
-                if !args.no_ack {
+                if let Some(reason) = &args.fail_reason {
+                    println!("fail {} reason={:?}", dispatch.dispatch_id, reason);
+                    sender
+                        .send(ConnectorToCore {
+                            operation: Some(connector_to_core::Operation::DispatchFailed(
+                                DispatchFailed {
+                                    dispatch_id: dispatch.dispatch_id,
+                                    reason: reason.clone(),
+                                    permanent: args.permanent_failure,
+                                },
+                            )),
+                        })
+                        .await?;
+                } else if !args.no_ack {
                     let platform_id = args
                         .ack_platform_id
                         .clone()

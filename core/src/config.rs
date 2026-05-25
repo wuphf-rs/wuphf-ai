@@ -6,6 +6,8 @@ use thiserror::Error;
 pub struct Config {
     pub server: ServerConfig,
     pub database: DatabaseConfig,
+    #[serde(default)]
+    pub delivery: DeliveryConfig,
     pub connectors: Vec<ConnectorConfig>,
     pub endpoints: Vec<EndpointConfig>,
     pub replication_groups: Vec<ReplicationGroupConfig>,
@@ -19,6 +21,24 @@ pub struct ServerConfig {
 #[derive(Clone, Debug, Deserialize)]
 pub struct DatabaseConfig {
     pub url: String,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(default)]
+pub struct DeliveryConfig {
+    pub acknowledgement_timeout_ms: u64,
+    pub retry_initial_ms: u64,
+    pub retry_max_ms: u64,
+}
+
+impl Default for DeliveryConfig {
+    fn default() -> Self {
+        Self {
+            acknowledgement_timeout_ms: 30_000,
+            retry_initial_ms: 1_000,
+            retry_max_ms: 60_000,
+        }
+    }
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -61,6 +81,15 @@ impl Config {
         if self.server.listen.trim().is_empty() || self.database.url.trim().is_empty() {
             return Err(ConfigError::Validation(
                 "server listen address and database URL are required".into(),
+            ));
+        }
+        if self.delivery.acknowledgement_timeout_ms == 0
+            || self.delivery.retry_initial_ms == 0
+            || self.delivery.retry_max_ms < self.delivery.retry_initial_ms
+        {
+            return Err(ConfigError::Validation(
+                "delivery timeouts must be positive and retry_max_ms must be at least retry_initial_ms"
+                    .into(),
             ));
         }
 
@@ -204,6 +233,14 @@ mod tests {
         config.replication_groups[0]
             .endpoints
             .push("missing".into());
+        assert!(config.validate().is_err());
+    }
+
+    #[test]
+    fn rejects_invalid_delivery_retry_window() {
+        let mut config = valid();
+        config.delivery.retry_initial_ms = 10;
+        config.delivery.retry_max_ms = 1;
         assert!(config.validate().is_err());
     }
 }

@@ -6,3 +6,5 @@ platform clients and supports synthetic message submission, reply references,
 automatic acknowledgement, and unacknowledged replay demonstrations.
 Use `--ack-platform-id` when a stable mock-created platform ID is useful in a
 reply walkthrough.
+Use `--fail-reason REASON` to report a transient failed dispatch, or add
+`--permanent-failure` to record terminal failure without retrying.

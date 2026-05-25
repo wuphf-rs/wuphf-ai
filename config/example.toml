@@ -4,6 +4,11 @@ listen = "127.0.0.1:50051"
 [database]
 url = "sqlite://wuphf-example.sqlite?mode=rwc"
 
+[delivery]
+acknowledgement_timeout_ms = 30000
+retry_initial_ms = 1000
+retry_max_ms = 60000
+
 [[connectors]]
 id = "mock-a"
 token = "development-token-a"

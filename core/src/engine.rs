@@ -1,7 +1,11 @@
 use crate::{config::Config, store::Store};
 use serde::{Deserialize, Serialize};
 use sqlx::Row;
-use std::{collections::BTreeSet, sync::Arc};
+use std::{
+    collections::BTreeSet,
+    sync::Arc,
+    time::{Duration, SystemTime, UNIX_EPOCH},
+};
 use thiserror::Error;
 use uuid::Uuid;
 use wuphf_proto::v1::{AttachmentDescriptor, CreateMessage, DispatchCreateMessage};
@@ -196,10 +200,16 @@ impl Engine {
         })
     }
 
-    pub async fn eligible_dispatches(
+    pub async fn claim_dispatches(
         &self,
         connector_id: &str,
+        allow_early_retry: bool,
     ) -> Result<Vec<DispatchCreateMessage>, EngineError> {
+        let now = now_unix_ms();
+        let lease_until = now.saturating_add(
+            i64::try_from(self.config.delivery.acknowledgement_timeout_ms).unwrap_or(i64::MAX),
+        );
+        let mut tx = self.store.pool.begin().await?;
         let rows = sqlx::query(
             "SELECT d.id, d.logical_message_id, d.target_endpoint_id, l.text, l.sender_id,
                     l.sender_display_name, l.sent_at_unix_ms, l.attachments_json,
@@ -211,6 +221,8 @@ impl Engine {
               AND parent_copy.endpoint_id = d.target_endpoint_id
              WHERE d.target_connector_id = ?
                AND d.status IN ('pending', 'failed')
+               AND d.terminal_failure = 0
+               AND (d.attempt_count = 0 OR ? OR d.next_attempt_at_unix_ms <= ?)
                AND (d.parent_logical_message_id IS NULL OR parent_copy.id IS NOT NULL)
                AND NOT EXISTS (
                    SELECT 1 FROM dispatch_commands earlier
@@ -221,34 +233,51 @@ impl Engine {
              ORDER BY d.target_endpoint_id, d.endpoint_sequence",
         )
         .bind(connector_id)
-        .fetch_all(&self.store.pool)
+        .bind(allow_early_retry)
+        .bind(now)
+        .fetch_all(&mut *tx)
         .await?;
 
-        rows.into_iter()
-            .map(|row| {
-                let metadata: Vec<StoredAttachment> =
-                    serde_json::from_str(row.get::<&str, _>("attachments_json"))?;
-                Ok(DispatchCreateMessage {
-                    dispatch_id: row.get("id"),
-                    logical_message_id: row.get("logical_message_id"),
-                    endpoint_id: row.get("target_endpoint_id"),
-                    text: row.get("text"),
-                    sender_id: row.get("sender_id"),
-                    sender_display_name: row.get("sender_display_name"),
-                    sent_at_unix_ms: row.get("sent_at_unix_ms"),
-                    reply_to_platform_message_id: row.get("reply_platform_message_id"),
-                    attachments: metadata
-                        .into_iter()
-                        .map(|item| AttachmentDescriptor {
-                            kind: item.kind,
-                            filename: item.filename,
-                            mime_type: item.mime_type,
-                            size_bytes: item.size_bytes,
-                        })
-                        .collect(),
-                })
-            })
-            .collect()
+        let mut dispatches = Vec::with_capacity(rows.len());
+        for row in rows {
+            let dispatch_id: String = row.get("id");
+            sqlx::query(
+                "UPDATE dispatch_commands
+                 SET status = 'pending',
+                     attempt_count = attempt_count + 1,
+                     last_attempted_at_unix_ms = ?,
+                     next_attempt_at_unix_ms = ?
+                 WHERE id = ?",
+            )
+            .bind(now)
+            .bind(lease_until)
+            .bind(&dispatch_id)
+            .execute(&mut *tx)
+            .await?;
+            let metadata: Vec<StoredAttachment> =
+                serde_json::from_str(row.get::<&str, _>("attachments_json"))?;
+            dispatches.push(DispatchCreateMessage {
+                dispatch_id,
+                logical_message_id: row.get("logical_message_id"),
+                endpoint_id: row.get("target_endpoint_id"),
+                text: row.get("text"),
+                sender_id: row.get("sender_id"),
+                sender_display_name: row.get("sender_display_name"),
+                sent_at_unix_ms: row.get("sent_at_unix_ms"),
+                reply_to_platform_message_id: row.get("reply_platform_message_id"),
+                attachments: metadata
+                    .into_iter()
+                    .map(|item| AttachmentDescriptor {
+                        kind: item.kind,
+                        filename: item.filename,
+                        mime_type: item.mime_type,
+                        size_bytes: item.size_bytes,
+                    })
+                    .collect(),
+            });
+        }
+        tx.commit().await?;
+        Ok(dispatches)
     }
 
     pub async fn acknowledge(
@@ -308,21 +337,84 @@ impl Engine {
         connector_id: &str,
         dispatch_id: &str,
         reason: &str,
-    ) -> Result<(), EngineError> {
-        let result = sqlx::query(
-            "UPDATE dispatch_commands SET status = 'failed', last_error = ?
+        permanent: bool,
+    ) -> Result<Option<Duration>, EngineError> {
+        let mut tx = self.store.pool.begin().await?;
+        let row = sqlx::query(
+            "SELECT attempt_count, status, terminal_failure, next_attempt_at_unix_ms
+             FROM dispatch_commands
              WHERE id = ? AND target_connector_id = ? AND status != 'completed'",
         )
-        .bind(reason)
         .bind(dispatch_id)
         .bind(connector_id)
-        .execute(&self.store.pool)
-        .await?;
-        if result.rows_affected() == 0 {
-            return Err(EngineError::UnauthorizedDispatch);
+        .fetch_optional(&mut *tx)
+        .await?
+        .ok_or(EngineError::UnauthorizedDispatch)?;
+        let attempts: i64 = row.get("attempt_count");
+        let status: String = row.get("status");
+        let terminal_failure: bool = row.get("terminal_failure");
+        if terminal_failure {
+            tx.commit().await?;
+            return Ok(None);
         }
-        Ok(())
+        if status == "failed" && !permanent {
+            let retry_at: Option<i64> = row.get("next_attempt_at_unix_ms");
+            tx.commit().await?;
+            return Ok(retry_at.map(|retry_at| {
+                Duration::from_millis(
+                    retry_at
+                        .saturating_sub(now_unix_ms())
+                        .try_into()
+                        .unwrap_or_default(),
+                )
+            }));
+        }
+        let retry_delay = if permanent {
+            None
+        } else {
+            Some(self.retry_delay(attempts))
+        };
+        let retry_at = retry_delay.map(|delay| {
+            now_unix_ms().saturating_add(i64::try_from(delay.as_millis()).unwrap_or(i64::MAX))
+        });
+        sqlx::query(
+            "UPDATE dispatch_commands
+             SET status = 'failed', last_error = ?, terminal_failure = ?,
+                 next_attempt_at_unix_ms = ?
+             WHERE id = ?",
+        )
+        .bind(reason)
+        .bind(permanent)
+        .bind(retry_at)
+        .bind(dispatch_id)
+        .execute(&mut *tx)
+        .await?;
+        tx.commit().await?;
+        Ok(retry_delay)
     }
+
+    fn retry_delay(&self, attempts: i64) -> Duration {
+        let exponent = u32::try_from(attempts.saturating_sub(1))
+            .unwrap_or(u32::MAX)
+            .min(63);
+        let multiplier = 1_u64.checked_shl(exponent).unwrap_or(u64::MAX);
+        let delay = self
+            .config
+            .delivery
+            .retry_initial_ms
+            .saturating_mul(multiplier)
+            .min(self.config.delivery.retry_max_ms);
+        Duration::from_millis(delay)
+    }
+}
+
+fn now_unix_ms() -> i64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis()
+        .try_into()
+        .unwrap_or(i64::MAX)
 }
 
 #[cfg(test)]
@@ -411,9 +503,9 @@ mod tests {
             .await
             .unwrap();
 
-        assert_eq!(engine.eligible_dispatches("a").await.unwrap().len(), 0);
-        assert_eq!(engine.eligible_dispatches("b").await.unwrap().len(), 1);
-        assert_eq!(engine.eligible_dispatches("c").await.unwrap().len(), 1);
+        assert_eq!(engine.claim_dispatches("a", false).await.unwrap().len(), 0);
+        assert_eq!(engine.claim_dispatches("b", false).await.unwrap().len(), 1);
+        assert_eq!(engine.claim_dispatches("c", false).await.unwrap().len(), 1);
     }
 
     #[tokio::test]
@@ -437,7 +529,7 @@ mod tests {
         assert!(!duplicate.was_new);
         assert_eq!(first.logical_message_id, duplicate.logical_message_id);
 
-        let dispatch = engine.eligible_dispatches("b").await.unwrap().remove(0);
+        let dispatch = engine.claim_dispatches("b", false).await.unwrap().remove(0);
         engine
             .acknowledge("b", &dispatch.dispatch_id, "b-created")
             .await
@@ -447,7 +539,7 @@ mod tests {
             .await
             .unwrap();
         assert!(!observed.was_new);
-        assert_eq!(engine.eligible_dispatches("a").await.unwrap().len(), 0);
+        assert_eq!(engine.claim_dispatches("a", false).await.unwrap().len(), 0);
 
         let logical_messages: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM logical_messages")
             .fetch_one(&engine.store.pool)
@@ -474,7 +566,7 @@ mod tests {
             .ingest("a", create("reply", "a-room", "a-reply", Some("a-parent")))
             .await
             .unwrap();
-        let first = engine.eligible_dispatches("b").await.unwrap();
+        let first = engine.claim_dispatches("b", false).await.unwrap();
         assert_eq!(first.len(), 1);
         assert_eq!(first[0].text, "parent");
 
@@ -486,7 +578,7 @@ mod tests {
             .acknowledge("b", &first[0].dispatch_id, "b-parent")
             .await
             .unwrap();
-        let reply = engine.eligible_dispatches("b").await.unwrap();
+        let reply = engine.claim_dispatches("b", false).await.unwrap();
         assert_eq!(reply.len(), 1);
         assert_eq!(
             reply[0].reply_to_platform_message_id.as_deref(),
@@ -510,6 +602,138 @@ mod tests {
             .unwrap();
         let reopened_store = Store::open(&engine.config).await.unwrap();
         let reopened = Engine::new(engine.config.clone(), reopened_store);
-        assert_eq!(reopened.eligible_dispatches("b").await.unwrap().len(), 1);
+        assert_eq!(reopened.claim_dispatches("b", true).await.unwrap().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn records_attempts_and_does_not_duplicate_an_in_flight_dispatch() {
+        let (engine, _temp) = setup(
+            r#"
+                [[replication_groups]]
+                id = "one"
+                endpoints = ["a-room", "b-room"]
+            "#,
+        )
+        .await;
+        engine
+            .ingest("a", create("pending", "a-room", "origin", None))
+            .await
+            .unwrap();
+
+        let dispatch = engine.claim_dispatches("b", false).await.unwrap();
+        assert_eq!(dispatch.len(), 1);
+        assert!(engine
+            .claim_dispatches("b", false)
+            .await
+            .unwrap()
+            .is_empty());
+        let attempts: i64 = sqlx::query_scalar("SELECT attempt_count FROM dispatch_commands")
+            .fetch_one(&engine.store.pool)
+            .await
+            .unwrap();
+        assert_eq!(attempts, 1);
+    }
+
+    #[tokio::test]
+    async fn applies_retry_backoff_and_stops_terminal_failures() {
+        let (engine, _temp) = setup(
+            r#"
+                [[replication_groups]]
+                id = "one"
+                endpoints = ["a-room", "b-room"]
+            "#,
+        )
+        .await;
+        engine
+            .ingest("a", create("retry", "a-room", "origin", None))
+            .await
+            .unwrap();
+        let first = engine.claim_dispatches("b", false).await.unwrap().remove(0);
+        assert_eq!(
+            engine
+                .fail("b", &first.dispatch_id, "transient", false)
+                .await
+                .unwrap(),
+            Some(Duration::from_millis(1_000))
+        );
+        let original_retry_at: i64 =
+            sqlx::query_scalar("SELECT next_attempt_at_unix_ms FROM dispatch_commands")
+                .fetch_one(&engine.store.pool)
+                .await
+                .unwrap();
+        engine
+            .fail("b", &first.dispatch_id, "duplicate transient", false)
+            .await
+            .unwrap();
+        let preserved_retry_at: i64 =
+            sqlx::query_scalar("SELECT next_attempt_at_unix_ms FROM dispatch_commands")
+                .fetch_one(&engine.store.pool)
+                .await
+                .unwrap();
+        assert_eq!(preserved_retry_at, original_retry_at);
+        assert!(engine
+            .claim_dispatches("b", false)
+            .await
+            .unwrap()
+            .is_empty());
+        let retried = engine.claim_dispatches("b", true).await.unwrap().remove(0);
+        assert_eq!(
+            engine
+                .fail("b", &retried.dispatch_id, "transient again", false)
+                .await
+                .unwrap(),
+            Some(Duration::from_millis(2_000))
+        );
+        let final_attempt = engine.claim_dispatches("b", true).await.unwrap().remove(0);
+        engine
+            .fail("b", &final_attempt.dispatch_id, "terminal", true)
+            .await
+            .unwrap();
+        engine
+            .fail("b", &final_attempt.dispatch_id, "stale transient", false)
+            .await
+            .unwrap();
+        assert!(engine.claim_dispatches("b", true).await.unwrap().is_empty());
+        let terminal: bool = sqlx::query_scalar("SELECT terminal_failure FROM dispatch_commands")
+            .fetch_one(&engine.store.pool)
+            .await
+            .unwrap();
+        assert!(terminal);
+    }
+
+    #[tokio::test]
+    async fn forwards_attachment_metadata_and_orders_pending_messages() {
+        let (engine, _temp) = setup(
+            r#"
+                [[replication_groups]]
+                id = "one"
+                endpoints = ["a-room", "b-room"]
+            "#,
+        )
+        .await;
+        let mut first = create("first", "a-room", "first-origin", None);
+        first.attachments.push(AttachmentDescriptor {
+            kind: 1,
+            filename: "photo.jpg".into(),
+            mime_type: "image/jpeg".into(),
+            size_bytes: 42,
+        });
+        engine.ingest("a", first).await.unwrap();
+        engine
+            .ingest("a", create("second", "a-room", "second-origin", None))
+            .await
+            .unwrap();
+
+        let first = engine.claim_dispatches("b", false).await.unwrap();
+        assert_eq!(first.len(), 1);
+        assert_eq!(first[0].text, "first");
+        assert_eq!(first[0].attachments[0].filename, "photo.jpg");
+        engine
+            .acknowledge("b", &first[0].dispatch_id, "first-copy")
+            .await
+            .unwrap();
+        let second = engine.claim_dispatches("b", false).await.unwrap();
+        assert_eq!(second.len(), 1);
+        assert_eq!(second[0].text, "second");
     }
 }
