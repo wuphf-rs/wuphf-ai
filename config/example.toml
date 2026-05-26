@@ -1,0 +1,30 @@
+listen = "127.0.0.1:50051"
+database_url = "sqlite://wuphf.sqlite"
+
+[[endpoints]]
+id = "018f1b58-f667-75ba-bbbb-000000000001"
+platform = "whatsapp"
+chat_id = "12345@s.whatsapp.net"
+
+[[endpoints]]
+id = "018f1b58-f667-75ba-bbbb-000000000002"
+platform = "telegram"
+chat_id = "-100123"
+thread_id = "12"
+
+[[groups]]
+id = "018f1b58-f667-75ba-bbbb-000000000003"
+endpoints = [
+  "018f1b58-f667-75ba-bbbb-000000000001",
+  "018f1b58-f667-75ba-bbbb-000000000002",
+]
+
+[[connectors]]
+id = "whatsapp-main"
+platform = "whatsapp"
+endpoints = ["018f1b58-f667-75ba-bbbb-000000000001"]
+
+[[connectors]]
+id = "telegram-main"
+platform = "telegram"
+endpoints = ["018f1b58-f667-75ba-bbbb-000000000002"]

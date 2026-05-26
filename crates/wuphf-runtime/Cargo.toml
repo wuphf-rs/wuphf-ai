@@ -1,0 +1,16 @@
+[package]
+name = "wuphf-runtime"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+thiserror.workspace = true
+tokio = { workspace = true, features = ["macros", "net", "rt-multi-thread", "sync"] }
+tokio-stream = { workspace = true, features = ["net"] }
+tonic.workspace = true
+uuid.workspace = true
+wuphf-core.workspace = true
+wuphf-model.workspace = true
+wuphf-proto.workspace = true
+wuphf-storage.workspace = true

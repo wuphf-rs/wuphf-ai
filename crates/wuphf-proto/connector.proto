@@ -1,0 +1,89 @@
+syntax = "proto3";
+
+package wuphf.connector.v1;
+
+service ConnectorTransport {
+  rpc OpenSession(stream ClientFrame) returns (stream ServerFrame);
+}
+
+enum Platform {
+  PLATFORM_UNSPECIFIED = 0;
+  PLATFORM_WHATSAPP = 1;
+  PLATFORM_TELEGRAM = 2;
+  PLATFORM_DISCORD = 3;
+  PLATFORM_SIGNAL = 4;
+  PLATFORM_SLACK = 5;
+  PLATFORM_MATRIX = 6;
+}
+
+message Registration {
+  string connector_id = 1;
+  Platform platform = 2;
+  repeated string endpoint_ids = 3;
+}
+
+message Attachment {
+  enum Kind {
+    KIND_UNSPECIFIED = 0;
+    KIND_IMAGE = 1;
+    KIND_VIDEO = 2;
+    KIND_AUDIO = 3;
+    KIND_FILE = 4;
+    KIND_STICKER = 5;
+  }
+
+  Kind kind = 1;
+  string url = 2;
+  optional string mime_type = 3;
+  optional uint64 size_bytes = 4;
+}
+
+message MessageCreateEvent {
+  string origin_endpoint_id = 1;
+  string group_id = 2;
+  string platform_message_id = 3;
+  string sender = 4;
+  optional string participant = 5;
+  optional string text = 6;
+  repeated Attachment attachments = 7;
+  optional string reply_to_platform_message_id = 8;
+  int64 timestamp_ms = 9;
+}
+
+message Acknowledgement {
+  string dispatch_id = 1;
+  string platform_message_id = 2;
+}
+
+message ClientFrame {
+  oneof body {
+    Registration registration = 1;
+    MessageCreateEvent message_create = 2;
+    Acknowledgement acknowledgement = 3;
+  }
+}
+
+message MessageCreateDispatch {
+  string dispatch_id = 1;
+  string target_endpoint_id = 2;
+  string logical_message_id = 3;
+  string group_id = 4;
+  string sender = 5;
+  optional string participant = 6;
+  optional string text = 7;
+  repeated Attachment attachments = 8;
+  optional string reply_to_logical_message_id = 9;
+  optional string reply_to_platform_message_id = 10;
+  int64 timestamp_ms = 11;
+}
+
+message Rejected {
+  string reason = 1;
+}
+
+message ServerFrame {
+  oneof body {
+    MessageCreateDispatch message_create = 1;
+    Rejected rejected = 2;
+  }
+}
