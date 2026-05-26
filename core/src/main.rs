@@ -79,9 +79,34 @@ async fn main() -> anyhow::Result<()> {
     tracing::info!(%listen, "starting wuphf core");
     Server::builder()
         .add_service(ConnectorServer::new(service))
-        .serve(listen)
+        .serve_with_shutdown(listen, shutdown_signal())
         .await?;
     Ok(())
+}
+
+/// Waits for process termination signal so Tonic can drain active connections.
+async fn shutdown_signal() {
+    #[cfg(unix)]
+    {
+        let mut terminate =
+            tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
+                .expect("SIGTERM handler must install");
+        tokio::select! {
+            result = tokio::signal::ctrl_c() => {
+                if let Err(error) = result {
+                    tracing::error!(%error, "failed to listen for Ctrl-C");
+                }
+            }
+            _ = terminate.recv() => {}
+        }
+    }
+
+    #[cfg(not(unix))]
+    if let Err(error) = tokio::signal::ctrl_c().await {
+        tracing::error!(%error, "failed to listen for Ctrl-C");
+    }
+
+    tracing::info!("shutdown signal received");
 }
 
 /// Executes one operator command against durable state and exits.

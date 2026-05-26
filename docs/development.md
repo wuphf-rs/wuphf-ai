@@ -131,11 +131,18 @@ do not update SQLite tables manually.
 
 SQLite is part of the first MVP so logical-message identity mappings and
 durable pending dispatch work remain correct after reconnects and restarts.
+At startup the core opens SQLite with foreign-key enforcement, WAL journaling,
+full synchronous durability, and a five-second busy timeout. It logs applied
+migration version and configured topology counts without logging connector
+tokens.
 The `[delivery]` section in the TOML configuration sets acknowledgement
 timeout, initial retry delay, and maximum exponential retry delay.
 Changes to persistent state require migrations. Changes to protobuf contracts
 must preserve compatibility deliberately rather than silently changing the
 wire contract.
+
+The serving core handles Ctrl-C and SIGTERM through Tonic graceful shutdown,
+stopping new stream acceptance while active connections close.
 
 New implementation must retain the invariants described in
 [System Architecture](architecture.md) and

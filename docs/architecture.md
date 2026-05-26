@@ -51,6 +51,14 @@ idempotent acknowledgement processing.
 
 Persistence changes must be introduced through migrations.
 
+The core enables SQLite foreign-key enforcement, WAL journaling, full
+synchronous durability, and a bounded busy timeout when opening durable state.
+It currently uses one pooled connection because dispatch sequence allocation
+and claims are serialized by design.
+
+On process shutdown signals, the gRPC server performs graceful shutdown rather
+than immediately terminating active connector streams.
+
 ### Operations And Future API
 
 The MVP includes narrow local operator commands to list durable dispatches and
