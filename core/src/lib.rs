@@ -2,6 +2,8 @@
 
 #![warn(missing_docs)]
 
+/// Operator-facing durable dispatch administration use cases.
+pub mod admin;
 /// Runtime configuration and topology validation.
 pub mod config;
 /// Delivery lease and retry-delay policy implementation.

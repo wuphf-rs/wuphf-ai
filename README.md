@@ -45,6 +45,8 @@ Implemented behavior:
 - Explicit permanent dispatch failure reporting, which leaves the endpoint
   sequence blocked for operator investigation rather than silently dropping
   later ordered work.
+- Core-owned operator commands to inspect durable dispatch state and explicitly
+  reopen a terminal failed dispatch.
 - Deterministic per-endpoint dispatch order.
 - Idempotent event submission and acknowledgement processing.
 - Reply dispatch blocking until the parent message has a target-side
@@ -59,7 +61,7 @@ Deferred work:
 - Telegram topic mapping.
 - Message edits, reactions, deletes, or revokes.
 - Media transport or storage.
-- Management API or TUI, dynamic replication administration, mTLS, and
+- Live management API or TUI, dynamic replication administration, mTLS, and
   multiple sessions for one connector integration.
 
 ## Repository Layout
@@ -109,8 +111,33 @@ cargo run -p wuphf-mock -- \
 See [Development Workflow](docs/development.md) for reply mapping and durable
 replay/failure walkthroughs. The protocol and persistence invariants are described in
 [Connector Protocol](docs/protocol.md) and
-[System Architecture](docs/architecture.md). Planned pipeline and platform
-evolution is captured in [Future Architecture](docs/future-architecture.md).
+[System Architecture](docs/architecture.md).
+
+## Inspect Failed Delivery
+
+A permanent connector failure remains durable and blocks later delivery to the
+same endpoint. Inspect terminal dispatches while the server is stopped, or
+against the same SQLite database with care:
+
+```sh
+cargo run -p wuphf-core -- --config config/example.toml \
+  dispatches list --terminal-only
+```
+
+Listing is bounded by default; use `--limit` up to `1000` for a larger
+diagnostic page.
+
+Reopen a terminal dispatch by ID:
+
+```sh
+cargo run -p wuphf-core -- --config config/example.toml \
+  dispatches retry <dispatch-id>
+```
+
+The reopened command is delivered when its connector next connects or
+otherwise causes dispatch polling. A future authenticated live administration
+API can provide immediate recovery and health reporting without exposing raw
+database mutation.
 
 ## Verification
 

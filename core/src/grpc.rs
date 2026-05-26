@@ -174,6 +174,10 @@ impl Connector for ConnectorService {
             .engine
             .authenticate_connector(&register.connector_id, &register.shared_token)
         {
+            tracing::warn!(
+                connector_id = %register.connector_id,
+                "connector registration rejected"
+            );
             sender
                 .send(Ok(CoreToConnector {
                     operation: Some(core_to_connector::Operation::RegistrationResult(
@@ -194,12 +198,14 @@ impl Connector for ConnectorService {
             .register(connector_id.clone(), sender.clone())
             .await;
         if let Some(prior_sender) = session.replaced_sender {
+            tracing::warn!(%connector_id, "connector session replaced");
             let _ = prior_sender
                 .send(Err(Status::aborted(
                     "connector session replaced by a newer registration",
                 )))
                 .await;
         }
+        tracing::info!(%connector_id, session_id = %session.id, "connector registered");
         sender
             .send(Ok(CoreToConnector {
                 operation: Some(core_to_connector::Operation::RegistrationResult(
@@ -241,6 +247,7 @@ impl Connector for ConnectorService {
                 .sessions
                 .remove_if_active(&connector_id, &session_id)
                 .await;
+            tracing::info!(%connector_id, %session_id, "connector stream closed");
         });
 
         Ok(Response::new(Box::pin(ReceiverStream::new(receiver))))
@@ -256,6 +263,8 @@ fn to_status(error: EngineError) -> Status {
         EngineError::UnknownReply(_) | EngineError::ConflictingAcknowledgement => {
             Status::invalid_argument(error.to_string())
         }
-        EngineError::Database(_) | EngineError::Metadata(_) => Status::internal(error.to_string()),
+        EngineError::Database(_)
+        | EngineError::Metadata(_)
+        | EngineError::DispatchNotTerminal(_) => Status::internal(error.to_string()),
     }
 }

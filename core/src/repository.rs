@@ -1,6 +1,7 @@
 //! Transactional persistence for logical messages, message copies, and dispatch state.
 
 use crate::{
+    admin::{DispatchFilter, DispatchRecord},
     config::EndpointConfig,
     delivery::{now_unix_ms, DeliveryPolicy},
     engine::EngineError,
@@ -328,6 +329,67 @@ impl Repository {
         .await?;
         tx.commit().await?;
         Ok(retry_delay)
+    }
+
+    /// Returns durable dispatch records matching operator filter fields.
+    pub(crate) async fn list_dispatches(
+        &self,
+        filter: &DispatchFilter,
+    ) -> Result<Vec<DispatchRecord>, EngineError> {
+        let rows = sqlx::query(
+            "SELECT id, logical_message_id, target_endpoint_id, target_connector_id,
+                    status, attempt_count, endpoint_sequence, last_attempted_at_unix_ms,
+                    next_attempt_at_unix_ms, last_error, terminal_failure
+             FROM dispatch_commands
+             WHERE (? IS NULL OR target_connector_id = ?)
+               AND (? IS NULL OR target_endpoint_id = ?)
+               AND (NOT ? OR terminal_failure = 1)
+             ORDER BY target_endpoint_id, endpoint_sequence
+             LIMIT ?",
+        )
+        .bind(&filter.connector_id)
+        .bind(&filter.connector_id)
+        .bind(&filter.endpoint_id)
+        .bind(&filter.endpoint_id)
+        .bind(filter.terminal_only)
+        .bind(i64::from(filter.limit.clamp(1, 1_000)))
+        .fetch_all(&self.store.pool)
+        .await?;
+        Ok(rows
+            .into_iter()
+            .map(|row| DispatchRecord {
+                id: row.get("id"),
+                logical_message_id: row.get("logical_message_id"),
+                target_endpoint_id: row.get("target_endpoint_id"),
+                target_connector_id: row.get("target_connector_id"),
+                status: row.get("status"),
+                attempt_count: row.get("attempt_count"),
+                endpoint_sequence: row.get("endpoint_sequence"),
+                last_attempted_at_unix_ms: row.get("last_attempted_at_unix_ms"),
+                next_attempt_at_unix_ms: row.get("next_attempt_at_unix_ms"),
+                last_error: row.get("last_error"),
+                terminal_failure: row.get("terminal_failure"),
+            })
+            .collect())
+    }
+
+    /// Reopens one terminal dispatch while preserving its diagnostic history.
+    pub(crate) async fn retry_terminal_dispatch(
+        &self,
+        dispatch_id: &str,
+    ) -> Result<(), EngineError> {
+        let result = sqlx::query(
+            "UPDATE dispatch_commands
+             SET status = 'failed', terminal_failure = 0, next_attempt_at_unix_ms = 0
+             WHERE id = ? AND terminal_failure = 1",
+        )
+        .bind(dispatch_id)
+        .execute(&self.store.pool)
+        .await?;
+        if result.rows_affected() == 0 {
+            return Err(EngineError::DispatchNotTerminal(dispatch_id.to_owned()));
+        }
+        Ok(())
     }
 }
 

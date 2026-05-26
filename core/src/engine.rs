@@ -32,6 +32,9 @@ pub enum EngineError {
     /// Persisted normalized metadata could not be decoded.
     #[error("stored attachment metadata cannot be decoded: {0}")]
     Metadata(#[from] serde_json::Error),
+    /// Operator requested retry for dispatch not currently terminal.
+    #[error("dispatch '{0}' is not terminal or does not exist")]
+    DispatchNotTerminal(String),
 }
 
 #[derive(Clone)]
@@ -77,7 +80,19 @@ impl Engine {
         connector_id: &str,
         message: CreateMessage,
     ) -> Result<IngestResult, EngineError> {
-        self.inbound.process_create(connector_id, message).await
+        let endpoint_id = message.endpoint_id.clone();
+        let event_id = message.event_id.clone();
+        let result = self.inbound.process_create(connector_id, message).await?;
+        tracing::info!(
+            %connector_id,
+            %endpoint_id,
+            %event_id,
+            logical_message_id = %result.logical_message_id,
+            was_new = result.was_new,
+            target_connector_count = result.target_connectors.len(),
+            "inbound message processed"
+        );
+        Ok(result)
     }
 
     /// Claims commands currently deliverable to a connector instance.
@@ -86,9 +101,19 @@ impl Engine {
         connector_id: &str,
         allow_early_retry: bool,
     ) -> Result<Vec<DispatchCreateMessage>, EngineError> {
-        self.repository
+        let dispatches = self
+            .repository
             .claim_dispatches(connector_id, &self.delivery, allow_early_retry)
-            .await
+            .await?;
+        if !dispatches.is_empty() {
+            tracing::info!(
+                %connector_id,
+                count = dispatches.len(),
+                reconnect_reclaim = allow_early_retry,
+                "dispatch commands claimed"
+            );
+        }
+        Ok(dispatches)
     }
 
     /// Records successful creation of a target platform message copy.
@@ -100,7 +125,9 @@ impl Engine {
     ) -> Result<(), EngineError> {
         self.repository
             .acknowledge(connector_id, dispatch_id, platform_message_id)
-            .await
+            .await?;
+        tracing::info!(%connector_id, %dispatch_id, "dispatch acknowledged");
+        Ok(())
     }
 
     /// Records connector delivery failure and returns transient retry delay, if applicable.
@@ -111,9 +138,18 @@ impl Engine {
         reason: &str,
         permanent: bool,
     ) -> Result<Option<Duration>, EngineError> {
-        self.repository
+        let retry_delay = self
+            .repository
             .fail(connector_id, dispatch_id, reason, permanent, &self.delivery)
-            .await
+            .await?;
+        tracing::warn!(
+            %connector_id,
+            %dispatch_id,
+            permanent,
+            retry_delay_ms = retry_delay.map(|delay| delay.as_millis()),
+            "dispatch failed"
+        );
+        Ok(retry_delay)
     }
 }
 

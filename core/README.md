@@ -18,6 +18,8 @@ Platform clients communicate with this server through the gRPC definitions in
 - `repository`: durable logical message, message copy, and dispatch
   transactions.
 - `delivery`: acknowledgement lease and retry backoff policy.
+- `admin`: operator inspection and controlled recovery of terminal durable
+  dispatch state.
 - `sessions`: single-active-stream connector session registry.
 - `grpc`: protocol adapter and asynchronous dispatch wakeups.
 
