@@ -1,8 +1,8 @@
 use std::sync::Arc;
 use thiserror::Error;
 use wuphf_model::{
-    DedupKey, DispatchAcknowledgement, EndpointId, EventPayload, Message, MessageCopy, MessageId,
-    NormalizedEvent, StoredDispatch,
+    DedupKey, DispatchAcknowledgement, EndpointId, EventPayload, MediaId, Message, MessageCopy,
+    MessageId, NormalizedEvent, StoredDispatch,
 };
 use wuphf_router::{Router, RouterError, RoutingOutcome};
 use wuphf_storage::{Storage, StorageError};
@@ -51,6 +51,17 @@ where
             ),
             None => None,
         };
+
+        for attachment in &inbound.attachments {
+            let media = self
+                .storage
+                .media(attachment.media_id)
+                .await?
+                .ok_or(CoreError::UnknownMedia(attachment.media_id))?;
+            if media.attachment != *attachment {
+                return Err(CoreError::MediaMetadataMismatch(attachment.media_id));
+            }
+        }
 
         let dedup_key = DedupKey {
             platform: origin.platform,
@@ -168,14 +179,18 @@ pub enum CoreError {
     UnsupportedEvent,
     #[error("reply target platform message {0} is unknown at the origin endpoint")]
     UnknownReplyTarget(String),
+    #[error("attachment media {0} is not uploaded to the core")]
+    UnknownMedia(MediaId),
+    #[error("attachment metadata for media {0} differs from the core record")]
+    MediaMetadataMismatch(MediaId),
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use wuphf_model::{
-        DispatchPayload, Endpoint, GroupId, InboundMessage, NormalizedEvent, Platform,
-        ReplicationGroup,
+        Attachment, AttachmentKind, DispatchPayload, Endpoint, GroupId, InboundMessage, MediaBlob,
+        MediaId, NormalizedEvent, Platform, ReplicationGroup,
     };
     use wuphf_storage::InMemoryStorage;
 
@@ -333,10 +348,12 @@ mod tests {
             .unwrap();
         let DispatchPayload::MessageCreate {
             message,
-            reply_to_platform_message_id,
+            reply_context,
         } = &reply.dispatches()[0].command.payload;
         assert_eq!(message.reply_to, Some(parent_id));
-        assert_eq!(reply_to_platform_message_id.as_deref(), Some("tg-parent"));
+        let reply_context = reply_context.as_ref().expect("reply context resolved");
+        assert_eq!(reply_context.message_id, parent_id);
+        assert_eq!(reply_context.platform_message_id, "tg-parent");
     }
 
     #[tokio::test]
@@ -369,5 +386,73 @@ mod tests {
         assert!(routing.dispatches.is_empty());
         assert_eq!(routing.blocked.len(), 1);
         assert_eq!(routing.blocked[0].command.target_endpoint, fixture.telegram);
+    }
+
+    #[tokio::test]
+    async fn rejects_unknown_or_modified_media_before_claiming_event() {
+        let fixture = fixture().await;
+        let attachment = Attachment {
+            media_id: MediaId::new(),
+            kind: AttachmentKind::Image,
+            file_name: Some("photo.jpg".into()),
+            mime_type: Some("image/jpeg".into()),
+            size_bytes: Some(5),
+        };
+        let event = media_event(
+            fixture.whatsapp,
+            fixture.group_id,
+            "wa-media",
+            attachment.clone(),
+        );
+        assert!(matches!(
+            fixture.core.ingest(event.clone()).await,
+            Err(CoreError::UnknownMedia(id)) if id == attachment.media_id
+        ));
+
+        fixture
+            .core
+            .storage
+            .put_media(
+                MediaBlob {
+                    attachment: attachment.clone(),
+                    bytes: b"hello".to_vec(),
+                },
+                1,
+            )
+            .await
+            .unwrap();
+        let mut altered = attachment.clone();
+        altered.kind = AttachmentKind::File;
+        assert!(matches!(
+            fixture
+                .core
+                .ingest(media_event(
+                    fixture.whatsapp,
+                    fixture.group_id,
+                    "wa-media",
+                    altered
+                ))
+                .await,
+            Err(CoreError::MediaMetadataMismatch(id)) if id == attachment.media_id
+        ));
+
+        assert_eq!(
+            fixture.core.ingest(event).await.unwrap().dispatches().len(),
+            1
+        );
+    }
+
+    fn media_event(
+        endpoint: EndpointId,
+        group_id: GroupId,
+        native_id: &str,
+        attachment: Attachment,
+    ) -> NormalizedEvent {
+        let mut event = message_event(endpoint, group_id, native_id, None);
+        let EventPayload::MessageCreate(inbound) = &mut event.payload else {
+            unreachable!();
+        };
+        inbound.attachments = vec![attachment];
+        event
     }
 }

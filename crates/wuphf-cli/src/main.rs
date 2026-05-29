@@ -1,7 +1,7 @@
 use anyhow::{Context, Result, bail};
 use clap::{Parser, Subcommand};
 use serde::Deserialize;
-use std::{net::SocketAddr, path::PathBuf, sync::Arc};
+use std::{net::SocketAddr, path::PathBuf, sync::Arc, time::Duration};
 use tonic::transport::Server;
 use uuid::Uuid;
 use wuphf_core::Core;
@@ -10,7 +10,10 @@ use wuphf_model::{
     GroupId, InboundMessage, NormalizedEvent, Platform, ReplicationGroup,
 };
 use wuphf_proto::connector::connector_transport_server::ConnectorTransportServer;
-use wuphf_runtime::{Runtime, connector::ConnectorHub, grpc::GrpcConnectorService};
+use wuphf_proto::connector::media_transport_server::MediaTransportServer;
+use wuphf_runtime::{
+    Runtime, connector::ConnectorHub, grpc::GrpcConnectorService, media::GrpcMediaService,
+};
 use wuphf_storage::{SqliteStorage, Storage};
 
 #[derive(Parser)]
@@ -38,9 +41,21 @@ enum Command {
 struct Configuration {
     listen: SocketAddr,
     database_url: String,
+    #[serde(default = "default_max_media_bytes")]
+    max_media_bytes: usize,
+    #[serde(default = "default_orphan_media_retention_seconds")]
+    orphan_media_retention_seconds: u64,
     endpoints: Vec<EndpointConfiguration>,
     groups: Vec<GroupConfiguration>,
     connectors: Vec<ConnectorConfiguration>,
+}
+
+fn default_max_media_bytes() -> usize {
+    32 * 1024 * 1024
+}
+
+fn default_orphan_media_retention_seconds() -> u64 {
+    24 * 60 * 60
 }
 
 #[derive(Deserialize)]
@@ -182,6 +197,11 @@ async fn serve(path: PathBuf) -> Result<()> {
         })
         .collect::<Result<Vec<_>>>()?;
 
+    let media_service = GrpcMediaService::new(
+        Arc::clone(&storage),
+        configuration.max_media_bytes,
+        Duration::from_secs(configuration.orphan_media_retention_seconds),
+    );
     let (runtime, channels) = Runtime::channelled(Arc::new(Core::new(storage)), 128);
     let (hub, handle) = ConnectorHub::new(channels, allowed);
     let runtime_task = tokio::spawn(runtime.run());
@@ -194,6 +214,7 @@ async fn serve(path: PathBuf) -> Result<()> {
         .add_service(ConnectorTransportServer::new(GrpcConnectorService::new(
             handle,
         )))
+        .add_service(MediaTransportServer::new(media_service))
         .serve(configuration.listen);
     tokio::select! {
         result = server => result?,

@@ -31,6 +31,7 @@ uuid_id!(MessageId);
 uuid_id!(GroupId);
 uuid_id!(EndpointId);
 uuid_id!(DispatchId);
+uuid_id!(MediaId);
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -70,10 +71,17 @@ pub enum AttachmentKind {
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Attachment {
+    pub media_id: MediaId,
     pub kind: AttachmentKind,
-    pub url: String,
+    pub file_name: Option<String>,
     pub mime_type: Option<String>,
     pub size_bytes: Option<u64>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct MediaBlob {
+    pub attachment: Attachment,
+    pub bytes: Vec<u8>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -93,6 +101,16 @@ pub struct MessageCopy {
     pub message_id: MessageId,
     pub endpoint_id: EndpointId,
     pub platform_message_id: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ReplyContext {
+    pub message_id: MessageId,
+    pub platform_message_id: String,
+    pub sender: String,
+    pub participant: Option<String>,
+    pub text: Option<String>,
+    pub attachments: Vec<Attachment>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -160,7 +178,7 @@ pub struct NormalizedEvent {
 pub enum DispatchPayload {
     MessageCreate {
         message: Message,
-        reply_to_platform_message_id: Option<String>,
+        reply_context: Option<ReplyContext>,
     },
 }
 

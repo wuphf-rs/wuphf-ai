@@ -1,5 +1,7 @@
 listen = "127.0.0.1:50051"
 database_url = "sqlite://wuphf.sqlite"
+max_media_bytes = 33554432
+orphan_media_retention_seconds = 86400
 
 [[endpoints]]
 id = "018f1b58-f667-75ba-bbbb-000000000001"

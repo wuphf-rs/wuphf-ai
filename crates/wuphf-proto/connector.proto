@@ -2,8 +2,15 @@ syntax = "proto3";
 
 package wuphf.connector.v1;
 
+option go_package = "github.com/akshettrj/wuphf/proto/go/connector/v1;wuphfpb";
+
 service ConnectorTransport {
   rpc OpenSession(stream ClientFrame) returns (stream ServerFrame);
+}
+
+service MediaTransport {
+  rpc UploadMedia(stream UploadMediaFrame) returns (Attachment);
+  rpc DownloadMedia(DownloadMediaRequest) returns (stream MediaChunk);
 }
 
 enum Platform {
@@ -32,10 +39,33 @@ message Attachment {
     KIND_STICKER = 5;
   }
 
-  Kind kind = 1;
-  string url = 2;
+  string media_id = 1;
+  Kind kind = 2;
+  optional string file_name = 3;
+  optional string mime_type = 4;
+  optional uint64 size_bytes = 5;
+}
+
+message MediaMetadata {
+  Attachment.Kind kind = 1;
+  optional string file_name = 2;
   optional string mime_type = 3;
   optional uint64 size_bytes = 4;
+}
+
+message UploadMediaFrame {
+  oneof body {
+    MediaMetadata metadata = 1;
+    bytes chunk = 2;
+  }
+}
+
+message DownloadMediaRequest {
+  string media_id = 1;
+}
+
+message MediaChunk {
+  bytes chunk = 1;
 }
 
 message MessageCreateEvent {
@@ -48,6 +78,15 @@ message MessageCreateEvent {
   repeated Attachment attachments = 7;
   optional string reply_to_platform_message_id = 8;
   int64 timestamp_ms = 9;
+}
+
+message ReplyContext {
+  string logical_message_id = 1;
+  string platform_message_id = 2;
+  string sender = 3;
+  optional string participant = 4;
+  optional string text = 5;
+  repeated Attachment attachments = 6;
 }
 
 message Acknowledgement {
@@ -75,6 +114,7 @@ message MessageCreateDispatch {
   optional string reply_to_logical_message_id = 9;
   optional string reply_to_platform_message_id = 10;
   int64 timestamp_ms = 11;
+  optional ReplyContext reply_context = 12;
 }
 
 message Rejected {

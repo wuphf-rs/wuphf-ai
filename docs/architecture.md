@@ -35,7 +35,11 @@ work. `wuphf-runtime` moves events, acknowledgements, and dispatches
 asynchronously through Tokio channels. Its connector hub binds registered
 endpoint ownership to configured connector sessions without adding platform
 logic. `wuphf-proto` and Tonic adapter expose session boundary over
-bidirectional gRPC.
+bidirectional gRPC. The runtime also exposes a bounded media broker:
+connectors upload bytes once, while normalized attachments and dispatches
+refer to a core-owned `MediaId`. Storage records which media IDs are attached
+to logical messages, allowing expired abandoned uploads to be removed without
+breaking replayable dispatches.
 
 ## Runtime Invariants
 
@@ -54,11 +58,17 @@ bidirectional gRPC.
   acknowledge only assigned dispatches.
 - Connector registration must match configured connector/platform/endpoint
   assignment before work can be received.
+- Attachment data is addressed by core-owned media identity; connector-private
+  platform file handles do not escape adapter boundaries.
+- The core accepts attachment events only after their media and metadata match
+  a broker-issued media record.
 
 ## Planned Extension Points
 
 - Implement the remaining normalized payload operations for edits, deletes,
   and reactions.
-- Add media handling through normalized `Attachment` metadata and connector
-  transfer mechanisms.
-- Build WhatsApp and Telegram connectors as external-facing adapters.
+- Extend connector media kinds and define deletion policy for media attached
+  to retained logical messages.
+- Carry enough target-copy quote metadata for correct outbound WhatsApp
+  replies.
+- Harden live connector retry/reconnect behavior and integration tests.

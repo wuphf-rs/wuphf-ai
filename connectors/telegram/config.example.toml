@@ -1,0 +1,21 @@
+core_address = "127.0.0.1:50051"
+connector_id = "telegram-main"
+session_file = "./telegram.session.json"
+endpoints = ["018f1b58-f667-75ba-bbbb-000000000002"]
+
+# Telegram application credentials are read from:
+# WUPHF_TELEGRAM_APP_ID and WUPHF_TELEGRAM_APP_HASH.
+# For a user session also set WUPHF_TELEGRAM_PHONE and optionally
+# WUPHF_TELEGRAM_PASSWORD. Authentication codes are prompted on first login.
+# Alternatively set WUPHF_TELEGRAM_BOT_TOKEN for a bot session.
+
+[[targets]]
+endpoint_id = "018f1b58-f667-75ba-bbbb-000000000002"
+group_id = "018f1b58-f667-75ba-bbbb-000000000003"
+peer = "replace_with_public_username_or_phone"
+# Exact MTProto peer identity for incoming update filtering. For a
+# supergroup/channel use type "channel" and bare positive channel ID.
+incoming_peer_type = "channel"
+incoming_peer_id = 1234567890
+# For a Telegram forum topic, use its topic starter message ID:
+topic_root_message_id = 12

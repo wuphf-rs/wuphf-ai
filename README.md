@@ -21,12 +21,21 @@ This initial Rust workspace implements a minimal, extensible core slice:
   delivery, configured registration allowlist, and acknowledgement
   authorization.
 - Bidirectional Tonic/gRPC connector transport over canonical protobuf frames.
+- Core-owned media broker with bounded streaming upload/download, SQLite blob
+  persistence, and orphan-upload retention; attachments reference stable
+  internal media IDs.
+- Go Telegram connector scaffold using `gotd/td` for authenticated sessions
+  plus inbound/outbound configured text, image, and file replication and
+  acknowledgements.
+- Go WhatsApp connector using `whatsmeow` with QR-paired SQLite session state
+  plus configured text, image, and file replication; inbound reply identity
+  is normalized for routing to supported targets.
 - CLI demonstration of one WhatsApp-origin logical message dispatched to a
   Telegram topic endpoint.
 
-Edits, deletes, reactions, actual media transport, and production
-WhatsApp/Telegram connector integrations are represented or reserved by the
-architecture but are not yet executed by the runtime.
+Edits, deletes, reactions, additional attachment kinds, and outbound
+WhatsApp quoted replies are represented or reserved by the architecture but
+are not yet executed by the runtime.
 
 ## Layout
 
@@ -40,8 +49,9 @@ crates/
   wuphf-runtime/   Tokio event-bus and dispatch pipeline
   wuphf-cli/       Local executable demonstration
 connectors/
-  telegram/        Thin adapter boundary
-  whatsapp/        Thin adapter boundary
+  telegram/        Go gotd/td connector
+  whatsapp/        Go whatsmeow connector
+proto/go/          Shared generated Go connector protocol bindings
 migrations/        SQLite schema migrations
 config/            Example server topology and connector assignment
 ```
@@ -62,6 +72,12 @@ Run gRPC connector server with configured endpoints and assignments:
 
 ```sh
 cargo run -p wuphf-cli -- serve --config config/example.toml
+
+# in another shell, after configuring Telegram credentials/target
+(cd connectors/telegram && go run ./cmd/wuphf-telegram --config config.example.toml)
+
+# in another shell; first launch prints a WhatsApp pairing QR code
+(cd connectors/whatsapp && go run ./cmd/wuphf-whatsapp --config config.example.toml)
 ```
 
 ## Verify
@@ -70,9 +86,14 @@ cargo run -p wuphf-cli -- serve --config config/example.toml
 cargo fmt --check
 cargo test --workspace
 cargo clippy --workspace --all-targets
+(cd proto/go && go test ./...)
+(cd connectors/telegram && go test ./...)
+(cd connectors/whatsapp && go test ./...)
 nix flake check --all-systems
 ```
 
 See [docs/architecture.md](docs/architecture.md) for the identity and routing
 constraints and [docs/connector-protocol.md](docs/connector-protocol.md) for
-the connector-facing session contract.
+the connector-facing session contract. See
+[docs/implementation-status.md](docs/implementation-status.md) for current
+workspace changes, known in-progress work, and next steps.

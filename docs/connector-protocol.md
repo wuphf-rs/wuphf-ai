@@ -43,9 +43,27 @@ same dispatch ID.
 ## Transport
 
 Canonical network contract is `crates/wuphf-proto/connector.proto`. It
-exposes one bidirectional gRPC `OpenSession` stream. First client frame must
-be `Registration`; following frames carry message creates or
-acknowledgements. Server frames carry dispatches or rejection results.
+exposes a bidirectional gRPC `OpenSession` stream plus the `MediaTransport`
+service. First session client frame must be `Registration`; following frames
+carry message creates or acknowledgements. Server frames carry dispatches or
+rejection results.
+
+Attachments carry an internal `media_id`, type, filename, MIME type, and
+size. A source connector uploads attachment bytes to `MediaTransport` before
+submitting the normalized event. A destination connector downloads those
+bytes by `media_id` while executing its dispatch. Platform-specific file
+locations and URLs never become cross-platform message identity.
+The event attachment metadata must be the metadata returned by upload; the
+core rejects missing media IDs or altered metadata before accepting the event.
+
+Media uploads are streamed and bounded by the server `max_media_bytes`
+configuration. The initial SQLite implementation persists media bytes in the
+core so dispatch retry and connector restart do not lose referenced content.
+Uploads not subsequently linked into a logical message are removed after
+`orphan_media_retention_seconds` once later upload traffic triggers cleanup.
+Media linked to a persisted logical message is retained; deleting that content
+requires a future message-retention policy rather than an unsafe age-only
+cleanup.
 
 `wuphf-runtime::grpc` translates protobuf frames to internal connector hub.
 Routing and identity remain outside transport adapter.
@@ -56,3 +74,20 @@ TOML:
 ```sh
 cargo run -p wuphf-cli -- serve --config config/example.toml
 ```
+
+The Telegram connector under `connectors/telegram` is a Go `gotd/td` client.
+It registers as `telegram-main`, resolves configured Telegram peer targets,
+sends text/image/file dispatches and replies, reports native message IDs
+through acknowledgements, and emits inbound text/image/file events only for
+explicitly mapped MTProto peer/topic targets. Logical identity, media
+identity, and reply resolution remain core-owned.
+
+The WhatsApp connector under `connectors/whatsapp` is a Go `whatsmeow` client.
+It persists linked-device session state in its own SQLite database, prints a
+QR code for first pairing, resolves configured chat JIDs, and sends/emits
+text/image/file messages. Inbound WhatsApp replies are normalized for routing
+to platforms already supporting reply dispatch. Outbound WhatsApp quoted
+replies are deferred until dispatch includes required quote sender/content
+context. Group participant metadata is normalized for core storage. Bridge
+echo suppression remains a core decision: WhatsApp messages sent from linked
+account are still submitted to core.

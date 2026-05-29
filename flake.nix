@@ -29,8 +29,11 @@
           packages = with pkgs; [
             cargo
             clippy
+            go
             pkg-config
             protobuf
+            protoc-gen-go
+            protoc-gen-go-grpc
             rust-analyzer
             rustc
             rustfmt

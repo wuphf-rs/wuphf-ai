@@ -8,7 +8,7 @@ use uuid::Uuid;
 use wuphf_model::{
     Attachment, AttachmentKind, ConnectorId, ConnectorInput, ConnectorOutput,
     ConnectorRegistration, DispatchAcknowledgement, DispatchPayload, EndpointId, EventPayload,
-    GroupId, InboundMessage, NormalizedEvent, Platform,
+    GroupId, InboundMessage, MediaId, NormalizedEvent, Platform, ReplyContext,
 };
 use wuphf_proto::connector as pb;
 use wuphf_proto::connector::connector_transport_server::ConnectorTransport;
@@ -138,8 +138,11 @@ fn output_to_proto(output: ConnectorOutput) -> pb::ServerFrame {
         ConnectorOutput::Dispatch(dispatch) => {
             let DispatchPayload::MessageCreate {
                 message,
-                reply_to_platform_message_id,
+                reply_context,
             } = dispatch.command.payload;
+            let reply_to_platform_message_id = reply_context
+                .as_ref()
+                .map(|context| context.platform_message_id.clone());
             pb::server_frame::Body::MessageCreate(Box::new(pb::MessageCreateDispatch {
                 dispatch_id: dispatch.id.to_string(),
                 target_endpoint_id: dispatch.command.target_endpoint.to_string(),
@@ -156,6 +159,7 @@ fn output_to_proto(output: ConnectorOutput) -> pb::ServerFrame {
                 reply_to_logical_message_id: message.reply_to.map(|id| id.to_string()),
                 reply_to_platform_message_id,
                 timestamp_ms: message.timestamp_ms,
+                reply_context: reply_context.map(reply_context_to_proto),
             }))
         }
         ConnectorOutput::Rejected { reason } => {
@@ -163,6 +167,21 @@ fn output_to_proto(output: ConnectorOutput) -> pb::ServerFrame {
         }
     };
     pb::ServerFrame { body: Some(body) }
+}
+
+fn reply_context_to_proto(context: ReplyContext) -> pb::ReplyContext {
+    pb::ReplyContext {
+        logical_message_id: context.message_id.to_string(),
+        platform_message_id: context.platform_message_id,
+        sender: context.sender,
+        participant: context.participant,
+        text: context.text,
+        attachments: context
+            .attachments
+            .into_iter()
+            .map(attachment_to_proto)
+            .collect(),
+    }
 }
 
 fn attachment_from_proto(attachment: pb::Attachment) -> Result<Attachment, WireError> {
@@ -179,14 +198,15 @@ fn attachment_from_proto(attachment: pb::Attachment) -> Result<Attachment, WireE
         }
     };
     Ok(Attachment {
+        media_id: MediaId(parse_uuid(&attachment.media_id, "attachment.media_id")?),
         kind,
-        url: required_string(attachment.url, "attachment.url")?,
+        file_name: attachment.file_name,
         mime_type: attachment.mime_type,
         size_bytes: attachment.size_bytes,
     })
 }
 
-fn attachment_to_proto(attachment: Attachment) -> pb::Attachment {
+pub(crate) fn attachment_to_proto(attachment: Attachment) -> pb::Attachment {
     let kind = match attachment.kind {
         AttachmentKind::Image => pb::attachment::Kind::Image,
         AttachmentKind::Video => pb::attachment::Kind::Video,
@@ -195,8 +215,9 @@ fn attachment_to_proto(attachment: Attachment) -> pb::Attachment {
         AttachmentKind::Sticker => pb::attachment::Kind::Sticker,
     };
     pb::Attachment {
+        media_id: attachment.media_id.to_string(),
         kind: kind.into(),
-        url: attachment.url,
+        file_name: attachment.file_name,
         mime_type: attachment.mime_type,
         size_bytes: attachment.size_bytes,
     }

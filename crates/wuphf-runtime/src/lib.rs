@@ -7,6 +7,7 @@ use wuphf_storage::Storage;
 
 pub mod connector;
 pub mod grpc;
+pub mod media;
 
 pub struct Runtime<S> {
     core: Arc<Core<S>>,
@@ -92,6 +93,7 @@ mod tests {
     use super::*;
     use crate::connector::ConnectorHub;
     use crate::grpc::GrpcConnectorService;
+    use crate::media::GrpcMediaService;
     use tokio::net::TcpListener;
     use tokio_stream::wrappers::{ReceiverStream, TcpListenerStream};
     use tonic::transport::Server;
@@ -102,6 +104,8 @@ mod tests {
     use wuphf_proto::connector as pb;
     use wuphf_proto::connector::connector_transport_client::ConnectorTransportClient;
     use wuphf_proto::connector::connector_transport_server::ConnectorTransportServer;
+    use wuphf_proto::connector::media_transport_client::MediaTransportClient;
+    use wuphf_proto::connector::media_transport_server::MediaTransportServer;
     use wuphf_storage::{InMemoryStorage, Storage};
 
     #[tokio::test]
@@ -231,11 +235,9 @@ mod tests {
             .await
             .unwrap();
         let reply_dispatch = channels.dispatches.recv().await.unwrap();
-        let DispatchPayload::MessageCreate {
-            reply_to_platform_message_id,
-            ..
-        } = reply_dispatch.command.payload;
-        assert_eq!(reply_to_platform_message_id.as_deref(), Some("tg-parent"));
+        let DispatchPayload::MessageCreate { reply_context, .. } = reply_dispatch.command.payload;
+        let reply_context = reply_context.expect("reply context set on release");
+        assert_eq!(reply_context.platform_message_id, "tg-parent");
         drop(channels.events);
         task.await.unwrap().unwrap();
     }
@@ -382,14 +384,107 @@ mod tests {
             panic!("Telegram should receive released reply dispatch");
         };
         let reply_dispatch = *reply_dispatch;
-        let DispatchPayload::MessageCreate {
-            reply_to_platform_message_id,
-            ..
-        } = reply_dispatch.command.payload;
-        assert_eq!(reply_to_platform_message_id.as_deref(), Some("tg-parent"));
+        let DispatchPayload::MessageCreate { reply_context, .. } = reply_dispatch.command.payload;
+        let reply_context = reply_context.expect("reply context set on release");
+        assert_eq!(reply_context.platform_message_id, "tg-parent");
 
         hub_task.abort();
         runtime_task.abort();
+    }
+
+    #[tokio::test]
+    async fn media_transport_stores_downloadable_bytes_prunes_orphans_and_enforces_limit() {
+        let storage = Arc::new(InMemoryStorage::default());
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = tokio::spawn(
+            Server::builder()
+                .add_service(MediaTransportServer::new(GrpcMediaService::new(
+                    storage,
+                    5,
+                    std::time::Duration::ZERO,
+                )))
+                .serve_with_incoming(TcpListenerStream::new(listener)),
+        );
+        let uri = format!("http://{address}");
+        let mut client = MediaTransportClient::connect(uri).await.unwrap();
+
+        let uploaded = client
+            .upload_media(tokio_stream::iter(vec![
+                pb::UploadMediaFrame {
+                    body: Some(pb::upload_media_frame::Body::Metadata(pb::MediaMetadata {
+                        kind: pb::attachment::Kind::Image.into(),
+                        file_name: Some("photo.jpg".into()),
+                        mime_type: Some("image/jpeg".into()),
+                        size_bytes: Some(5),
+                    })),
+                },
+                pb::UploadMediaFrame {
+                    body: Some(pb::upload_media_frame::Body::Chunk(b"hello".to_vec())),
+                },
+            ]))
+            .await
+            .unwrap()
+            .into_inner();
+        assert_eq!(uploaded.file_name.as_deref(), Some("photo.jpg"));
+        assert_eq!(uploaded.size_bytes, Some(5));
+        let first_media_id = uploaded.media_id.clone();
+
+        let mut download = client
+            .download_media(pb::DownloadMediaRequest {
+                media_id: uploaded.media_id,
+            })
+            .await
+            .unwrap()
+            .into_inner();
+        assert_eq!(
+            download.message().await.unwrap().unwrap().chunk,
+            b"hello".to_vec()
+        );
+
+        tokio::time::sleep(std::time::Duration::from_millis(2)).await;
+        client
+            .upload_media(tokio_stream::iter(vec![
+                pb::UploadMediaFrame {
+                    body: Some(pb::upload_media_frame::Body::Metadata(pb::MediaMetadata {
+                        kind: pb::attachment::Kind::File.into(),
+                        file_name: None,
+                        mime_type: None,
+                        size_bytes: Some(1),
+                    })),
+                },
+                pb::UploadMediaFrame {
+                    body: Some(pb::upload_media_frame::Body::Chunk(b"x".to_vec())),
+                },
+            ]))
+            .await
+            .unwrap();
+        let error = client
+            .download_media(pb::DownloadMediaRequest {
+                media_id: first_media_id,
+            })
+            .await
+            .unwrap_err();
+        assert_eq!(error.code(), tonic::Code::NotFound);
+
+        let error = client
+            .upload_media(tokio_stream::iter(vec![
+                pb::UploadMediaFrame {
+                    body: Some(pb::upload_media_frame::Body::Metadata(pb::MediaMetadata {
+                        kind: pb::attachment::Kind::File.into(),
+                        file_name: None,
+                        mime_type: None,
+                        size_bytes: None,
+                    })),
+                },
+                pb::UploadMediaFrame {
+                    body: Some(pb::upload_media_frame::Body::Chunk(b"123456".to_vec())),
+                },
+            ]))
+            .await
+            .unwrap_err();
+        assert_eq!(error.code(), tonic::Code::ResourceExhausted);
+        server.abort();
     }
 
     #[tokio::test]

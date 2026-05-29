@@ -7,8 +7,8 @@ use thiserror::Error;
 use tokio::sync::RwLock;
 use wuphf_model::{
     ChatSettings, Contact, DedupKey, DispatchCommand, DispatchId, DispatchPayload, DispatchState,
-    Endpoint, EndpointId, GroupId, Message, MessageCopy, MessageId, ReplicationGroup,
-    StoredDispatch,
+    Endpoint, EndpointId, GroupId, MediaBlob, MediaId, Message, MessageCopy, MessageId,
+    ReplicationGroup, ReplyContext, StoredDispatch,
 };
 
 #[derive(Debug, Error)]
@@ -19,6 +19,10 @@ pub enum StorageError {
     GroupNotFound(GroupId),
     #[error("dispatch {0} is not configured")]
     DispatchNotFound(DispatchId),
+    #[error("media {0} is not stored")]
+    MediaNotFound(MediaId),
+    #[error("message {0} is not stored")]
+    MessageNotFound(MessageId),
     #[error(transparent)]
     Database(#[from] sqlx::Error),
     #[error(transparent)]
@@ -57,6 +61,9 @@ pub trait Storage: Send + Sync + 'static {
     ) -> StorageResult<Option<MessageCopy>>;
     async fn put_contact(&self, contact: Contact) -> StorageResult<()>;
     async fn put_chat_settings(&self, settings: ChatSettings) -> StorageResult<()>;
+    async fn put_media(&self, media: MediaBlob, stored_at_ms: i64) -> StorageResult<()>;
+    async fn media(&self, media_id: MediaId) -> StorageResult<Option<MediaBlob>>;
+    async fn prune_unreferenced_media_before(&self, cutoff_ms: i64) -> StorageResult<u64>;
     async fn enqueue_dispatch(
         &self,
         command: DispatchCommand,
@@ -86,7 +93,13 @@ struct State {
     seen_events: HashSet<DedupKey>,
     contacts: HashMap<String, Contact>,
     chat_settings: HashMap<EndpointId, ChatSettings>,
+    media: HashMap<MediaId, StoredMedia>,
     dispatches: HashMap<DispatchId, StoredDispatch>,
+}
+
+struct StoredMedia {
+    blob: MediaBlob,
+    stored_at_ms: i64,
 }
 
 #[async_trait]
@@ -213,6 +226,43 @@ impl Storage for InMemoryStorage {
         Ok(())
     }
 
+    async fn put_media(&self, media: MediaBlob, stored_at_ms: i64) -> StorageResult<()> {
+        let media_id = media.attachment.media_id;
+        self.state.write().await.media.insert(
+            media_id,
+            StoredMedia {
+                blob: media,
+                stored_at_ms,
+            },
+        );
+        Ok(())
+    }
+
+    async fn media(&self, media_id: MediaId) -> StorageResult<Option<MediaBlob>> {
+        Ok(self
+            .state
+            .read()
+            .await
+            .media
+            .get(&media_id)
+            .map(|media| media.blob.clone()))
+    }
+
+    async fn prune_unreferenced_media_before(&self, cutoff_ms: i64) -> StorageResult<u64> {
+        let mut state = self.state.write().await;
+        let referenced = state
+            .messages
+            .values()
+            .flat_map(|message| message.attachments.iter())
+            .map(|attachment| attachment.media_id)
+            .collect::<HashSet<_>>();
+        let before = state.media.len();
+        state
+            .media
+            .retain(|id, media| media.stored_at_ms >= cutoff_ms || referenced.contains(id));
+        Ok((before - state.media.len()) as u64)
+    }
+
     async fn enqueue_dispatch(
         &self,
         command: DispatchCommand,
@@ -268,18 +318,39 @@ impl Storage for InMemoryStorage {
             true,
         );
 
+        let blocked_ids: Vec<DispatchId> = state
+            .dispatches
+            .values()
+            .filter(|candidate| {
+                candidate.command.target_endpoint == endpoint_id
+                    && candidate.state
+                        == (DispatchState::Blocked {
+                            waiting_for: message_id,
+                        })
+            })
+            .map(|candidate| candidate.id)
+            .collect();
+        if blocked_ids.is_empty() {
+            return Ok(Vec::new());
+        }
+        let parent = state
+            .messages
+            .get(&message_id)
+            .cloned()
+            .ok_or(StorageError::MessageNotFound(message_id))?;
         let mut released = Vec::new();
-        for candidate in state.dispatches.values_mut() {
-            if candidate.command.target_endpoint == endpoint_id
-                && candidate.state
-                    == (DispatchState::Blocked {
-                        waiting_for: message_id,
-                    })
-            {
-                set_native_reply(&mut candidate.command, platform_message_id.clone());
-                candidate.state = DispatchState::Pending;
-                released.push(candidate.clone());
-            }
+        for id in blocked_ids {
+            let candidate = state
+                .dispatches
+                .get_mut(&id)
+                .expect("blocked dispatch present");
+            set_native_reply(
+                &mut candidate.command,
+                parent.clone(),
+                platform_message_id.clone(),
+            );
+            candidate.state = DispatchState::Pending;
+            released.push(candidate.clone());
         }
         Ok(released)
     }
@@ -365,14 +436,28 @@ impl Storage for SqliteStorage {
     }
 
     async fn put_message(&self, message: Message) -> StorageResult<()> {
-        upsert_json(
-            &self.pool,
-            "messages",
-            "id",
-            message.id.to_string(),
-            &message,
+        let mut transaction = self.pool.begin().await?;
+        sqlx::query(
+            "INSERT INTO messages (id, payload) VALUES (?, ?)
+             ON CONFLICT(id) DO UPDATE SET payload = excluded.payload",
         )
-        .await
+        .bind(message.id.to_string())
+        .bind(serde_json::to_string(&message)?)
+        .execute(&mut *transaction)
+        .await?;
+        sqlx::query("DELETE FROM message_media WHERE message_id = ?")
+            .bind(message.id.to_string())
+            .execute(&mut *transaction)
+            .await?;
+        for attachment in &message.attachments {
+            sqlx::query("INSERT INTO message_media (message_id, media_id) VALUES (?, ?)")
+                .bind(message.id.to_string())
+                .bind(attachment.media_id.to_string())
+                .execute(&mut *transaction)
+                .await?;
+        }
+        transaction.commit().await?;
+        Ok(())
     }
 
     async fn message(&self, message_id: MessageId) -> StorageResult<Option<Message>> {
@@ -452,6 +537,52 @@ impl Storage for SqliteStorage {
         .await
     }
 
+    async fn put_media(&self, media: MediaBlob, stored_at_ms: i64) -> StorageResult<()> {
+        sqlx::query(
+            "INSERT INTO media_blobs (id, metadata, contents, stored_at_ms) VALUES (?, ?, ?, ?)
+             ON CONFLICT(id) DO UPDATE SET
+               metadata = excluded.metadata,
+               contents = excluded.contents,
+               stored_at_ms = excluded.stored_at_ms",
+        )
+        .bind(media.attachment.media_id.to_string())
+        .bind(serde_json::to_string(&media.attachment)?)
+        .bind(media.bytes)
+        .bind(stored_at_ms)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    async fn media(&self, media_id: MediaId) -> StorageResult<Option<MediaBlob>> {
+        let row = sqlx::query("SELECT metadata, contents FROM media_blobs WHERE id = ?")
+            .bind(media_id.to_string())
+            .fetch_optional(&self.pool)
+            .await?;
+        row.map(|row| {
+            Ok(MediaBlob {
+                attachment: serde_json::from_str(row.get("metadata"))?,
+                bytes: row.get("contents"),
+            })
+        })
+        .transpose()
+    }
+
+    async fn prune_unreferenced_media_before(&self, cutoff_ms: i64) -> StorageResult<u64> {
+        let result = sqlx::query(
+            "DELETE FROM media_blobs
+             WHERE stored_at_ms IS NOT NULL
+               AND stored_at_ms < ?
+               AND NOT EXISTS (
+                 SELECT 1 FROM message_media WHERE message_media.media_id = media_blobs.id
+               )",
+        )
+        .bind(cutoff_ms)
+        .execute(&self.pool)
+        .await?;
+        Ok(result.rows_affected())
+    }
+
     async fn enqueue_dispatch(
         &self,
         command: DispatchCommand,
@@ -526,9 +657,23 @@ impl Storage for SqliteStorage {
         .fetch_all(&mut *transaction)
         .await?;
         let mut released = Vec::new();
+        if rows.is_empty() {
+            transaction.commit().await?;
+            return Ok(released);
+        }
+        let parent_row = sqlx::query("SELECT payload FROM messages WHERE id = ?")
+            .bind(dispatch.command.message_id().to_string())
+            .fetch_optional(&mut *transaction)
+            .await?
+            .ok_or(StorageError::MessageNotFound(dispatch.command.message_id()))?;
+        let parent: Message = serde_json::from_str(parent_row.get("payload"))?;
         for row in rows {
             let mut blocked: StoredDispatch = serde_json::from_str(row.get("payload"))?;
-            set_native_reply(&mut blocked.command, platform_message_id.clone());
+            set_native_reply(
+                &mut blocked.command,
+                parent.clone(),
+                platform_message_id.clone(),
+            );
             blocked.state = DispatchState::Pending;
             sqlx::query(
                 "UPDATE dispatches SET waiting_for = ?, state = ?, payload = ? WHERE id = ?",
@@ -553,12 +698,18 @@ fn dispatch_state(waiting_for: Option<MessageId>) -> DispatchState {
     }
 }
 
-fn set_native_reply(command: &mut DispatchCommand, platform_message_id: String) {
+fn set_native_reply(command: &mut DispatchCommand, parent: Message, platform_message_id: String) {
     match &mut command.payload {
-        DispatchPayload::MessageCreate {
-            reply_to_platform_message_id,
-            ..
-        } => *reply_to_platform_message_id = Some(platform_message_id),
+        DispatchPayload::MessageCreate { reply_context, .. } => {
+            *reply_context = Some(ReplyContext {
+                message_id: parent.id,
+                platform_message_id,
+                sender: parent.sender,
+                participant: parent.participant,
+                text: parent.text,
+                attachments: parent.attachments,
+            })
+        }
     }
 }
 
@@ -647,7 +798,7 @@ fn state_name(state: &DispatchState) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use wuphf_model::{DispatchPayload, Platform};
+    use wuphf_model::{Attachment, AttachmentKind, DispatchPayload, MediaBlob, MediaId, Platform};
 
     #[tokio::test]
     async fn sqlite_persists_copy_state_and_releases_blocked_reply() {
@@ -667,6 +818,7 @@ mod tests {
             })
             .await
             .unwrap();
+        storage.put_message(message(parent_id)).await.unwrap();
         let parent = storage
             .enqueue_dispatch(command(parent_id, endpoint_id), None)
             .await
@@ -680,14 +832,12 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(released.len(), 1);
-        let DispatchPayload::MessageCreate {
-            reply_to_platform_message_id,
-            ..
-        } = &released[0].command.payload;
-        assert_eq!(
-            reply_to_platform_message_id.as_deref(),
-            Some("telegram-parent")
-        );
+        let DispatchPayload::MessageCreate { reply_context, .. } = &released[0].command.payload;
+        let reply_context = reply_context
+            .as_ref()
+            .expect("reply context set on release");
+        assert_eq!(reply_context.message_id, parent_id);
+        assert_eq!(reply_context.platform_message_id, "telegram-parent");
         drop(storage);
 
         let reopened = SqliteStorage::connect(&url).await.unwrap();
@@ -700,21 +850,106 @@ mod tests {
         );
     }
 
+    #[tokio::test]
+    async fn sqlite_persists_media_blobs() {
+        let path = std::env::temp_dir().join(format!("wuphf-media-{}.sqlite", MediaId::new()));
+        let url = format!("sqlite://{}", path.display());
+        let attachment = Attachment {
+            media_id: MediaId::new(),
+            kind: AttachmentKind::Image,
+            file_name: Some("photo.jpg".into()),
+            mime_type: Some("image/jpeg".into()),
+            size_bytes: Some(5),
+        };
+        let storage = SqliteStorage::connect(&url).await.unwrap();
+        storage
+            .put_media(
+                MediaBlob {
+                    attachment: attachment.clone(),
+                    bytes: b"hello".to_vec(),
+                },
+                10,
+            )
+            .await
+            .unwrap();
+        drop(storage);
+
+        let reopened = SqliteStorage::connect(&url).await.unwrap();
+        let media = reopened.media(attachment.media_id).await.unwrap().unwrap();
+        assert_eq!(media.attachment, attachment);
+        assert_eq!(media.bytes, b"hello");
+    }
+
+    #[tokio::test]
+    async fn sqlite_prunes_only_expired_unreferenced_media() {
+        let path = std::env::temp_dir().join(format!("wuphf-prune-{}.sqlite", MediaId::new()));
+        let url = format!("sqlite://{}", path.display());
+        let storage = SqliteStorage::connect(&url).await.unwrap();
+        let referenced = attachment();
+        let orphan = attachment();
+        for attachment in [&referenced, &orphan] {
+            storage
+                .put_media(
+                    MediaBlob {
+                        attachment: attachment.clone(),
+                        bytes: b"old".to_vec(),
+                    },
+                    10,
+                )
+                .await
+                .unwrap();
+        }
+        storage
+            .put_message(Message {
+                id: MessageId::new(),
+                group_id: GroupId::new(),
+                sender: "test".into(),
+                participant: None,
+                text: None,
+                attachments: vec![referenced.clone()],
+                reply_to: None,
+                timestamp_ms: 0,
+            })
+            .await
+            .unwrap();
+
+        assert_eq!(
+            storage.prune_unreferenced_media_before(20).await.unwrap(),
+            1
+        );
+        assert!(storage.media(referenced.media_id).await.unwrap().is_some());
+        assert!(storage.media(orphan.media_id).await.unwrap().is_none());
+    }
+
+    fn attachment() -> Attachment {
+        Attachment {
+            media_id: MediaId::new(),
+            kind: AttachmentKind::File,
+            file_name: Some("file.bin".into()),
+            mime_type: None,
+            size_bytes: Some(3),
+        }
+    }
+
+    fn message(message_id: MessageId) -> Message {
+        Message {
+            id: message_id,
+            group_id: GroupId::new(),
+            sender: "test".into(),
+            participant: None,
+            text: Some("test".into()),
+            attachments: vec![],
+            reply_to: None,
+            timestamp_ms: 0,
+        }
+    }
+
     fn command(message_id: MessageId, endpoint_id: EndpointId) -> DispatchCommand {
         DispatchCommand {
             target_endpoint: endpoint_id,
             payload: DispatchPayload::MessageCreate {
-                message: Message {
-                    id: message_id,
-                    group_id: GroupId::new(),
-                    sender: "test".into(),
-                    participant: None,
-                    text: Some("test".into()),
-                    attachments: vec![],
-                    reply_to: None,
-                    timestamp_ms: 0,
-                },
-                reply_to_platform_message_id: None,
+                message: message(message_id),
+                reply_context: None,
             },
         }
     }

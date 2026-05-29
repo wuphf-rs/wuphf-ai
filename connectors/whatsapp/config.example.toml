@@ -1,0 +1,9 @@
+core_address = "127.0.0.1:50051"
+connector_id = "whatsapp-main"
+session_database = "file:whatsapp.session.db?_foreign_keys=on"
+endpoints = ["018f1b58-f667-75ba-bbbb-000000000001"]
+
+[[targets]]
+endpoint_id = "018f1b58-f667-75ba-bbbb-000000000001"
+group_id = "018f1b58-f667-75ba-bbbb-000000000003"
+chat_jid = "12345@s.whatsapp.net"

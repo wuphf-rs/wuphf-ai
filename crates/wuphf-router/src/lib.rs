@@ -1,6 +1,6 @@
 use std::sync::Arc;
 use thiserror::Error;
-use wuphf_model::{DispatchCommand, DispatchPayload, EndpointId, Message, MessageId};
+use wuphf_model::{DispatchCommand, DispatchPayload, EndpointId, Message, MessageId, ReplyContext};
 use wuphf_storage::{Storage, StorageError};
 
 pub struct Router<S> {
@@ -31,21 +31,28 @@ where
             .into_iter()
             .filter(|endpoint_id| *endpoint_id != origin_endpoint)
         {
-            let native_reply = match message.reply_to {
+            let reply_context = match message.reply_to {
                 Some(parent_id) => {
                     match self
                         .storage
                         .copy_at_endpoint(parent_id, endpoint_id)
                         .await?
                     {
-                        Some(copy) => Some(copy.platform_message_id),
+                        Some(copy) => {
+                            let parent = self
+                                .storage
+                                .message(parent_id)
+                                .await?
+                                .ok_or(RouterError::MessageNotFound(parent_id))?;
+                            Some(reply_context(parent, copy.platform_message_id))
+                        }
                         None => {
                             outcome.blocked.push(BlockedDispatch {
                                 command: DispatchCommand {
                                     target_endpoint: endpoint_id,
                                     payload: DispatchPayload::MessageCreate {
                                         message: message.clone(),
-                                        reply_to_platform_message_id: None,
+                                        reply_context: None,
                                     },
                                 },
                                 waiting_for_message: parent_id,
@@ -61,11 +68,22 @@ where
                 target_endpoint: endpoint_id,
                 payload: DispatchPayload::MessageCreate {
                     message: message.clone(),
-                    reply_to_platform_message_id: native_reply,
+                    reply_context,
                 },
             });
         }
         Ok(outcome)
+    }
+}
+
+fn reply_context(message: Message, platform_message_id: String) -> ReplyContext {
+    ReplyContext {
+        message_id: message.id,
+        platform_message_id,
+        sender: message.sender,
+        participant: message.participant,
+        text: message.text,
+        attachments: message.attachments,
     }
 }
 
@@ -87,4 +105,6 @@ pub enum RouterError {
     Storage(#[from] StorageError),
     #[error("origin endpoint {0} is not a member of the replication group")]
     OriginOutsideGroup(EndpointId),
+    #[error("reply parent message {0} is not stored")]
+    MessageNotFound(MessageId),
 }
