@@ -74,7 +74,7 @@ func inboundMedia(
 			}, true
 	case *tg.MessageMediaDocument:
 		documentClass, ok := value.GetDocument()
-		if !ok || value.Video || value.Voice || value.Round {
+		if !ok {
 			return nil, nil, false
 		}
 		document, ok := documentClass.AsNotEmpty()
@@ -83,7 +83,7 @@ func inboundMedia(
 		}
 		size := uint64(document.Size)
 		metadata := &wuphfpb.MediaMetadata{
-			Kind:      wuphfpb.Attachment_KIND_FILE,
+			Kind:      documentKind(document),
 			MimeType:  stringPointer(document.MimeType),
 			SizeBytes: &size,
 		}
@@ -114,6 +114,23 @@ func largestPhotoSize(sizes []tg.PhotoSizeClass) string {
 		}
 	}
 	return selected
+}
+
+func documentKind(document *tg.Document) wuphfpb.Attachment_Kind {
+	for _, attribute := range document.Attributes {
+		if _, ok := attribute.(*tg.DocumentAttributeSticker); ok {
+			return wuphfpb.Attachment_KIND_STICKER
+		}
+	}
+	for _, attribute := range document.Attributes {
+		switch attribute.(type) {
+		case *tg.DocumentAttributeVideo:
+			return wuphfpb.Attachment_KIND_VIDEO
+		case *tg.DocumentAttributeAudio:
+			return wuphfpb.Attachment_KIND_AUDIO
+		}
+	}
+	return wuphfpb.Attachment_KIND_FILE
 }
 
 func documentFileName(document *tg.Document) string {

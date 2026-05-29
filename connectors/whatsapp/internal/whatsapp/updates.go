@@ -84,6 +84,8 @@ func messageText(message *waE2E.Message) string {
 		return message.GetImageMessage().GetCaption()
 	case message.GetDocumentMessage() != nil:
 		return message.GetDocumentMessage().GetCaption()
+	case message.GetVideoMessage() != nil:
+		return message.GetVideoMessage().GetCaption()
 	default:
 		return ""
 	}
@@ -97,11 +99,21 @@ func messageContext(message *waE2E.Message) *waE2E.ContextInfo {
 		return message.GetImageMessage().GetContextInfo()
 	case message.GetDocumentMessage() != nil:
 		return message.GetDocumentMessage().GetContextInfo()
+	case message.GetVideoMessage() != nil:
+		return message.GetVideoMessage().GetContextInfo()
+	case message.GetAudioMessage() != nil:
+		return message.GetAudioMessage().GetContextInfo()
+	case message.GetStickerMessage() != nil:
+		return message.GetStickerMessage().GetContextInfo()
 	default:
 		return nil
 	}
 }
 
 func hasAttachment(message *waE2E.Message) bool {
-	return message.GetImageMessage() != nil || message.GetDocumentMessage() != nil
+	return message.GetImageMessage() != nil ||
+		message.GetDocumentMessage() != nil ||
+		message.GetVideoMessage() != nil ||
+		message.GetAudioMessage() != nil ||
+		message.GetStickerMessage() != nil
 }

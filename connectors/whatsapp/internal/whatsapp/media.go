@@ -61,6 +61,30 @@ func inboundMedia(message *waE2E.Message) (*wuphfpb.MediaMetadata, whatsmeow.Dow
 			SizeBytes: &size,
 		}, document, true
 	}
+	if video := message.GetVideoMessage(); video != nil {
+		size := video.GetFileLength()
+		return &wuphfpb.MediaMetadata{
+			Kind:      wuphfpb.Attachment_KIND_VIDEO,
+			MimeType:  optionalString(video.GetMimetype()),
+			SizeBytes: &size,
+		}, video, true
+	}
+	if audio := message.GetAudioMessage(); audio != nil {
+		size := audio.GetFileLength()
+		return &wuphfpb.MediaMetadata{
+			Kind:      wuphfpb.Attachment_KIND_AUDIO,
+			MimeType:  optionalString(audio.GetMimetype()),
+			SizeBytes: &size,
+		}, audio, true
+	}
+	if sticker := message.GetStickerMessage(); sticker != nil {
+		size := sticker.GetFileLength()
+		return &wuphfpb.MediaMetadata{
+			Kind:      wuphfpb.Attachment_KIND_STICKER,
+			MimeType:  optionalString(sticker.GetMimetype()),
+			SizeBytes: &size,
+		}, sticker, true
+	}
 	return nil, nil, false
 }
 

@@ -87,9 +87,14 @@ passes format, lint, test, and `nix flake check`.
 - Added inbound image/file media normalization.
 - Added outbound text dispatch.
 - Added outbound image/file dispatch.
+- Added inbound video/audio/sticker normalization (documents classified by
+  Telegram document attributes).
+- Added outbound video/audio/sticker dispatch.
 - Added Telegram reply dispatch using native Telegram message ID.
 - Added sent message acknowledgement.
 - Added connector registration against Rust core.
+- Added connector reconnect with exponential backoff.
+- Added bounded transient dispatch retry.
 - Added shared connector input stream for future event types.
 - Added media broker client for upload/download.
 - Added tests for:
@@ -108,18 +113,20 @@ passes format, lint, test, and `nix flake check`.
 - Added WhatsApp config loader and validation.
 - Added endpoint to chat JID target registry.
 - Added inbound text normalization.
-- Added inbound image/file normalization.
+- Added inbound image/file/video/audio/sticker normalization.
 - Added media upload through core broker.
 - Added outbound text dispatch.
-- Added outbound image/file dispatch.
+- Added outbound image/file/video/audio/sticker dispatch.
 - Added media download from core broker.
 - Added group participant normalization.
+- Added connector reconnect with exponential backoff.
+- Added bounded transient dispatch retry.
 - Kept linked-account authored messages flowing into core so Rust core decides
   bridge echo suppression.
 - Inbound WhatsApp replies are normalized by stanza ID.
-- Outbound WhatsApp quoted replies are currently deferred because correct
-  WhatsApp reply sending needs quote metadata beyond native platform message
-  ID.
+- Outbound WhatsApp quoted replies build real quote metadata (stanza ID,
+  own-account participant, quoted body). Non-text parents are quoted as a typed
+  stub (kind plus caption) so clients render a media reply.
 - Added tests for:
   - config ambiguity
   - target registry
@@ -127,7 +134,8 @@ passes format, lint, test, and `nix flake check`.
   - self-message pass-through for core echo decision
   - inbound media upload
   - outbound file dispatch
-  - explicit rejection of unsupported outbound quoted reply
+  - outbound quoted reply context (text and media parents)
+  - rejection of a legacy reply lacking quote context
 
 ## Repository / Tooling Changes
 
@@ -157,14 +165,12 @@ Before the current incomplete `ReplyContext` refactor, these checks passed:
 Workspace is green under static checks and unit tests. Live connector behavior
 (real Telegram/WhatsApp sessions) is still unverified. The WhatsApp quoted
 reply assumes the quoted copy is bridge-authored (true because the router never
-dispatches to the origin endpoint) and quotes the parent body as plain text;
-non-text quoted parents are not yet reflected in the quoted preview.
+dispatches to the origin endpoint) and renders non-text parents as a typed stub
+rather than the original media preview.
 
 ## Next Steps
 
-1. Connector reconnect/backoff.
-2. Transient dispatch retry behavior.
-3. Video/audio/sticker media kinds.
-4. Live WhatsApp QR/session smoke test, including quoted-reply rendering.
-5. Live Telegram session smoke test.
-6. Implement remaining normalized operations: edits, deletes, reactions.
+1. Live WhatsApp QR/session smoke test, including quoted-reply rendering and
+   video/audio/sticker round-trips.
+2. Live Telegram session smoke test, including video/audio/sticker round-trips.
+3. Implement remaining normalized operations: edits, deletes, reactions.

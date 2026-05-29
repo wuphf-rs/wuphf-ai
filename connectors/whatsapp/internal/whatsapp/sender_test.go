@@ -105,6 +105,40 @@ func TestSendOutboundReplyBuildsQuotedContext(t *testing.T) {
 	}
 }
 
+func TestSendOutboundReplyQuotesMediaParent(t *testing.T) {
+	t.Parallel()
+	client := &stubSendClient{}
+	ownJID := types.NewJID("15550001111", types.DefaultUserServer)
+	sender := NewSender(client, testRegistry(t), &stubBroker{}, ownJID)
+	text := "look at this"
+	parentCaption := "parent photo"
+	mime := "image/jpeg"
+	_, err := sender.SendMessage(context.Background(), &wuphfpb.MessageCreateDispatch{
+		TargetEndpointId: "endpoint-a",
+		Text:             &text,
+		ReplyContext: &wuphfpb.ReplyContext{
+			PlatformMessageId: "parent-stanza-id",
+			Text:              &parentCaption,
+			Attachments: []*wuphfpb.Attachment{{
+				MediaId:  "media-id",
+				Kind:     wuphfpb.Attachment_KIND_IMAGE,
+				MimeType: &mime,
+			}},
+		},
+	})
+	if err != nil {
+		t.Fatalf("SendMessage() error = %v", err)
+	}
+	quoted := client.sent.GetExtendedTextMessage().GetContextInfo().GetQuotedMessage()
+	image := quoted.GetImageMessage()
+	if image == nil {
+		t.Fatalf("quoted message = %#v, want image", quoted)
+	}
+	if image.GetCaption() != parentCaption || image.GetMimetype() != mime {
+		t.Fatalf("quoted image = %#v", image)
+	}
+}
+
 func TestSendRejectsLegacyReplyWithoutContext(t *testing.T) {
 	t.Parallel()
 	client := &stubSendClient{}

@@ -81,6 +81,12 @@ func (s Sender) sendAttachment(
 	switch attachment.Kind {
 	case wuphfpb.Attachment_KIND_IMAGE:
 		return upload.Photo(ctx, captionOptions...)
+	case wuphfpb.Attachment_KIND_VIDEO:
+		return upload.Video(ctx, captionOptions...)
+	case wuphfpb.Attachment_KIND_AUDIO:
+		return upload.Audio(ctx, captionOptions...)
+	case wuphfpb.Attachment_KIND_STICKER:
+		return upload.Sticker(ctx, captionOptions...)
 	case wuphfpb.Attachment_KIND_FILE:
 		return upload.File(ctx, captionOptions...)
 	default:
