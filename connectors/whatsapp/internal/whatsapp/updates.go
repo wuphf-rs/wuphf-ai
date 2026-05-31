@@ -5,28 +5,49 @@ import (
 
 	wuphfpb "github.com/akshettrj/wuphf/proto/go/connector/v1"
 	waE2E "go.mau.fi/whatsmeow/proto/waE2E"
+	"go.mau.fi/whatsmeow/types"
 	"go.mau.fi/whatsmeow/types/events"
 )
 
-type Normalizer struct {
-	targets TargetRegistry
-	inputs  chan<- *wuphfpb.ClientFrame
-	media   MediaCodec
+// ChatNamer resolves a human-readable title for a chat so the core can label a
+// freshly provisioned mirror thread. Implementations are expected to cache, as
+// it is queried per inbound message.
+type ChatNamer interface {
+	ChatTitle(ctx context.Context, chat types.JID, isGroup bool) string
 }
 
-func NewNormalizer(targets TargetRegistry, inputs chan<- *wuphfpb.ClientFrame, media MediaCodec) Normalizer {
-	return Normalizer{targets: targets, inputs: inputs, media: media}
+type Normalizer struct {
+	inputs chan<- *wuphfpb.ClientFrame
+	media  MediaCodec
+	namer  ChatNamer
+}
+
+func NewNormalizer(inputs chan<- *wuphfpb.ClientFrame, media MediaCodec, namer ChatNamer) Normalizer {
+	return Normalizer{inputs: inputs, media: media, namer: namer}
 }
 
 func (n Normalizer) Handle(ctx context.Context, message *events.Message) error {
+	// A phone/LID migration must be reported before the message so the core can
+	// link both addresses to one conversation before resolving this event.
+	if migration := identityMigration(message); migration != nil {
+		if err := n.send(ctx, &wuphfpb.ClientFrame{
+			Body: &wuphfpb.ClientFrame_IdentityMigrated{IdentityMigrated: migration},
+		}); err != nil {
+			return err
+		}
+	}
 	event, ok, err := n.normalize(ctx, message)
 	if err != nil || !ok {
 		return err
 	}
-	select {
-	case n.inputs <- &wuphfpb.ClientFrame{
+	return n.send(ctx, &wuphfpb.ClientFrame{
 		Body: &wuphfpb.ClientFrame_MessageCreate{MessageCreate: event},
-	}:
+	})
+}
+
+func (n Normalizer) send(ctx context.Context, frame *wuphfpb.ClientFrame) error {
+	select {
+	case n.inputs <- frame:
 		return nil
 	case <-ctx.Done():
 		return ctx.Err()
@@ -35,10 +56,6 @@ func (n Normalizer) Handle(ctx context.Context, message *events.Message) error {
 
 func (n Normalizer) normalize(ctx context.Context, message *events.Message) (*wuphfpb.MessageCreateEvent, bool, error) {
 	if message.IsEdit {
-		return nil, false, nil
-	}
-	target, ok := n.targets.Incoming(message.Info.Chat)
-	if !ok {
 		return nil, false, nil
 	}
 	attachments, supported, err := n.media.Inbound(ctx, message.Message)
@@ -53,12 +70,16 @@ func (n Normalizer) normalize(ctx context.Context, message *events.Message) (*wu
 		return nil, false, nil
 	}
 	event := &wuphfpb.MessageCreateEvent{
-		OriginEndpointId:  target.EndpointID,
-		GroupId:           target.GroupID,
+		ChatId:            message.Info.Chat.String(),
 		PlatformMessageId: string(message.Info.ID),
 		Sender:            message.Info.Sender.String(),
 		Attachments:       attachments,
 		TimestampMs:       message.Info.Timestamp.UnixMilli(),
+	}
+	if n.namer != nil {
+		if title := n.namer.ChatTitle(ctx, message.Info.Chat, message.Info.IsGroup); title != "" {
+			event.ChatTitle = &title
+		}
 	}
 	if message.Info.IsGroup {
 		participant := message.Info.Sender.String()
@@ -72,6 +93,28 @@ func (n Normalizer) normalize(ctx context.Context, message *events.Message) (*wu
 		event.ReplyToPlatformMessageId = &reply
 	}
 	return event, true, nil
+}
+
+// identityMigration derives a phone-to-LID (or reverse) chat address change for
+// a direct message. WhatsApp keeps both addresses live, so the core must learn
+// they refer to one conversation. The LID form is treated as canonical.
+func identityMigration(message *events.Message) *wuphfpb.IdentityMigrated {
+	if message.Info.IsGroup || message.Info.RecipientAlt.IsEmpty() {
+		return nil
+	}
+	var oldJID, newJID types.JID
+	if message.Info.AddressingMode == types.AddressingModeLID {
+		newJID, oldJID = message.Info.Chat, message.Info.RecipientAlt
+	} else {
+		oldJID, newJID = message.Info.Chat, message.Info.RecipientAlt
+	}
+	if oldJID.IsEmpty() || newJID.IsEmpty() || oldJID == newJID {
+		return nil
+	}
+	return &wuphfpb.IdentityMigrated{
+		OldChatId: oldJID.String(),
+		NewChatId: newJID.String(),
+	}
 }
 
 func messageText(message *waE2E.Message) string {

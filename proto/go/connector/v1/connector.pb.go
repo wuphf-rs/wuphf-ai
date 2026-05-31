@@ -137,21 +137,73 @@ func (x Attachment_Kind) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use Attachment_Kind.Descriptor instead.
 func (Attachment_Kind) EnumDescriptor() ([]byte, []int) {
-	return file_connector_proto_rawDescGZIP(), []int{1, 0}
+	return file_connector_proto_rawDescGZIP(), []int{2, 0}
+}
+
+type Capabilities struct {
+	state               protoimpl.MessageState `protogen:"open.v1"`
+	SupportsThreads     bool                   `protobuf:"varint,1,opt,name=supports_threads,json=supportsThreads,proto3" json:"supports_threads,omitempty"`
+	SupportsTopicCreate bool                   `protobuf:"varint,2,opt,name=supports_topic_create,json=supportsTopicCreate,proto3" json:"supports_topic_create,omitempty"`
+	unknownFields       protoimpl.UnknownFields
+	sizeCache           protoimpl.SizeCache
+}
+
+func (x *Capabilities) Reset() {
+	*x = Capabilities{}
+	mi := &file_connector_proto_msgTypes[0]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *Capabilities) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*Capabilities) ProtoMessage() {}
+
+func (x *Capabilities) ProtoReflect() protoreflect.Message {
+	mi := &file_connector_proto_msgTypes[0]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use Capabilities.ProtoReflect.Descriptor instead.
+func (*Capabilities) Descriptor() ([]byte, []int) {
+	return file_connector_proto_rawDescGZIP(), []int{0}
+}
+
+func (x *Capabilities) GetSupportsThreads() bool {
+	if x != nil {
+		return x.SupportsThreads
+	}
+	return false
+}
+
+func (x *Capabilities) GetSupportsTopicCreate() bool {
+	if x != nil {
+		return x.SupportsTopicCreate
+	}
+	return false
 }
 
 type Registration struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	ConnectorId   string                 `protobuf:"bytes,1,opt,name=connector_id,json=connectorId,proto3" json:"connector_id,omitempty"`
 	Platform      Platform               `protobuf:"varint,2,opt,name=platform,proto3,enum=wuphf.connector.v1.Platform" json:"platform,omitempty"`
-	EndpointIds   []string               `protobuf:"bytes,3,rep,name=endpoint_ids,json=endpointIds,proto3" json:"endpoint_ids,omitempty"`
+	Capabilities  *Capabilities          `protobuf:"bytes,3,opt,name=capabilities,proto3" json:"capabilities,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
 func (x *Registration) Reset() {
 	*x = Registration{}
-	mi := &file_connector_proto_msgTypes[0]
+	mi := &file_connector_proto_msgTypes[1]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -163,7 +215,7 @@ func (x *Registration) String() string {
 func (*Registration) ProtoMessage() {}
 
 func (x *Registration) ProtoReflect() protoreflect.Message {
-	mi := &file_connector_proto_msgTypes[0]
+	mi := &file_connector_proto_msgTypes[1]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -176,7 +228,7 @@ func (x *Registration) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Registration.ProtoReflect.Descriptor instead.
 func (*Registration) Descriptor() ([]byte, []int) {
-	return file_connector_proto_rawDescGZIP(), []int{0}
+	return file_connector_proto_rawDescGZIP(), []int{1}
 }
 
 func (x *Registration) GetConnectorId() string {
@@ -193,9 +245,9 @@ func (x *Registration) GetPlatform() Platform {
 	return Platform_PLATFORM_UNSPECIFIED
 }
 
-func (x *Registration) GetEndpointIds() []string {
+func (x *Registration) GetCapabilities() *Capabilities {
 	if x != nil {
-		return x.EndpointIds
+		return x.Capabilities
 	}
 	return nil
 }
@@ -213,7 +265,7 @@ type Attachment struct {
 
 func (x *Attachment) Reset() {
 	*x = Attachment{}
-	mi := &file_connector_proto_msgTypes[1]
+	mi := &file_connector_proto_msgTypes[2]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -225,7 +277,7 @@ func (x *Attachment) String() string {
 func (*Attachment) ProtoMessage() {}
 
 func (x *Attachment) ProtoReflect() protoreflect.Message {
-	mi := &file_connector_proto_msgTypes[1]
+	mi := &file_connector_proto_msgTypes[2]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -238,7 +290,7 @@ func (x *Attachment) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Attachment.ProtoReflect.Descriptor instead.
 func (*Attachment) Descriptor() ([]byte, []int) {
-	return file_connector_proto_rawDescGZIP(), []int{1}
+	return file_connector_proto_rawDescGZIP(), []int{2}
 }
 
 func (x *Attachment) GetMediaId() string {
@@ -288,7 +340,7 @@ type MediaMetadata struct {
 
 func (x *MediaMetadata) Reset() {
 	*x = MediaMetadata{}
-	mi := &file_connector_proto_msgTypes[2]
+	mi := &file_connector_proto_msgTypes[3]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -300,7 +352,7 @@ func (x *MediaMetadata) String() string {
 func (*MediaMetadata) ProtoMessage() {}
 
 func (x *MediaMetadata) ProtoReflect() protoreflect.Message {
-	mi := &file_connector_proto_msgTypes[2]
+	mi := &file_connector_proto_msgTypes[3]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -313,7 +365,7 @@ func (x *MediaMetadata) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MediaMetadata.ProtoReflect.Descriptor instead.
 func (*MediaMetadata) Descriptor() ([]byte, []int) {
-	return file_connector_proto_rawDescGZIP(), []int{2}
+	return file_connector_proto_rawDescGZIP(), []int{3}
 }
 
 func (x *MediaMetadata) GetKind() Attachment_Kind {
@@ -357,7 +409,7 @@ type UploadMediaFrame struct {
 
 func (x *UploadMediaFrame) Reset() {
 	*x = UploadMediaFrame{}
-	mi := &file_connector_proto_msgTypes[3]
+	mi := &file_connector_proto_msgTypes[4]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -369,7 +421,7 @@ func (x *UploadMediaFrame) String() string {
 func (*UploadMediaFrame) ProtoMessage() {}
 
 func (x *UploadMediaFrame) ProtoReflect() protoreflect.Message {
-	mi := &file_connector_proto_msgTypes[3]
+	mi := &file_connector_proto_msgTypes[4]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -382,7 +434,7 @@ func (x *UploadMediaFrame) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UploadMediaFrame.ProtoReflect.Descriptor instead.
 func (*UploadMediaFrame) Descriptor() ([]byte, []int) {
-	return file_connector_proto_rawDescGZIP(), []int{3}
+	return file_connector_proto_rawDescGZIP(), []int{4}
 }
 
 func (x *UploadMediaFrame) GetBody() isUploadMediaFrame_Body {
@@ -435,7 +487,7 @@ type DownloadMediaRequest struct {
 
 func (x *DownloadMediaRequest) Reset() {
 	*x = DownloadMediaRequest{}
-	mi := &file_connector_proto_msgTypes[4]
+	mi := &file_connector_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -447,7 +499,7 @@ func (x *DownloadMediaRequest) String() string {
 func (*DownloadMediaRequest) ProtoMessage() {}
 
 func (x *DownloadMediaRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_connector_proto_msgTypes[4]
+	mi := &file_connector_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -460,7 +512,7 @@ func (x *DownloadMediaRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DownloadMediaRequest.ProtoReflect.Descriptor instead.
 func (*DownloadMediaRequest) Descriptor() ([]byte, []int) {
-	return file_connector_proto_rawDescGZIP(), []int{4}
+	return file_connector_proto_rawDescGZIP(), []int{5}
 }
 
 func (x *DownloadMediaRequest) GetMediaId() string {
@@ -479,7 +531,7 @@ type MediaChunk struct {
 
 func (x *MediaChunk) Reset() {
 	*x = MediaChunk{}
-	mi := &file_connector_proto_msgTypes[5]
+	mi := &file_connector_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -491,7 +543,7 @@ func (x *MediaChunk) String() string {
 func (*MediaChunk) ProtoMessage() {}
 
 func (x *MediaChunk) ProtoReflect() protoreflect.Message {
-	mi := &file_connector_proto_msgTypes[5]
+	mi := &file_connector_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -504,7 +556,7 @@ func (x *MediaChunk) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MediaChunk.ProtoReflect.Descriptor instead.
 func (*MediaChunk) Descriptor() ([]byte, []int) {
-	return file_connector_proto_rawDescGZIP(), []int{5}
+	return file_connector_proto_rawDescGZIP(), []int{6}
 }
 
 func (x *MediaChunk) GetChunk() []byte {
@@ -514,24 +566,28 @@ func (x *MediaChunk) GetChunk() []byte {
 	return nil
 }
 
+// Raw origin coordinates for an inbound message. The connector id is taken from
+// the session registration, not the wire, so a session cannot speak for another
+// connector. The core resolves (connector, chat_id, thread_id) to an endpoint.
 type MessageCreateEvent struct {
 	state                    protoimpl.MessageState `protogen:"open.v1"`
-	OriginEndpointId         string                 `protobuf:"bytes,1,opt,name=origin_endpoint_id,json=originEndpointId,proto3" json:"origin_endpoint_id,omitempty"`
-	GroupId                  string                 `protobuf:"bytes,2,opt,name=group_id,json=groupId,proto3" json:"group_id,omitempty"`
-	PlatformMessageId        string                 `protobuf:"bytes,3,opt,name=platform_message_id,json=platformMessageId,proto3" json:"platform_message_id,omitempty"`
-	Sender                   string                 `protobuf:"bytes,4,opt,name=sender,proto3" json:"sender,omitempty"`
-	Participant              *string                `protobuf:"bytes,5,opt,name=participant,proto3,oneof" json:"participant,omitempty"`
-	Text                     *string                `protobuf:"bytes,6,opt,name=text,proto3,oneof" json:"text,omitempty"`
-	Attachments              []*Attachment          `protobuf:"bytes,7,rep,name=attachments,proto3" json:"attachments,omitempty"`
-	ReplyToPlatformMessageId *string                `protobuf:"bytes,8,opt,name=reply_to_platform_message_id,json=replyToPlatformMessageId,proto3,oneof" json:"reply_to_platform_message_id,omitempty"`
-	TimestampMs              int64                  `protobuf:"varint,9,opt,name=timestamp_ms,json=timestampMs,proto3" json:"timestamp_ms,omitempty"`
+	ChatId                   string                 `protobuf:"bytes,1,opt,name=chat_id,json=chatId,proto3" json:"chat_id,omitempty"`
+	ThreadId                 *string                `protobuf:"bytes,2,opt,name=thread_id,json=threadId,proto3,oneof" json:"thread_id,omitempty"`
+	ChatTitle                *string                `protobuf:"bytes,3,opt,name=chat_title,json=chatTitle,proto3,oneof" json:"chat_title,omitempty"`
+	PlatformMessageId        string                 `protobuf:"bytes,4,opt,name=platform_message_id,json=platformMessageId,proto3" json:"platform_message_id,omitempty"`
+	Sender                   string                 `protobuf:"bytes,5,opt,name=sender,proto3" json:"sender,omitempty"`
+	Participant              *string                `protobuf:"bytes,6,opt,name=participant,proto3,oneof" json:"participant,omitempty"`
+	Text                     *string                `protobuf:"bytes,7,opt,name=text,proto3,oneof" json:"text,omitempty"`
+	Attachments              []*Attachment          `protobuf:"bytes,8,rep,name=attachments,proto3" json:"attachments,omitempty"`
+	ReplyToPlatformMessageId *string                `protobuf:"bytes,9,opt,name=reply_to_platform_message_id,json=replyToPlatformMessageId,proto3,oneof" json:"reply_to_platform_message_id,omitempty"`
+	TimestampMs              int64                  `protobuf:"varint,10,opt,name=timestamp_ms,json=timestampMs,proto3" json:"timestamp_ms,omitempty"`
 	unknownFields            protoimpl.UnknownFields
 	sizeCache                protoimpl.SizeCache
 }
 
 func (x *MessageCreateEvent) Reset() {
 	*x = MessageCreateEvent{}
-	mi := &file_connector_proto_msgTypes[6]
+	mi := &file_connector_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -543,7 +599,7 @@ func (x *MessageCreateEvent) String() string {
 func (*MessageCreateEvent) ProtoMessage() {}
 
 func (x *MessageCreateEvent) ProtoReflect() protoreflect.Message {
-	mi := &file_connector_proto_msgTypes[6]
+	mi := &file_connector_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -556,19 +612,26 @@ func (x *MessageCreateEvent) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MessageCreateEvent.ProtoReflect.Descriptor instead.
 func (*MessageCreateEvent) Descriptor() ([]byte, []int) {
-	return file_connector_proto_rawDescGZIP(), []int{6}
+	return file_connector_proto_rawDescGZIP(), []int{7}
 }
 
-func (x *MessageCreateEvent) GetOriginEndpointId() string {
+func (x *MessageCreateEvent) GetChatId() string {
 	if x != nil {
-		return x.OriginEndpointId
+		return x.ChatId
 	}
 	return ""
 }
 
-func (x *MessageCreateEvent) GetGroupId() string {
-	if x != nil {
-		return x.GroupId
+func (x *MessageCreateEvent) GetThreadId() string {
+	if x != nil && x.ThreadId != nil {
+		return *x.ThreadId
+	}
+	return ""
+}
+
+func (x *MessageCreateEvent) GetChatTitle() string {
+	if x != nil && x.ChatTitle != nil {
+		return *x.ChatTitle
 	}
 	return ""
 }
@@ -622,6 +685,76 @@ func (x *MessageCreateEvent) GetTimestampMs() int64 {
 	return 0
 }
 
+// The platform reported a chat address change (e.g. WhatsApp phone-to-LID).
+// Both addresses remain resolvable; the new one becomes canonical for outbound.
+type IdentityMigrated struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	OldChatId     string                 `protobuf:"bytes,1,opt,name=old_chat_id,json=oldChatId,proto3" json:"old_chat_id,omitempty"`
+	OldThreadId   *string                `protobuf:"bytes,2,opt,name=old_thread_id,json=oldThreadId,proto3,oneof" json:"old_thread_id,omitempty"`
+	NewChatId     string                 `protobuf:"bytes,3,opt,name=new_chat_id,json=newChatId,proto3" json:"new_chat_id,omitempty"`
+	NewThreadId   *string                `protobuf:"bytes,4,opt,name=new_thread_id,json=newThreadId,proto3,oneof" json:"new_thread_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *IdentityMigrated) Reset() {
+	*x = IdentityMigrated{}
+	mi := &file_connector_proto_msgTypes[8]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *IdentityMigrated) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*IdentityMigrated) ProtoMessage() {}
+
+func (x *IdentityMigrated) ProtoReflect() protoreflect.Message {
+	mi := &file_connector_proto_msgTypes[8]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use IdentityMigrated.ProtoReflect.Descriptor instead.
+func (*IdentityMigrated) Descriptor() ([]byte, []int) {
+	return file_connector_proto_rawDescGZIP(), []int{8}
+}
+
+func (x *IdentityMigrated) GetOldChatId() string {
+	if x != nil {
+		return x.OldChatId
+	}
+	return ""
+}
+
+func (x *IdentityMigrated) GetOldThreadId() string {
+	if x != nil && x.OldThreadId != nil {
+		return *x.OldThreadId
+	}
+	return ""
+}
+
+func (x *IdentityMigrated) GetNewChatId() string {
+	if x != nil {
+		return x.NewChatId
+	}
+	return ""
+}
+
+func (x *IdentityMigrated) GetNewThreadId() string {
+	if x != nil && x.NewThreadId != nil {
+		return *x.NewThreadId
+	}
+	return ""
+}
+
 type ReplyContext struct {
 	state             protoimpl.MessageState `protogen:"open.v1"`
 	LogicalMessageId  string                 `protobuf:"bytes,1,opt,name=logical_message_id,json=logicalMessageId,proto3" json:"logical_message_id,omitempty"`
@@ -636,7 +769,7 @@ type ReplyContext struct {
 
 func (x *ReplyContext) Reset() {
 	*x = ReplyContext{}
-	mi := &file_connector_proto_msgTypes[7]
+	mi := &file_connector_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -648,7 +781,7 @@ func (x *ReplyContext) String() string {
 func (*ReplyContext) ProtoMessage() {}
 
 func (x *ReplyContext) ProtoReflect() protoreflect.Message {
-	mi := &file_connector_proto_msgTypes[7]
+	mi := &file_connector_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -661,7 +794,7 @@ func (x *ReplyContext) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ReplyContext.ProtoReflect.Descriptor instead.
 func (*ReplyContext) Descriptor() ([]byte, []int) {
-	return file_connector_proto_rawDescGZIP(), []int{7}
+	return file_connector_proto_rawDescGZIP(), []int{9}
 }
 
 func (x *ReplyContext) GetLogicalMessageId() string {
@@ -710,13 +843,16 @@ type Acknowledgement struct {
 	state             protoimpl.MessageState `protogen:"open.v1"`
 	DispatchId        string                 `protobuf:"bytes,1,opt,name=dispatch_id,json=dispatchId,proto3" json:"dispatch_id,omitempty"`
 	PlatformMessageId string                 `protobuf:"bytes,2,opt,name=platform_message_id,json=platformMessageId,proto3" json:"platform_message_id,omitempty"`
-	unknownFields     protoimpl.UnknownFields
-	sizeCache         protoimpl.SizeCache
+	// The thread/topic the message landed in. Set when the dispatch provisioned a
+	// new thread, so the core can persist the conversation thread mapping.
+	ThreadId      *string `protobuf:"bytes,3,opt,name=thread_id,json=threadId,proto3,oneof" json:"thread_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *Acknowledgement) Reset() {
 	*x = Acknowledgement{}
-	mi := &file_connector_proto_msgTypes[8]
+	mi := &file_connector_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -728,7 +864,7 @@ func (x *Acknowledgement) String() string {
 func (*Acknowledgement) ProtoMessage() {}
 
 func (x *Acknowledgement) ProtoReflect() protoreflect.Message {
-	mi := &file_connector_proto_msgTypes[8]
+	mi := &file_connector_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -741,7 +877,7 @@ func (x *Acknowledgement) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Acknowledgement.ProtoReflect.Descriptor instead.
 func (*Acknowledgement) Descriptor() ([]byte, []int) {
-	return file_connector_proto_rawDescGZIP(), []int{8}
+	return file_connector_proto_rawDescGZIP(), []int{10}
 }
 
 func (x *Acknowledgement) GetDispatchId() string {
@@ -758,6 +894,69 @@ func (x *Acknowledgement) GetPlatformMessageId() string {
 	return ""
 }
 
+func (x *Acknowledgement) GetThreadId() string {
+	if x != nil && x.ThreadId != nil {
+		return *x.ThreadId
+	}
+	return ""
+}
+
+// A dispatch that can never succeed (e.g. an invalid target peer). The
+// connector reports it instead of acknowledging so the core dead-letters the
+// dispatch rather than redelivering it forever. Transient failures are not
+// reported this way; the connector drops its session and the core redelivers.
+type DispatchFailed struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	DispatchId    string                 `protobuf:"bytes,1,opt,name=dispatch_id,json=dispatchId,proto3" json:"dispatch_id,omitempty"`
+	Reason        string                 `protobuf:"bytes,2,opt,name=reason,proto3" json:"reason,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *DispatchFailed) Reset() {
+	*x = DispatchFailed{}
+	mi := &file_connector_proto_msgTypes[11]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *DispatchFailed) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*DispatchFailed) ProtoMessage() {}
+
+func (x *DispatchFailed) ProtoReflect() protoreflect.Message {
+	mi := &file_connector_proto_msgTypes[11]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use DispatchFailed.ProtoReflect.Descriptor instead.
+func (*DispatchFailed) Descriptor() ([]byte, []int) {
+	return file_connector_proto_rawDescGZIP(), []int{11}
+}
+
+func (x *DispatchFailed) GetDispatchId() string {
+	if x != nil {
+		return x.DispatchId
+	}
+	return ""
+}
+
+func (x *DispatchFailed) GetReason() string {
+	if x != nil {
+		return x.Reason
+	}
+	return ""
+}
+
 type ClientFrame struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Types that are valid to be assigned to Body:
@@ -765,6 +964,8 @@ type ClientFrame struct {
 	//	*ClientFrame_Registration
 	//	*ClientFrame_MessageCreate
 	//	*ClientFrame_Acknowledgement
+	//	*ClientFrame_IdentityMigrated
+	//	*ClientFrame_DispatchFailed
 	Body          isClientFrame_Body `protobuf_oneof:"body"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -772,7 +973,7 @@ type ClientFrame struct {
 
 func (x *ClientFrame) Reset() {
 	*x = ClientFrame{}
-	mi := &file_connector_proto_msgTypes[9]
+	mi := &file_connector_proto_msgTypes[12]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -784,7 +985,7 @@ func (x *ClientFrame) String() string {
 func (*ClientFrame) ProtoMessage() {}
 
 func (x *ClientFrame) ProtoReflect() protoreflect.Message {
-	mi := &file_connector_proto_msgTypes[9]
+	mi := &file_connector_proto_msgTypes[12]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -797,7 +998,7 @@ func (x *ClientFrame) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ClientFrame.ProtoReflect.Descriptor instead.
 func (*ClientFrame) Descriptor() ([]byte, []int) {
-	return file_connector_proto_rawDescGZIP(), []int{9}
+	return file_connector_proto_rawDescGZIP(), []int{12}
 }
 
 func (x *ClientFrame) GetBody() isClientFrame_Body {
@@ -834,6 +1035,24 @@ func (x *ClientFrame) GetAcknowledgement() *Acknowledgement {
 	return nil
 }
 
+func (x *ClientFrame) GetIdentityMigrated() *IdentityMigrated {
+	if x != nil {
+		if x, ok := x.Body.(*ClientFrame_IdentityMigrated); ok {
+			return x.IdentityMigrated
+		}
+	}
+	return nil
+}
+
+func (x *ClientFrame) GetDispatchFailed() *DispatchFailed {
+	if x != nil {
+		if x, ok := x.Body.(*ClientFrame_DispatchFailed); ok {
+			return x.DispatchFailed
+		}
+	}
+	return nil
+}
+
 type isClientFrame_Body interface {
 	isClientFrame_Body()
 }
@@ -850,33 +1069,99 @@ type ClientFrame_Acknowledgement struct {
 	Acknowledgement *Acknowledgement `protobuf:"bytes,3,opt,name=acknowledgement,proto3,oneof"`
 }
 
+type ClientFrame_IdentityMigrated struct {
+	IdentityMigrated *IdentityMigrated `protobuf:"bytes,4,opt,name=identity_migrated,json=identityMigrated,proto3,oneof"`
+}
+
+type ClientFrame_DispatchFailed struct {
+	DispatchFailed *DispatchFailed `protobuf:"bytes,5,opt,name=dispatch_failed,json=dispatchFailed,proto3,oneof"`
+}
+
 func (*ClientFrame_Registration) isClientFrame_Body() {}
 
 func (*ClientFrame_MessageCreate) isClientFrame_Body() {}
 
 func (*ClientFrame_Acknowledgement) isClientFrame_Body() {}
 
+func (*ClientFrame_IdentityMigrated) isClientFrame_Body() {}
+
+func (*ClientFrame_DispatchFailed) isClientFrame_Body() {}
+
+// Instruction to create a thread/topic in a container before sending, used when
+// a mirror conversation has no thread yet. The connector creates the thread,
+// sends, and reports the resulting thread id back in the acknowledgement.
+type ProvisionThread struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Container     string                 `protobuf:"bytes,1,opt,name=container,proto3" json:"container,omitempty"`
+	Title         string                 `protobuf:"bytes,2,opt,name=title,proto3" json:"title,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ProvisionThread) Reset() {
+	*x = ProvisionThread{}
+	mi := &file_connector_proto_msgTypes[13]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ProvisionThread) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ProvisionThread) ProtoMessage() {}
+
+func (x *ProvisionThread) ProtoReflect() protoreflect.Message {
+	mi := &file_connector_proto_msgTypes[13]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ProvisionThread.ProtoReflect.Descriptor instead.
+func (*ProvisionThread) Descriptor() ([]byte, []int) {
+	return file_connector_proto_rawDescGZIP(), []int{13}
+}
+
+func (x *ProvisionThread) GetContainer() string {
+	if x != nil {
+		return x.Container
+	}
+	return ""
+}
+
+func (x *ProvisionThread) GetTitle() string {
+	if x != nil {
+		return x.Title
+	}
+	return ""
+}
+
 type MessageCreateDispatch struct {
 	state                    protoimpl.MessageState `protogen:"open.v1"`
 	DispatchId               string                 `protobuf:"bytes,1,opt,name=dispatch_id,json=dispatchId,proto3" json:"dispatch_id,omitempty"`
-	TargetEndpointId         string                 `protobuf:"bytes,2,opt,name=target_endpoint_id,json=targetEndpointId,proto3" json:"target_endpoint_id,omitempty"`
-	LogicalMessageId         string                 `protobuf:"bytes,3,opt,name=logical_message_id,json=logicalMessageId,proto3" json:"logical_message_id,omitempty"`
-	GroupId                  string                 `protobuf:"bytes,4,opt,name=group_id,json=groupId,proto3" json:"group_id,omitempty"`
+	TargetChatId             string                 `protobuf:"bytes,2,opt,name=target_chat_id,json=targetChatId,proto3" json:"target_chat_id,omitempty"`
+	TargetThreadId           *string                `protobuf:"bytes,3,opt,name=target_thread_id,json=targetThreadId,proto3,oneof" json:"target_thread_id,omitempty"`
+	ProvisionThread          *ProvisionThread       `protobuf:"bytes,4,opt,name=provision_thread,json=provisionThread,proto3,oneof" json:"provision_thread,omitempty"`
 	Sender                   string                 `protobuf:"bytes,5,opt,name=sender,proto3" json:"sender,omitempty"`
 	Participant              *string                `protobuf:"bytes,6,opt,name=participant,proto3,oneof" json:"participant,omitempty"`
 	Text                     *string                `protobuf:"bytes,7,opt,name=text,proto3,oneof" json:"text,omitempty"`
 	Attachments              []*Attachment          `protobuf:"bytes,8,rep,name=attachments,proto3" json:"attachments,omitempty"`
-	ReplyToLogicalMessageId  *string                `protobuf:"bytes,9,opt,name=reply_to_logical_message_id,json=replyToLogicalMessageId,proto3,oneof" json:"reply_to_logical_message_id,omitempty"`
-	ReplyToPlatformMessageId *string                `protobuf:"bytes,10,opt,name=reply_to_platform_message_id,json=replyToPlatformMessageId,proto3,oneof" json:"reply_to_platform_message_id,omitempty"`
-	TimestampMs              int64                  `protobuf:"varint,11,opt,name=timestamp_ms,json=timestampMs,proto3" json:"timestamp_ms,omitempty"`
-	ReplyContext             *ReplyContext          `protobuf:"bytes,12,opt,name=reply_context,json=replyContext,proto3,oneof" json:"reply_context,omitempty"`
+	ReplyToPlatformMessageId *string                `protobuf:"bytes,9,opt,name=reply_to_platform_message_id,json=replyToPlatformMessageId,proto3,oneof" json:"reply_to_platform_message_id,omitempty"`
+	TimestampMs              int64                  `protobuf:"varint,10,opt,name=timestamp_ms,json=timestampMs,proto3" json:"timestamp_ms,omitempty"`
+	ReplyContext             *ReplyContext          `protobuf:"bytes,11,opt,name=reply_context,json=replyContext,proto3,oneof" json:"reply_context,omitempty"`
 	unknownFields            protoimpl.UnknownFields
 	sizeCache                protoimpl.SizeCache
 }
 
 func (x *MessageCreateDispatch) Reset() {
 	*x = MessageCreateDispatch{}
-	mi := &file_connector_proto_msgTypes[10]
+	mi := &file_connector_proto_msgTypes[14]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -888,7 +1173,7 @@ func (x *MessageCreateDispatch) String() string {
 func (*MessageCreateDispatch) ProtoMessage() {}
 
 func (x *MessageCreateDispatch) ProtoReflect() protoreflect.Message {
-	mi := &file_connector_proto_msgTypes[10]
+	mi := &file_connector_proto_msgTypes[14]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -901,7 +1186,7 @@ func (x *MessageCreateDispatch) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MessageCreateDispatch.ProtoReflect.Descriptor instead.
 func (*MessageCreateDispatch) Descriptor() ([]byte, []int) {
-	return file_connector_proto_rawDescGZIP(), []int{10}
+	return file_connector_proto_rawDescGZIP(), []int{14}
 }
 
 func (x *MessageCreateDispatch) GetDispatchId() string {
@@ -911,25 +1196,25 @@ func (x *MessageCreateDispatch) GetDispatchId() string {
 	return ""
 }
 
-func (x *MessageCreateDispatch) GetTargetEndpointId() string {
+func (x *MessageCreateDispatch) GetTargetChatId() string {
 	if x != nil {
-		return x.TargetEndpointId
+		return x.TargetChatId
 	}
 	return ""
 }
 
-func (x *MessageCreateDispatch) GetLogicalMessageId() string {
-	if x != nil {
-		return x.LogicalMessageId
+func (x *MessageCreateDispatch) GetTargetThreadId() string {
+	if x != nil && x.TargetThreadId != nil {
+		return *x.TargetThreadId
 	}
 	return ""
 }
 
-func (x *MessageCreateDispatch) GetGroupId() string {
+func (x *MessageCreateDispatch) GetProvisionThread() *ProvisionThread {
 	if x != nil {
-		return x.GroupId
+		return x.ProvisionThread
 	}
-	return ""
+	return nil
 }
 
 func (x *MessageCreateDispatch) GetSender() string {
@@ -958,13 +1243,6 @@ func (x *MessageCreateDispatch) GetAttachments() []*Attachment {
 		return x.Attachments
 	}
 	return nil
-}
-
-func (x *MessageCreateDispatch) GetReplyToLogicalMessageId() string {
-	if x != nil && x.ReplyToLogicalMessageId != nil {
-		return *x.ReplyToLogicalMessageId
-	}
-	return ""
 }
 
 func (x *MessageCreateDispatch) GetReplyToPlatformMessageId() string {
@@ -997,7 +1275,7 @@ type Rejected struct {
 
 func (x *Rejected) Reset() {
 	*x = Rejected{}
-	mi := &file_connector_proto_msgTypes[11]
+	mi := &file_connector_proto_msgTypes[15]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1009,7 +1287,7 @@ func (x *Rejected) String() string {
 func (*Rejected) ProtoMessage() {}
 
 func (x *Rejected) ProtoReflect() protoreflect.Message {
-	mi := &file_connector_proto_msgTypes[11]
+	mi := &file_connector_proto_msgTypes[15]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1022,7 +1300,7 @@ func (x *Rejected) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Rejected.ProtoReflect.Descriptor instead.
 func (*Rejected) Descriptor() ([]byte, []int) {
-	return file_connector_proto_rawDescGZIP(), []int{11}
+	return file_connector_proto_rawDescGZIP(), []int{15}
 }
 
 func (x *Rejected) GetReason() string {
@@ -1045,7 +1323,7 @@ type ServerFrame struct {
 
 func (x *ServerFrame) Reset() {
 	*x = ServerFrame{}
-	mi := &file_connector_proto_msgTypes[12]
+	mi := &file_connector_proto_msgTypes[16]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1057,7 +1335,7 @@ func (x *ServerFrame) String() string {
 func (*ServerFrame) ProtoMessage() {}
 
 func (x *ServerFrame) ProtoReflect() protoreflect.Message {
-	mi := &file_connector_proto_msgTypes[12]
+	mi := &file_connector_proto_msgTypes[16]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1070,7 +1348,7 @@ func (x *ServerFrame) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ServerFrame.ProtoReflect.Descriptor instead.
 func (*ServerFrame) Descriptor() ([]byte, []int) {
-	return file_connector_proto_rawDescGZIP(), []int{12}
+	return file_connector_proto_rawDescGZIP(), []int{16}
 }
 
 func (x *ServerFrame) GetBody() isServerFrame_Body {
@@ -1118,11 +1396,14 @@ var File_connector_proto protoreflect.FileDescriptor
 
 const file_connector_proto_rawDesc = "" +
 	"\n" +
-	"\x0fconnector.proto\x12\x12wuphf.connector.v1\"\x8e\x01\n" +
+	"\x0fconnector.proto\x12\x12wuphf.connector.v1\"m\n" +
+	"\fCapabilities\x12)\n" +
+	"\x10supports_threads\x18\x01 \x01(\bR\x0fsupportsThreads\x122\n" +
+	"\x15supports_topic_create\x18\x02 \x01(\bR\x13supportsTopicCreate\"\xb1\x01\n" +
 	"\fRegistration\x12!\n" +
 	"\fconnector_id\x18\x01 \x01(\tR\vconnectorId\x128\n" +
-	"\bplatform\x18\x02 \x01(\x0e2\x1c.wuphf.connector.v1.PlatformR\bplatform\x12!\n" +
-	"\fendpoint_ids\x18\x03 \x03(\tR\vendpointIds\"\xe2\x02\n" +
+	"\bplatform\x18\x02 \x01(\x0e2\x1c.wuphf.connector.v1.PlatformR\bplatform\x12D\n" +
+	"\fcapabilities\x18\x03 \x01(\v2 .wuphf.connector.v1.CapabilitiesR\fcapabilities\"\xe2\x02\n" +
 	"\n" +
 	"Attachment\x12\x19\n" +
 	"\bmedia_id\x18\x01 \x01(\tR\amediaId\x127\n" +
@@ -1165,20 +1446,33 @@ const file_connector_proto_rawDesc = "" +
 	"\bmedia_id\x18\x01 \x01(\tR\amediaId\"\"\n" +
 	"\n" +
 	"MediaChunk\x12\x14\n" +
-	"\x05chunk\x18\x01 \x01(\fR\x05chunk\"\xc9\x03\n" +
-	"\x12MessageCreateEvent\x12,\n" +
-	"\x12origin_endpoint_id\x18\x01 \x01(\tR\x10originEndpointId\x12\x19\n" +
-	"\bgroup_id\x18\x02 \x01(\tR\agroupId\x12.\n" +
-	"\x13platform_message_id\x18\x03 \x01(\tR\x11platformMessageId\x12\x16\n" +
-	"\x06sender\x18\x04 \x01(\tR\x06sender\x12%\n" +
-	"\vparticipant\x18\x05 \x01(\tH\x00R\vparticipant\x88\x01\x01\x12\x17\n" +
-	"\x04text\x18\x06 \x01(\tH\x01R\x04text\x88\x01\x01\x12@\n" +
-	"\vattachments\x18\a \x03(\v2\x1e.wuphf.connector.v1.AttachmentR\vattachments\x12C\n" +
-	"\x1creply_to_platform_message_id\x18\b \x01(\tH\x02R\x18replyToPlatformMessageId\x88\x01\x01\x12!\n" +
-	"\ftimestamp_ms\x18\t \x01(\x03R\vtimestampMsB\x0e\n" +
+	"\x05chunk\x18\x01 \x01(\fR\x05chunk\"\xfc\x03\n" +
+	"\x12MessageCreateEvent\x12\x17\n" +
+	"\achat_id\x18\x01 \x01(\tR\x06chatId\x12 \n" +
+	"\tthread_id\x18\x02 \x01(\tH\x00R\bthreadId\x88\x01\x01\x12\"\n" +
+	"\n" +
+	"chat_title\x18\x03 \x01(\tH\x01R\tchatTitle\x88\x01\x01\x12.\n" +
+	"\x13platform_message_id\x18\x04 \x01(\tR\x11platformMessageId\x12\x16\n" +
+	"\x06sender\x18\x05 \x01(\tR\x06sender\x12%\n" +
+	"\vparticipant\x18\x06 \x01(\tH\x02R\vparticipant\x88\x01\x01\x12\x17\n" +
+	"\x04text\x18\a \x01(\tH\x03R\x04text\x88\x01\x01\x12@\n" +
+	"\vattachments\x18\b \x03(\v2\x1e.wuphf.connector.v1.AttachmentR\vattachments\x12C\n" +
+	"\x1creply_to_platform_message_id\x18\t \x01(\tH\x04R\x18replyToPlatformMessageId\x88\x01\x01\x12!\n" +
+	"\ftimestamp_ms\x18\n" +
+	" \x01(\x03R\vtimestampMsB\f\n" +
+	"\n" +
+	"_thread_idB\r\n" +
+	"\v_chat_titleB\x0e\n" +
 	"\f_participantB\a\n" +
 	"\x05_textB\x1f\n" +
-	"\x1d_reply_to_platform_message_id\"\x9f\x02\n" +
+	"\x1d_reply_to_platform_message_id\"\xc8\x01\n" +
+	"\x10IdentityMigrated\x12\x1e\n" +
+	"\vold_chat_id\x18\x01 \x01(\tR\toldChatId\x12'\n" +
+	"\rold_thread_id\x18\x02 \x01(\tH\x00R\voldThreadId\x88\x01\x01\x12\x1e\n" +
+	"\vnew_chat_id\x18\x03 \x01(\tR\tnewChatId\x12'\n" +
+	"\rnew_thread_id\x18\x04 \x01(\tH\x01R\vnewThreadId\x88\x01\x01B\x10\n" +
+	"\x0e_old_thread_idB\x10\n" +
+	"\x0e_new_thread_id\"\x9f\x02\n" +
 	"\fReplyContext\x12,\n" +
 	"\x12logical_message_id\x18\x01 \x01(\tR\x10logicalMessageId\x12.\n" +
 	"\x13platform_message_id\x18\x02 \x01(\tR\x11platformMessageId\x12\x16\n" +
@@ -1187,34 +1481,46 @@ const file_connector_proto_rawDesc = "" +
 	"\x04text\x18\x05 \x01(\tH\x01R\x04text\x88\x01\x01\x12@\n" +
 	"\vattachments\x18\x06 \x03(\v2\x1e.wuphf.connector.v1.AttachmentR\vattachmentsB\x0e\n" +
 	"\f_participantB\a\n" +
-	"\x05_text\"b\n" +
+	"\x05_text\"\x92\x01\n" +
 	"\x0fAcknowledgement\x12\x1f\n" +
 	"\vdispatch_id\x18\x01 \x01(\tR\n" +
 	"dispatchId\x12.\n" +
-	"\x13platform_message_id\x18\x02 \x01(\tR\x11platformMessageId\"\xff\x01\n" +
+	"\x13platform_message_id\x18\x02 \x01(\tR\x11platformMessageId\x12 \n" +
+	"\tthread_id\x18\x03 \x01(\tH\x00R\bthreadId\x88\x01\x01B\f\n" +
+	"\n" +
+	"_thread_id\"I\n" +
+	"\x0eDispatchFailed\x12\x1f\n" +
+	"\vdispatch_id\x18\x01 \x01(\tR\n" +
+	"dispatchId\x12\x16\n" +
+	"\x06reason\x18\x02 \x01(\tR\x06reason\"\xa3\x03\n" +
 	"\vClientFrame\x12F\n" +
 	"\fregistration\x18\x01 \x01(\v2 .wuphf.connector.v1.RegistrationH\x00R\fregistration\x12O\n" +
 	"\x0emessage_create\x18\x02 \x01(\v2&.wuphf.connector.v1.MessageCreateEventH\x00R\rmessageCreate\x12O\n" +
-	"\x0facknowledgement\x18\x03 \x01(\v2#.wuphf.connector.v1.AcknowledgementH\x00R\x0facknowledgementB\x06\n" +
-	"\x04body\"\xac\x05\n" +
+	"\x0facknowledgement\x18\x03 \x01(\v2#.wuphf.connector.v1.AcknowledgementH\x00R\x0facknowledgement\x12S\n" +
+	"\x11identity_migrated\x18\x04 \x01(\v2$.wuphf.connector.v1.IdentityMigratedH\x00R\x10identityMigrated\x12M\n" +
+	"\x0fdispatch_failed\x18\x05 \x01(\v2\".wuphf.connector.v1.DispatchFailedH\x00R\x0edispatchFailedB\x06\n" +
+	"\x04body\"E\n" +
+	"\x0fProvisionThread\x12\x1c\n" +
+	"\tcontainer\x18\x01 \x01(\tR\tcontainer\x12\x14\n" +
+	"\x05title\x18\x02 \x01(\tR\x05title\"\xa6\x05\n" +
 	"\x15MessageCreateDispatch\x12\x1f\n" +
 	"\vdispatch_id\x18\x01 \x01(\tR\n" +
-	"dispatchId\x12,\n" +
-	"\x12target_endpoint_id\x18\x02 \x01(\tR\x10targetEndpointId\x12,\n" +
-	"\x12logical_message_id\x18\x03 \x01(\tR\x10logicalMessageId\x12\x19\n" +
-	"\bgroup_id\x18\x04 \x01(\tR\agroupId\x12\x16\n" +
+	"dispatchId\x12$\n" +
+	"\x0etarget_chat_id\x18\x02 \x01(\tR\ftargetChatId\x12-\n" +
+	"\x10target_thread_id\x18\x03 \x01(\tH\x00R\x0etargetThreadId\x88\x01\x01\x12S\n" +
+	"\x10provision_thread\x18\x04 \x01(\v2#.wuphf.connector.v1.ProvisionThreadH\x01R\x0fprovisionThread\x88\x01\x01\x12\x16\n" +
 	"\x06sender\x18\x05 \x01(\tR\x06sender\x12%\n" +
-	"\vparticipant\x18\x06 \x01(\tH\x00R\vparticipant\x88\x01\x01\x12\x17\n" +
-	"\x04text\x18\a \x01(\tH\x01R\x04text\x88\x01\x01\x12@\n" +
-	"\vattachments\x18\b \x03(\v2\x1e.wuphf.connector.v1.AttachmentR\vattachments\x12A\n" +
-	"\x1breply_to_logical_message_id\x18\t \x01(\tH\x02R\x17replyToLogicalMessageId\x88\x01\x01\x12C\n" +
-	"\x1creply_to_platform_message_id\x18\n" +
-	" \x01(\tH\x03R\x18replyToPlatformMessageId\x88\x01\x01\x12!\n" +
-	"\ftimestamp_ms\x18\v \x01(\x03R\vtimestampMs\x12J\n" +
-	"\rreply_context\x18\f \x01(\v2 .wuphf.connector.v1.ReplyContextH\x04R\freplyContext\x88\x01\x01B\x0e\n" +
+	"\vparticipant\x18\x06 \x01(\tH\x02R\vparticipant\x88\x01\x01\x12\x17\n" +
+	"\x04text\x18\a \x01(\tH\x03R\x04text\x88\x01\x01\x12@\n" +
+	"\vattachments\x18\b \x03(\v2\x1e.wuphf.connector.v1.AttachmentR\vattachments\x12C\n" +
+	"\x1creply_to_platform_message_id\x18\t \x01(\tH\x04R\x18replyToPlatformMessageId\x88\x01\x01\x12!\n" +
+	"\ftimestamp_ms\x18\n" +
+	" \x01(\x03R\vtimestampMs\x12J\n" +
+	"\rreply_context\x18\v \x01(\v2 .wuphf.connector.v1.ReplyContextH\x05R\freplyContext\x88\x01\x01B\x13\n" +
+	"\x11_target_thread_idB\x13\n" +
+	"\x11_provision_threadB\x0e\n" +
 	"\f_participantB\a\n" +
-	"\x05_textB\x1e\n" +
-	"\x1c_reply_to_logical_message_idB\x1f\n" +
+	"\x05_textB\x1f\n" +
 	"\x1d_reply_to_platform_message_idB\x10\n" +
 	"\x0e_reply_context\"\"\n" +
 	"\bRejected\x12\x16\n" +
@@ -1250,49 +1556,57 @@ func file_connector_proto_rawDescGZIP() []byte {
 }
 
 var file_connector_proto_enumTypes = make([]protoimpl.EnumInfo, 2)
-var file_connector_proto_msgTypes = make([]protoimpl.MessageInfo, 13)
+var file_connector_proto_msgTypes = make([]protoimpl.MessageInfo, 17)
 var file_connector_proto_goTypes = []any{
 	(Platform)(0),                 // 0: wuphf.connector.v1.Platform
 	(Attachment_Kind)(0),          // 1: wuphf.connector.v1.Attachment.Kind
-	(*Registration)(nil),          // 2: wuphf.connector.v1.Registration
-	(*Attachment)(nil),            // 3: wuphf.connector.v1.Attachment
-	(*MediaMetadata)(nil),         // 4: wuphf.connector.v1.MediaMetadata
-	(*UploadMediaFrame)(nil),      // 5: wuphf.connector.v1.UploadMediaFrame
-	(*DownloadMediaRequest)(nil),  // 6: wuphf.connector.v1.DownloadMediaRequest
-	(*MediaChunk)(nil),            // 7: wuphf.connector.v1.MediaChunk
-	(*MessageCreateEvent)(nil),    // 8: wuphf.connector.v1.MessageCreateEvent
-	(*ReplyContext)(nil),          // 9: wuphf.connector.v1.ReplyContext
-	(*Acknowledgement)(nil),       // 10: wuphf.connector.v1.Acknowledgement
-	(*ClientFrame)(nil),           // 11: wuphf.connector.v1.ClientFrame
-	(*MessageCreateDispatch)(nil), // 12: wuphf.connector.v1.MessageCreateDispatch
-	(*Rejected)(nil),              // 13: wuphf.connector.v1.Rejected
-	(*ServerFrame)(nil),           // 14: wuphf.connector.v1.ServerFrame
+	(*Capabilities)(nil),          // 2: wuphf.connector.v1.Capabilities
+	(*Registration)(nil),          // 3: wuphf.connector.v1.Registration
+	(*Attachment)(nil),            // 4: wuphf.connector.v1.Attachment
+	(*MediaMetadata)(nil),         // 5: wuphf.connector.v1.MediaMetadata
+	(*UploadMediaFrame)(nil),      // 6: wuphf.connector.v1.UploadMediaFrame
+	(*DownloadMediaRequest)(nil),  // 7: wuphf.connector.v1.DownloadMediaRequest
+	(*MediaChunk)(nil),            // 8: wuphf.connector.v1.MediaChunk
+	(*MessageCreateEvent)(nil),    // 9: wuphf.connector.v1.MessageCreateEvent
+	(*IdentityMigrated)(nil),      // 10: wuphf.connector.v1.IdentityMigrated
+	(*ReplyContext)(nil),          // 11: wuphf.connector.v1.ReplyContext
+	(*Acknowledgement)(nil),       // 12: wuphf.connector.v1.Acknowledgement
+	(*DispatchFailed)(nil),        // 13: wuphf.connector.v1.DispatchFailed
+	(*ClientFrame)(nil),           // 14: wuphf.connector.v1.ClientFrame
+	(*ProvisionThread)(nil),       // 15: wuphf.connector.v1.ProvisionThread
+	(*MessageCreateDispatch)(nil), // 16: wuphf.connector.v1.MessageCreateDispatch
+	(*Rejected)(nil),              // 17: wuphf.connector.v1.Rejected
+	(*ServerFrame)(nil),           // 18: wuphf.connector.v1.ServerFrame
 }
 var file_connector_proto_depIdxs = []int32{
 	0,  // 0: wuphf.connector.v1.Registration.platform:type_name -> wuphf.connector.v1.Platform
-	1,  // 1: wuphf.connector.v1.Attachment.kind:type_name -> wuphf.connector.v1.Attachment.Kind
-	1,  // 2: wuphf.connector.v1.MediaMetadata.kind:type_name -> wuphf.connector.v1.Attachment.Kind
-	4,  // 3: wuphf.connector.v1.UploadMediaFrame.metadata:type_name -> wuphf.connector.v1.MediaMetadata
-	3,  // 4: wuphf.connector.v1.MessageCreateEvent.attachments:type_name -> wuphf.connector.v1.Attachment
-	3,  // 5: wuphf.connector.v1.ReplyContext.attachments:type_name -> wuphf.connector.v1.Attachment
-	2,  // 6: wuphf.connector.v1.ClientFrame.registration:type_name -> wuphf.connector.v1.Registration
-	8,  // 7: wuphf.connector.v1.ClientFrame.message_create:type_name -> wuphf.connector.v1.MessageCreateEvent
-	10, // 8: wuphf.connector.v1.ClientFrame.acknowledgement:type_name -> wuphf.connector.v1.Acknowledgement
-	3,  // 9: wuphf.connector.v1.MessageCreateDispatch.attachments:type_name -> wuphf.connector.v1.Attachment
-	9,  // 10: wuphf.connector.v1.MessageCreateDispatch.reply_context:type_name -> wuphf.connector.v1.ReplyContext
-	12, // 11: wuphf.connector.v1.ServerFrame.message_create:type_name -> wuphf.connector.v1.MessageCreateDispatch
-	13, // 12: wuphf.connector.v1.ServerFrame.rejected:type_name -> wuphf.connector.v1.Rejected
-	11, // 13: wuphf.connector.v1.ConnectorTransport.OpenSession:input_type -> wuphf.connector.v1.ClientFrame
-	5,  // 14: wuphf.connector.v1.MediaTransport.UploadMedia:input_type -> wuphf.connector.v1.UploadMediaFrame
-	6,  // 15: wuphf.connector.v1.MediaTransport.DownloadMedia:input_type -> wuphf.connector.v1.DownloadMediaRequest
-	14, // 16: wuphf.connector.v1.ConnectorTransport.OpenSession:output_type -> wuphf.connector.v1.ServerFrame
-	3,  // 17: wuphf.connector.v1.MediaTransport.UploadMedia:output_type -> wuphf.connector.v1.Attachment
-	7,  // 18: wuphf.connector.v1.MediaTransport.DownloadMedia:output_type -> wuphf.connector.v1.MediaChunk
-	16, // [16:19] is the sub-list for method output_type
-	13, // [13:16] is the sub-list for method input_type
-	13, // [13:13] is the sub-list for extension type_name
-	13, // [13:13] is the sub-list for extension extendee
-	0,  // [0:13] is the sub-list for field type_name
+	2,  // 1: wuphf.connector.v1.Registration.capabilities:type_name -> wuphf.connector.v1.Capabilities
+	1,  // 2: wuphf.connector.v1.Attachment.kind:type_name -> wuphf.connector.v1.Attachment.Kind
+	1,  // 3: wuphf.connector.v1.MediaMetadata.kind:type_name -> wuphf.connector.v1.Attachment.Kind
+	5,  // 4: wuphf.connector.v1.UploadMediaFrame.metadata:type_name -> wuphf.connector.v1.MediaMetadata
+	4,  // 5: wuphf.connector.v1.MessageCreateEvent.attachments:type_name -> wuphf.connector.v1.Attachment
+	4,  // 6: wuphf.connector.v1.ReplyContext.attachments:type_name -> wuphf.connector.v1.Attachment
+	3,  // 7: wuphf.connector.v1.ClientFrame.registration:type_name -> wuphf.connector.v1.Registration
+	9,  // 8: wuphf.connector.v1.ClientFrame.message_create:type_name -> wuphf.connector.v1.MessageCreateEvent
+	12, // 9: wuphf.connector.v1.ClientFrame.acknowledgement:type_name -> wuphf.connector.v1.Acknowledgement
+	10, // 10: wuphf.connector.v1.ClientFrame.identity_migrated:type_name -> wuphf.connector.v1.IdentityMigrated
+	13, // 11: wuphf.connector.v1.ClientFrame.dispatch_failed:type_name -> wuphf.connector.v1.DispatchFailed
+	15, // 12: wuphf.connector.v1.MessageCreateDispatch.provision_thread:type_name -> wuphf.connector.v1.ProvisionThread
+	4,  // 13: wuphf.connector.v1.MessageCreateDispatch.attachments:type_name -> wuphf.connector.v1.Attachment
+	11, // 14: wuphf.connector.v1.MessageCreateDispatch.reply_context:type_name -> wuphf.connector.v1.ReplyContext
+	16, // 15: wuphf.connector.v1.ServerFrame.message_create:type_name -> wuphf.connector.v1.MessageCreateDispatch
+	17, // 16: wuphf.connector.v1.ServerFrame.rejected:type_name -> wuphf.connector.v1.Rejected
+	14, // 17: wuphf.connector.v1.ConnectorTransport.OpenSession:input_type -> wuphf.connector.v1.ClientFrame
+	6,  // 18: wuphf.connector.v1.MediaTransport.UploadMedia:input_type -> wuphf.connector.v1.UploadMediaFrame
+	7,  // 19: wuphf.connector.v1.MediaTransport.DownloadMedia:input_type -> wuphf.connector.v1.DownloadMediaRequest
+	18, // 20: wuphf.connector.v1.ConnectorTransport.OpenSession:output_type -> wuphf.connector.v1.ServerFrame
+	4,  // 21: wuphf.connector.v1.MediaTransport.UploadMedia:output_type -> wuphf.connector.v1.Attachment
+	8,  // 22: wuphf.connector.v1.MediaTransport.DownloadMedia:output_type -> wuphf.connector.v1.MediaChunk
+	20, // [20:23] is the sub-list for method output_type
+	17, // [17:20] is the sub-list for method input_type
+	17, // [17:17] is the sub-list for extension type_name
+	17, // [17:17] is the sub-list for extension extendee
+	0,  // [0:17] is the sub-list for field type_name
 }
 
 func init() { file_connector_proto_init() }
@@ -1300,21 +1614,25 @@ func file_connector_proto_init() {
 	if File_connector_proto != nil {
 		return
 	}
-	file_connector_proto_msgTypes[1].OneofWrappers = []any{}
 	file_connector_proto_msgTypes[2].OneofWrappers = []any{}
-	file_connector_proto_msgTypes[3].OneofWrappers = []any{
+	file_connector_proto_msgTypes[3].OneofWrappers = []any{}
+	file_connector_proto_msgTypes[4].OneofWrappers = []any{
 		(*UploadMediaFrame_Metadata)(nil),
 		(*UploadMediaFrame_Chunk)(nil),
 	}
-	file_connector_proto_msgTypes[6].OneofWrappers = []any{}
 	file_connector_proto_msgTypes[7].OneofWrappers = []any{}
-	file_connector_proto_msgTypes[9].OneofWrappers = []any{
+	file_connector_proto_msgTypes[8].OneofWrappers = []any{}
+	file_connector_proto_msgTypes[9].OneofWrappers = []any{}
+	file_connector_proto_msgTypes[10].OneofWrappers = []any{}
+	file_connector_proto_msgTypes[12].OneofWrappers = []any{
 		(*ClientFrame_Registration)(nil),
 		(*ClientFrame_MessageCreate)(nil),
 		(*ClientFrame_Acknowledgement)(nil),
+		(*ClientFrame_IdentityMigrated)(nil),
+		(*ClientFrame_DispatchFailed)(nil),
 	}
-	file_connector_proto_msgTypes[10].OneofWrappers = []any{}
-	file_connector_proto_msgTypes[12].OneofWrappers = []any{
+	file_connector_proto_msgTypes[14].OneofWrappers = []any{}
+	file_connector_proto_msgTypes[16].OneofWrappers = []any{
 		(*ServerFrame_MessageCreate)(nil),
 		(*ServerFrame_Rejected)(nil),
 	}
@@ -1324,7 +1642,7 @@ func file_connector_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_connector_proto_rawDesc), len(file_connector_proto_rawDesc)),
 			NumEnums:      2,
-			NumMessages:   13,
+			NumMessages:   17,
 			NumExtensions: 0,
 			NumServices:   2,
 		},

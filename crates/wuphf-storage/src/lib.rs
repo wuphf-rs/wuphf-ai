@@ -6,9 +6,10 @@ use std::str::FromStr;
 use thiserror::Error;
 use tokio::sync::RwLock;
 use wuphf_model::{
-    ChatSettings, Contact, DedupKey, DispatchCommand, DispatchId, DispatchPayload, DispatchState,
-    Endpoint, EndpointId, GroupId, MediaBlob, MediaId, Message, MessageCopy, MessageId,
-    ReplicationGroup, ReplyContext, StoredDispatch,
+    Alias, ChatSettings, ConnectorId, Contact, Conversation, ConversationId, DedupKey,
+    DispatchCommand, DispatchId, DispatchPayload, DispatchState, Endpoint, EndpointId, GroupId,
+    MediaBlob, MediaId, Message, MessageCopy, MessageId, PlatformAddress, ReplicationGroup,
+    ReplyContext, StoredDispatch, ThreadMapping,
 };
 
 #[derive(Debug, Error)]
@@ -29,6 +30,8 @@ pub enum StorageError {
     Migration(#[from] sqlx::migrate::MigrateError),
     #[error(transparent)]
     Serialization(#[from] serde_json::Error),
+    #[error("stored identifier is malformed: {0}")]
+    Identifier(String),
 }
 
 pub type StorageResult<T> = Result<T, StorageError>;
@@ -39,6 +42,50 @@ pub trait Storage: Send + Sync + 'static {
     async fn endpoint(&self, endpoint_id: EndpointId) -> StorageResult<Endpoint>;
     async fn put_group(&self, group: ReplicationGroup) -> StorageResult<()>;
     async fn group(&self, group_id: GroupId) -> StorageResult<ReplicationGroup>;
+    /// The replication group that contains the endpoint, if any.
+    async fn group_for_endpoint(&self, endpoint_id: EndpointId)
+    -> StorageResult<Option<GroupId>>;
+    /// Insert or update an alias. Inserting a canonical alias clears the
+    /// canonical flag on the endpoint's other aliases.
+    async fn put_alias(&self, alias: Alias) -> StorageResult<()>;
+    /// Resolve a platform address on a connector to its endpoint.
+    async fn resolve_endpoint(
+        &self,
+        connector_id: &ConnectorId,
+        address: &PlatformAddress,
+    ) -> StorageResult<Option<EndpointId>>;
+    async fn put_conversation(&self, conversation: Conversation) -> StorageResult<()>;
+    async fn conversation(
+        &self,
+        conversation_id: ConversationId,
+    ) -> StorageResult<Option<Conversation>>;
+    /// The conversation whose identity source is this address, if any.
+    async fn conversation_for_source(
+        &self,
+        rule_id: &wuphf_model::RuleId,
+        connector_id: &ConnectorId,
+        address: &PlatformAddress,
+    ) -> StorageResult<Option<Conversation>>;
+    /// The conversation backed by this replication group, if any.
+    async fn conversation_for_group(
+        &self,
+        group_id: GroupId,
+    ) -> StorageResult<Option<Conversation>>;
+    async fn put_thread_mapping(&self, mapping: ThreadMapping) -> StorageResult<()>;
+    /// The thread provisioned for a conversation in the given connector's
+    /// container, if one exists yet.
+    async fn thread_for_conversation(
+        &self,
+        conversation_id: ConversationId,
+        connector_id: &ConnectorId,
+    ) -> StorageResult<Option<String>>;
+    /// Reverse lookup for a message typed directly into a mirror topic.
+    async fn conversation_for_thread(
+        &self,
+        connector_id: &ConnectorId,
+        container: &str,
+        thread_id: &str,
+    ) -> StorageResult<Option<ConversationId>>;
     async fn claim_event(&self, key: DedupKey) -> StorageResult<bool>;
     async fn put_message(&self, message: Message) -> StorageResult<()>;
     async fn message(&self, message_id: MessageId) -> StorageResult<Option<Message>>;
@@ -70,11 +117,15 @@ pub trait Storage: Send + Sync + 'static {
         waiting_for: Option<MessageId>,
     ) -> StorageResult<StoredDispatch>;
     async fn pending_dispatches(&self) -> StorageResult<Vec<StoredDispatch>>;
+    async fn dispatch(&self, dispatch_id: DispatchId) -> StorageResult<Option<StoredDispatch>>;
     async fn acknowledge_dispatch(
         &self,
         dispatch_id: DispatchId,
         platform_message_id: String,
     ) -> StorageResult<Vec<StoredDispatch>>;
+    /// Mark a dispatch as permanently failed so it leaves the pending queue and
+    /// is never redelivered. Unlike acknowledgement, it records no sent copy.
+    async fn fail_dispatch(&self, dispatch_id: DispatchId, reason: String) -> StorageResult<()>;
 }
 
 #[derive(Default)]
@@ -86,6 +137,9 @@ pub struct InMemoryStorage {
 struct State {
     endpoints: HashMap<EndpointId, Endpoint>,
     groups: HashMap<GroupId, ReplicationGroup>,
+    aliases: HashMap<(ConnectorId, PlatformAddress), Alias>,
+    conversations: HashMap<ConversationId, Conversation>,
+    thread_mappings: HashMap<(ConversationId, ConnectorId), ThreadMapping>,
     messages: HashMap<MessageId, Message>,
     copies: HashMap<(MessageId, EndpointId), MessageCopy>,
     copy_ids: HashMap<(EndpointId, String), MessageId>,
@@ -136,6 +190,147 @@ impl Storage for InMemoryStorage {
             .get(&group_id)
             .cloned()
             .ok_or(StorageError::GroupNotFound(group_id))
+    }
+
+    async fn group_for_endpoint(
+        &self,
+        endpoint_id: EndpointId,
+    ) -> StorageResult<Option<GroupId>> {
+        Ok(self
+            .state
+            .read()
+            .await
+            .groups
+            .values()
+            .find(|group| group.endpoints.contains(&endpoint_id))
+            .map(|group| group.id))
+    }
+
+    async fn put_alias(&self, alias: Alias) -> StorageResult<()> {
+        let mut state = self.state.write().await;
+        if alias.is_canonical {
+            for existing in state.aliases.values_mut() {
+                if existing.endpoint_id == alias.endpoint_id {
+                    existing.is_canonical = false;
+                }
+            }
+        }
+        state
+            .aliases
+            .insert((alias.connector_id.clone(), alias.address.clone()), alias);
+        Ok(())
+    }
+
+    async fn resolve_endpoint(
+        &self,
+        connector_id: &ConnectorId,
+        address: &PlatformAddress,
+    ) -> StorageResult<Option<EndpointId>> {
+        Ok(self
+            .state
+            .read()
+            .await
+            .aliases
+            .get(&(connector_id.clone(), address.clone()))
+            .map(|alias| alias.endpoint_id))
+    }
+
+    async fn put_conversation(&self, conversation: Conversation) -> StorageResult<()> {
+        self.state
+            .write()
+            .await
+            .conversations
+            .insert(conversation.id, conversation);
+        Ok(())
+    }
+
+    async fn conversation(
+        &self,
+        conversation_id: ConversationId,
+    ) -> StorageResult<Option<Conversation>> {
+        Ok(self
+            .state
+            .read()
+            .await
+            .conversations
+            .get(&conversation_id)
+            .cloned())
+    }
+
+    async fn conversation_for_source(
+        &self,
+        rule_id: &wuphf_model::RuleId,
+        connector_id: &ConnectorId,
+        address: &PlatformAddress,
+    ) -> StorageResult<Option<Conversation>> {
+        Ok(self
+            .state
+            .read()
+            .await
+            .conversations
+            .values()
+            .find(|conversation| {
+                conversation.rule_id == *rule_id
+                    && conversation.source_connector == *connector_id
+                    && conversation.source_address == *address
+            })
+            .cloned())
+    }
+
+    async fn conversation_for_group(
+        &self,
+        group_id: GroupId,
+    ) -> StorageResult<Option<Conversation>> {
+        Ok(self
+            .state
+            .read()
+            .await
+            .conversations
+            .values()
+            .find(|conversation| conversation.group_id == group_id)
+            .cloned())
+    }
+
+    async fn put_thread_mapping(&self, mapping: ThreadMapping) -> StorageResult<()> {
+        self.state.write().await.thread_mappings.insert(
+            (mapping.conversation_id, mapping.connector_id.clone()),
+            mapping,
+        );
+        Ok(())
+    }
+
+    async fn thread_for_conversation(
+        &self,
+        conversation_id: ConversationId,
+        connector_id: &ConnectorId,
+    ) -> StorageResult<Option<String>> {
+        Ok(self
+            .state
+            .read()
+            .await
+            .thread_mappings
+            .get(&(conversation_id, connector_id.clone()))
+            .map(|mapping| mapping.thread_id.clone()))
+    }
+
+    async fn conversation_for_thread(
+        &self,
+        connector_id: &ConnectorId,
+        container: &str,
+        thread_id: &str,
+    ) -> StorageResult<Option<ConversationId>> {
+        Ok(self
+            .state
+            .read()
+            .await
+            .thread_mappings
+            .values()
+            .find(|mapping| {
+                mapping.connector_id == *connector_id
+                    && mapping.container == container
+                    && mapping.thread_id == thread_id
+            })
+            .map(|mapping| mapping.conversation_id))
     }
 
     async fn claim_event(&self, key: DedupKey) -> StorageResult<bool> {
@@ -293,6 +488,10 @@ impl Storage for InMemoryStorage {
             .collect())
     }
 
+    async fn dispatch(&self, dispatch_id: DispatchId) -> StorageResult<Option<StoredDispatch>> {
+        Ok(self.state.read().await.dispatches.get(&dispatch_id).cloned())
+    }
+
     async fn acknowledge_dispatch(
         &self,
         dispatch_id: DispatchId,
@@ -353,6 +552,16 @@ impl Storage for InMemoryStorage {
             released.push(candidate.clone());
         }
         Ok(released)
+    }
+
+    async fn fail_dispatch(&self, dispatch_id: DispatchId, reason: String) -> StorageResult<()> {
+        let mut state = self.state.write().await;
+        let dispatch = state
+            .dispatches
+            .get_mut(&dispatch_id)
+            .ok_or(StorageError::DispatchNotFound(dispatch_id))?;
+        dispatch.state = DispatchState::Failed { reason };
+        Ok(())
     }
 }
 
@@ -421,6 +630,181 @@ impl Storage for SqliteStorage {
         get_json(&self.pool, "replication_groups", "id", group_id.to_string())
             .await?
             .ok_or(StorageError::GroupNotFound(group_id))
+    }
+
+    async fn group_for_endpoint(
+        &self,
+        endpoint_id: EndpointId,
+    ) -> StorageResult<Option<GroupId>> {
+        let needle = endpoint_id.to_string();
+        let rows = sqlx::query("SELECT payload FROM replication_groups")
+            .fetch_all(&self.pool)
+            .await?;
+        for row in rows {
+            let group: ReplicationGroup = serde_json::from_str(row.get("payload"))?;
+            if group.endpoints.iter().any(|id| id.to_string() == needle) {
+                return Ok(Some(group.id));
+            }
+        }
+        Ok(None)
+    }
+
+    async fn put_alias(&self, alias: Alias) -> StorageResult<()> {
+        let mut transaction = self.pool.begin().await?;
+        if alias.is_canonical {
+            sqlx::query("UPDATE aliases SET is_canonical = 0 WHERE endpoint_id = ?")
+                .bind(alias.endpoint_id.to_string())
+                .execute(&mut *transaction)
+                .await?;
+        }
+        sqlx::query(
+            "INSERT INTO aliases (connector_id, chat_id, thread_key, endpoint_id, is_canonical)
+             VALUES (?, ?, ?, ?, ?)
+             ON CONFLICT(connector_id, chat_id, thread_key) DO UPDATE SET
+               endpoint_id = excluded.endpoint_id,
+               is_canonical = excluded.is_canonical",
+        )
+        .bind(alias.connector_id.to_string())
+        .bind(&alias.address.chat_id)
+        .bind(thread_key(&alias.address))
+        .bind(alias.endpoint_id.to_string())
+        .bind(i64::from(alias.is_canonical))
+        .execute(&mut *transaction)
+        .await?;
+        transaction.commit().await?;
+        Ok(())
+    }
+
+    async fn resolve_endpoint(
+        &self,
+        connector_id: &ConnectorId,
+        address: &PlatformAddress,
+    ) -> StorageResult<Option<EndpointId>> {
+        let row = sqlx::query(
+            "SELECT endpoint_id FROM aliases WHERE connector_id = ? AND chat_id = ? AND thread_key = ?",
+        )
+        .bind(connector_id.to_string())
+        .bind(&address.chat_id)
+        .bind(thread_key(address))
+        .fetch_optional(&self.pool)
+        .await?;
+        row.map(|row| parse_endpoint_id(row.get("endpoint_id")))
+            .transpose()
+    }
+
+    async fn put_conversation(&self, conversation: Conversation) -> StorageResult<()> {
+        sqlx::query(
+            "INSERT INTO conversations
+               (id, rule_id, group_id, source_connector, source_chat_id, source_thread_key, payload)
+             VALUES (?, ?, ?, ?, ?, ?, ?)
+             ON CONFLICT(id) DO UPDATE SET payload = excluded.payload",
+        )
+        .bind(conversation.id.to_string())
+        .bind(conversation.rule_id.to_string())
+        .bind(conversation.group_id.to_string())
+        .bind(conversation.source_connector.to_string())
+        .bind(&conversation.source_address.chat_id)
+        .bind(thread_key(&conversation.source_address))
+        .bind(serde_json::to_string(&conversation)?)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    async fn conversation(
+        &self,
+        conversation_id: ConversationId,
+    ) -> StorageResult<Option<Conversation>> {
+        get_json(&self.pool, "conversations", "id", conversation_id.to_string()).await
+    }
+
+    async fn conversation_for_source(
+        &self,
+        rule_id: &wuphf_model::RuleId,
+        connector_id: &ConnectorId,
+        address: &PlatformAddress,
+    ) -> StorageResult<Option<Conversation>> {
+        let row = sqlx::query(
+            "SELECT payload FROM conversations
+             WHERE rule_id = ? AND source_connector = ? AND source_chat_id = ? AND source_thread_key = ?",
+        )
+        .bind(rule_id.to_string())
+        .bind(connector_id.to_string())
+        .bind(&address.chat_id)
+        .bind(thread_key(address))
+        .fetch_optional(&self.pool)
+        .await?;
+        row.map(|row| serde_json::from_str(row.get("payload")))
+            .transpose()
+            .map_err(Into::into)
+    }
+
+    async fn conversation_for_group(
+        &self,
+        group_id: GroupId,
+    ) -> StorageResult<Option<Conversation>> {
+        let row = sqlx::query("SELECT payload FROM conversations WHERE group_id = ?")
+            .bind(group_id.to_string())
+            .fetch_optional(&self.pool)
+            .await?;
+        row.map(|row| serde_json::from_str(row.get("payload")))
+            .transpose()
+            .map_err(Into::into)
+    }
+
+    async fn put_thread_mapping(&self, mapping: ThreadMapping) -> StorageResult<()> {
+        sqlx::query(
+            "INSERT INTO thread_mappings (conversation_id, connector_id, container, thread_id)
+             VALUES (?, ?, ?, ?)
+             ON CONFLICT(conversation_id, connector_id) DO UPDATE SET
+               container = excluded.container,
+               thread_id = excluded.thread_id",
+        )
+        .bind(mapping.conversation_id.to_string())
+        .bind(mapping.connector_id.to_string())
+        .bind(&mapping.container)
+        .bind(&mapping.thread_id)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    async fn thread_for_conversation(
+        &self,
+        conversation_id: ConversationId,
+        connector_id: &ConnectorId,
+    ) -> StorageResult<Option<String>> {
+        let row = sqlx::query(
+            "SELECT thread_id FROM thread_mappings WHERE conversation_id = ? AND connector_id = ?",
+        )
+        .bind(conversation_id.to_string())
+        .bind(connector_id.to_string())
+        .fetch_optional(&self.pool)
+        .await?;
+        Ok(row.map(|row| row.get::<String, _>("thread_id")))
+    }
+
+    async fn conversation_for_thread(
+        &self,
+        connector_id: &ConnectorId,
+        container: &str,
+        thread_id: &str,
+    ) -> StorageResult<Option<ConversationId>> {
+        let row = sqlx::query(
+            "SELECT conversation_id FROM thread_mappings
+             WHERE connector_id = ? AND container = ? AND thread_id = ?",
+        )
+        .bind(connector_id.to_string())
+        .bind(container)
+        .bind(thread_id)
+        .fetch_optional(&self.pool)
+        .await?;
+        row.map(|row| {
+            uuid::Uuid::parse_str(row.get("conversation_id"))
+                .map(ConversationId)
+                .map_err(|err| StorageError::Identifier(err.to_string()))
+        })
+        .transpose()
     }
 
     async fn claim_event(&self, key: DedupKey) -> StorageResult<bool> {
@@ -607,6 +991,10 @@ impl Storage for SqliteStorage {
             .collect()
     }
 
+    async fn dispatch(&self, dispatch_id: DispatchId) -> StorageResult<Option<StoredDispatch>> {
+        get_json(&self.pool, "dispatches", "id", dispatch_id.to_string()).await
+    }
+
     async fn acknowledge_dispatch(
         &self,
         dispatch_id: DispatchId,
@@ -689,6 +1077,34 @@ impl Storage for SqliteStorage {
         transaction.commit().await?;
         Ok(released)
     }
+
+    async fn fail_dispatch(&self, dispatch_id: DispatchId, reason: String) -> StorageResult<()> {
+        let row = sqlx::query("SELECT payload FROM dispatches WHERE id = ?")
+            .bind(dispatch_id.to_string())
+            .fetch_optional(&self.pool)
+            .await?
+            .ok_or(StorageError::DispatchNotFound(dispatch_id))?;
+        let mut dispatch: StoredDispatch = serde_json::from_str(row.get("payload"))?;
+        dispatch.state = DispatchState::Failed { reason };
+        sqlx::query("UPDATE dispatches SET waiting_for = ?, state = ?, payload = ? WHERE id = ?")
+            .bind(None::<String>)
+            .bind(state_name(&dispatch.state))
+            .bind(serde_json::to_string(&dispatch)?)
+            .bind(dispatch.id.to_string())
+            .execute(&self.pool)
+            .await?;
+        Ok(())
+    }
+}
+
+fn thread_key(address: &PlatformAddress) -> String {
+    address.thread_id.clone().unwrap_or_default()
+}
+
+fn parse_endpoint_id(value: &str) -> StorageResult<EndpointId> {
+    uuid::Uuid::parse_str(value)
+        .map(EndpointId)
+        .map_err(|err| StorageError::Identifier(err.to_string()))
 }
 
 fn dispatch_state(waiting_for: Option<MessageId>) -> DispatchState {
@@ -792,6 +1208,7 @@ fn state_name(state: &DispatchState) -> &'static str {
         DispatchState::Pending => "pending",
         DispatchState::Blocked { .. } => "blocked",
         DispatchState::Acknowledged { .. } => "acknowledged",
+        DispatchState::Failed { .. } => "failed",
     }
 }
 
@@ -812,6 +1229,7 @@ mod tests {
         storage
             .put_endpoint(Endpoint {
                 id: endpoint_id,
+                connector_id: ConnectorId("telegram".into()),
                 platform: Platform::Telegram,
                 chat_id: "-100".into(),
                 thread_id: Some("7".into()),
@@ -947,6 +1365,11 @@ mod tests {
     fn command(message_id: MessageId, endpoint_id: EndpointId) -> DispatchCommand {
         DispatchCommand {
             target_endpoint: endpoint_id,
+            target_connector: ConnectorId("telegram".into()),
+            target: wuphf_model::TargetAddress {
+                address: wuphf_model::PlatformAddress::new("-100", Some("7".into())),
+                provision_thread: None,
+            },
             payload: DispatchPayload::MessageCreate {
                 message: message(message_id),
                 reply_context: None,

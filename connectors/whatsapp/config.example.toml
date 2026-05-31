@@ -1,9 +1,13 @@
 core_address = "127.0.0.1:50051"
 connector_id = "whatsapp-main"
 session_database = "file:whatsapp.session.db?_foreign_keys=on"
-endpoints = ["018f1b58-f667-75ba-bbbb-000000000001"]
 
-[[targets]]
-endpoint_id = "018f1b58-f667-75ba-bbbb-000000000001"
-group_id = "018f1b58-f667-75ba-bbbb-000000000003"
-chat_jid = "12345@s.whatsapp.net"
+# WhatsApp has no threads/topics, so leave both capabilities false. The core
+# may only use this connector as a single target or an identity source, never
+# as a threaded mirror.
+supports_threads = false
+supports_topic_create = false
+
+# Routing is owned entirely by the core. Configure which conversations map
+# where through the core's [[rules]] using WhatsApp JIDs such as
+# "12345@s.whatsapp.net" or "12345@g.us" as chat IDs.

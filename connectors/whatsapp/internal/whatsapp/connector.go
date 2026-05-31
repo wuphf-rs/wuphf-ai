@@ -25,10 +25,6 @@ func New(cfg config.File) Connector {
 }
 
 func (c Connector) Run(ctx context.Context) error {
-	targets, err := NewTargetRegistry(c.cfg)
-	if err != nil {
-		return fmt.Errorf("configure WhatsApp targets: %w", err)
-	}
 	container, err := sqlstore.New(ctx, "sqlite3", c.cfg.SessionDatabase, nil)
 	if err != nil {
 		return fmt.Errorf("open WhatsApp session database: %w", err)
@@ -45,7 +41,7 @@ func (c Connector) Run(ctx context.Context) error {
 	}
 	defer media.Close()
 	inputs := make(chan *wuphfpb.ClientFrame, 128)
-	normalizer := NewNormalizer(targets, inputs, NewMediaCodec(media, client))
+	normalizer := NewNormalizer(inputs, NewMediaCodec(media, client), newChatNamer(client))
 	eventErrors := make(chan error, 1)
 	client.AddEventHandler(func(raw any) {
 		message, ok := raw.(*events.Message)
@@ -69,7 +65,7 @@ func (c Connector) Run(ctx context.Context) error {
 	ownJID := *client.Store.ID
 	runResult := make(chan error, 1)
 	go func() {
-		runResult <- coreclient.New(c.cfg).Run(ctx, NewSender(client, targets, media, ownJID), inputs)
+		runResult <- coreclient.New(c.cfg).Run(ctx, NewSender(client, media, ownJID), inputs)
 	}()
 	select {
 	case <-ctx.Done():

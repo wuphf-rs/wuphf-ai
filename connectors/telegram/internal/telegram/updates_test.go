@@ -4,58 +4,42 @@ import (
 	"context"
 	"testing"
 
-	"github.com/akshettrj/wuphf/connectors/telegram/internal/config"
 	"github.com/akshettrj/wuphf/proto/go/connector/v1"
 	"github.com/gotd/td/tg"
 )
 
-func testRegistry(t *testing.T, target config.Target) TargetRegistry {
-	t.Helper()
-	registry, err := NewTargetRegistry(config.File{
-		CoreAddress: "127.0.0.1:50051",
-		ConnectorID: "telegram-main",
-		SessionFile: "./telegram.session.json",
-		Endpoints:   []string{target.EndpointID},
-		Targets:     []config.Target{target},
-	})
-	if err != nil {
-		t.Fatalf("NewTargetRegistry() error = %v", err)
+func topicMessage(id int, topID, replyID int) *tg.Message {
+	header := &tg.MessageReplyHeader{ForumTopic: true}
+	if topID != 0 {
+		header.SetReplyToTopID(topID)
 	}
-	return registry
-}
-
-func TestNormalizeTopicTextAndLogicalReply(t *testing.T) {
-	t.Parallel()
-
-	normalizer := NewNormalizer(testRegistry(t, config.Target{
-		EndpointID:         "endpoint-a",
-		GroupID:            "group-a",
-		Peer:               "example",
-		IncomingPeerType:   "channel",
-		IncomingPeerID:     99,
-		TopicRootMessageID: 12,
-	}), make(chan *wuphfpb.ClientFrame), MediaCodec{})
-	header := &tg.MessageReplyHeader{}
-	header.SetReplyToTopID(12)
-	header.SetReplyToMsgID(21)
+	if replyID != 0 {
+		header.SetReplyToMsgID(replyID)
+	}
 	message := &tg.Message{
-		ID:      42,
+		ID:      id,
 		PeerID:  &tg.PeerChannel{ChannelID: 99},
 		Message: "hello",
 		Date:    7,
 	}
 	message.SetFromID(&tg.PeerUser{UserID: 88})
 	message.SetReplyTo(header)
+	return message
+}
 
-	event, ok, err := normalizer.normalize(context.Background(), message)
+func TestNormalizeEmitsRawAddressTopicAndLogicalReply(t *testing.T) {
+	t.Parallel()
+
+	normalizer := NewNormalizer(NewPeerCache(), make(chan *wuphfpb.ClientFrame), MediaCodec{})
+	event, ok, err := normalizer.normalize(context.Background(), tg.Entities{}, topicMessage(42, 12, 21))
 	if err != nil {
 		t.Fatalf("normalize() error = %v", err)
 	}
 	if !ok {
-		t.Fatal("normalize() ignored configured topic message")
+		t.Fatal("normalize() ignored topic message")
 	}
-	if event.GetOriginEndpointId() != "endpoint-a" || event.GetGroupId() != "group-a" {
-		t.Fatalf("normalize() target = %q/%q", event.GetOriginEndpointId(), event.GetGroupId())
+	if event.GetChatId() != "telegram:channel:99" || event.GetThreadId() != "12" {
+		t.Fatalf("normalize() address = %q/%q", event.GetChatId(), event.GetThreadId())
 	}
 	if event.GetSender() != "telegram:user:88" || event.GetPlatformMessageId() != "42" {
 		t.Fatalf("normalize() identity = %q/%q", event.GetSender(), event.GetPlatformMessageId())
@@ -68,20 +52,8 @@ func TestNormalizeTopicTextAndLogicalReply(t *testing.T) {
 func TestNormalizeTopicRootAnchorIsNotLogicalReply(t *testing.T) {
 	t.Parallel()
 
-	normalizer := NewNormalizer(testRegistry(t, config.Target{
-		EndpointID:         "endpoint-a",
-		GroupID:            "group-a",
-		Peer:               "example",
-		IncomingPeerType:   "channel",
-		IncomingPeerID:     99,
-		TopicRootMessageID: 12,
-	}), make(chan *wuphfpb.ClientFrame), MediaCodec{})
-	header := &tg.MessageReplyHeader{}
-	header.SetReplyToMsgID(12)
-	message := &tg.Message{ID: 42, PeerID: &tg.PeerChannel{ChannelID: 99}, Message: "hello"}
-	message.SetReplyTo(header)
-
-	event, ok, err := normalizer.normalize(context.Background(), message)
+	normalizer := NewNormalizer(NewPeerCache(), make(chan *wuphfpb.ClientFrame), MediaCodec{})
+	event, ok, err := normalizer.normalize(context.Background(), tg.Entities{}, topicMessage(42, 0, 12))
 	if err != nil {
 		t.Fatalf("normalize() error = %v", err)
 	}
@@ -91,29 +63,38 @@ func TestNormalizeTopicRootAnchorIsNotLogicalReply(t *testing.T) {
 	if event.ReplyToPlatformMessageId != nil {
 		t.Fatalf("normalize() exposed topic root as logical reply: %q", event.GetReplyToPlatformMessageId())
 	}
+	if event.GetThreadId() != "12" {
+		t.Fatalf("normalize() thread = %q, want 12", event.GetThreadId())
+	}
 }
 
-func TestNormalizeSkipsUnsupportedMediaAndUnconfiguredPeer(t *testing.T) {
+func TestNormalizeSetsChatTitleFromEntities(t *testing.T) {
 	t.Parallel()
 
-	normalizer := NewNormalizer(testRegistry(t, config.Target{
-		EndpointID:       "endpoint-a",
-		GroupID:          "group-a",
-		Peer:             "example",
-		IncomingPeerType: "channel",
-		IncomingPeerID:   99,
-	}), make(chan *wuphfpb.ClientFrame), MediaCodec{})
+	normalizer := NewNormalizer(NewPeerCache(), make(chan *wuphfpb.ClientFrame), MediaCodec{})
+	entities := tg.Entities{Channels: map[int64]*tg.Channel{99: {ID: 99, Title: "Project Chat"}}}
+	message := &tg.Message{ID: 1, PeerID: &tg.PeerChannel{ChannelID: 99}, Message: "hi"}
+	event, ok, err := normalizer.normalize(context.Background(), entities, message)
+	if err != nil || !ok {
+		t.Fatalf("normalize() ok=%v err=%v", ok, err)
+	}
+	if event.GetChatTitle() != "Project Chat" {
+		t.Fatalf("normalize() chat title = %q", event.GetChatTitle())
+	}
+}
+
+func TestNormalizeSkipsUnsupportedMediaAndOutgoing(t *testing.T) {
+	t.Parallel()
+
+	normalizer := NewNormalizer(NewPeerCache(), make(chan *wuphfpb.ClientFrame), MediaCodec{})
 	media := &tg.Message{ID: 1, PeerID: &tg.PeerChannel{ChannelID: 99}, Message: "caption"}
 	media.SetMedia(&tg.MessageMediaEmpty{})
-	if _, ok, err := normalizer.normalize(context.Background(), media); err != nil || ok {
+	if _, ok, err := normalizer.normalize(context.Background(), tg.Entities{}, media); err != nil || ok {
 		t.Fatal("normalize() accepted unsupported media")
 	}
-	if _, ok, err := normalizer.normalize(context.Background(), &tg.Message{
-		ID:      2,
-		PeerID:  &tg.PeerChannel{ChannelID: 100},
-		Message: "other",
-	}); err != nil || ok {
-		t.Fatal("normalize() accepted unconfigured peer")
+	outgoing := &tg.Message{ID: 2, PeerID: &tg.PeerChannel{ChannelID: 99}, Message: "mine", Out: true}
+	if _, ok, err := normalizer.normalize(context.Background(), tg.Entities{}, outgoing); err != nil || ok {
+		t.Fatal("normalize() accepted outgoing message")
 	}
 }
 
@@ -121,22 +102,13 @@ func TestHandleQueuesMessageCreateFrame(t *testing.T) {
 	t.Parallel()
 
 	inputs := make(chan *wuphfpb.ClientFrame, 1)
-	normalizer := NewNormalizer(testRegistry(t, config.Target{
-		EndpointID:       "endpoint-a",
-		GroupID:          "group-a",
-		Peer:             "example",
-		IncomingPeerType: "channel",
-		IncomingPeerID:   99,
-	}), inputs, MediaCodec{})
-	if err := normalizer.handle(context.Background(), &tg.Message{
-		ID:      42,
-		PeerID:  &tg.PeerChannel{ChannelID: 99},
-		Message: "hello",
-	}); err != nil {
+	normalizer := NewNormalizer(NewPeerCache(), inputs, MediaCodec{})
+	message := &tg.Message{ID: 42, PeerID: &tg.PeerChannel{ChannelID: 99}, Message: "hello"}
+	if err := normalizer.handle(context.Background(), tg.Entities{}, message); err != nil {
 		t.Fatalf("handle() error = %v", err)
 	}
 	frame := <-inputs
-	if frame.GetMessageCreate().GetPlatformMessageId() != "42" {
+	if frame.GetMessageCreate().GetChatId() != "telegram:channel:99" {
 		t.Fatalf("handle() frame = %#v", frame)
 	}
 }

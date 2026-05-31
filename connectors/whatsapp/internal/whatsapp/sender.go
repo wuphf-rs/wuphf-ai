@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 
+	coreclient "github.com/akshettrj/wuphf/connectors/whatsapp/internal/core"
 	wuphfpb "github.com/akshettrj/wuphf/proto/go/connector/v1"
 	"go.mau.fi/whatsmeow"
 	waE2E "go.mau.fi/whatsmeow/proto/waE2E"
@@ -18,27 +19,29 @@ type SendClient interface {
 }
 
 type Sender struct {
-	client  SendClient
-	targets TargetRegistry
-	media   MediaBroker
-	ownJID  types.JID
+	client SendClient
+	media  MediaBroker
+	ownJID types.JID
 }
 
-func NewSender(client SendClient, targets TargetRegistry, media MediaBroker, ownJID types.JID) Sender {
-	return Sender{client: client, targets: targets, media: media, ownJID: ownJID}
+func NewSender(client SendClient, media MediaBroker, ownJID types.JID) Sender {
+	return Sender{client: client, media: media, ownJID: ownJID}
 }
 
-func (s Sender) SendMessage(ctx context.Context, dispatch *wuphfpb.MessageCreateDispatch) (string, error) {
-	target, ok := s.targets.Outbound(dispatch.TargetEndpointId)
-	if !ok {
-		return "", fmt.Errorf("no WhatsApp target for endpoint %q", dispatch.TargetEndpointId)
+// SendMessage delivers a dispatch to the target WhatsApp chat. WhatsApp has no
+// threads, so the dispatch never carries a thread target and the returned
+// threadID is always empty.
+func (s Sender) SendMessage(ctx context.Context, dispatch *wuphfpb.MessageCreateDispatch) (string, string, error) {
+	chat, err := types.ParseJID(dispatch.GetTargetChatId())
+	if err != nil {
+		return "", "", coreclient.Permanent(fmt.Errorf("parse WhatsApp target chat %q: %w", dispatch.GetTargetChatId(), err))
 	}
 	if len(dispatch.Attachments) > 1 {
-		return "", errors.New("multiple attachment dispatch is not implemented")
+		return "", "", coreclient.Permanent(errors.New("multiple attachment dispatch is not implemented"))
 	}
 	contextInfo, err := s.quotedContext(dispatch)
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
 	var message *waE2E.Message
 	if len(dispatch.Attachments) == 0 {
@@ -46,15 +49,15 @@ func (s Sender) SendMessage(ctx context.Context, dispatch *wuphfpb.MessageCreate
 	} else {
 		message, err = s.attachmentMessage(ctx, dispatch.Attachments[0], dispatch.GetText())
 		if err != nil {
-			return "", err
+			return "", "", err
 		}
 	}
 	message = withContext(message, contextInfo)
-	response, err := s.client.SendMessage(ctx, target.Chat, message)
+	response, err := s.client.SendMessage(ctx, chat, message)
 	if err != nil {
-		return "", fmt.Errorf("send WhatsApp message: %w", err)
+		return "", "", fmt.Errorf("send WhatsApp message: %w", err)
 	}
-	return string(response.ID), nil
+	return string(response.ID), "", nil
 }
 
 // quotedContext builds the WhatsApp quote metadata for a reply dispatch. The
@@ -65,12 +68,12 @@ func (s Sender) quotedContext(dispatch *wuphfpb.MessageCreateDispatch) (*waE2E.C
 	reply := dispatch.GetReplyContext()
 	if reply == nil {
 		if dispatch.GetReplyToPlatformMessageId() != "" {
-			return nil, errors.New("outbound WhatsApp reply requires quoted-message context")
+			return nil, coreclient.Permanent(errors.New("outbound WhatsApp reply requires quoted-message context"))
 		}
 		return nil, nil
 	}
 	if s.ownJID.IsEmpty() {
-		return nil, errors.New("outbound WhatsApp reply requires a paired account JID")
+		return nil, coreclient.Permanent(errors.New("outbound WhatsApp reply requires a paired account JID"))
 	}
 	return &waE2E.ContextInfo{
 		StanzaID:      proto.String(reply.GetPlatformMessageId()),
@@ -231,7 +234,7 @@ func (s Sender) attachmentMessage(
 			FileLength:    &uploaded.FileLength,
 		}}, nil
 	default:
-		return nil, fmt.Errorf("unsupported outbound attachment kind %s", attachment.Kind)
+		return nil, coreclient.Permanent(fmt.Errorf("unsupported outbound attachment kind %s", attachment.Kind))
 	}
 }
 

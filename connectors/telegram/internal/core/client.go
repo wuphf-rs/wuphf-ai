@@ -9,9 +9,42 @@ import (
 
 	"github.com/akshettrj/wuphf/connectors/telegram/internal/config"
 	"github.com/akshettrj/wuphf/proto/go/connector/v1"
+	"github.com/gotd/td/tgerr"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 )
+
+// PermanentError marks a send failure that can never succeed on retry (e.g. an
+// invalid target). The session loop reports it to the core for dead-lettering
+// instead of dropping the session, which would only redeliver the same dispatch.
+type PermanentError struct{ Err error }
+
+func (e PermanentError) Error() string { return e.Err.Error() }
+func (e PermanentError) Unwrap() error { return e.Err }
+
+// Permanent wraps err so the session loop dead-letters the dispatch.
+func Permanent(err error) error {
+	if err == nil {
+		return nil
+	}
+	return PermanentError{Err: err}
+}
+
+// isPermanent reports whether a send failure should dead-letter the dispatch.
+// A Telegram RPC 400 means the request itself is invalid (a bad peer, an empty
+// message); retrying or redelivering cannot fix it. FLOOD_WAIT (420) and server
+// errors (5xx) are transient and left to the reconnect-and-redeliver path.
+func isPermanent(err error) bool {
+	var marked PermanentError
+	if errors.As(err, &marked) {
+		return true
+	}
+	var rpcErr *tgerr.Error
+	if errors.As(err, &rpcErr) {
+		return rpcErr.Code == 400
+	}
+	return false
+}
 
 const (
 	initialBackoff  = time.Second
@@ -21,7 +54,10 @@ const (
 )
 
 type Sender interface {
-	SendMessage(context.Context, *wuphfpb.MessageCreateDispatch) (string, error)
+	// SendMessage delivers a dispatch and returns the resulting platform message
+	// id. threadID is non-empty only when the send provisioned a new thread, so
+	// the core can persist the conversation-to-thread mapping.
+	SendMessage(context.Context, *wuphfpb.MessageCreateDispatch) (messageID string, threadID string, err error)
 }
 
 type Client struct {
@@ -75,7 +111,10 @@ func (c Client) runSession(
 		Body: &wuphfpb.ClientFrame_Registration{Registration: &wuphfpb.Registration{
 			ConnectorId: c.cfg.ConnectorID,
 			Platform:    wuphfpb.Platform_PLATFORM_TELEGRAM,
-			EndpointIds: c.cfg.Endpoints,
+			Capabilities: &wuphfpb.Capabilities{
+				SupportsThreads:     c.cfg.SupportsThreads,
+				SupportsTopicCreate: c.cfg.SupportsTopicCreate,
+			},
 		}},
 	}); err != nil {
 		return fmt.Errorf("register connector: %w", err)
@@ -112,15 +151,33 @@ func (c Client) runSession(
 		case frame := <-frames:
 			switch body := frame.Body.(type) {
 			case *wuphfpb.ServerFrame_MessageCreate:
-				messageID, err := sendWithRetry(ctx, sender, body.MessageCreate)
+				messageID, threadID, err := sendWithRetry(ctx, sender, body.MessageCreate)
 				if err != nil {
-					return fmt.Errorf("send dispatch %s: %w", body.MessageCreate.DispatchId, err)
+					if !isPermanent(err) {
+						return fmt.Errorf("send dispatch %s: %w", body.MessageCreate.DispatchId, err)
+					}
+					// A permanent failure cannot be retried; report it so the core
+					// dead-letters the dispatch and the session keeps serving others.
+					log.Printf("dispatch %s permanently failed, dead-lettering: %v", body.MessageCreate.DispatchId, err)
+					if err := stream.Send(&wuphfpb.ClientFrame{
+						Body: &wuphfpb.ClientFrame_DispatchFailed{DispatchFailed: &wuphfpb.DispatchFailed{
+							DispatchId: body.MessageCreate.DispatchId,
+							Reason:     err.Error(),
+						}},
+					}); err != nil {
+						return fmt.Errorf("report failed dispatch %s: %w", body.MessageCreate.DispatchId, err)
+					}
+					continue
+				}
+				acknowledgement := &wuphfpb.Acknowledgement{
+					DispatchId:        body.MessageCreate.DispatchId,
+					PlatformMessageId: messageID,
+				}
+				if threadID != "" {
+					acknowledgement.ThreadId = &threadID
 				}
 				if err := stream.Send(&wuphfpb.ClientFrame{
-					Body: &wuphfpb.ClientFrame_Acknowledgement{Acknowledgement: &wuphfpb.Acknowledgement{
-						DispatchId:        body.MessageCreate.DispatchId,
-						PlatformMessageId: messageID,
-					}},
+					Body: &wuphfpb.ClientFrame_Acknowledgement{Acknowledgement: acknowledgement},
 				}); err != nil {
 					return fmt.Errorf("acknowledge dispatch %s: %w", body.MessageCreate.DispatchId, err)
 				}
@@ -136,22 +193,25 @@ func (c Client) runSession(
 // sendWithRetry retries a transient dispatch send a bounded number of times
 // before surfacing the failure to the session loop, which then drops the
 // session so the core can redeliver the still-unacknowledged dispatch.
-func sendWithRetry(ctx context.Context, sender Sender, dispatch *wuphfpb.MessageCreateDispatch) (string, error) {
+func sendWithRetry(ctx context.Context, sender Sender, dispatch *wuphfpb.MessageCreateDispatch) (string, string, error) {
 	var lastErr error
 	for attempt := 0; attempt < maxSendAttempts; attempt++ {
 		if attempt > 0 {
 			select {
 			case <-ctx.Done():
-				return "", ctx.Err()
+				return "", "", ctx.Err()
 			case <-time.After(sendRetryDelay):
 			}
 		}
-		messageID, err := sender.SendMessage(ctx, dispatch)
+		messageID, threadID, err := sender.SendMessage(ctx, dispatch)
 		if err == nil {
-			return messageID, nil
+			return messageID, threadID, nil
 		}
 		lastErr = err
 		log.Printf("dispatch %s send attempt %d failed: %v", dispatch.DispatchId, attempt+1, err)
+		if isPermanent(err) {
+			return "", "", err
+		}
 	}
-	return "", lastErr
+	return "", "", lastErr
 }

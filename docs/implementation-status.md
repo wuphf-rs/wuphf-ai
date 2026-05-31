@@ -5,8 +5,36 @@ This document records current workspace changes and next steps.
 ## Current State
 
 The repository now contains a Rust core runtime plus Go Telegram and WhatsApp
-connector work. The `ReplyContext` refactor is complete and the full workspace
-passes format, lint, test, and `nix flake check`.
+connector work. Routing has moved from static endpoint/group configuration to
+rule-based dynamic routing (`dynamic-routing-design.md`): the core resolves raw
+platform addresses to endpoints through an alias table, lazily mints
+conversations/groups, and provisions mirror threads on demand. Connectors are
+now raw pipes that own no mapping. The Rust workspace and both Go connectors
+build and pass their unit tests.
+
+## Dynamic Routing Migration
+
+- Added `Rule`/`RuleSide`/`SideKind` (`single`/`source`/`mirror`) model with
+  explicit include/exclude ID filters; rules replace `[[endpoints]]` and
+  `[[groups]]`.
+- Added `Alias`, `Conversation`, and `ThreadMapping` model types plus SQLite
+  tables and lazy resolution, so a raw `SourceAddress` resolves (or mints) an
+  endpoint/conversation/group, and mirror threads are recorded once and reused.
+- Added `ConnectorCapabilities` (`supports_threads`, `supports_topic_create`);
+  a `mirror` side requires both.
+- Added identity-migration handling: a new platform address links to an
+  existing endpoint and becomes the canonical alias, keeping both addresses
+  resolvable (drives WhatsApp phone-to-LID migration).
+- Reworked the wire contract to raw addresses: inbound `MessageCreateEvent`
+  carries `chat_id`/`thread_id`/`chat_title`; outbound `MessageCreateDispatch`
+  carries `target_chat_id`/`target_thread_id`/`provision_thread`; ack carries an
+  optional provisioned `thread_id`; added the `IdentityMigrated` client frame.
+- CLI config replaced with `[[connectors]]` (id, platform, capabilities) and
+  `[[rules]]` (`[[rules.sides]]` with `kind`); `config/example.toml` updated.
+- Both connectors rewritten as raw pipes: Telegram emits typed chat IDs
+  (`telegram:channel|chat|user:N`) with an access-hash peer cache and
+  provisions forum topics on demand; WhatsApp emits JID chat IDs and reports
+  phone-to-LID migrations. Connector configs/READMEs updated.
 
 ## Core Runtime Changes
 
@@ -80,8 +108,9 @@ passes format, lint, test, and `nix flake check`.
 
 - Added Go Telegram connector using `gotd/td`.
 - Added Telegram config loader and validation.
-- Added target registry for endpoint to Telegram peer/topic mapping.
-- Added exact incoming peer matching.
+- Added typed chat IDs and an access-hash peer cache populated from update
+  entities (no preconfigured peer mapping).
+- Added on-demand forum topic provisioning for threaded mirrors.
 - Added topic/thread support via Telegram topic root message ID.
 - Added inbound text normalization.
 - Added inbound image/file media normalization.
@@ -98,9 +127,9 @@ passes format, lint, test, and `nix flake check`.
 - Added shared connector input stream for future event types.
 - Added media broker client for upload/download.
 - Added tests for:
-  - config ambiguity
-  - target registry
-  - inbound normalization
+  - config validation (required fields, topic-create needs threads)
+  - typed peer formatting and access-hash peer cache resolution
+  - inbound normalization (raw address, topic thread, logical reply, title)
   - media metadata upload path
   - sent message ID extraction
 
@@ -111,7 +140,8 @@ passes format, lint, test, and `nix flake check`.
 - Added terminal QR rendering through `qrterminal`.
 - Added connector-private SQLite session database.
 - Added WhatsApp config loader and validation.
-- Added endpoint to chat JID target registry.
+- Emits/executes messages keyed by raw WhatsApp JID chat IDs (no mapping).
+- Added phone-to-LID identity migration reporting.
 - Added inbound text normalization.
 - Added inbound image/file/video/audio/sticker normalization.
 - Added media upload through core broker.
@@ -128,9 +158,9 @@ passes format, lint, test, and `nix flake check`.
   own-account participant, quoted body). Non-text parents are quoted as a typed
   stub (kind plus caption) so clients render a media reply.
 - Added tests for:
-  - config ambiguity
-  - target registry
-  - inbound text and reply normalization
+  - config validation (required fields, topic-create needs threads)
+  - inbound text and reply normalization with raw JID chat IDs
+  - phone-to-LID identity migration derivation
   - self-message pass-through for core echo decision
   - inbound media upload
   - outbound file dispatch
@@ -170,7 +200,12 @@ rather than the original media preview.
 
 ## Next Steps
 
-1. Live WhatsApp QR/session smoke test, including quoted-reply rendering and
+1. Retitle a provisioned mirror thread when its source conversation is renamed
+   (`RetitleThread` dispatch + chat-metadata-changed event), deferred from the
+   dynamic-routing work.
+2. Live WhatsApp QR/session smoke test, including phone-to-LID migration,
+   quoted-reply rendering, and video/audio/sticker round-trips.
+3. Live Telegram session smoke test, including forum topic provisioning and
    video/audio/sticker round-trips.
-2. Live Telegram session smoke test, including video/audio/sticker round-trips.
-3. Implement remaining normalized operations: edits, deletes, reactions.
+4. Symmetric N-to-N rules (every side both source and mirror).
+5. Implement remaining normalized operations: edits, deletes, reactions.

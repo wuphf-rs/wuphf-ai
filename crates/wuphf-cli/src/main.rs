@@ -1,20 +1,20 @@
 use anyhow::{Context, Result, bail};
 use clap::{Parser, Subcommand};
 use serde::Deserialize;
-use std::{net::SocketAddr, path::PathBuf, sync::Arc, time::Duration};
+use std::{collections::HashMap, net::SocketAddr, path::PathBuf, sync::Arc, time::Duration};
 use tonic::transport::Server;
-use uuid::Uuid;
-use wuphf_core::Core;
+use wuphf_core::{ConnectorInfo, Core, RoutingConfig};
 use wuphf_model::{
-    ConnectorId, ConnectorRegistration, DispatchPayload, Endpoint, EndpointId, EventPayload,
-    GroupId, InboundMessage, NormalizedEvent, Platform, ReplicationGroup,
+    ConnectorCapabilities, ConnectorId, ConnectorRegistration, DispatchPayload, EventPayload,
+    InboundMessage, NormalizedEvent, Platform, PlatformAddress, Rule, RuleId, RuleSide, SideKind,
+    SourceAddress,
 };
 use wuphf_proto::connector::connector_transport_server::ConnectorTransportServer;
 use wuphf_proto::connector::media_transport_server::MediaTransportServer;
 use wuphf_runtime::{
     Runtime, connector::ConnectorHub, grpc::GrpcConnectorService, media::GrpcMediaService,
 };
-use wuphf_storage::{SqliteStorage, Storage};
+use wuphf_storage::SqliteStorage;
 
 #[derive(Parser)]
 #[command(about = "Run the wuphf messaging replication runtime")]
@@ -45,9 +45,10 @@ struct Configuration {
     max_media_bytes: usize,
     #[serde(default = "default_orphan_media_retention_seconds")]
     orphan_media_retention_seconds: u64,
-    endpoints: Vec<EndpointConfiguration>,
-    groups: Vec<GroupConfiguration>,
+    #[serde(default)]
     connectors: Vec<ConnectorConfiguration>,
+    #[serde(default)]
+    rules: Vec<Rule>,
 }
 
 fn default_max_media_bytes() -> usize {
@@ -59,24 +60,13 @@ fn default_orphan_media_retention_seconds() -> u64 {
 }
 
 #[derive(Deserialize)]
-struct EndpointConfiguration {
-    id: Uuid,
-    platform: String,
-    chat_id: String,
-    thread_id: Option<String>,
-}
-
-#[derive(Deserialize)]
-struct GroupConfiguration {
-    id: Uuid,
-    endpoints: Vec<Uuid>,
-}
-
-#[derive(Deserialize)]
 struct ConnectorConfiguration {
     id: String,
     platform: String,
-    endpoints: Vec<Uuid>,
+    #[serde(default)]
+    supports_threads: bool,
+    #[serde(default)]
+    supports_topic_create: bool,
 }
 
 #[tokio::main]
@@ -89,40 +79,58 @@ async fn main() -> Result<()> {
 
 async fn demo(text: String, database_url: &str) -> Result<()> {
     let storage = Arc::new(SqliteStorage::connect(database_url).await?);
-    let whatsapp = EndpointId::new();
-    let telegram = EndpointId::new();
-    let group_id = GroupId::new();
+    let whatsapp = ConnectorId("whatsapp".into());
+    let telegram = ConnectorId("telegram".into());
+    let rules = vec![Rule {
+        id: RuleId("demo".into()),
+        sides: vec![
+            RuleSide {
+                connector: whatsapp.clone(),
+                kind: SideKind::Single {
+                    chat_id: "demo@s.whatsapp.net".into(),
+                    thread_id: None,
+                },
+            },
+            RuleSide {
+                connector: telegram.clone(),
+                kind: SideKind::Single {
+                    chat_id: "-100-demo".into(),
+                    thread_id: Some("topic-1".into()),
+                },
+            },
+        ],
+    }];
+    let connectors = HashMap::from([
+        (
+            whatsapp.clone(),
+            ConnectorInfo {
+                platform: Platform::WhatsApp,
+                capabilities: ConnectorCapabilities::default(),
+            },
+        ),
+        (
+            telegram,
+            ConnectorInfo {
+                platform: Platform::Telegram,
+                capabilities: ConnectorCapabilities {
+                    supports_threads: true,
+                    supports_topic_create: true,
+                },
+            },
+        ),
+    ]);
+    let config = Arc::new(RoutingConfig::new(rules, connectors));
 
-    storage
-        .put_endpoint(Endpoint {
-            id: whatsapp,
-            platform: Platform::WhatsApp,
-            chat_id: "demo@s.whatsapp.net".into(),
-            thread_id: None,
-        })
-        .await?;
-    storage
-        .put_endpoint(Endpoint {
-            id: telegram,
-            platform: Platform::Telegram,
-            chat_id: "-100-demo".into(),
-            thread_id: Some("topic-1".into()),
-        })
-        .await?;
-    storage
-        .put_group(ReplicationGroup {
-            id: group_id,
-            endpoints: vec![whatsapp, telegram],
-        })
-        .await?;
-
-    let (runtime, mut channels) = Runtime::channelled(Arc::new(Core::new(storage)), 8);
+    let (runtime, mut channels) = Runtime::channelled(Arc::new(Core::new(storage, config)), 8);
     let runtime_task = tokio::spawn(runtime.run());
     channels
         .events
         .send(NormalizedEvent {
-            origin_endpoint: whatsapp,
-            group_id,
+            source: SourceAddress {
+                connector_id: whatsapp,
+                address: PlatformAddress::new("demo@s.whatsapp.net", None),
+                chat_title: None,
+            },
             payload: EventPayload::MessageCreate(InboundMessage {
                 platform_message_id: "wa-demo-1".into(),
                 sender: "demo-user".into(),
@@ -141,12 +149,14 @@ async fn demo(text: String, database_url: &str) -> Result<()> {
         .recv()
         .await
         .context("demonstration event produced no dispatch")?;
-    let target_endpoint = dispatch.command.target_endpoint;
+    let target_connector = dispatch.command.target_connector.clone();
+    let target_chat = dispatch.command.target.address.chat_id.clone();
     let DispatchPayload::MessageCreate { message, .. } = dispatch.command.payload;
     println!(
-        "logical message {} dispatched to Telegram endpoint {}: {}",
+        "logical message {} dispatched to {} chat {}: {}",
         message.id,
-        target_endpoint,
+        target_connector,
+        target_chat,
         message.text.as_deref().unwrap_or_default()
     );
 
@@ -162,47 +172,37 @@ async fn serve(path: PathBuf) -> Result<()> {
     let configuration: Configuration =
         toml::from_str(&source).context("failed to parse TOML configuration")?;
     let storage = Arc::new(SqliteStorage::connect(&configuration.database_url).await?);
-    for endpoint in &configuration.endpoints {
-        storage
-            .put_endpoint(Endpoint {
-                id: EndpointId(endpoint.id),
-                platform: platform(&endpoint.platform)?,
-                chat_id: endpoint.chat_id.clone(),
-                thread_id: endpoint.thread_id.clone(),
-            })
-            .await?;
+
+    let mut connector_infos = HashMap::new();
+    let mut allowed = Vec::new();
+    for connector in &configuration.connectors {
+        let id = ConnectorId(connector.id.clone());
+        let platform = platform(&connector.platform)?;
+        let capabilities = ConnectorCapabilities {
+            supports_threads: connector.supports_threads,
+            supports_topic_create: connector.supports_topic_create,
+        };
+        connector_infos.insert(
+            id.clone(),
+            ConnectorInfo {
+                platform: platform.clone(),
+                capabilities,
+            },
+        );
+        allowed.push(ConnectorRegistration {
+            id,
+            platform,
+            capabilities,
+        });
     }
-    for group in &configuration.groups {
-        storage
-            .put_group(ReplicationGroup {
-                id: GroupId(group.id),
-                endpoints: group.endpoints.iter().copied().map(EndpointId).collect(),
-            })
-            .await?;
-    }
-    let allowed = configuration
-        .connectors
-        .iter()
-        .map(|connector| {
-            Ok(ConnectorRegistration {
-                id: ConnectorId(connector.id.clone()),
-                platform: platform(&connector.platform)?,
-                endpoints: connector
-                    .endpoints
-                    .iter()
-                    .copied()
-                    .map(EndpointId)
-                    .collect(),
-            })
-        })
-        .collect::<Result<Vec<_>>>()?;
+    let config = Arc::new(RoutingConfig::new(configuration.rules, connector_infos));
 
     let media_service = GrpcMediaService::new(
         Arc::clone(&storage),
         configuration.max_media_bytes,
         Duration::from_secs(configuration.orphan_media_retention_seconds),
     );
-    let (runtime, channels) = Runtime::channelled(Arc::new(Core::new(storage)), 128);
+    let (runtime, channels) = Runtime::channelled(Arc::new(Core::new(storage, config)), 128);
     let (hub, handle) = ConnectorHub::new(channels, allowed);
     let runtime_task = tokio::spawn(runtime.run());
     let hub_task = tokio::spawn(hub.run());

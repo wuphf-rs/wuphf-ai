@@ -6,9 +6,10 @@ use tokio_stream::{Stream, wrappers::ReceiverStream};
 use tonic::{Request, Response, Status};
 use uuid::Uuid;
 use wuphf_model::{
-    Attachment, AttachmentKind, ConnectorId, ConnectorInput, ConnectorOutput,
-    ConnectorRegistration, DispatchAcknowledgement, DispatchPayload, EndpointId, EventPayload,
-    GroupId, InboundMessage, MediaId, NormalizedEvent, Platform, ReplyContext,
+    Attachment, AttachmentKind, ConnectorCapabilities, ConnectorId, ConnectorInput,
+    ConnectorOutput, ConnectorRegistration, DispatchAcknowledgement, DispatchPayload, EventPayload,
+    InboundMessage, MediaId, NormalizedEvent, Platform, PlatformAddress, ProvisionThread,
+    ReplyContext, SourceAddress,
 };
 use wuphf_proto::connector as pb;
 use wuphf_proto::connector::connector_transport_server::ConnectorTransport;
@@ -44,6 +45,7 @@ impl ConnectorTransport for GrpcConnectorService {
             }
             _ => return Err(Status::invalid_argument("first frame must be registration")),
         };
+        let connector_id = registration.id.clone();
         let mut connection = self
             .hub
             .connect(registration)
@@ -52,7 +54,7 @@ impl ConnectorTransport for GrpcConnectorService {
         let input = connection.input.clone();
         tokio::spawn(async move {
             while let Ok(Some(frame)) = incoming.message().await {
-                let Ok(message) = input_from_proto(frame) else {
+                let Ok(message) = input_from_proto(frame, &connector_id) else {
                     return;
                 };
                 if input.try_send(message).is_err() {
@@ -82,20 +84,31 @@ fn registration_from_proto(
     Ok(ConnectorRegistration {
         id: ConnectorId(required_string(registration.connector_id, "connector_id")?),
         platform: platform_from_proto(registration.platform)?,
-        endpoints: registration
-            .endpoint_ids
-            .into_iter()
-            .map(|id| endpoint_id(&id))
-            .collect::<Result<_, _>>()?,
+        capabilities: registration
+            .capabilities
+            .map(|capabilities| ConnectorCapabilities {
+                supports_threads: capabilities.supports_threads,
+                supports_topic_create: capabilities.supports_topic_create,
+            })
+            .unwrap_or_default(),
     })
 }
 
-fn input_from_proto(frame: pb::ClientFrame) -> Result<ConnectorInput, WireError> {
+fn input_from_proto(
+    frame: pb::ClientFrame,
+    connector_id: &ConnectorId,
+) -> Result<ConnectorInput, WireError> {
     match frame.body {
         Some(pb::client_frame::Body::MessageCreate(event)) => {
             Ok(ConnectorInput::Event(NormalizedEvent {
-                origin_endpoint: endpoint_id(&event.origin_endpoint_id)?,
-                group_id: group_id(&event.group_id)?,
+                source: SourceAddress {
+                    connector_id: connector_id.clone(),
+                    address: PlatformAddress::new(
+                        required_string(event.chat_id, "chat_id")?,
+                        event.thread_id,
+                    ),
+                    chat_title: event.chat_title,
+                },
                 payload: EventPayload::MessageCreate(InboundMessage {
                     platform_message_id: required_string(
                         event.platform_message_id,
@@ -124,7 +137,30 @@ fn input_from_proto(frame: pb::ClientFrame) -> Result<ConnectorInput, WireError>
                     acknowledgement.platform_message_id,
                     "platform_message_id",
                 )?,
+                thread_id: acknowledgement.thread_id,
             }))
+        }
+        Some(pb::client_frame::Body::IdentityMigrated(migration)) => {
+            Ok(ConnectorInput::IdentityMigrated {
+                connector_id: connector_id.clone(),
+                old: PlatformAddress::new(
+                    required_string(migration.old_chat_id, "old_chat_id")?,
+                    migration.old_thread_id,
+                ),
+                new: PlatformAddress::new(
+                    required_string(migration.new_chat_id, "new_chat_id")?,
+                    migration.new_thread_id,
+                ),
+            })
+        }
+        Some(pb::client_frame::Body::DispatchFailed(failure)) => {
+            Ok(ConnectorInput::DispatchFailed {
+                dispatch_id: wuphf_model::DispatchId(parse_uuid(
+                    &failure.dispatch_id,
+                    "dispatch_id",
+                )?),
+                reason: failure.reason,
+            })
         }
         Some(pb::client_frame::Body::Registration(_)) => {
             Err(WireError("registration already completed".into()))
@@ -136,6 +172,7 @@ fn input_from_proto(frame: pb::ClientFrame) -> Result<ConnectorInput, WireError>
 fn output_to_proto(output: ConnectorOutput) -> pb::ServerFrame {
     let body = match output {
         ConnectorOutput::Dispatch(dispatch) => {
+            let target = dispatch.command.target;
             let DispatchPayload::MessageCreate {
                 message,
                 reply_context,
@@ -145,9 +182,9 @@ fn output_to_proto(output: ConnectorOutput) -> pb::ServerFrame {
                 .map(|context| context.platform_message_id.clone());
             pb::server_frame::Body::MessageCreate(Box::new(pb::MessageCreateDispatch {
                 dispatch_id: dispatch.id.to_string(),
-                target_endpoint_id: dispatch.command.target_endpoint.to_string(),
-                logical_message_id: message.id.to_string(),
-                group_id: message.group_id.to_string(),
+                target_chat_id: target.address.chat_id,
+                target_thread_id: target.address.thread_id,
+                provision_thread: target.provision_thread.map(provision_thread_to_proto),
                 sender: message.sender,
                 participant: message.participant,
                 text: message.text,
@@ -156,7 +193,6 @@ fn output_to_proto(output: ConnectorOutput) -> pb::ServerFrame {
                     .into_iter()
                     .map(attachment_to_proto)
                     .collect(),
-                reply_to_logical_message_id: message.reply_to.map(|id| id.to_string()),
                 reply_to_platform_message_id,
                 timestamp_ms: message.timestamp_ms,
                 reply_context: reply_context.map(reply_context_to_proto),
@@ -167,6 +203,13 @@ fn output_to_proto(output: ConnectorOutput) -> pb::ServerFrame {
         }
     };
     pb::ServerFrame { body: Some(body) }
+}
+
+fn provision_thread_to_proto(provision: ProvisionThread) -> pb::ProvisionThread {
+    pb::ProvisionThread {
+        container: provision.container,
+        title: provision.title,
+    }
 }
 
 fn reply_context_to_proto(context: ReplyContext) -> pb::ReplyContext {
@@ -233,14 +276,6 @@ fn platform_from_proto(value: i32) -> Result<Platform, WireError> {
         pb::Platform::Matrix => Ok(Platform::Matrix),
         pb::Platform::Unspecified => Err(WireError("platform required".into())),
     }
-}
-
-fn endpoint_id(value: &str) -> Result<EndpointId, WireError> {
-    Ok(EndpointId(parse_uuid(value, "endpoint_id")?))
-}
-
-fn group_id(value: &str) -> Result<GroupId, WireError> {
-    Ok(GroupId(parse_uuid(value, "group_id")?))
 }
 
 fn parse_uuid(value: &str, name: &str) -> Result<Uuid, WireError> {

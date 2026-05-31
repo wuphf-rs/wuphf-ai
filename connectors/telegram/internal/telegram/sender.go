@@ -4,8 +4,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math/rand"
 	"strconv"
 
+	coreclient "github.com/akshettrj/wuphf/connectors/telegram/internal/core"
 	"github.com/akshettrj/wuphf/proto/go/connector/v1"
 	"github.com/gotd/td/telegram/message"
 	"github.com/gotd/td/telegram/message/styling"
@@ -13,50 +15,86 @@ import (
 )
 
 type Sender struct {
-	sender  *message.Sender
-	targets TargetRegistry
-	media   MediaBroker
+	api    *tg.Client
+	sender *message.Sender
+	peers  *PeerCache
+	media  MediaBroker
 }
 
-func NewSender(api *tg.Client, targets TargetRegistry, media MediaBroker) Sender {
-	return Sender{sender: message.NewSender(api), targets: targets, media: media}
+func NewSender(api *tg.Client, peers *PeerCache, media MediaBroker) Sender {
+	return Sender{api: api, sender: message.NewSender(api), peers: peers, media: media}
 }
 
-func (s Sender) SendMessage(ctx context.Context, dispatch *wuphfpb.MessageCreateDispatch) (string, error) {
-	target, ok := s.targets.Outbound(dispatch.TargetEndpointId)
-	if !ok {
-		return "", fmt.Errorf("no Telegram target for endpoint %q", dispatch.TargetEndpointId)
-	}
+func (s Sender) SendMessage(ctx context.Context, dispatch *wuphfpb.MessageCreateDispatch) (string, string, error) {
 	if len(dispatch.Attachments) > 1 {
-		return "", errors.New("multiple attachment dispatch is not implemented")
+		return "", "", coreclient.Permanent(errors.New("multiple attachment dispatch is not implemented"))
+	}
+	peer, err := s.peers.InputPeer(dispatch.TargetChatId)
+	if err != nil {
+		return "", "", err
 	}
 
-	builder := s.sender.Resolve(target.Peer).CloneBuilder()
+	var provisionedThread string
+	topicRoot := 0
+	if provision := dispatch.GetProvisionThread(); provision != nil {
+		topicRoot, err = s.createTopic(ctx, peer, provision.GetTitle())
+		if err != nil {
+			return "", "", err
+		}
+		provisionedThread = strconv.Itoa(topicRoot)
+	} else if dispatch.TargetThreadId != nil {
+		topicRoot, err = strconv.Atoi(dispatch.GetTargetThreadId())
+		if err != nil {
+			return "", "", coreclient.Permanent(fmt.Errorf("invalid Telegram target thread id %q: %w", dispatch.GetTargetThreadId(), err))
+		}
+	}
+
+	builder := s.sender.To(peer).CloneBuilder()
 	if nativeReplyID := replyTargetMessageID(dispatch); nativeReplyID != "" {
 		replyID, err := strconv.Atoi(nativeReplyID)
 		if err != nil {
-			return "", fmt.Errorf("invalid Telegram reply message ID %q: %w", nativeReplyID, err)
+			return "", "", coreclient.Permanent(fmt.Errorf("invalid Telegram reply message ID %q: %w", nativeReplyID, err))
 		}
-		builder.Reply(replyID)
-	} else if target.TopicRootMessageID != 0 {
-		builder.Reply(target.TopicRootMessageID)
+		builder = builder.Reply(replyID)
+	} else if topicRoot != 0 {
+		builder = builder.Reply(topicRoot)
 	}
 
 	var updates tg.UpdatesClass
-	var err error
 	if len(dispatch.Attachments) == 0 {
 		updates, err = builder.Text(ctx, dispatch.GetText())
 	} else {
 		updates, err = s.sendAttachment(ctx, builder, dispatch.Attachments[0], dispatch.GetText())
 	}
 	if err != nil {
-		return "", fmt.Errorf("send Telegram message: %w", err)
+		return "", "", fmt.Errorf("send Telegram message: %w", err)
 	}
 	messageID, err := sentMessageID(updates)
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
-	return strconv.Itoa(messageID), nil
+	return strconv.Itoa(messageID), provisionedThread, nil
+}
+
+// createTopic creates a forum topic in the container and returns its root
+// message id, which doubles as the topic (thread) id for later sends.
+func (s Sender) createTopic(ctx context.Context, peer tg.InputPeerClass, title string) (int, error) {
+	if title == "" {
+		title = "conversation"
+	}
+	updates, err := s.api.MessagesCreateForumTopic(ctx, &tg.MessagesCreateForumTopicRequest{
+		Peer:     peer,
+		Title:    title,
+		RandomID: rand.Int63(),
+	})
+	if err != nil {
+		return 0, fmt.Errorf("create Telegram forum topic: %w", err)
+	}
+	topicRoot, err := sentMessageID(updates)
+	if err != nil {
+		return 0, fmt.Errorf("resolve created Telegram topic id: %w", err)
+	}
+	return topicRoot, nil
 }
 
 func (s Sender) sendAttachment(
@@ -90,7 +128,7 @@ func (s Sender) sendAttachment(
 	case wuphfpb.Attachment_KIND_FILE:
 		return upload.File(ctx, captionOptions...)
 	default:
-		return nil, fmt.Errorf("unsupported outbound attachment kind %s", attachment.Kind)
+		return nil, coreclient.Permanent(fmt.Errorf("unsupported outbound attachment kind %s", attachment.Kind))
 	}
 }
 

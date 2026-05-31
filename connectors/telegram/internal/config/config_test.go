@@ -2,54 +2,40 @@ package config
 
 import "testing"
 
-func TestValidateTargetMustBelongToConnector(t *testing.T) {
+func TestValidateRequiresCoreConnectorAndSession(t *testing.T) {
 	t.Parallel()
 
-	cfg := File{
-		CoreAddress: "127.0.0.1:50051",
-		ConnectorID: "telegram-main",
-		SessionFile: "./telegram.session.json",
-		Endpoints:   []string{"endpoint-a"},
-		Targets: []Target{{
-			EndpointID:       "endpoint-b",
-			GroupID:          "group-a",
-			Peer:             "example",
-			IncomingPeerType: "channel",
-			IncomingPeerID:   1001,
-		}},
-	}
+	cfg := File{ConnectorID: "telegram-main", SessionFile: "./telegram.session.json"}
 	if err := cfg.Validate(); err == nil {
-		t.Fatal("Validate() succeeded for unowned target")
+		t.Fatal("Validate() succeeded without core_address")
 	}
 }
 
-func TestValidateRejectsAmbiguousInboundTarget(t *testing.T) {
+func TestValidateRejectsTopicCreateWithoutThreads(t *testing.T) {
 	t.Parallel()
 
 	cfg := File{
-		CoreAddress: "127.0.0.1:50051",
-		ConnectorID: "telegram-main",
-		SessionFile: "./telegram.session.json",
-		Endpoints:   []string{"general", "topic"},
-		Targets: []Target{
-			{
-				EndpointID:       "general",
-				GroupID:          "group-a",
-				Peer:             "example",
-				IncomingPeerType: "channel",
-				IncomingPeerID:   1001,
-			},
-			{
-				EndpointID:         "topic",
-				GroupID:            "group-b",
-				Peer:               "example",
-				IncomingPeerType:   "channel",
-				IncomingPeerID:     1001,
-				TopicRootMessageID: 12,
-			},
-		},
+		CoreAddress:         "127.0.0.1:50051",
+		ConnectorID:         "telegram-main",
+		SessionFile:         "./telegram.session.json",
+		SupportsTopicCreate: true,
 	}
 	if err := cfg.Validate(); err == nil {
-		t.Fatal("Validate() succeeded for overlapping general and topic targets")
+		t.Fatal("Validate() succeeded for supports_topic_create without supports_threads")
+	}
+}
+
+func TestValidateAcceptsThreadedConnector(t *testing.T) {
+	t.Parallel()
+
+	cfg := File{
+		CoreAddress:         "127.0.0.1:50051",
+		ConnectorID:         "telegram-main",
+		SessionFile:         "./telegram.session.json",
+		SupportsThreads:     true,
+		SupportsTopicCreate: true,
+	}
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("Validate() failed for valid threaded connector: %v", err)
 	}
 }

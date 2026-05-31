@@ -23,10 +23,15 @@ enum Platform {
   PLATFORM_MATRIX = 6;
 }
 
+message Capabilities {
+  bool supports_threads = 1;
+  bool supports_topic_create = 2;
+}
+
 message Registration {
   string connector_id = 1;
   Platform platform = 2;
-  repeated string endpoint_ids = 3;
+  Capabilities capabilities = 3;
 }
 
 message Attachment {
@@ -68,16 +73,29 @@ message MediaChunk {
   bytes chunk = 1;
 }
 
+// Raw origin coordinates for an inbound message. The connector id is taken from
+// the session registration, not the wire, so a session cannot speak for another
+// connector. The core resolves (connector, chat_id, thread_id) to an endpoint.
 message MessageCreateEvent {
-  string origin_endpoint_id = 1;
-  string group_id = 2;
-  string platform_message_id = 3;
-  string sender = 4;
-  optional string participant = 5;
-  optional string text = 6;
-  repeated Attachment attachments = 7;
-  optional string reply_to_platform_message_id = 8;
-  int64 timestamp_ms = 9;
+  string chat_id = 1;
+  optional string thread_id = 2;
+  optional string chat_title = 3;
+  string platform_message_id = 4;
+  string sender = 5;
+  optional string participant = 6;
+  optional string text = 7;
+  repeated Attachment attachments = 8;
+  optional string reply_to_platform_message_id = 9;
+  int64 timestamp_ms = 10;
+}
+
+// The platform reported a chat address change (e.g. WhatsApp phone-to-LID).
+// Both addresses remain resolvable; the new one becomes canonical for outbound.
+message IdentityMigrated {
+  string old_chat_id = 1;
+  optional string old_thread_id = 2;
+  string new_chat_id = 3;
+  optional string new_thread_id = 4;
 }
 
 message ReplyContext {
@@ -92,6 +110,18 @@ message ReplyContext {
 message Acknowledgement {
   string dispatch_id = 1;
   string platform_message_id = 2;
+  // The thread/topic the message landed in. Set when the dispatch provisioned a
+  // new thread, so the core can persist the conversation thread mapping.
+  optional string thread_id = 3;
+}
+
+// A dispatch that can never succeed (e.g. an invalid target peer). The
+// connector reports it instead of acknowledging so the core dead-letters the
+// dispatch rather than redelivering it forever. Transient failures are not
+// reported this way; the connector drops its session and the core redelivers.
+message DispatchFailed {
+  string dispatch_id = 1;
+  string reason = 2;
 }
 
 message ClientFrame {
@@ -99,22 +129,31 @@ message ClientFrame {
     Registration registration = 1;
     MessageCreateEvent message_create = 2;
     Acknowledgement acknowledgement = 3;
+    IdentityMigrated identity_migrated = 4;
+    DispatchFailed dispatch_failed = 5;
   }
+}
+
+// Instruction to create a thread/topic in a container before sending, used when
+// a mirror conversation has no thread yet. The connector creates the thread,
+// sends, and reports the resulting thread id back in the acknowledgement.
+message ProvisionThread {
+  string container = 1;
+  string title = 2;
 }
 
 message MessageCreateDispatch {
   string dispatch_id = 1;
-  string target_endpoint_id = 2;
-  string logical_message_id = 3;
-  string group_id = 4;
+  string target_chat_id = 2;
+  optional string target_thread_id = 3;
+  optional ProvisionThread provision_thread = 4;
   string sender = 5;
   optional string participant = 6;
   optional string text = 7;
   repeated Attachment attachments = 8;
-  optional string reply_to_logical_message_id = 9;
-  optional string reply_to_platform_message_id = 10;
-  int64 timestamp_ms = 11;
-  optional ReplyContext reply_context = 12;
+  optional string reply_to_platform_message_id = 9;
+  int64 timestamp_ms = 10;
+  optional ReplyContext reply_context = 11;
 }
 
 message Rejected {

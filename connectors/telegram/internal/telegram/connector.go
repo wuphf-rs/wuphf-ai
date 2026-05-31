@@ -27,10 +27,6 @@ func New(cfg config.File, credentials config.Credentials) Connector {
 }
 
 func (c Connector) Run(ctx context.Context) error {
-	targets, err := NewTargetRegistry(c.cfg)
-	if err != nil {
-		return fmt.Errorf("configure Telegram targets: %w", err)
-	}
 	media, err := coreclient.DialMedia(c.cfg.CoreAddress)
 	if err != nil {
 		return err
@@ -44,8 +40,9 @@ func (c Connector) Run(ctx context.Context) error {
 		}
 		return output.Bytes(), nil
 	})
+	peers := NewPeerCache()
 	inputs := make(chan *wuphfpb.ClientFrame, 128)
-	dispatcher := NewNormalizer(targets, inputs, codec).Dispatcher()
+	dispatcher := NewNormalizer(peers, inputs, codec).Dispatcher()
 	client = gotd.NewClient(c.credentials.AppID, c.credentials.AppHash, gotd.Options{
 		SessionStorage: &session.FileStorage{Path: c.cfg.SessionFile},
 		UpdateHandler:  dispatcher,
@@ -54,12 +51,48 @@ func (c Connector) Run(ctx context.Context) error {
 		if err := c.authenticate(ctx, client); err != nil {
 			return err
 		}
-		sender := NewSender(client.API(), targets, media)
+		// Bots cannot list dialogs (messages.getDialogs is user-only), and they
+		// receive an access hash on the first update from any peer, so cold-start
+		// priming applies only to user sessions.
+		if c.credentials.BotToken == "" {
+			if err := primePeers(ctx, client.API(), peers); err != nil {
+				return err
+			}
+		}
+		sender := NewSender(client.API(), peers, media)
 		return coreclient.New(c.cfg).Run(ctx, sender, inputs)
 	})
 }
 
+// primePeers seeds the peer cache from the account's dialog list so the core can
+// dispatch to a configured chat (e.g. a mirror container) before any update from
+// it has been observed. MTProto requires an access hash to address a user or
+// channel, and the dialog list is the cheapest source of hashes at startup.
+func primePeers(ctx context.Context, api *tg.Client, peers *PeerCache) error {
+	dialogs, err := api.MessagesGetDialogs(ctx, &tg.MessagesGetDialogsRequest{
+		OffsetPeer: &tg.InputPeerEmpty{},
+		Limit:      100,
+	})
+	if err != nil {
+		return fmt.Errorf("prime Telegram peer cache: %w", err)
+	}
+	switch value := dialogs.(type) {
+	case *tg.MessagesDialogs:
+		peers.ObserveClasses(value.Users, value.Chats)
+	case *tg.MessagesDialogsSlice:
+		peers.ObserveClasses(value.Users, value.Chats)
+	}
+	return nil
+}
+
 func (c Connector) authenticate(ctx context.Context, client *gotd.Client) error {
+	// Reuse the stored session when it is still authorized. Telegram heavily
+	// rate-limits auth calls (FLOOD_WAIT), and bot ImportBotAuthorization is not
+	// self-guarded, so re-authenticating on every restart eventually locks us out.
+	if status, err := client.Auth().Status(ctx); err == nil && status.Authorized {
+		return nil
+	}
+
 	if c.credentials.BotToken != "" {
 		if _, err := client.Auth().Bot(ctx, c.credentials.BotToken); err != nil {
 			return fmt.Errorf("authenticate Telegram bot: %w", err)

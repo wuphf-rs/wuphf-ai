@@ -1,9 +1,8 @@
 use crate::RuntimeChannels;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use tokio::sync::{mpsc, oneshot};
 use wuphf_model::{
-    ConnectorId, ConnectorInput, ConnectorOutput, ConnectorRegistration, DispatchId, EndpointId,
-    StoredDispatch,
+    ConnectorId, ConnectorInput, ConnectorOutput, ConnectorRegistration, DispatchId, StoredDispatch,
 };
 
 pub struct ConnectorConnection {
@@ -50,13 +49,11 @@ pub struct ConnectorHub {
     inbound_rx: mpsc::Receiver<(ConnectorId, ConnectorInput)>,
     allowed: HashMap<ConnectorId, ConnectorRegistration>,
     sessions: HashMap<ConnectorId, Session>,
-    owners: HashMap<EndpointId, ConnectorId>,
     assigned: HashMap<DispatchId, (ConnectorId, StoredDispatch)>,
     held: Vec<StoredDispatch>,
 }
 
 struct Session {
-    endpoints: HashSet<EndpointId>,
     output: mpsc::Sender<ConnectorOutput>,
 }
 
@@ -85,7 +82,6 @@ impl ConnectorHub {
                     .map(|registration| (registration.id.clone(), registration))
                     .collect(),
                 sessions: HashMap::new(),
-                owners: HashMap::new(),
                 assigned: HashMap::new(),
                 held: Vec::new(),
             },
@@ -116,29 +112,9 @@ impl ConnectorHub {
             ));
             return;
         }
-        let endpoint_set: HashSet<_> = request.registration.endpoints.into_iter().collect();
-        if let Some(conflict) = endpoint_set.iter().find(|endpoint| {
-            self.owners
-                .get(endpoint)
-                .is_some_and(|owner| *owner != connector_id)
-        }) {
-            let _ = request.result_tx.send(Err(format!(
-                "endpoint {conflict} already owned by another connector"
-            )));
-            return;
-        }
-        if let Some(previous) = self.sessions.remove(&connector_id) {
-            for endpoint in previous.endpoints {
-                self.owners.remove(&endpoint);
-            }
-        }
-        for endpoint in &endpoint_set {
-            self.owners.insert(*endpoint, connector_id.clone());
-        }
         self.sessions.insert(
             connector_id.clone(),
             Session {
-                endpoints: endpoint_set,
                 output: request.output_tx,
             },
         );
@@ -174,20 +150,15 @@ impl ConnectorHub {
     }
 
     async fn accept_input(&mut self, connector_id: ConnectorId, input: ConnectorInput) {
-        let Some(session) = self.sessions.get(&connector_id) else {
+        if !self.sessions.contains_key(&connector_id) {
             return;
-        };
+        }
         match input {
-            ConnectorInput::Event(event) => {
-                if session.endpoints.contains(&event.origin_endpoint) {
-                    let _ = self.runtime.events.send(event).await;
-                } else {
-                    self.reject(
-                        &connector_id,
-                        "event origin endpoint is not owned by session",
-                    )
-                    .await;
-                }
+            ConnectorInput::Event(mut event) => {
+                // The session is the authority on which connector spoke; stamp it
+                // so a connector cannot present itself as another.
+                event.source.connector_id = connector_id;
+                let _ = self.runtime.events.send(event).await;
             }
             ConnectorInput::Acknowledgement(acknowledgement) => {
                 if self
@@ -205,14 +176,33 @@ impl ConnectorHub {
                     .await;
                 }
             }
+            ConnectorInput::IdentityMigrated { old, new, .. } => {
+                let _ = self.runtime.migrations.send((connector_id, old, new)).await;
+            }
+            ConnectorInput::DispatchFailed {
+                dispatch_id,
+                reason,
+            } => {
+                if self
+                    .assigned
+                    .get(&dispatch_id)
+                    .is_some_and(|(owner, _)| *owner == connector_id)
+                {
+                    self.assigned.remove(&dispatch_id);
+                    let _ = self.runtime.failures.send((dispatch_id, reason)).await;
+                } else {
+                    self.reject(
+                        &connector_id,
+                        "dispatch failure is not assigned to session",
+                    )
+                    .await;
+                }
+            }
         }
     }
 
     async fn deliver_or_hold(&mut self, dispatch: StoredDispatch) {
-        let Some(connector_id) = self.owners.get(&dispatch.command.target_endpoint).cloned() else {
-            self.held.push(dispatch);
-            return;
-        };
+        let connector_id = dispatch.command.target_connector.clone();
         let Some(session) = self.sessions.get(&connector_id) else {
             self.held.push(dispatch);
             return;

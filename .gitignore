@@ -6,6 +6,10 @@
 # Rust build output
 /target/
 
+# Go connector build output
+/connectors/telegram/wuphf-telegram
+/connectors/whatsapp/wuphf-whatsapp
+
 # Local runtime state and configuration
 *.db
 *.db-shm

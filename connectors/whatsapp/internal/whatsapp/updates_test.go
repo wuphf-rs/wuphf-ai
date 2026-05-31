@@ -14,7 +14,7 @@ import (
 
 func TestNormalizeGroupTextAndReply(t *testing.T) {
 	t.Parallel()
-	normalizer := NewNormalizer(testRegistry(t), make(chan *wuphfpb.ClientFrame), MediaCodec{})
+	normalizer := NewNormalizer(make(chan *wuphfpb.ClientFrame), MediaCodec{}, nil)
 	event, ok, err := normalizer.normalize(context.Background(), &events.Message{
 		Info: types.MessageInfo{
 			MessageSource: types.MessageSource{
@@ -35,16 +35,43 @@ func TestNormalizeGroupTextAndReply(t *testing.T) {
 	if err != nil || !ok {
 		t.Fatalf("normalize() = %#v, %v, %v", event, ok, err)
 	}
-	if event.GetText() != "hello" || event.GetReplyToPlatformMessageId() != "wa-parent" ||
+	if event.GetChatId() != "123456789@g.us" || event.GetText() != "hello" ||
+		event.GetReplyToPlatformMessageId() != "wa-parent" ||
 		event.GetParticipant() != "9988@s.whatsapp.net" || event.GetTimestampMs() != 7 {
 		t.Fatalf("normalize() event = %#v", event)
+	}
+}
+
+type stubNamer struct{ title string }
+
+func (s stubNamer) ChatTitle(context.Context, types.JID, bool) string { return s.title }
+
+func TestNormalizeSetsChatTitleFromNamer(t *testing.T) {
+	t.Parallel()
+	normalizer := NewNormalizer(make(chan *wuphfpb.ClientFrame), MediaCodec{}, stubNamer{title: "Family Group"})
+	event, ok, err := normalizer.normalize(context.Background(), &events.Message{
+		Info: types.MessageInfo{
+			MessageSource: types.MessageSource{
+				Chat:    types.NewJID("123456789", types.GroupServer),
+				Sender:  types.NewJID("9988", types.DefaultUserServer),
+				IsGroup: true,
+			},
+			ID: "wa-1",
+		},
+		Message: &waE2E.Message{Conversation: proto.String("hi")},
+	})
+	if err != nil || !ok {
+		t.Fatalf("normalize() ok=%v err=%v", ok, err)
+	}
+	if event.GetChatTitle() != "Family Group" {
+		t.Fatalf("normalize() chat title = %q", event.GetChatTitle())
 	}
 }
 
 func TestHandleQueuesMessageCreateFrame(t *testing.T) {
 	t.Parallel()
 	inputs := make(chan *wuphfpb.ClientFrame, 1)
-	normalizer := NewNormalizer(testRegistry(t), inputs, MediaCodec{})
+	normalizer := NewNormalizer(inputs, MediaCodec{}, nil)
 	if err := normalizer.Handle(context.Background(), &events.Message{
 		Info: types.MessageInfo{
 			MessageSource: types.MessageSource{
@@ -64,7 +91,7 @@ func TestHandleQueuesMessageCreateFrame(t *testing.T) {
 
 func TestNormalizeIncludesOwnUserMessagesForCoreEchoDecision(t *testing.T) {
 	t.Parallel()
-	normalizer := NewNormalizer(testRegistry(t), make(chan *wuphfpb.ClientFrame), MediaCodec{})
+	normalizer := NewNormalizer(make(chan *wuphfpb.ClientFrame), MediaCodec{}, nil)
 	event, ok, err := normalizer.normalize(context.Background(), &events.Message{
 		Info: types.MessageInfo{
 			MessageSource: types.MessageSource{
@@ -78,5 +105,40 @@ func TestNormalizeIncludesOwnUserMessagesForCoreEchoDecision(t *testing.T) {
 	})
 	if err != nil || !ok || event.GetPlatformMessageId() != "wa-self" {
 		t.Fatalf("normalize() = %#v, %v, %v", event, ok, err)
+	}
+}
+
+func TestIdentityMigrationTreatsLIDAsCanonical(t *testing.T) {
+	t.Parallel()
+	phone := types.NewJID("15550001111", types.DefaultUserServer)
+	lid := types.NewJID("88887777", types.HiddenUserServer)
+	migration := identityMigration(&events.Message{
+		Info: types.MessageInfo{
+			MessageSource: types.MessageSource{
+				Chat:           phone,
+				RecipientAlt:   lid,
+				AddressingMode: types.AddressingModePN,
+			},
+		},
+	})
+	if migration == nil {
+		t.Fatal("identityMigration() = nil, want phone-to-LID migration")
+	}
+	if migration.GetOldChatId() != phone.String() || migration.GetNewChatId() != lid.String() {
+		t.Fatalf("identityMigration() = %#v", migration)
+	}
+}
+
+func TestIdentityMigrationIgnoresGroupAndAbsentAlt(t *testing.T) {
+	t.Parallel()
+	if identityMigration(&events.Message{Info: types.MessageInfo{
+		MessageSource: types.MessageSource{IsGroup: true},
+	}}) != nil {
+		t.Fatal("identityMigration() reported migration for a group message")
+	}
+	if identityMigration(&events.Message{Info: types.MessageInfo{
+		MessageSource: types.MessageSource{Chat: types.NewJID("1", types.DefaultUserServer)},
+	}}) != nil {
+		t.Fatal("identityMigration() reported migration without a recipient alt")
 	}
 }

@@ -3,30 +3,46 @@ database_url = "sqlite://wuphf.sqlite"
 max_media_bytes = 33554432
 orphan_media_retention_seconds = 86400
 
-[[endpoints]]
-id = "018f1b58-f667-75ba-bbbb-000000000001"
-platform = "whatsapp"
-chat_id = "12345@s.whatsapp.net"
-
-[[endpoints]]
-id = "018f1b58-f667-75ba-bbbb-000000000002"
-platform = "telegram"
-chat_id = "-100123"
-thread_id = "12"
-
-[[groups]]
-id = "018f1b58-f667-75ba-bbbb-000000000003"
-endpoints = [
-  "018f1b58-f667-75ba-bbbb-000000000001",
-  "018f1b58-f667-75ba-bbbb-000000000002",
-]
-
+# Connectors are thin pipes. The core only trusts a session whose registration
+# matches an entry here. `supports_threads` / `supports_topic_create` gate which
+# rule sides a connector may serve (a `mirror` side needs both).
 [[connectors]]
 id = "whatsapp-main"
 platform = "whatsapp"
-endpoints = ["018f1b58-f667-75ba-bbbb-000000000001"]
 
 [[connectors]]
 id = "telegram-main"
 platform = "telegram"
-endpoints = ["018f1b58-f667-75ba-bbbb-000000000002"]
+supports_threads = true
+supports_topic_create = true
+
+#                       # One fixed WhatsApp chat mirrored one-to-one into one fixed Telegram topic.
+#                       [[rules]]
+#                       id = "direct-pair"
+#
+#                       [[rules.sides]]
+#                       connector = "whatsapp-main"
+#                       kind = "single"
+#                       chat_id = "12345@s.whatsapp.net"
+#
+#                       [[rules.sides]]
+#                       connector = "telegram-main"
+#                       kind = "single"
+#                       chat_id = "-100123"
+#                       thread_id = "12"
+
+# Every WhatsApp chat (the identity source) fanned into one Telegram supergroup,
+# with one topic auto-created per source conversation. `include`/`exclude` are
+# explicit chat-id lists; an empty `include` means "all chats".
+[[rules]]
+id = "wa-to-telegram-mirror"
+
+[[rules.sides]]
+connector = "whatsapp-main"
+kind = "source"
+exclude = []
+
+[[rules.sides]]
+connector = "telegram-main"
+kind = "mirror"
+container = "telegram:channel:2060340733"

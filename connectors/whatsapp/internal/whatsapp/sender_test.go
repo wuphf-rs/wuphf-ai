@@ -41,13 +41,13 @@ func (s *stubBroker) Download(context.Context, string) ([]byte, error) {
 func TestSendFileDispatch(t *testing.T) {
 	t.Parallel()
 	client := &stubSendClient{}
-	sender := NewSender(client, testRegistry(t), &stubBroker{bytes: []byte("data")}, types.JID{})
+	sender := NewSender(client, &stubBroker{bytes: []byte("data")}, types.JID{})
 	text := "caption"
 	fileName := "receipt.pdf"
 	mime := "application/pdf"
-	messageID, err := sender.SendMessage(context.Background(), &wuphfpb.MessageCreateDispatch{
-		TargetEndpointId: "endpoint-a",
-		Text:             &text,
+	messageID, _, err := sender.SendMessage(context.Background(), &wuphfpb.MessageCreateDispatch{
+		TargetChatId: "123@s.whatsapp.net",
+		Text:         &text,
 		Attachments: []*wuphfpb.Attachment{{
 			MediaId:  "media-id",
 			Kind:     wuphfpb.Attachment_KIND_FILE,
@@ -71,13 +71,13 @@ func TestSendOutboundReplyBuildsQuotedContext(t *testing.T) {
 	t.Parallel()
 	client := &stubSendClient{}
 	ownJID := types.NewJID("15550001111", types.DefaultUserServer)
-	sender := NewSender(client, testRegistry(t), &stubBroker{}, ownJID)
+	sender := NewSender(client, &stubBroker{}, ownJID)
 	text := "child reply"
 	parentText := "parent body"
 	parentID := "parent-stanza-id"
-	messageID, err := sender.SendMessage(context.Background(), &wuphfpb.MessageCreateDispatch{
-		TargetEndpointId: "endpoint-a",
-		Text:             &text,
+	messageID, _, err := sender.SendMessage(context.Background(), &wuphfpb.MessageCreateDispatch{
+		TargetChatId: "123@s.whatsapp.net",
+		Text:         &text,
 		ReplyContext: &wuphfpb.ReplyContext{
 			PlatformMessageId: parentID,
 			Text:              &parentText,
@@ -109,13 +109,13 @@ func TestSendOutboundReplyQuotesMediaParent(t *testing.T) {
 	t.Parallel()
 	client := &stubSendClient{}
 	ownJID := types.NewJID("15550001111", types.DefaultUserServer)
-	sender := NewSender(client, testRegistry(t), &stubBroker{}, ownJID)
+	sender := NewSender(client, &stubBroker{}, ownJID)
 	text := "look at this"
 	parentCaption := "parent photo"
 	mime := "image/jpeg"
-	_, err := sender.SendMessage(context.Background(), &wuphfpb.MessageCreateDispatch{
-		TargetEndpointId: "endpoint-a",
-		Text:             &text,
+	_, _, err := sender.SendMessage(context.Background(), &wuphfpb.MessageCreateDispatch{
+		TargetChatId: "123@s.whatsapp.net",
+		Text:         &text,
 		ReplyContext: &wuphfpb.ReplyContext{
 			PlatformMessageId: "parent-stanza-id",
 			Text:              &parentCaption,
@@ -142,10 +142,10 @@ func TestSendOutboundReplyQuotesMediaParent(t *testing.T) {
 func TestSendRejectsLegacyReplyWithoutContext(t *testing.T) {
 	t.Parallel()
 	client := &stubSendClient{}
-	sender := NewSender(client, testRegistry(t), &stubBroker{}, types.JID{})
+	sender := NewSender(client, &stubBroker{}, types.JID{})
 	reply := "parent-id"
-	_, err := sender.SendMessage(context.Background(), &wuphfpb.MessageCreateDispatch{
-		TargetEndpointId:         "endpoint-a",
+	_, _, err := sender.SendMessage(context.Background(), &wuphfpb.MessageCreateDispatch{
+		TargetChatId:             "123@s.whatsapp.net",
 		ReplyToPlatformMessageId: &reply,
 	})
 	if err == nil || client.sent != nil {
