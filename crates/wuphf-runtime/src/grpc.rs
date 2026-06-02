@@ -116,6 +116,7 @@ fn input_from_proto(
                     )?,
                     sender: required_string(event.sender, "sender")?,
                     participant: event.participant,
+                    sender_name: event.sender_name,
                     text: event.text,
                     attachments: event
                         .attachments
@@ -125,6 +126,25 @@ fn input_from_proto(
                     reply_to_platform_message_id: event.reply_to_platform_message_id,
                     timestamp_ms: event.timestamp_ms,
                 }),
+            }))
+        }
+        Some(pb::client_frame::Body::MessageEdit(event)) => {
+            Ok(ConnectorInput::Event(NormalizedEvent {
+                source: SourceAddress {
+                    connector_id: connector_id.clone(),
+                    address: PlatformAddress::new(
+                        required_string(event.chat_id, "chat_id")?,
+                        event.thread_id,
+                    ),
+                    chat_title: None,
+                },
+                payload: EventPayload::MessageEdit {
+                    platform_message_id: required_string(
+                        event.platform_message_id,
+                        "platform_message_id",
+                    )?,
+                    text: event.text,
+                },
             }))
         }
         Some(pb::client_frame::Body::Acknowledgement(acknowledgement)) => {
@@ -172,31 +192,48 @@ fn input_from_proto(
 fn output_to_proto(output: ConnectorOutput) -> pb::ServerFrame {
     let body = match output {
         ConnectorOutput::Dispatch(dispatch) => {
+            let dispatch_id = dispatch.id.to_string();
             let target = dispatch.command.target;
-            let DispatchPayload::MessageCreate {
-                message,
-                reply_context,
-            } = dispatch.command.payload;
-            let reply_to_platform_message_id = reply_context
-                .as_ref()
-                .map(|context| context.platform_message_id.clone());
-            pb::server_frame::Body::MessageCreate(Box::new(pb::MessageCreateDispatch {
-                dispatch_id: dispatch.id.to_string(),
-                target_chat_id: target.address.chat_id,
-                target_thread_id: target.address.thread_id,
-                provision_thread: target.provision_thread.map(provision_thread_to_proto),
-                sender: message.sender,
-                participant: message.participant,
-                text: message.text,
-                attachments: message
-                    .attachments
-                    .into_iter()
-                    .map(attachment_to_proto)
-                    .collect(),
-                reply_to_platform_message_id,
-                timestamp_ms: message.timestamp_ms,
-                reply_context: reply_context.map(reply_context_to_proto),
-            }))
+            match dispatch.command.payload {
+                DispatchPayload::MessageCreate {
+                    message,
+                    reply_context,
+                } => {
+                    let reply_to_platform_message_id = reply_context
+                        .as_ref()
+                        .map(|context| context.platform_message_id.clone());
+                    pb::server_frame::Body::MessageCreate(Box::new(pb::MessageCreateDispatch {
+                        dispatch_id,
+                        target_chat_id: target.address.chat_id,
+                        target_thread_id: target.address.thread_id,
+                        provision_thread: target.provision_thread.map(provision_thread_to_proto),
+                        sender: message.sender,
+                        participant: message.participant,
+                        text: message.text,
+                        attachments: message
+                            .attachments
+                            .into_iter()
+                            .map(attachment_to_proto)
+                            .collect(),
+                        reply_to_platform_message_id,
+                        timestamp_ms: message.timestamp_ms,
+                        reply_context: reply_context.map(reply_context_to_proto),
+                        sender_name: message.sender_name,
+                    }))
+                }
+                DispatchPayload::MessageEdit {
+                    message,
+                    target_platform_message_id,
+                } => pb::server_frame::Body::MessageEdit(pb::MessageEditDispatch {
+                    dispatch_id,
+                    target_chat_id: target.address.chat_id,
+                    target_thread_id: target.address.thread_id,
+                    target_platform_message_id,
+                    text: message.text,
+                    sender_name: message.sender_name,
+                    participant: message.participant,
+                }),
+            }
         }
         ConnectorOutput::Rejected { reason } => {
             pb::server_frame::Body::Rejected(pb::Rejected { reason })

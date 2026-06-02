@@ -60,11 +60,12 @@ func (s Sender) SendMessage(ctx context.Context, dispatch *wuphfpb.MessageCreate
 		builder = builder.Reply(topicRoot)
 	}
 
+	body := attributedText(dispatch.GetSenderName(), dispatch.GetParticipant(), dispatch.GetText())
 	var updates tg.UpdatesClass
 	if len(dispatch.Attachments) == 0 {
-		updates, err = builder.Text(ctx, dispatch.GetText())
+		updates, err = builder.StyledText(ctx, body...)
 	} else {
-		updates, err = s.sendAttachment(ctx, builder, dispatch.Attachments[0], dispatch.GetText())
+		updates, err = s.sendAttachment(ctx, builder, dispatch.Attachments[0], body)
 	}
 	if err != nil {
 		return "", "", fmt.Errorf("send Telegram message: %w", err)
@@ -74,6 +75,46 @@ func (s Sender) SendMessage(ctx context.Context, dispatch *wuphfpb.MessageCreate
 		return "", "", err
 	}
 	return strconv.Itoa(messageID), provisionedThread, nil
+}
+
+// EditMessage revises an already-delivered copy in place. The native message id
+// is unchanged by an edit, so it is returned as-is for the acknowledgement.
+func (s Sender) EditMessage(ctx context.Context, dispatch *wuphfpb.MessageEditDispatch) (string, error) {
+	peer, err := s.peers.InputPeer(dispatch.TargetChatId)
+	if err != nil {
+		return "", err
+	}
+	messageID, err := strconv.Atoi(dispatch.TargetPlatformMessageId)
+	if err != nil {
+		return "", coreclient.Permanent(fmt.Errorf("invalid Telegram target message id %q: %w", dispatch.TargetPlatformMessageId, err))
+	}
+	body := attributedText(dispatch.GetSenderName(), dispatch.GetParticipant(), dispatch.GetText())
+	if _, err := s.sender.To(peer).Edit(messageID).StyledText(ctx, body...); err != nil {
+		return "", fmt.Errorf("edit Telegram message: %w", err)
+	}
+	return dispatch.TargetPlatformMessageId, nil
+}
+
+// attributedText renders a dispatch body for Telegram, prefixing a bold sender
+// name on its own line for group messages so the mirror shows who authored each
+// message. Attribution is added only when a participant is present (a group
+// context); direct chats are left unlabelled. The name falls back to the raw
+// participant id when the source supplied no display name.
+func attributedText(senderName, participant, text string) []message.StyledTextOption {
+	if participant == "" {
+		if text == "" {
+			return nil
+		}
+		return []message.StyledTextOption{styling.Plain(text)}
+	}
+	label := senderName
+	if label == "" {
+		label = participant
+	}
+	if text == "" {
+		return []message.StyledTextOption{styling.Bold(label)}
+	}
+	return []message.StyledTextOption{styling.Bold(label), styling.Plain("\n" + text)}
 }
 
 // createTopic creates a forum topic in the container and returns its root
@@ -101,7 +142,7 @@ func (s Sender) sendAttachment(
 	ctx context.Context,
 	builder *message.Builder,
 	attachment *wuphfpb.Attachment,
-	caption string,
+	captionOptions []message.StyledTextOption,
 ) (tg.UpdatesClass, error) {
 	bytes, err := s.media.Download(ctx, attachment.MediaId)
 	if err != nil {
@@ -112,10 +153,6 @@ func (s Sender) sendAttachment(
 		name = "attachment"
 	}
 	upload := builder.Upload(message.FromBytes(name, bytes))
-	var captionOptions []message.StyledTextOption
-	if caption != "" {
-		captionOptions = []message.StyledTextOption{styling.Plain(caption)}
-	}
 	switch attachment.Kind {
 	case wuphfpb.Attachment_KIND_IMAGE:
 		return upload.Photo(ctx, captionOptions...)

@@ -191,11 +191,8 @@ impl ConnectorHub {
                     self.assigned.remove(&dispatch_id);
                     let _ = self.runtime.failures.send((dispatch_id, reason)).await;
                 } else {
-                    self.reject(
-                        &connector_id,
-                        "dispatch failure is not assigned to session",
-                    )
-                    .await;
+                    self.reject(&connector_id, "dispatch failure is not assigned to session")
+                        .await;
                 }
             }
         }

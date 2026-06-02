@@ -2,6 +2,7 @@ package whatsappconnector
 
 import (
 	"context"
+	"strings"
 
 	wuphfpb "github.com/akshettrj/wuphf/proto/go/connector/v1"
 	waE2E "go.mau.fi/whatsmeow/proto/waE2E"
@@ -36,6 +37,15 @@ func (n Normalizer) Handle(ctx context.Context, message *events.Message) error {
 			return err
 		}
 	}
+	if message.IsEdit {
+		edit, ok := normalizeEdit(message)
+		if !ok {
+			return nil
+		}
+		return n.send(ctx, &wuphfpb.ClientFrame{
+			Body: &wuphfpb.ClientFrame_MessageEdit{MessageEdit: edit},
+		})
+	}
 	event, ok, err := n.normalize(ctx, message)
 	if err != nil || !ok {
 		return err
@@ -43,6 +53,29 @@ func (n Normalizer) Handle(ctx context.Context, message *events.Message) error {
 	return n.send(ctx, &wuphfpb.ClientFrame{
 		Body: &wuphfpb.ClientFrame_MessageCreate{MessageCreate: event},
 	})
+}
+
+// normalizeEdit reports an inbound content revision. WhatsApp carries an edit as
+// a protocol message whose key names the original message and whose edited body
+// holds the new content; the core suppresses no-op and echoed edits by comparing
+// text, so only the original message id and new text are needed here.
+func normalizeEdit(message *events.Message) (*wuphfpb.MessageEditEvent, bool) {
+	protocol := message.Message.GetProtocolMessage()
+	if protocol == nil {
+		return nil, false
+	}
+	originalID := protocol.GetKey().GetID()
+	if originalID == "" {
+		return nil, false
+	}
+	event := &wuphfpb.MessageEditEvent{
+		ChatId:            message.Info.Chat.String(),
+		PlatformMessageId: originalID,
+	}
+	if text := messageText(protocol.GetEditedMessage()); text != "" {
+		event.Text = &text
+	}
+	return event, true
 }
 
 func (n Normalizer) send(ctx context.Context, frame *wuphfpb.ClientFrame) error {
@@ -84,6 +117,9 @@ func (n Normalizer) normalize(ctx context.Context, message *events.Message) (*wu
 	if message.Info.IsGroup {
 		participant := message.Info.Sender.String()
 		event.Participant = &participant
+	}
+	if name := strings.TrimSpace(message.Info.PushName); name != "" {
+		event.SenderName = &name
 	}
 	if text != "" {
 		event.Text = &text

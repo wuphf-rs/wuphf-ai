@@ -98,14 +98,17 @@ where
         origin_endpoint: EndpointId,
         provision_title: &str,
     ) -> Result<RoutingOutcome, RouterError> {
-        let group = self.storage.group(message.group_id).await?;
-        if !group.endpoints.contains(&origin_endpoint) {
-            return Err(RouterError::OriginOutsideGroup(origin_endpoint));
+        let replica_set = self.storage.replica_set(message.replica_set_id).await?;
+        if !replica_set.endpoints.contains(&origin_endpoint) {
+            return Err(RouterError::OriginOutsideReplicaSet(origin_endpoint));
         }
-        let conversation = self.storage.conversation_for_group(message.group_id).await?;
+        let conversation = self
+            .storage
+            .conversation_for_replica_set(message.replica_set_id)
+            .await?;
 
         let mut outcome = RoutingOutcome::default();
-        for endpoint_id in group
+        for endpoint_id in replica_set
             .endpoints
             .into_iter()
             .filter(|endpoint_id| *endpoint_id != origin_endpoint)
@@ -160,6 +163,64 @@ where
                     reply_context,
                 },
             });
+        }
+        Ok(outcome)
+    }
+
+    /// Fan an edit of an already-routed message out to every other endpoint in
+    /// the replica set. A target whose copy already exists is dispatched
+    /// immediately, carrying that copy's native id to edit; a target whose
+    /// create has not been acknowledged yet is blocked on the message and gains
+    /// its native id when the create is acknowledged.
+    pub async fn route_edit(
+        &self,
+        message: &Message,
+        origin_endpoint: EndpointId,
+    ) -> Result<RoutingOutcome, RouterError> {
+        let replica_set = self.storage.replica_set(message.replica_set_id).await?;
+        if !replica_set.endpoints.contains(&origin_endpoint) {
+            return Err(RouterError::OriginOutsideReplicaSet(origin_endpoint));
+        }
+
+        let mut outcome = RoutingOutcome::default();
+        for endpoint_id in replica_set
+            .endpoints
+            .into_iter()
+            .filter(|endpoint_id| *endpoint_id != origin_endpoint)
+        {
+            let endpoint = self.storage.endpoint(endpoint_id).await?;
+            let target = TargetAddress {
+                address: endpoint.address(),
+                provision_thread: None,
+            };
+            let target_connector = endpoint.connector_id.clone();
+            match self
+                .storage
+                .copy_at_endpoint(message.id, endpoint_id)
+                .await?
+            {
+                Some(copy) => outcome.dispatches.push(DispatchCommand {
+                    target_endpoint: endpoint_id,
+                    target_connector,
+                    target,
+                    payload: DispatchPayload::MessageEdit {
+                        message: message.clone(),
+                        target_platform_message_id: copy.platform_message_id,
+                    },
+                }),
+                None => outcome.blocked.push(BlockedDispatch {
+                    command: DispatchCommand {
+                        target_endpoint: endpoint_id,
+                        target_connector,
+                        target,
+                        payload: DispatchPayload::MessageEdit {
+                            message: message.clone(),
+                            target_platform_message_id: String::new(),
+                        },
+                    },
+                    waiting_for_message: message.id,
+                }),
+            }
         }
         Ok(outcome)
     }
@@ -238,8 +299,8 @@ pub struct BlockedDispatch {
 pub enum RouterError {
     #[error(transparent)]
     Storage(#[from] StorageError),
-    #[error("origin endpoint {0} is not a member of the replication group")]
-    OriginOutsideGroup(EndpointId),
+    #[error("origin endpoint {0} is not a member of the replica set")]
+    OriginOutsideReplicaSet(EndpointId),
     #[error("reply parent message {0} is not stored")]
     MessageNotFound(MessageId),
 }

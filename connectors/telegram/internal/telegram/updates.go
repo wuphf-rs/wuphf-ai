@@ -30,6 +30,12 @@ func (n Normalizer) Dispatcher() tg.UpdateDispatcher {
 	dispatcher.OnNewChannelMessage(func(ctx context.Context, entities tg.Entities, update *tg.UpdateNewChannelMessage) error {
 		return n.handle(ctx, entities, update.Message)
 	})
+	dispatcher.OnEditMessage(func(ctx context.Context, entities tg.Entities, update *tg.UpdateEditMessage) error {
+		return n.handleEdit(ctx, entities, update.Message)
+	})
+	dispatcher.OnEditChannelMessage(func(ctx context.Context, entities tg.Entities, update *tg.UpdateEditChannelMessage) error {
+		return n.handleEdit(ctx, entities, update.Message)
+	})
 	return dispatcher
 }
 
@@ -50,6 +56,47 @@ func (n Normalizer) handle(ctx context.Context, entities tg.Entities, message tg
 	case <-ctx.Done():
 		return ctx.Err()
 	}
+}
+
+func (n Normalizer) handleEdit(ctx context.Context, entities tg.Entities, message tg.MessageClass) error {
+	n.peers.Observe(entities)
+	event, ok := n.normalizeEdit(message)
+	if !ok {
+		return nil
+	}
+	select {
+	case n.inputs <- &wuphfpb.ClientFrame{
+		Body: &wuphfpb.ClientFrame_MessageEdit{MessageEdit: event},
+	}:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+// normalizeEdit reports an inbound content revision. Telegram also emits edit
+// updates for non-content changes (view counts, reactions); the core suppresses
+// those by comparing text, so this only needs to drop our own outbound echoes.
+func (n Normalizer) normalizeEdit(class tg.MessageClass) (*wuphfpb.MessageEditEvent, bool) {
+	message, ok := class.(*tg.Message)
+	if !ok {
+		return nil, false
+	}
+	if message.Out {
+		return nil, false
+	}
+	event := &wuphfpb.MessageEditEvent{
+		ChatId:            formatPeer(message.PeerID),
+		PlatformMessageId: strconv.Itoa(message.ID),
+	}
+	if topicID, ok := topicRootID(message); ok {
+		thread := strconv.Itoa(topicID)
+		event.ThreadId = &thread
+	}
+	if text := message.Message; text != "" {
+		event.Text = &text
+	}
+	return event, true
 }
 
 func (n Normalizer) normalize(
@@ -89,6 +136,11 @@ func (n Normalizer) normalize(
 	}
 	if title := chatTitle(entities, message.PeerID); title != "" {
 		event.ChatTitle = &title
+	}
+	if from, ok := message.GetFromID(); ok {
+		if name := chatTitle(entities, from); name != "" {
+			event.SenderName = &name
+		}
 	}
 	if topicID, ok := topicRootID(message); ok {
 		thread := strconv.Itoa(topicID)

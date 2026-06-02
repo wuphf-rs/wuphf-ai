@@ -215,11 +215,7 @@ mod tests {
     async fn transports_ready_dispatches_over_tokio_channels() {
         let (runtime, mut channels) = Runtime::channelled(core(), 4);
         let task = tokio::spawn(runtime.run());
-        channels
-            .events
-            .send(wa_event("wa-1", None))
-            .await
-            .unwrap();
+        channels.events.send(wa_event("wa-1", None)).await.unwrap();
         let dispatch = channels.dispatches.recv().await.unwrap();
         assert_eq!(dispatch.command.target_connector, ConnectorId(TG.into()));
         assert_eq!(dispatch.command.target.address.chat_id, "tg-chat");
@@ -253,7 +249,10 @@ mod tests {
             .await
             .unwrap();
         let reply_dispatch = channels.dispatches.recv().await.unwrap();
-        let DispatchPayload::MessageCreate { reply_context, .. } = reply_dispatch.command.payload;
+        let DispatchPayload::MessageCreate { reply_context, .. } = reply_dispatch.command.payload
+        else {
+            panic!("released reply should be a message create");
+        };
         let reply_context = reply_context.expect("reply context set on release");
         assert_eq!(reply_context.platform_message_id, "tg-parent");
         drop(channels.events);
@@ -313,7 +312,10 @@ mod tests {
         assert_eq!(redelivered_parent.id, parent_dispatch.id);
         whatsapp
             .input
-            .send(ConnectorInput::Event(wa_event("wa-reply", Some("wa-parent"))))
+            .send(ConnectorInput::Event(wa_event(
+                "wa-reply",
+                Some("wa-parent"),
+            )))
             .await
             .unwrap();
         telegram
@@ -330,7 +332,10 @@ mod tests {
             panic!("Telegram should receive released reply dispatch");
         };
         let reply_dispatch = *reply_dispatch;
-        let DispatchPayload::MessageCreate { reply_context, .. } = reply_dispatch.command.payload;
+        let DispatchPayload::MessageCreate { reply_context, .. } = reply_dispatch.command.payload
+        else {
+            panic!("released reply should be a message create");
+        };
         let reply_context = reply_context.expect("reply context set on release");
         assert_eq!(reply_context.platform_message_id, "tg-parent");
 
@@ -494,6 +499,7 @@ mod tests {
                         attachments: vec![],
                         reply_to_platform_message_id: None,
                         timestamp_ms: 1,
+                        sender_name: None,
                     },
                 )),
             })
@@ -537,6 +543,7 @@ mod tests {
                 platform_message_id: native_id.into(),
                 sender: "sender".into(),
                 participant: None,
+                sender_name: None,
                 text: Some("message".into()),
                 attachments: vec![],
                 reply_to_platform_message_id: reply_to.map(str::to_owned),

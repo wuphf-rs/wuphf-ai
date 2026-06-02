@@ -1,9 +1,34 @@
+//! Core domain types shared across the wuphf workspace.
+//!
+//! wuphf replicates messages between chat platforms. The model is built around
+//! a few ideas, from configured intent down to a single delivery:
+//!
+//! - [`Rule`] — a user-declared mapping between two or more [`RuleSide`]s. Rules
+//!   are the only routing input a user writes; everything below is derived.
+//! - [`SideKind`] — how one side selects chats: a fixed `Single` chat, a
+//!   `Source` set of real chats, or a threaded `Mirror` container.
+//! - [`Endpoint`] — a concrete destination (a chat, optionally a thread) on one
+//!   connector, identified internally by an [`EndpointId`]. Platform addresses
+//!   resolve to it through an [`Alias`], never by equality, so an address can
+//!   migrate without changing identity.
+//! - [`Conversation`] — the abstract unit a rule pairs across sides (one per
+//!   source chat). Backed by one [`ReplicaSet`].
+//! - [`ReplicaSet`] — the set of endpoints that mirror each other; a
+//!   [`Message`] delivered to one is dispatched to all the others.
+//! - [`Message`] — the normalized, platform-agnostic form copied out to every
+//!   endpoint as a [`StoredDispatch`].
+//!
+//! Connectors are thin pipes: they report [`ConnectorInput`]s keyed by raw
+//! platform addresses and execute [`ConnectorOutput`] dispatches. All routing
+//! and identity resolution lives in the core.
+
 use serde::{Deserialize, Serialize};
 use std::fmt;
 use uuid::Uuid;
 
 macro_rules! uuid_id {
-    ($name:ident) => {
+    ($name:ident, $doc:expr) => {
+        #[doc = $doc]
         #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
         pub struct $name(pub Uuid);
 
@@ -27,13 +52,32 @@ macro_rules! uuid_id {
     };
 }
 
-uuid_id!(MessageId);
-uuid_id!(GroupId);
-uuid_id!(EndpointId);
-uuid_id!(DispatchId);
-uuid_id!(MediaId);
-uuid_id!(ConversationId);
+uuid_id!(
+    MessageId,
+    "Stable internal id of a normalized [`Message`]. Native platform message ids map to it via [`MessageCopy`]."
+);
+uuid_id!(
+    ReplicaSetId,
+    "Id of a [`ReplicaSet`] — the set of endpoints a message fans out to."
+);
+uuid_id!(
+    EndpointId,
+    "Stable internal id of an [`Endpoint`]. Platform addresses resolve to it through [`Alias`]es, never by equality."
+);
+uuid_id!(
+    DispatchId,
+    "Id of one outbound [`StoredDispatch`] targeting a single endpoint."
+);
+uuid_id!(
+    MediaId,
+    "Id of a stored media blob referenced by an [`Attachment`]."
+);
+uuid_id!(
+    ConversationId,
+    "Id of a [`Conversation`] — the unit a [`Rule`] pairs across its sides."
+);
 
+/// User-chosen id of a routing [`Rule`], taken verbatim from configuration.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct RuleId(pub String);
 
@@ -43,6 +87,8 @@ impl fmt::Display for RuleId {
     }
 }
 
+/// A messaging platform a connector bridges. `Other` keeps the model open to
+/// platforms without a dedicated variant.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Platform {
@@ -55,6 +101,11 @@ pub enum Platform {
     Other(String),
 }
 
+/// A concrete delivery destination on one connector: a chat, optionally a
+/// thread within it. Endpoints are members of a [`ReplicaSet`] and are
+/// derived from rules at runtime, never hand-configured. `chat_id`/`thread_id`
+/// hold the canonical platform address; other addresses for the same endpoint
+/// are reachable through [`Alias`]es.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Endpoint {
     pub id: EndpointId,
@@ -73,9 +124,12 @@ impl Endpoint {
     }
 }
 
+/// The set of endpoints that mirror each other. A [`Message`] delivered to any
+/// member is dispatched to all the others. One replica set backs one
+/// [`Conversation`].
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ReplicationGroup {
-    pub id: GroupId,
+pub struct ReplicaSet {
+    pub id: ReplicaSetId,
     pub endpoints: Vec<EndpointId>,
 }
 
@@ -118,6 +172,7 @@ pub enum SideKind {
     Mirror { container: String },
 }
 
+/// One side of a [`Rule`]: a connector plus how that connector selects chats.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RuleSide {
     pub connector: ConnectorId,
@@ -125,6 +180,9 @@ pub struct RuleSide {
     pub kind: SideKind,
 }
 
+/// A user-declared mapping binding two or more [`RuleSide`]s. Rules are the only
+/// routing input a user writes; conversations, endpoints, and groups are derived
+/// from them lazily at runtime.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Rule {
     pub id: RuleId,
@@ -150,12 +208,12 @@ pub struct Alias {
     pub is_canonical: bool,
 }
 
-/// The abstract unit a rule pairs across sides, backed by one replication group.
+/// The abstract unit a rule pairs across sides, backed by one replica set.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Conversation {
     pub id: ConversationId,
     pub rule_id: RuleId,
-    pub group_id: GroupId,
+    pub replica_set_id: ReplicaSetId,
     pub source_connector: ConnectorId,
     pub source_address: PlatformAddress,
 }
@@ -169,6 +227,7 @@ pub struct ThreadMapping {
     pub thread_id: String,
 }
 
+/// Media category of an [`Attachment`], used to pick the platform send method.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum AttachmentKind {
@@ -179,6 +238,8 @@ pub enum AttachmentKind {
     Sticker,
 }
 
+/// Metadata for one piece of media. The bytes are stored separately and fetched
+/// by `media_id` through the media broker (see [`MediaBlob`]).
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Attachment {
     pub media_id: MediaId,
@@ -188,24 +249,38 @@ pub struct Attachment {
     pub size_bytes: Option<u64>,
 }
 
+/// An [`Attachment`] together with its raw bytes, as moved through the media
+/// broker. Not serialized — the bytes never travel in a message payload.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct MediaBlob {
     pub attachment: Attachment,
     pub bytes: Vec<u8>,
 }
 
+/// The normalized, platform-agnostic message owned by a [`ReplicaSet`].
+/// This canonical form is copied out to every endpoint in the set as a
+/// [`StoredDispatch`]. `sender` is the chat; `participant` is the individual
+/// author in a group chat. `reply_to` references the parent by internal id.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Message {
     pub id: MessageId,
-    pub group_id: GroupId,
+    pub replica_set_id: ReplicaSetId,
     pub sender: String,
     pub participant: Option<String>,
+    /// Human-readable display name of the author, resolved by the source
+    /// connector. Used to label the author when mirroring into a shared chat;
+    /// absent when the platform did not supply a name.
+    #[serde(default)]
+    pub sender_name: Option<String>,
     pub text: Option<String>,
     pub attachments: Vec<Attachment>,
     pub reply_to: Option<MessageId>,
     pub timestamp_ms: i64,
 }
 
+/// Records the native id under which a [`Message`] was delivered to one
+/// endpoint. Maps internal message identity to per-platform message ids, which
+/// powers reply resolution and dedup.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct MessageCopy {
     pub message_id: MessageId,
@@ -213,6 +288,9 @@ pub struct MessageCopy {
     pub platform_message_id: String,
 }
 
+/// The quoted parent of a reply, denormalized so a connector can render a quote
+/// preview without a second lookup. Carries the parent's native id on the target
+/// platform plus enough content to display.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ReplyContext {
     pub message_id: MessageId,
@@ -223,6 +301,8 @@ pub struct ReplyContext {
     pub attachments: Vec<Attachment>,
 }
 
+/// Identifies an inbound platform event so the same message seen twice (e.g. on
+/// reconnect) is ingested only once.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct DedupKey {
     pub platform: Platform,
@@ -230,6 +310,8 @@ pub struct DedupKey {
     pub platform_message_id: String,
 }
 
+/// Cached display-name fields for a sender, used to label mirrored messages and
+/// newly provisioned threads.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Contact {
     pub id: String,
@@ -239,6 +321,7 @@ pub struct Contact {
     pub business_name: Option<String>,
 }
 
+/// Per-endpoint chat options, e.g. a disappearing-message timer.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ChatSettings {
     pub endpoint_id: EndpointId,
@@ -246,17 +329,23 @@ pub struct ChatSettings {
     pub ephemeral_timer_seconds: Option<u64>,
 }
 
+/// A new message as normalized by a connector, before the core resolves it to an
+/// endpoint and group. Addresses are still native (`platform_message_id`,
+/// `reply_to_platform_message_id`).
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct InboundMessage {
     pub platform_message_id: String,
     pub sender: String,
     pub participant: Option<String>,
+    /// Display name of the author as known to the source platform, if any.
+    pub sender_name: Option<String>,
     pub text: Option<String>,
     pub attachments: Vec<Attachment>,
     pub reply_to_platform_message_id: Option<String>,
     pub timestamp_ms: i64,
 }
 
+/// An emoji reaction added to a message.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Reaction {
     pub message_id: MessageId,
@@ -264,6 +353,7 @@ pub struct Reaction {
     pub emoji: String,
 }
 
+/// The kind of inbound event a connector reports for a chat.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum EventPayload {
     MessageCreate(InboundMessage),
@@ -289,17 +379,28 @@ pub struct SourceAddress {
     pub chat_title: Option<String>,
 }
 
+/// A connector event paired with its origin coordinates, ready for the core to
+/// resolve against the alias table and rules.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct NormalizedEvent {
     pub source: SourceAddress,
     pub payload: EventPayload,
 }
 
+/// The content of an outbound dispatch.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum DispatchPayload {
     MessageCreate {
         message: Message,
         reply_context: Option<ReplyContext>,
+    },
+    /// Revise an already-delivered copy. `target_platform_message_id` is the
+    /// native id of the copy to edit at the target endpoint; it is empty while
+    /// the dispatch is blocked and filled in when the original create is
+    /// acknowledged.
+    MessageEdit {
+        message: Message,
+        target_platform_message_id: String,
     },
 }
 
@@ -321,6 +422,8 @@ pub struct TargetAddress {
     pub provision_thread: Option<ProvisionThread>,
 }
 
+/// A fully resolved instruction to deliver one payload to one endpoint on one
+/// connector. The core produces a command per group member when fanning out.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DispatchCommand {
     pub target_endpoint: EndpointId,
@@ -332,27 +435,36 @@ pub struct DispatchCommand {
 impl DispatchCommand {
     pub fn message_id(&self) -> MessageId {
         match &self.payload {
-            DispatchPayload::MessageCreate { message, .. } => message.id,
+            DispatchPayload::MessageCreate { message, .. }
+            | DispatchPayload::MessageEdit { message, .. } => message.id,
         }
     }
 
-    pub fn message_group_id(&self) -> GroupId {
+    pub fn message_replica_set_id(&self) -> ReplicaSetId {
         match &self.payload {
-            DispatchPayload::MessageCreate { message, .. } => message.group_id,
+            DispatchPayload::MessageCreate { message, .. }
+            | DispatchPayload::MessageEdit { message, .. } => message.replica_set_id,
         }
     }
 }
 
+/// Lifecycle of a [`StoredDispatch`].
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum DispatchState {
+    /// Ready to send; redelivered to the connector until acknowledged.
     Pending,
+    /// Held until the message it replies to is itself delivered, so the reply can
+    /// quote the parent's native id.
     Blocked { waiting_for: MessageId },
+    /// Delivered; carries the native id the connector assigned.
     Acknowledged { platform_message_id: String },
     /// The connector reported the dispatch can never succeed. It is retained for
     /// observability but is no longer pending, so it is never redelivered.
     Failed { reason: String },
 }
 
+/// A [`DispatchCommand`] together with its persisted [`DispatchState`] — one
+/// outbound delivery the core tracks to completion.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct StoredDispatch {
     pub id: DispatchId,
@@ -360,6 +472,8 @@ pub struct StoredDispatch {
     pub state: DispatchState,
 }
 
+/// A connector's confirmation that a dispatch was delivered, returned after a
+/// successful send.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DispatchAcknowledgement {
     pub dispatch_id: DispatchId,
@@ -370,6 +484,8 @@ pub struct DispatchAcknowledgement {
     pub thread_id: Option<String>,
 }
 
+/// Stable id of a connector, matching a `[[connector]]` entry in core config and
+/// the registration a connector sends on connect.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct ConnectorId(pub String);
 
@@ -390,6 +506,7 @@ pub struct ConnectorRegistration {
     pub capabilities: ConnectorCapabilities,
 }
 
+/// A frame a connector sends up to the core.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ConnectorInput {
     Event(NormalizedEvent),
@@ -410,8 +527,11 @@ pub enum ConnectorInput {
     },
 }
 
+/// A frame the core sends down to a connector.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ConnectorOutput {
+    /// A dispatch to execute, then acknowledge.
     Dispatch(Box<StoredDispatch>),
+    /// The core refused the connector's last input (e.g. unknown registration).
     Rejected { reason: String },
 }

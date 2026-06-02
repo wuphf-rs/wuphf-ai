@@ -30,6 +30,7 @@
             cargo
             clippy
             go
+            gopls
             pkg-config
             protobuf
             protoc-gen-go

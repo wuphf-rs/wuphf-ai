@@ -2,9 +2,9 @@ use std::sync::Arc;
 use thiserror::Error;
 use wuphf_model::{
     Alias, ConnectorId, Conversation, ConversationId, DedupKey, DispatchAcknowledgement,
-    DispatchId, Endpoint,
-    EndpointId, EventPayload, GroupId, MediaId, Message, MessageCopy, MessageId, NormalizedEvent,
-    PlatformAddress, ReplicationGroup, Rule, SideKind, SourceAddress, StoredDispatch,
+    DispatchId, Endpoint, EndpointId, EventPayload, MediaId, Message, MessageCopy, MessageId,
+    NormalizedEvent, PlatformAddress, ReplicaSet, ReplicaSetId, Rule, SideKind, SourceAddress,
+    StoredDispatch,
 };
 use wuphf_router::{Router, RouterError, RoutingOutcome};
 use wuphf_storage::{Storage, StorageError};
@@ -35,16 +35,38 @@ where
             return Ok(IngestOutcome::Ignored(IgnoreReason::Unmatched));
         };
         let origin = self.storage.endpoint(origin_endpoint).await?;
-        let group_id = self
+        let replica_set_id = self
             .storage
-            .group_for_endpoint(origin_endpoint)
+            .replica_set_for_endpoint(origin_endpoint)
             .await?
-            .ok_or(CoreError::OriginWithoutGroup(origin_endpoint))?;
+            .ok_or(CoreError::OriginWithoutReplicaSet(origin_endpoint))?;
 
-        let EventPayload::MessageCreate(inbound) = event.payload else {
-            return Err(CoreError::UnsupportedEvent);
-        };
+        match event.payload {
+            EventPayload::MessageCreate(inbound) => {
+                self.ingest_create(source, origin_endpoint, origin, replica_set_id, inbound)
+                    .await
+            }
+            EventPayload::MessageEdit {
+                platform_message_id,
+                text,
+            } => {
+                self.ingest_edit(origin_endpoint, platform_message_id, text)
+                    .await
+            }
+            EventPayload::MessageDelete { .. } | EventPayload::ReactionAdd(_) => {
+                Err(CoreError::UnsupportedEvent)
+            }
+        }
+    }
 
+    async fn ingest_create(
+        &self,
+        source: SourceAddress,
+        origin_endpoint: EndpointId,
+        origin: Endpoint,
+        replica_set_id: ReplicaSetId,
+        inbound: wuphf_model::InboundMessage,
+    ) -> Result<IngestOutcome, CoreError> {
         if self
             .storage
             .is_sent_copy(origin_endpoint, &inbound.platform_message_id)
@@ -85,9 +107,10 @@ where
 
         let message = Message {
             id: MessageId::new(),
-            group_id,
+            replica_set_id,
             sender: inbound.sender,
             participant: inbound.participant,
+            sender_name: inbound.sender_name,
             text: inbound.text,
             attachments: inbound.attachments,
             reply_to,
@@ -126,8 +149,53 @@ where
         })
     }
 
+    /// Apply an inbound edit: revise the canonical message text and fan the
+    /// change out to the other endpoints. An edit whose text matches the stored
+    /// text is dropped, which both ignores redundant reports and breaks the echo
+    /// loop when our own mirrored edit is reported back by the target platform.
+    async fn ingest_edit(
+        &self,
+        origin_endpoint: EndpointId,
+        platform_message_id: String,
+        text: Option<String>,
+    ) -> Result<IngestOutcome, CoreError> {
+        let Some(message_id) = self
+            .storage
+            .message_id_for_copy(origin_endpoint, &platform_message_id)
+            .await?
+        else {
+            return Ok(IngestOutcome::Ignored(IgnoreReason::Unmatched));
+        };
+        let mut message = self
+            .storage
+            .message(message_id)
+            .await?
+            .ok_or(CoreError::EditTargetNotStored(message_id))?;
+        if message.text == text {
+            return Ok(IngestOutcome::Ignored(IgnoreReason::RedundantEdit));
+        }
+        message.text = text;
+        self.storage.put_message(message.clone()).await?;
+
+        let routing = self.router.route_edit(&message, origin_endpoint).await?;
+        let mut dispatches = Vec::new();
+        for command in routing.dispatches.iter().cloned() {
+            dispatches.push(self.storage.enqueue_dispatch(command, None).await?);
+        }
+        for blocked in routing.blocked.iter().cloned() {
+            self.storage
+                .enqueue_dispatch(blocked.command, Some(blocked.waiting_for_message))
+                .await?;
+        }
+        Ok(IngestOutcome::Routed {
+            message_id,
+            routing,
+            dispatches,
+        })
+    }
+
     /// Resolve a raw inbound address to its endpoint, lazily minting the
-    /// endpoint, conversation, and replication group on first sighting when a
+    /// endpoint, conversation, and replica set on first sighting when a
     /// rule matches. Returns `None` when the address matches no rule, or matches
     /// only a mirror side with no provisioned thread (an unmapped topic).
     async fn resolve_origin(
@@ -142,11 +210,17 @@ where
             return Ok(Some(endpoint));
         }
 
-        let Some(matched) = self.config.match_source(&source.connector_id, &source.address) else {
+        let Some(matched) = self
+            .config
+            .match_source(&source.connector_id, &source.address)
+        else {
             return Ok(None);
         };
         let rule = matched.rule.clone();
-        if matches!(rule.sides[matched.origin_side].kind, SideKind::Mirror { .. }) {
+        if matches!(
+            rule.sides[matched.origin_side].kind,
+            SideKind::Mirror { .. }
+        ) {
             return Ok(None);
         }
 
@@ -176,7 +250,7 @@ where
     }
 
     /// Get the conversation backing this rule's identity address, creating it
-    /// (with an empty replication group) on first sighting.
+    /// (with an empty replica set) on first sighting.
     async fn ensure_conversation(
         &self,
         rule: &Rule,
@@ -191,17 +265,17 @@ where
         {
             return Ok(existing);
         }
-        let group_id = GroupId::new();
+        let replica_set_id = ReplicaSetId::new();
         self.storage
-            .put_group(ReplicationGroup {
-                id: group_id,
+            .put_replica_set(ReplicaSet {
+                id: replica_set_id,
                 endpoints: Vec::new(),
             })
             .await?;
         let conversation = Conversation {
             id: ConversationId::new(),
             rule_id: rule.id.clone(),
-            group_id,
+            replica_set_id,
             source_connector: identity_connector,
             source_address: identity_address.clone(),
         };
@@ -210,7 +284,7 @@ where
     }
 
     /// Get or mint the endpoint for one rule side, joining it to the
-    /// conversation's group. Single and source sides record a canonical alias;
+    /// conversation's replica set. Single and source sides record a canonical alias;
     /// a mirror side gets no alias until its thread is provisioned.
     async fn ensure_side_endpoint(
         &self,
@@ -221,11 +295,14 @@ where
     ) -> Result<EndpointId, CoreError> {
         let side = &rule.sides[side_index];
         let (address, with_alias) = match &side.kind {
-            SideKind::Single { chat_id, thread_id } => {
-                (PlatformAddress::new(chat_id.clone(), thread_id.clone()), true)
-            }
+            SideKind::Single { chat_id, thread_id } => (
+                PlatformAddress::new(chat_id.clone(), thread_id.clone()),
+                true,
+            ),
             SideKind::Source { .. } => (identity_address.clone(), true),
-            SideKind::Mirror { container } => (PlatformAddress::new(container.clone(), None), false),
+            SideKind::Mirror { container } => {
+                (PlatformAddress::new(container.clone(), None), false)
+            }
         };
 
         if with_alias {
@@ -237,7 +314,7 @@ where
                 return Ok(endpoint);
             }
         } else if let Some(endpoint) = self
-            .endpoint_in_group(conversation.group_id, &side.connector)
+            .endpoint_in_replica_set(conversation.replica_set_id, &side.connector)
             .await?
         {
             return Ok(endpoint);
@@ -265,21 +342,24 @@ where
                 })
                 .await?;
         }
-        let mut group = self.storage.group(conversation.group_id).await?;
-        if !group.endpoints.contains(&endpoint.id) {
-            group.endpoints.push(endpoint.id);
-            self.storage.put_group(group).await?;
+        let mut replica_set = self
+            .storage
+            .replica_set(conversation.replica_set_id)
+            .await?;
+        if !replica_set.endpoints.contains(&endpoint.id) {
+            replica_set.endpoints.push(endpoint.id);
+            self.storage.put_replica_set(replica_set).await?;
         }
         Ok(endpoint.id)
     }
 
-    async fn endpoint_in_group(
+    async fn endpoint_in_replica_set(
         &self,
-        group_id: GroupId,
+        replica_set_id: ReplicaSetId,
         connector: &ConnectorId,
     ) -> Result<Option<EndpointId>, CoreError> {
-        let group = self.storage.group(group_id).await?;
-        for endpoint_id in group.endpoints {
+        let replica_set = self.storage.replica_set(replica_set_id).await?;
+        for endpoint_id in replica_set.endpoints {
             let endpoint = self.storage.endpoint(endpoint_id).await?;
             if endpoint.connector_id == *connector {
                 return Ok(Some(endpoint_id));
@@ -311,7 +391,8 @@ where
         if let Some(thread_id) = acknowledgement.thread_id.clone()
             && let Some(dispatch) = self.storage.dispatch(acknowledgement.dispatch_id).await?
         {
-            self.persist_provisioned_thread(&dispatch, thread_id).await?;
+            self.persist_provisioned_thread(&dispatch, thread_id)
+                .await?;
         }
         Ok(self
             .storage
@@ -351,8 +432,12 @@ where
             })
             .await?;
 
-        let group_id = dispatch.command.message_group_id();
-        if let Some(conversation) = self.storage.conversation_for_group(group_id).await? {
+        let replica_set_id = dispatch.command.message_replica_set_id();
+        if let Some(conversation) = self
+            .storage
+            .conversation_for_replica_set(replica_set_id)
+            .await?
+        {
             self.storage
                 .put_thread_mapping(wuphf_model::ThreadMapping {
                     conversation_id: conversation.id,
@@ -444,6 +529,9 @@ pub enum IgnoreReason {
     DuplicateEvent,
     SentMessageEcho,
     Unmatched,
+    /// An edit that leaves the stored text unchanged: a redundant report or our
+    /// own mirrored edit echoed back by the platform.
+    RedundantEdit,
 }
 
 #[derive(Debug, Error)]
@@ -452,14 +540,16 @@ pub enum CoreError {
     Storage(#[from] StorageError),
     #[error(transparent)]
     Router(#[from] RouterError),
-    #[error("origin endpoint {0} resolved to no replication group")]
-    OriginWithoutGroup(EndpointId),
+    #[error("origin endpoint {0} resolved to no replica set")]
+    OriginWithoutReplicaSet(EndpointId),
     #[error("rule references connector {0} which is not registered")]
     UnknownConnector(ConnectorId),
-    #[error("only message create ingestion is implemented in the initial runtime")]
+    #[error("message delete and reaction ingestion are not yet implemented")]
     UnsupportedEvent,
     #[error("reply target platform message {0} is unknown at the origin endpoint")]
     UnknownReplyTarget(String),
+    #[error("edited message {0} maps from a copy but is not stored")]
+    EditTargetNotStored(MessageId),
     #[error("attachment media {0} is not uploaded to the core")]
     UnknownMedia(MediaId),
     #[error("attachment metadata for media {0} differs from the core record")]
@@ -550,7 +640,12 @@ mod tests {
         Core::new(storage, config)
     }
 
-    fn event(connector: &str, chat_id: &str, native_id: &str, reply_to: Option<&str>) -> NormalizedEvent {
+    fn event(
+        connector: &str,
+        chat_id: &str,
+        native_id: &str,
+        reply_to: Option<&str>,
+    ) -> NormalizedEvent {
         event_in(connector, chat_id, None, native_id, reply_to)
     }
 
@@ -571,6 +666,7 @@ mod tests {
                 platform_message_id: native_id.into(),
                 sender: "alice".into(),
                 participant: None,
+                sender_name: None,
                 text: Some("hello".into()),
                 attachments: vec![],
                 reply_to_platform_message_id: reply_to.map(str::to_owned),
@@ -644,7 +740,13 @@ mod tests {
 
         // A reply typed into the provisioned topic resolves back to the source.
         let reverse = core
-            .ingest(event_in(TELEGRAM, "-1001234567", Some("777"), "tg-reply", None))
+            .ingest(event_in(
+                TELEGRAM,
+                "-1001234567",
+                Some("777"),
+                "tg-reply",
+                None,
+            ))
             .await
             .unwrap();
         let back = &reverse.dispatches()[0];
@@ -734,7 +836,10 @@ mod tests {
         let DispatchPayload::MessageCreate {
             message,
             reply_context,
-        } = &reply.dispatches()[0].command.payload;
+        } = &reply.dispatches()[0].command.payload
+        else {
+            panic!("reply should route as a message create");
+        };
         assert_eq!(message.reply_to, Some(parent_id));
         let reply_context = reply_context.as_ref().expect("reply context resolved");
         assert_eq!(reply_context.message_id, parent_id);
@@ -847,8 +952,174 @@ mod tests {
         ));
 
         assert_eq!(
-            core.ingest(media_event(attachment)).await.unwrap().dispatches().len(),
+            core.ingest(media_event(attachment))
+                .await
+                .unwrap()
+                .dispatches()
+                .len(),
             1
+        );
+    }
+
+    fn edit_event(
+        connector: &str,
+        chat_id: &str,
+        thread_id: Option<&str>,
+        native_id: &str,
+        text: Option<&str>,
+    ) -> NormalizedEvent {
+        NormalizedEvent {
+            source: SourceAddress {
+                connector_id: ConnectorId(connector.into()),
+                address: PlatformAddress::new(chat_id, thread_id.map(str::to_owned)),
+                chat_title: None,
+            },
+            payload: EventPayload::MessageEdit {
+                platform_message_id: native_id.into(),
+                text: text.map(str::to_owned),
+            },
+        }
+    }
+
+    #[tokio::test]
+    async fn edit_after_delivery_revises_the_delivered_copy() {
+        let core = core(vec![direct_rule()]);
+        let IngestOutcome::Routed {
+            message_id,
+            dispatches,
+            ..
+        } = core
+            .ingest(event(WHATSAPP, "12345@s.whatsapp.net", "wa-1", None))
+            .await
+            .unwrap()
+        else {
+            panic!("create should route");
+        };
+        let telegram = dispatches[0].command.target_endpoint;
+        core.record_dispatched_copy(message_id, telegram, "tg-1")
+            .await
+            .unwrap();
+
+        let edited = core
+            .ingest(edit_event(
+                WHATSAPP,
+                "12345@s.whatsapp.net",
+                None,
+                "wa-1",
+                Some("hello edited"),
+            ))
+            .await
+            .unwrap();
+        let dispatch = &edited.dispatches()[0];
+        assert_eq!(
+            dispatch.command.target_connector,
+            ConnectorId(TELEGRAM.into())
+        );
+        let DispatchPayload::MessageEdit {
+            message,
+            target_platform_message_id,
+        } = &dispatch.command.payload
+        else {
+            panic!("edit should route as a message edit");
+        };
+        assert_eq!(target_platform_message_id, "tg-1");
+        assert_eq!(message.text.as_deref(), Some("hello edited"));
+    }
+
+    #[tokio::test]
+    async fn edit_before_delivery_blocks_then_releases_with_native_id() {
+        let core = core(vec![direct_rule()]);
+        let IngestOutcome::Routed { dispatches, .. } = core
+            .ingest(event(WHATSAPP, "12345@s.whatsapp.net", "wa-1", None))
+            .await
+            .unwrap()
+        else {
+            panic!("create should route");
+        };
+        let create_dispatch = dispatches[0].clone();
+
+        let edited = core
+            .ingest(edit_event(
+                WHATSAPP,
+                "12345@s.whatsapp.net",
+                None,
+                "wa-1",
+                Some("edited before delivery"),
+            ))
+            .await
+            .unwrap();
+        let IngestOutcome::Routed {
+            routing,
+            dispatches,
+            ..
+        } = edited
+        else {
+            panic!("edit should be stored while delivery is blocked");
+        };
+        assert!(dispatches.is_empty());
+        assert_eq!(routing.blocked.len(), 1);
+
+        let released = core
+            .acknowledge_dispatch(DispatchAcknowledgement {
+                dispatch_id: create_dispatch.id,
+                platform_message_id: "tg-1".into(),
+                thread_id: None,
+            })
+            .await
+            .unwrap();
+        let edit = released
+            .iter()
+            .find(|dispatch| {
+                matches!(
+                    dispatch.command.payload,
+                    DispatchPayload::MessageEdit { .. }
+                )
+            })
+            .expect("acknowledging the create releases the blocked edit");
+        let DispatchPayload::MessageEdit {
+            target_platform_message_id,
+            ..
+        } = &edit.command.payload
+        else {
+            unreachable!();
+        };
+        assert_eq!(target_platform_message_id, "tg-1");
+    }
+
+    #[tokio::test]
+    async fn edit_that_does_not_change_text_is_ignored() {
+        let core = core(vec![direct_rule()]);
+        core.ingest(event(WHATSAPP, "12345@s.whatsapp.net", "wa-1", None))
+            .await
+            .unwrap();
+        assert_eq!(
+            core.ingest(edit_event(
+                WHATSAPP,
+                "12345@s.whatsapp.net",
+                None,
+                "wa-1",
+                Some("hello"),
+            ))
+            .await
+            .unwrap(),
+            IngestOutcome::Ignored(IgnoreReason::RedundantEdit)
+        );
+    }
+
+    #[tokio::test]
+    async fn edit_for_unknown_message_is_ignored() {
+        let core = core(vec![direct_rule()]);
+        assert_eq!(
+            core.ingest(edit_event(
+                WHATSAPP,
+                "12345@s.whatsapp.net",
+                None,
+                "wa-unknown",
+                Some("edited"),
+            ))
+            .await
+            .unwrap(),
+            IngestOutcome::Ignored(IgnoreReason::Unmatched)
         );
     }
 }

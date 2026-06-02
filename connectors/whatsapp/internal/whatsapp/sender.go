@@ -16,6 +16,7 @@ import (
 type SendClient interface {
 	SendMessage(context.Context, types.JID, *waE2E.Message, ...whatsmeow.SendRequestExtra) (whatsmeow.SendResponse, error)
 	Upload(context.Context, []byte, whatsmeow.MediaType) (whatsmeow.UploadResponse, error)
+	BuildEdit(types.JID, types.MessageID, *waE2E.Message) *waE2E.Message
 }
 
 type Sender struct {
@@ -58,6 +59,21 @@ func (s Sender) SendMessage(ctx context.Context, dispatch *wuphfpb.MessageCreate
 		return "", "", fmt.Errorf("send WhatsApp message: %w", err)
 	}
 	return string(response.ID), "", nil
+}
+
+// EditMessage revises an already-delivered copy in place. WhatsApp keeps the
+// original message id across an edit, so the target id is returned unchanged for
+// the acknowledgement.
+func (s Sender) EditMessage(ctx context.Context, dispatch *wuphfpb.MessageEditDispatch) (string, error) {
+	chat, err := types.ParseJID(dispatch.GetTargetChatId())
+	if err != nil {
+		return "", coreclient.Permanent(fmt.Errorf("parse WhatsApp target chat %q: %w", dispatch.GetTargetChatId(), err))
+	}
+	edit := s.client.BuildEdit(chat, types.MessageID(dispatch.GetTargetPlatformMessageId()), textMessage(dispatch.GetText()))
+	if _, err := s.client.SendMessage(ctx, chat, edit); err != nil {
+		return "", fmt.Errorf("edit WhatsApp message: %w", err)
+	}
+	return dispatch.GetTargetPlatformMessageId(), nil
 }
 
 // quotedContext builds the WhatsApp quote metadata for a reply dispatch. The

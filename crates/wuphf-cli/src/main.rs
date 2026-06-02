@@ -4,11 +4,7 @@ use serde::Deserialize;
 use std::{collections::HashMap, net::SocketAddr, path::PathBuf, sync::Arc, time::Duration};
 use tonic::transport::Server;
 use wuphf_core::{ConnectorInfo, Core, RoutingConfig};
-use wuphf_model::{
-    ConnectorCapabilities, ConnectorId, ConnectorRegistration, DispatchPayload, EventPayload,
-    InboundMessage, NormalizedEvent, Platform, PlatformAddress, Rule, RuleId, RuleSide, SideKind,
-    SourceAddress,
-};
+use wuphf_model::{ConnectorCapabilities, ConnectorId, ConnectorRegistration, Platform, Rule};
 use wuphf_proto::connector::connector_transport_server::ConnectorTransportServer;
 use wuphf_proto::connector::media_transport_server::MediaTransportServer;
 use wuphf_runtime::{
@@ -25,12 +21,6 @@ struct Arguments {
 
 #[derive(Subcommand)]
 enum Command {
-    Demo {
-        #[arg(long, default_value = "hello from WhatsApp")]
-        text: String,
-        #[arg(long, default_value = "sqlite::memory:")]
-        database_url: String,
-    },
     Serve {
         #[arg(long, default_value = "config/example.toml")]
         config: PathBuf,
@@ -72,97 +62,8 @@ struct ConnectorConfiguration {
 #[tokio::main]
 async fn main() -> Result<()> {
     match Arguments::parse().command {
-        Command::Demo { text, database_url } => demo(text, &database_url).await,
         Command::Serve { config } => serve(config).await,
     }
-}
-
-async fn demo(text: String, database_url: &str) -> Result<()> {
-    let storage = Arc::new(SqliteStorage::connect(database_url).await?);
-    let whatsapp = ConnectorId("whatsapp".into());
-    let telegram = ConnectorId("telegram".into());
-    let rules = vec![Rule {
-        id: RuleId("demo".into()),
-        sides: vec![
-            RuleSide {
-                connector: whatsapp.clone(),
-                kind: SideKind::Single {
-                    chat_id: "demo@s.whatsapp.net".into(),
-                    thread_id: None,
-                },
-            },
-            RuleSide {
-                connector: telegram.clone(),
-                kind: SideKind::Single {
-                    chat_id: "-100-demo".into(),
-                    thread_id: Some("topic-1".into()),
-                },
-            },
-        ],
-    }];
-    let connectors = HashMap::from([
-        (
-            whatsapp.clone(),
-            ConnectorInfo {
-                platform: Platform::WhatsApp,
-                capabilities: ConnectorCapabilities::default(),
-            },
-        ),
-        (
-            telegram,
-            ConnectorInfo {
-                platform: Platform::Telegram,
-                capabilities: ConnectorCapabilities {
-                    supports_threads: true,
-                    supports_topic_create: true,
-                },
-            },
-        ),
-    ]);
-    let config = Arc::new(RoutingConfig::new(rules, connectors));
-
-    let (runtime, mut channels) = Runtime::channelled(Arc::new(Core::new(storage, config)), 8);
-    let runtime_task = tokio::spawn(runtime.run());
-    channels
-        .events
-        .send(NormalizedEvent {
-            source: SourceAddress {
-                connector_id: whatsapp,
-                address: PlatformAddress::new("demo@s.whatsapp.net", None),
-                chat_title: None,
-            },
-            payload: EventPayload::MessageCreate(InboundMessage {
-                platform_message_id: "wa-demo-1".into(),
-                sender: "demo-user".into(),
-                participant: None,
-                text: Some(text),
-                attachments: vec![],
-                reply_to_platform_message_id: None,
-                timestamp_ms: 0,
-            }),
-        })
-        .await
-        .context("event bus closed")?;
-
-    let dispatch = channels
-        .dispatches
-        .recv()
-        .await
-        .context("demonstration event produced no dispatch")?;
-    let target_connector = dispatch.command.target_connector.clone();
-    let target_chat = dispatch.command.target.address.chat_id.clone();
-    let DispatchPayload::MessageCreate { message, .. } = dispatch.command.payload;
-    println!(
-        "logical message {} dispatched to {} chat {}: {}",
-        message.id,
-        target_connector,
-        target_chat,
-        message.text.as_deref().unwrap_or_default()
-    );
-
-    drop(channels.events);
-    runtime_task.await??;
-    Ok(())
 }
 
 async fn serve(path: PathBuf) -> Result<()> {

@@ -11,14 +11,20 @@ import (
 )
 
 type stubSendClient struct {
-	sent     *waE2E.Message
-	uploaded []byte
-	media    whatsmeow.MediaType
+	sent      *waE2E.Message
+	uploaded  []byte
+	media     whatsmeow.MediaType
+	editedKey types.MessageID
 }
 
 func (s *stubSendClient) SendMessage(_ context.Context, _ types.JID, message *waE2E.Message, _ ...whatsmeow.SendRequestExtra) (whatsmeow.SendResponse, error) {
 	s.sent = message
 	return whatsmeow.SendResponse{ID: "sent-id"}, nil
+}
+
+func (s *stubSendClient) BuildEdit(_ types.JID, id types.MessageID, newContent *waE2E.Message) *waE2E.Message {
+	s.editedKey = id
+	return newContent
 }
 
 func (s *stubSendClient) Upload(_ context.Context, bytes []byte, media whatsmeow.MediaType) (whatsmeow.UploadResponse, error) {
@@ -136,6 +142,30 @@ func TestSendOutboundReplyQuotesMediaParent(t *testing.T) {
 	}
 	if image.GetCaption() != parentCaption || image.GetMimetype() != mime {
 		t.Fatalf("quoted image = %#v", image)
+	}
+}
+
+func TestEditMessageRevisesTargetInPlace(t *testing.T) {
+	t.Parallel()
+	client := &stubSendClient{}
+	sender := NewSender(client, &stubBroker{}, types.JID{})
+	text := "revised text"
+	messageID, err := sender.EditMessage(context.Background(), &wuphfpb.MessageEditDispatch{
+		TargetChatId:            "123@s.whatsapp.net",
+		TargetPlatformMessageId: "orig-id",
+		Text:                    &text,
+	})
+	if err != nil {
+		t.Fatalf("EditMessage() error = %v", err)
+	}
+	if messageID != "orig-id" {
+		t.Fatalf("EditMessage() id = %q, want orig-id", messageID)
+	}
+	if client.editedKey != "orig-id" {
+		t.Fatalf("BuildEdit key = %q, want orig-id", client.editedKey)
+	}
+	if client.sent.GetConversation() != "revised text" {
+		t.Fatalf("edited body = %q", client.sent.GetConversation())
 	}
 }
 

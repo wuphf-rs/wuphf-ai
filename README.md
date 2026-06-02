@@ -30,9 +30,6 @@ This initial Rust workspace implements a minimal, extensible core slice:
 - Go WhatsApp connector using `whatsmeow` with QR-paired SQLite session state
   plus configured text, image, and file replication; inbound reply identity
   is normalized for routing to supported targets.
-- CLI demonstration of one WhatsApp-origin logical message dispatched to a
-  Telegram topic endpoint.
-
 Edits, deletes, reactions, additional attachment kinds, and outbound
 WhatsApp quoted replies are represented or reserved by the architecture but
 are not yet executed by the runtime.
@@ -47,7 +44,7 @@ crates/
   wuphf-router/    Replication target and reply dependency logic
   wuphf-core/      Event ingestion and identity orchestration
   wuphf-runtime/   Tokio event-bus and dispatch pipeline
-  wuphf-cli/       Local executable demonstration
+  wuphf-cli/       Local executable entrypoint
 connectors/
   telegram/        Go gotd/td connector
   whatsapp/        Go whatsmeow connector
@@ -57,16 +54,6 @@ config/            Example server topology and connector assignment
 ```
 
 ## Run
-
-```sh
-cargo run -p wuphf-cli -- demo --text "hello bridge"
-```
-
-Use file-backed local state:
-
-```sh
-cargo run -p wuphf-cli -- demo --database-url sqlite://wuphf.sqlite --text "hello bridge"
-```
 
 Run gRPC connector server with configured endpoints and assignments:
 

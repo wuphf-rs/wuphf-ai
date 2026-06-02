@@ -87,6 +87,17 @@ message MessageCreateEvent {
   repeated Attachment attachments = 8;
   optional string reply_to_platform_message_id = 9;
   int64 timestamp_ms = 10;
+  optional string sender_name = 11;
+}
+
+// The platform reported that an existing message's content changed. The
+// connector reports the original message's native id and the new text; the core
+// resolves it to the logical message and fans the edit out to the other copies.
+message MessageEditEvent {
+  string chat_id = 1;
+  optional string thread_id = 2;
+  string platform_message_id = 3;
+  optional string text = 4;
 }
 
 // The platform reported a chat address change (e.g. WhatsApp phone-to-LID).
@@ -131,6 +142,7 @@ message ClientFrame {
     Acknowledgement acknowledgement = 3;
     IdentityMigrated identity_migrated = 4;
     DispatchFailed dispatch_failed = 5;
+    MessageEditEvent message_edit = 6;
   }
 }
 
@@ -154,6 +166,19 @@ message MessageCreateDispatch {
   optional string reply_to_platform_message_id = 9;
   int64 timestamp_ms = 10;
   optional ReplyContext reply_context = 11;
+  optional string sender_name = 12;
+}
+
+// Instruction to revise an already-delivered copy. `target_platform_message_id`
+// is the native id of the message to edit at this endpoint.
+message MessageEditDispatch {
+  string dispatch_id = 1;
+  string target_chat_id = 2;
+  optional string target_thread_id = 3;
+  string target_platform_message_id = 4;
+  optional string text = 5;
+  optional string sender_name = 6;
+  optional string participant = 7;
 }
 
 message Rejected {
@@ -164,5 +189,6 @@ message ServerFrame {
   oneof body {
     MessageCreateDispatch message_create = 1;
     Rejected rejected = 2;
+    MessageEditDispatch message_edit = 3;
   }
 }

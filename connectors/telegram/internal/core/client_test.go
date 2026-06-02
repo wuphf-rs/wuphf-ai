@@ -16,6 +16,10 @@ func (s *permanentSender) SendMessage(context.Context, *wuphfpb.MessageCreateDis
 	return "", "", Permanent(errors.New("invalid target"))
 }
 
+func (s *permanentSender) EditMessage(context.Context, *wuphfpb.MessageEditDispatch) (string, error) {
+	return "", nil
+}
+
 type flakySender struct {
 	failures int
 	calls    int
@@ -29,10 +33,20 @@ func (s *flakySender) SendMessage(context.Context, *wuphfpb.MessageCreateDispatc
 	return "platform-id", "topic-id", nil
 }
 
+func (s *flakySender) EditMessage(context.Context, *wuphfpb.MessageEditDispatch) (string, error) {
+	return "", nil
+}
+
+func sendOpFor(sender Sender) sendOp {
+	return func(ctx context.Context) (string, string, error) {
+		return sender.SendMessage(ctx, &wuphfpb.MessageCreateDispatch{DispatchId: "d1"})
+	}
+}
+
 func TestSendWithRetrySucceedsAfterTransientFailures(t *testing.T) {
 	t.Parallel()
 	sender := &flakySender{failures: maxSendAttempts - 1}
-	id, threadID, err := sendWithRetry(context.Background(), sender, &wuphfpb.MessageCreateDispatch{DispatchId: "d1"})
+	id, threadID, err := sendWithRetry(context.Background(), "d1", sendOpFor(sender))
 	if err != nil {
 		t.Fatalf("sendWithRetry() error = %v", err)
 	}
@@ -44,7 +58,7 @@ func TestSendWithRetrySucceedsAfterTransientFailures(t *testing.T) {
 func TestSendWithRetryGivesUpAfterMaxAttempts(t *testing.T) {
 	t.Parallel()
 	sender := &flakySender{failures: maxSendAttempts}
-	_, _, err := sendWithRetry(context.Background(), sender, &wuphfpb.MessageCreateDispatch{DispatchId: "d1"})
+	_, _, err := sendWithRetry(context.Background(), "d1", sendOpFor(sender))
 	if err == nil || sender.calls != maxSendAttempts {
 		t.Fatalf("err = %v, calls = %d", err, sender.calls)
 	}
@@ -53,7 +67,7 @@ func TestSendWithRetryGivesUpAfterMaxAttempts(t *testing.T) {
 func TestSendWithRetryDoesNotRetryPermanentFailures(t *testing.T) {
 	t.Parallel()
 	sender := &permanentSender{}
-	_, _, err := sendWithRetry(context.Background(), sender, &wuphfpb.MessageCreateDispatch{DispatchId: "d1"})
+	_, _, err := sendWithRetry(context.Background(), "d1", sendOpFor(sender))
 	if err == nil || !isPermanent(err) || sender.calls != 1 {
 		t.Fatalf("err = %v, permanent = %v, calls = %d", err, isPermanent(err), sender.calls)
 	}
@@ -77,7 +91,7 @@ func TestSendWithRetryStopsOnContextCancel(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	sender := &flakySender{failures: maxSendAttempts}
-	_, _, err := sendWithRetry(ctx, sender, &wuphfpb.MessageCreateDispatch{DispatchId: "d1"})
+	_, _, err := sendWithRetry(ctx, "d1", sendOpFor(sender))
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("err = %v, want context.Canceled", err)
 	}

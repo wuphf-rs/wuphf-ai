@@ -7,8 +7,8 @@ use thiserror::Error;
 use tokio::sync::RwLock;
 use wuphf_model::{
     Alias, ChatSettings, ConnectorId, Contact, Conversation, ConversationId, DedupKey,
-    DispatchCommand, DispatchId, DispatchPayload, DispatchState, Endpoint, EndpointId, GroupId,
-    MediaBlob, MediaId, Message, MessageCopy, MessageId, PlatformAddress, ReplicationGroup,
+    DispatchCommand, DispatchId, DispatchPayload, DispatchState, Endpoint, EndpointId, MediaBlob,
+    MediaId, Message, MessageCopy, MessageId, PlatformAddress, ReplicaSet, ReplicaSetId,
     ReplyContext, StoredDispatch, ThreadMapping,
 };
 
@@ -16,8 +16,8 @@ use wuphf_model::{
 pub enum StorageError {
     #[error("endpoint {0} is not configured")]
     EndpointNotFound(EndpointId),
-    #[error("replication group {0} is not configured")]
-    GroupNotFound(GroupId),
+    #[error("replica set {0} is not configured")]
+    ReplicaSetNotFound(ReplicaSetId),
     #[error("dispatch {0} is not configured")]
     DispatchNotFound(DispatchId),
     #[error("media {0} is not stored")]
@@ -40,11 +40,13 @@ pub type StorageResult<T> = Result<T, StorageError>;
 pub trait Storage: Send + Sync + 'static {
     async fn put_endpoint(&self, endpoint: Endpoint) -> StorageResult<()>;
     async fn endpoint(&self, endpoint_id: EndpointId) -> StorageResult<Endpoint>;
-    async fn put_group(&self, group: ReplicationGroup) -> StorageResult<()>;
-    async fn group(&self, group_id: GroupId) -> StorageResult<ReplicationGroup>;
-    /// The replication group that contains the endpoint, if any.
-    async fn group_for_endpoint(&self, endpoint_id: EndpointId)
-    -> StorageResult<Option<GroupId>>;
+    async fn put_replica_set(&self, replica_set: ReplicaSet) -> StorageResult<()>;
+    async fn replica_set(&self, replica_set_id: ReplicaSetId) -> StorageResult<ReplicaSet>;
+    /// The replica set that contains the endpoint, if any.
+    async fn replica_set_for_endpoint(
+        &self,
+        endpoint_id: EndpointId,
+    ) -> StorageResult<Option<ReplicaSetId>>;
     /// Insert or update an alias. Inserting a canonical alias clears the
     /// canonical flag on the endpoint's other aliases.
     async fn put_alias(&self, alias: Alias) -> StorageResult<()>;
@@ -66,10 +68,10 @@ pub trait Storage: Send + Sync + 'static {
         connector_id: &ConnectorId,
         address: &PlatformAddress,
     ) -> StorageResult<Option<Conversation>>;
-    /// The conversation backed by this replication group, if any.
-    async fn conversation_for_group(
+    /// The conversation backed by this replica set, if any.
+    async fn conversation_for_replica_set(
         &self,
-        group_id: GroupId,
+        replica_set_id: ReplicaSetId,
     ) -> StorageResult<Option<Conversation>>;
     async fn put_thread_mapping(&self, mapping: ThreadMapping) -> StorageResult<()>;
     /// The thread provisioned for a conversation in the given connector's
@@ -136,7 +138,7 @@ pub struct InMemoryStorage {
 #[derive(Default)]
 struct State {
     endpoints: HashMap<EndpointId, Endpoint>,
-    groups: HashMap<GroupId, ReplicationGroup>,
+    replica_sets: HashMap<ReplicaSetId, ReplicaSet>,
     aliases: HashMap<(ConnectorId, PlatformAddress), Alias>,
     conversations: HashMap<ConversationId, Conversation>,
     thread_mappings: HashMap<(ConversationId, ConnectorId), ThreadMapping>,
@@ -177,33 +179,37 @@ impl Storage for InMemoryStorage {
             .ok_or(StorageError::EndpointNotFound(endpoint_id))
     }
 
-    async fn put_group(&self, group: ReplicationGroup) -> StorageResult<()> {
-        self.state.write().await.groups.insert(group.id, group);
+    async fn put_replica_set(&self, replica_set: ReplicaSet) -> StorageResult<()> {
+        self.state
+            .write()
+            .await
+            .replica_sets
+            .insert(replica_set.id, replica_set);
         Ok(())
     }
 
-    async fn group(&self, group_id: GroupId) -> StorageResult<ReplicationGroup> {
+    async fn replica_set(&self, replica_set_id: ReplicaSetId) -> StorageResult<ReplicaSet> {
         self.state
             .read()
             .await
-            .groups
-            .get(&group_id)
+            .replica_sets
+            .get(&replica_set_id)
             .cloned()
-            .ok_or(StorageError::GroupNotFound(group_id))
+            .ok_or(StorageError::ReplicaSetNotFound(replica_set_id))
     }
 
-    async fn group_for_endpoint(
+    async fn replica_set_for_endpoint(
         &self,
         endpoint_id: EndpointId,
-    ) -> StorageResult<Option<GroupId>> {
+    ) -> StorageResult<Option<ReplicaSetId>> {
         Ok(self
             .state
             .read()
             .await
-            .groups
+            .replica_sets
             .values()
-            .find(|group| group.endpoints.contains(&endpoint_id))
-            .map(|group| group.id))
+            .find(|replica_set| replica_set.endpoints.contains(&endpoint_id))
+            .map(|replica_set| replica_set.id))
     }
 
     async fn put_alias(&self, alias: Alias) -> StorageResult<()> {
@@ -277,9 +283,9 @@ impl Storage for InMemoryStorage {
             .cloned())
     }
 
-    async fn conversation_for_group(
+    async fn conversation_for_replica_set(
         &self,
-        group_id: GroupId,
+        replica_set_id: ReplicaSetId,
     ) -> StorageResult<Option<Conversation>> {
         Ok(self
             .state
@@ -287,7 +293,7 @@ impl Storage for InMemoryStorage {
             .await
             .conversations
             .values()
-            .find(|conversation| conversation.group_id == group_id)
+            .find(|conversation| conversation.replica_set_id == replica_set_id)
             .cloned())
     }
 
@@ -489,7 +495,13 @@ impl Storage for InMemoryStorage {
     }
 
     async fn dispatch(&self, dispatch_id: DispatchId) -> StorageResult<Option<StoredDispatch>> {
-        Ok(self.state.read().await.dispatches.get(&dispatch_id).cloned())
+        Ok(self
+            .state
+            .read()
+            .await
+            .dispatches
+            .get(&dispatch_id)
+            .cloned())
     }
 
     async fn acknowledge_dispatch(
@@ -543,7 +555,7 @@ impl Storage for InMemoryStorage {
                 .dispatches
                 .get_mut(&id)
                 .expect("blocked dispatch present");
-            set_native_reply(
+            bind_native_parent(
                 &mut candidate.command,
                 parent.clone(),
                 platform_message_id.clone(),
@@ -615,35 +627,39 @@ impl Storage for SqliteStorage {
             .ok_or(StorageError::EndpointNotFound(endpoint_id))
     }
 
-    async fn put_group(&self, group: ReplicationGroup) -> StorageResult<()> {
+    async fn put_replica_set(&self, replica_set: ReplicaSet) -> StorageResult<()> {
         upsert_json(
             &self.pool,
-            "replication_groups",
+            "replica_sets",
             "id",
-            group.id.to_string(),
-            &group,
+            replica_set.id.to_string(),
+            &replica_set,
         )
         .await
     }
 
-    async fn group(&self, group_id: GroupId) -> StorageResult<ReplicationGroup> {
-        get_json(&self.pool, "replication_groups", "id", group_id.to_string())
+    async fn replica_set(&self, replica_set_id: ReplicaSetId) -> StorageResult<ReplicaSet> {
+        get_json(&self.pool, "replica_sets", "id", replica_set_id.to_string())
             .await?
-            .ok_or(StorageError::GroupNotFound(group_id))
+            .ok_or(StorageError::ReplicaSetNotFound(replica_set_id))
     }
 
-    async fn group_for_endpoint(
+    async fn replica_set_for_endpoint(
         &self,
         endpoint_id: EndpointId,
-    ) -> StorageResult<Option<GroupId>> {
+    ) -> StorageResult<Option<ReplicaSetId>> {
         let needle = endpoint_id.to_string();
-        let rows = sqlx::query("SELECT payload FROM replication_groups")
+        let rows = sqlx::query("SELECT payload FROM replica_sets")
             .fetch_all(&self.pool)
             .await?;
         for row in rows {
-            let group: ReplicationGroup = serde_json::from_str(row.get("payload"))?;
-            if group.endpoints.iter().any(|id| id.to_string() == needle) {
-                return Ok(Some(group.id));
+            let replica_set: ReplicaSet = serde_json::from_str(row.get("payload"))?;
+            if replica_set
+                .endpoints
+                .iter()
+                .any(|id| id.to_string() == needle)
+            {
+                return Ok(Some(replica_set.id));
             }
         }
         Ok(None)
@@ -695,13 +711,13 @@ impl Storage for SqliteStorage {
     async fn put_conversation(&self, conversation: Conversation) -> StorageResult<()> {
         sqlx::query(
             "INSERT INTO conversations
-               (id, rule_id, group_id, source_connector, source_chat_id, source_thread_key, payload)
+               (id, rule_id, replica_set_id, source_connector, source_chat_id, source_thread_key, payload)
              VALUES (?, ?, ?, ?, ?, ?, ?)
              ON CONFLICT(id) DO UPDATE SET payload = excluded.payload",
         )
         .bind(conversation.id.to_string())
         .bind(conversation.rule_id.to_string())
-        .bind(conversation.group_id.to_string())
+        .bind(conversation.replica_set_id.to_string())
         .bind(conversation.source_connector.to_string())
         .bind(&conversation.source_address.chat_id)
         .bind(thread_key(&conversation.source_address))
@@ -715,7 +731,13 @@ impl Storage for SqliteStorage {
         &self,
         conversation_id: ConversationId,
     ) -> StorageResult<Option<Conversation>> {
-        get_json(&self.pool, "conversations", "id", conversation_id.to_string()).await
+        get_json(
+            &self.pool,
+            "conversations",
+            "id",
+            conversation_id.to_string(),
+        )
+        .await
     }
 
     async fn conversation_for_source(
@@ -739,12 +761,12 @@ impl Storage for SqliteStorage {
             .map_err(Into::into)
     }
 
-    async fn conversation_for_group(
+    async fn conversation_for_replica_set(
         &self,
-        group_id: GroupId,
+        replica_set_id: ReplicaSetId,
     ) -> StorageResult<Option<Conversation>> {
-        let row = sqlx::query("SELECT payload FROM conversations WHERE group_id = ?")
-            .bind(group_id.to_string())
+        let row = sqlx::query("SELECT payload FROM conversations WHERE replica_set_id = ?")
+            .bind(replica_set_id.to_string())
             .fetch_optional(&self.pool)
             .await?;
         row.map(|row| serde_json::from_str(row.get("payload")))
@@ -1057,7 +1079,7 @@ impl Storage for SqliteStorage {
         let parent: Message = serde_json::from_str(parent_row.get("payload"))?;
         for row in rows {
             let mut blocked: StoredDispatch = serde_json::from_str(row.get("payload"))?;
-            set_native_reply(
+            bind_native_parent(
                 &mut blocked.command,
                 parent.clone(),
                 platform_message_id.clone(),
@@ -1114,7 +1136,10 @@ fn dispatch_state(waiting_for: Option<MessageId>) -> DispatchState {
     }
 }
 
-fn set_native_reply(command: &mut DispatchCommand, parent: Message, platform_message_id: String) {
+/// Fill in the native parent id a released dispatch was waiting for. A reply
+/// gains the quoted parent's id as its reply context; an edit gains the native
+/// id of the copy it must revise at the target endpoint.
+fn bind_native_parent(command: &mut DispatchCommand, parent: Message, platform_message_id: String) {
     match &mut command.payload {
         DispatchPayload::MessageCreate { reply_context, .. } => {
             *reply_context = Some(ReplyContext {
@@ -1126,6 +1151,10 @@ fn set_native_reply(command: &mut DispatchCommand, parent: Message, platform_mes
                 attachments: parent.attachments,
             })
         }
+        DispatchPayload::MessageEdit {
+            target_platform_message_id,
+            ..
+        } => *target_platform_message_id = platform_message_id,
     }
 }
 
@@ -1250,7 +1279,10 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(released.len(), 1);
-        let DispatchPayload::MessageCreate { reply_context, .. } = &released[0].command.payload;
+        let DispatchPayload::MessageCreate { reply_context, .. } = &released[0].command.payload
+        else {
+            panic!("released dispatch should be a message create");
+        };
         let reply_context = reply_context
             .as_ref()
             .expect("reply context set on release");
@@ -1320,9 +1352,10 @@ mod tests {
         storage
             .put_message(Message {
                 id: MessageId::new(),
-                group_id: GroupId::new(),
+                replica_set_id: ReplicaSetId::new(),
                 sender: "test".into(),
                 participant: None,
+                sender_name: None,
                 text: None,
                 attachments: vec![referenced.clone()],
                 reply_to: None,
@@ -1352,9 +1385,10 @@ mod tests {
     fn message(message_id: MessageId) -> Message {
         Message {
             id: message_id,
-            group_id: GroupId::new(),
+            replica_set_id: ReplicaSetId::new(),
             sender: "test".into(),
             participant: None,
+            sender_name: None,
             text: Some("test".into()),
             attachments: vec![],
             reply_to: None,
