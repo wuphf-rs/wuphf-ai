@@ -48,7 +48,9 @@ impl RoutingConfig {
     /// The delivery policy configured for a connector, or the default when the
     /// connector is unknown or left unconfigured.
     pub fn delivery(&self, id: &ConnectorId) -> DeliveryOptions {
-        self.connector(id).map(|info| info.delivery).unwrap_or_default()
+        self.connector(id)
+            .map(|info| info.delivery)
+            .unwrap_or_default()
     }
 
     /// The first rule side whose connector and selector accept this address.
