@@ -44,7 +44,7 @@ func TestNormalizeGroupTextAndReply(t *testing.T) {
 
 type stubNamer struct{ title string }
 
-func (s stubNamer) ChatTitle(context.Context, types.JID, bool) string { return s.title }
+func (s stubNamer) ChatTitle(context.Context, types.JID) string { return s.title }
 
 func TestNormalizeSetsChatTitleFromNamer(t *testing.T) {
 	t.Parallel()

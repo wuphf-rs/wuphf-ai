@@ -11,10 +11,11 @@ import (
 )
 
 // ChatNamer resolves a human-readable title for a chat so the core can label a
-// freshly provisioned mirror thread. Implementations are expected to cache, as
-// it is queried per inbound message.
+// freshly provisioned mirror thread. The chat kind (group, newsletter, contact)
+// is derived from the JID, so callers need not classify it. Implementations are
+// expected to cache, as it is queried per inbound message.
 type ChatNamer interface {
-	ChatTitle(ctx context.Context, chat types.JID, isGroup bool) string
+	ChatTitle(ctx context.Context, chat types.JID) string
 }
 
 type Normalizer struct {
@@ -134,7 +135,7 @@ func (n Normalizer) normalize(ctx context.Context, message *events.Message) (*wu
 		TimestampMs:       message.Info.Timestamp.UnixMilli(),
 	}
 	if n.namer != nil {
-		if title := n.namer.ChatTitle(ctx, message.Info.Chat, message.Info.IsGroup); title != "" {
+		if title := n.namer.ChatTitle(ctx, message.Info.Chat); title != "" {
 			event.ChatTitle = &title
 		}
 	}
