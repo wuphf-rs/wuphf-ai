@@ -7,6 +7,7 @@ import (
 	"math/rand"
 	"strconv"
 
+	"github.com/akshettrj/wuphf/connectors/telegram/internal/config"
 	coreclient "github.com/akshettrj/wuphf/connectors/telegram/internal/core"
 	"github.com/akshettrj/wuphf/proto/go/connector/v1"
 	"github.com/gotd/td/telegram/message"
@@ -15,14 +16,23 @@ import (
 )
 
 type Sender struct {
-	api    *tg.Client
-	sender *message.Sender
-	peers  *PeerCache
-	media  MediaBroker
+	api        *tg.Client
+	sender     *message.Sender
+	peers      *PeerCache
+	media      MediaBroker
+	editMode   config.EditMode
+	deleteMode config.DeleteMode
 }
 
-func NewSender(api *tg.Client, peers *PeerCache, media MediaBroker) Sender {
-	return Sender{api: api, sender: message.NewSender(api), peers: peers, media: media}
+func NewSender(api *tg.Client, peers *PeerCache, media MediaBroker, editMode config.EditMode, deleteMode config.DeleteMode) Sender {
+	return Sender{
+		api:        api,
+		sender:     message.NewSender(api),
+		peers:      peers,
+		media:      media,
+		editMode:   editMode,
+		deleteMode: deleteMode,
+	}
 }
 
 func (s Sender) SendMessage(ctx context.Context, dispatch *wuphfpb.MessageCreateDispatch) (string, string, error) {
@@ -77,8 +87,11 @@ func (s Sender) SendMessage(ctx context.Context, dispatch *wuphfpb.MessageCreate
 	return strconv.Itoa(messageID), provisionedThread, nil
 }
 
-// EditMessage revises an already-delivered copy in place. The native message id
-// is unchanged by an edit, so it is returned as-is for the acknowledgement.
+// EditMessage applies an inbound edit to an already-delivered copy. In the
+// default in-place mode it revises the original message; in repost mode it
+// leaves the original untouched and posts the revised content as a new reply
+// marked as an edit. Either way the original native id is returned unchanged,
+// so the copy mapping continues to point at the message future edits revise.
 func (s Sender) EditMessage(ctx context.Context, dispatch *wuphfpb.MessageEditDispatch) (string, error) {
 	peer, err := s.peers.InputPeer(dispatch.TargetChatId)
 	if err != nil {
@@ -89,8 +102,52 @@ func (s Sender) EditMessage(ctx context.Context, dispatch *wuphfpb.MessageEditDi
 		return "", coreclient.Permanent(fmt.Errorf("invalid Telegram target message id %q: %w", dispatch.TargetPlatformMessageId, err))
 	}
 	body := attributedText(dispatch.GetSenderName(), dispatch.GetParticipant(), dispatch.GetText())
+	if s.editMode == config.EditModeRepost {
+		body = append(body, styling.Italic("\n(edited)"))
+		if _, err := s.sender.To(peer).CloneBuilder().Reply(messageID).StyledText(ctx, body...); err != nil {
+			return "", fmt.Errorf("repost Telegram edit: %w", err)
+		}
+		return dispatch.TargetPlatformMessageId, nil
+	}
 	if _, err := s.sender.To(peer).Edit(messageID).StyledText(ctx, body...); err != nil {
 		return "", fmt.Errorf("edit Telegram message: %w", err)
+	}
+	return dispatch.TargetPlatformMessageId, nil
+}
+
+// DeleteMessage applies an inbound delete to an already-delivered copy. In the
+// default revoke mode it deletes the mirrored message; in tombstone mode it
+// leaves it in place and posts a notice replying to it. The original native id
+// is returned unchanged for the acknowledgement.
+func (s Sender) DeleteMessage(ctx context.Context, dispatch *wuphfpb.MessageDeleteDispatch) (string, error) {
+	peer, err := s.peers.InputPeer(dispatch.TargetChatId)
+	if err != nil {
+		return "", err
+	}
+	messageID, err := strconv.Atoi(dispatch.TargetPlatformMessageId)
+	if err != nil {
+		return "", coreclient.Permanent(fmt.Errorf("invalid Telegram target message id %q: %w", dispatch.TargetPlatformMessageId, err))
+	}
+	if s.deleteMode == config.DeleteModeTombstone {
+		if _, err := s.sender.To(peer).CloneBuilder().Reply(messageID).StyledText(ctx, styling.Italic("🗑 message deleted")); err != nil {
+			return "", fmt.Errorf("post Telegram tombstone: %w", err)
+		}
+		return dispatch.TargetPlatformMessageId, nil
+	}
+	switch input := peer.(type) {
+	case *tg.InputPeerChannel:
+		_, err = s.api.ChannelsDeleteMessages(ctx, &tg.ChannelsDeleteMessagesRequest{
+			Channel: &tg.InputChannel{ChannelID: input.ChannelID, AccessHash: input.AccessHash},
+			ID:      []int{messageID},
+		})
+	default:
+		_, err = s.api.MessagesDeleteMessages(ctx, &tg.MessagesDeleteMessagesRequest{
+			Revoke: true,
+			ID:     []int{messageID},
+		})
+	}
+	if err != nil {
+		return "", fmt.Errorf("delete Telegram message: %w", err)
 	}
 	return dispatch.TargetPlatformMessageId, nil
 }

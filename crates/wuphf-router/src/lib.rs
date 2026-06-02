@@ -225,6 +225,59 @@ where
         Ok(outcome)
     }
 
+    pub async fn route_delete(
+        &self,
+        message: &Message,
+        origin_endpoint: EndpointId,
+    ) -> Result<RoutingOutcome, RouterError> {
+        let replica_set = self.storage.replica_set(message.replica_set_id).await?;
+        if !replica_set.endpoints.contains(&origin_endpoint) {
+            return Err(RouterError::OriginOutsideReplicaSet(origin_endpoint));
+        }
+
+        let mut outcome = RoutingOutcome::default();
+        for endpoint_id in replica_set
+            .endpoints
+            .into_iter()
+            .filter(|endpoint_id| *endpoint_id != origin_endpoint)
+        {
+            let endpoint = self.storage.endpoint(endpoint_id).await?;
+            let target = TargetAddress {
+                address: endpoint.address(),
+                provision_thread: None,
+            };
+            let target_connector = endpoint.connector_id.clone();
+            match self
+                .storage
+                .copy_at_endpoint(message.id, endpoint_id)
+                .await?
+            {
+                Some(copy) => outcome.dispatches.push(DispatchCommand {
+                    target_endpoint: endpoint_id,
+                    target_connector,
+                    target,
+                    payload: DispatchPayload::MessageDelete {
+                        message: message.clone(),
+                        target_platform_message_id: copy.platform_message_id,
+                    },
+                }),
+                None => outcome.blocked.push(BlockedDispatch {
+                    command: DispatchCommand {
+                        target_endpoint: endpoint_id,
+                        target_connector,
+                        target,
+                        payload: DispatchPayload::MessageDelete {
+                            message: message.clone(),
+                            target_platform_message_id: String::new(),
+                        },
+                    },
+                    waiting_for_message: message.id,
+                }),
+            }
+        }
+        Ok(outcome)
+    }
+
     /// Resolve the platform destination for one target endpoint. Mirror
     /// endpoints either reuse their provisioned thread or carry a provision
     /// instruction; all other endpoints send to their canonical address.

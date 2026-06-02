@@ -100,6 +100,15 @@ message MessageEditEvent {
   optional string text = 4;
 }
 
+// The platform reported that an existing message was deleted/revoked. The
+// connector reports the original message's native id; the core resolves it to
+// the logical message and fans the deletion out to the other copies.
+message MessageDeleteEvent {
+  string chat_id = 1;
+  optional string thread_id = 2;
+  string platform_message_id = 3;
+}
+
 // The platform reported a chat address change (e.g. WhatsApp phone-to-LID).
 // Both addresses remain resolvable; the new one becomes canonical for outbound.
 message IdentityMigrated {
@@ -143,6 +152,7 @@ message ClientFrame {
     IdentityMigrated identity_migrated = 4;
     DispatchFailed dispatch_failed = 5;
     MessageEditEvent message_edit = 6;
+    MessageDeleteEvent message_delete = 7;
   }
 }
 
@@ -181,6 +191,15 @@ message MessageEditDispatch {
   optional string participant = 7;
 }
 
+// Instruction to revoke an already-delivered copy. `target_platform_message_id`
+// is the native id of the message to delete at this endpoint.
+message MessageDeleteDispatch {
+  string dispatch_id = 1;
+  string target_chat_id = 2;
+  optional string target_thread_id = 3;
+  string target_platform_message_id = 4;
+}
+
 message Rejected {
   string reason = 1;
 }
@@ -190,5 +209,6 @@ message ServerFrame {
     MessageCreateDispatch message_create = 1;
     Rejected rejected = 2;
     MessageEditDispatch message_edit = 3;
+    MessageDeleteDispatch message_delete = 4;
   }
 }

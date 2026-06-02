@@ -11,10 +11,11 @@ import (
 )
 
 type stubSendClient struct {
-	sent      *waE2E.Message
-	uploaded  []byte
-	media     whatsmeow.MediaType
-	editedKey types.MessageID
+	sent       *waE2E.Message
+	uploaded   []byte
+	media      whatsmeow.MediaType
+	editedKey  types.MessageID
+	revokedKey types.MessageID
 }
 
 func (s *stubSendClient) SendMessage(_ context.Context, _ types.JID, message *waE2E.Message, _ ...whatsmeow.SendRequestExtra) (whatsmeow.SendResponse, error) {
@@ -25,6 +26,11 @@ func (s *stubSendClient) SendMessage(_ context.Context, _ types.JID, message *wa
 func (s *stubSendClient) BuildEdit(_ types.JID, id types.MessageID, newContent *waE2E.Message) *waE2E.Message {
 	s.editedKey = id
 	return newContent
+}
+
+func (s *stubSendClient) BuildRevoke(_ types.JID, _ types.JID, id types.MessageID) *waE2E.Message {
+	s.revokedKey = id
+	return &waE2E.Message{}
 }
 
 func (s *stubSendClient) Upload(_ context.Context, bytes []byte, media whatsmeow.MediaType) (whatsmeow.UploadResponse, error) {

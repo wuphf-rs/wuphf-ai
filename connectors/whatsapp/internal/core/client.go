@@ -49,6 +49,9 @@ type Sender interface {
 	// EditMessage revises an already-delivered copy and returns its platform
 	// message id, which an edit leaves unchanged.
 	EditMessage(context.Context, *wuphfpb.MessageEditDispatch) (messageID string, err error)
+	// DeleteMessage revokes an already-delivered copy and returns its platform
+	// message id, which a delete leaves unchanged.
+	DeleteMessage(context.Context, *wuphfpb.MessageDeleteDispatch) (messageID string, err error)
 }
 
 // sendOp performs one outbound delivery attempt, returning the resulting
@@ -153,6 +156,14 @@ func (c Client) runSession(
 				dispatch := body.MessageEdit
 				if err := deliver(ctx, stream, dispatch.DispatchId, func(ctx context.Context) (string, string, error) {
 					messageID, err := sender.EditMessage(ctx, dispatch)
+					return messageID, "", err
+				}); err != nil {
+					return err
+				}
+			case *wuphfpb.ServerFrame_MessageDelete:
+				dispatch := body.MessageDelete
+				if err := deliver(ctx, stream, dispatch.DispatchId, func(ctx context.Context) (string, string, error) {
+					messageID, err := sender.DeleteMessage(ctx, dispatch)
 					return messageID, "", err
 				}); err != nil {
 					return err

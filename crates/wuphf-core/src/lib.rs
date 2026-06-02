@@ -53,9 +53,13 @@ where
                 self.ingest_edit(origin_endpoint, platform_message_id, text)
                     .await
             }
-            EventPayload::MessageDelete { .. } | EventPayload::ReactionAdd(_) => {
-                Err(CoreError::UnsupportedEvent)
+            EventPayload::MessageDelete {
+                platform_message_id,
+            } => {
+                self.ingest_delete(origin_endpoint, platform_message_id)
+                    .await
             }
+            EventPayload::ReactionAdd(_) => Err(CoreError::UnsupportedEvent),
         }
     }
 
@@ -115,6 +119,7 @@ where
             attachments: inbound.attachments,
             reply_to,
             timestamp_ms: inbound.timestamp_ms,
+            deleted: false,
         };
         self.storage.put_message(message.clone()).await?;
         self.storage
@@ -178,6 +183,50 @@ where
         self.storage.put_message(message.clone()).await?;
 
         let routing = self.router.route_edit(&message, origin_endpoint).await?;
+        let mut dispatches = Vec::new();
+        for command in routing.dispatches.iter().cloned() {
+            dispatches.push(self.storage.enqueue_dispatch(command, None).await?);
+        }
+        for blocked in routing.blocked.iter().cloned() {
+            self.storage
+                .enqueue_dispatch(blocked.command, Some(blocked.waiting_for_message))
+                .await?;
+        }
+        Ok(IngestOutcome::Routed {
+            message_id,
+            routing,
+            dispatches,
+        })
+    }
+
+    /// Apply an inbound delete: mark the canonical message revoked and fan the
+    /// deletion out to the other endpoints. A delete of an already-revoked
+    /// message is dropped, which both ignores redundant reports and breaks the
+    /// echo loop when our own mirrored delete is reported back by the target.
+    async fn ingest_delete(
+        &self,
+        origin_endpoint: EndpointId,
+        platform_message_id: String,
+    ) -> Result<IngestOutcome, CoreError> {
+        let Some(message_id) = self
+            .storage
+            .message_id_for_copy(origin_endpoint, &platform_message_id)
+            .await?
+        else {
+            return Ok(IngestOutcome::Ignored(IgnoreReason::Unmatched));
+        };
+        let mut message = self
+            .storage
+            .message(message_id)
+            .await?
+            .ok_or(CoreError::DeleteTargetNotStored(message_id))?;
+        if message.deleted {
+            return Ok(IngestOutcome::Ignored(IgnoreReason::RedundantDelete));
+        }
+        message.deleted = true;
+        self.storage.put_message(message.clone()).await?;
+
+        let routing = self.router.route_delete(&message, origin_endpoint).await?;
         let mut dispatches = Vec::new();
         for command in routing.dispatches.iter().cloned() {
             dispatches.push(self.storage.enqueue_dispatch(command, None).await?);
@@ -532,6 +581,9 @@ pub enum IgnoreReason {
     /// An edit that leaves the stored text unchanged: a redundant report or our
     /// own mirrored edit echoed back by the platform.
     RedundantEdit,
+    /// A delete of an already-revoked message: a redundant report or our own
+    /// mirrored delete echoed back by the platform.
+    RedundantDelete,
 }
 
 #[derive(Debug, Error)]
@@ -544,8 +596,10 @@ pub enum CoreError {
     OriginWithoutReplicaSet(EndpointId),
     #[error("rule references connector {0} which is not registered")]
     UnknownConnector(ConnectorId),
-    #[error("message delete and reaction ingestion are not yet implemented")]
+    #[error("reaction ingestion is not yet implemented")]
     UnsupportedEvent,
+    #[error("deleted message {0} maps from a copy but is not stored")]
+    DeleteTargetNotStored(MessageId),
     #[error("reply target platform message {0} is unknown at the origin endpoint")]
     UnknownReplyTarget(String),
     #[error("edited message {0} maps from a copy but is not stored")]

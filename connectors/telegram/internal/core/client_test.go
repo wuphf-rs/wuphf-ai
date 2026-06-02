@@ -20,6 +20,10 @@ func (s *permanentSender) EditMessage(context.Context, *wuphfpb.MessageEditDispa
 	return "", nil
 }
 
+func (s *permanentSender) DeleteMessage(context.Context, *wuphfpb.MessageDeleteDispatch) (string, error) {
+	return "", nil
+}
+
 type flakySender struct {
 	failures int
 	calls    int
@@ -34,6 +38,10 @@ func (s *flakySender) SendMessage(context.Context, *wuphfpb.MessageCreateDispatc
 }
 
 func (s *flakySender) EditMessage(context.Context, *wuphfpb.MessageEditDispatch) (string, error) {
+	return "", nil
+}
+
+func (s *flakySender) DeleteMessage(context.Context, *wuphfpb.MessageDeleteDispatch) (string, error) {
 	return "", nil
 }
 

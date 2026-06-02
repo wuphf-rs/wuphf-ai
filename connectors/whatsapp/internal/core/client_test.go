@@ -25,6 +25,10 @@ func (s *flakySender) EditMessage(context.Context, *wuphfpb.MessageEditDispatch)
 	return "", nil
 }
 
+func (s *flakySender) DeleteMessage(context.Context, *wuphfpb.MessageDeleteDispatch) (string, error) {
+	return "", nil
+}
+
 func sendOpFor(sender Sender) sendOp {
 	return func(ctx context.Context) (string, string, error) {
 		return sender.SendMessage(ctx, &wuphfpb.MessageCreateDispatch{DispatchId: "d1"})

@@ -1154,6 +1154,10 @@ fn bind_native_parent(command: &mut DispatchCommand, parent: Message, platform_m
         DispatchPayload::MessageEdit {
             target_platform_message_id,
             ..
+        }
+        | DispatchPayload::MessageDelete {
+            target_platform_message_id,
+            ..
         } => *target_platform_message_id = platform_message_id,
     }
 }
@@ -1360,6 +1364,7 @@ mod tests {
                 attachments: vec![referenced.clone()],
                 reply_to: None,
                 timestamp_ms: 0,
+                deleted: false,
             })
             .await
             .unwrap();
@@ -1393,6 +1398,7 @@ mod tests {
             attachments: vec![],
             reply_to: None,
             timestamp_ms: 0,
+            deleted: false,
         }
     }
 

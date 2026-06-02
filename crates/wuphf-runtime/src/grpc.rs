@@ -147,6 +147,24 @@ fn input_from_proto(
                 },
             }))
         }
+        Some(pb::client_frame::Body::MessageDelete(event)) => {
+            Ok(ConnectorInput::Event(NormalizedEvent {
+                source: SourceAddress {
+                    connector_id: connector_id.clone(),
+                    address: PlatformAddress::new(
+                        required_string(event.chat_id, "chat_id")?,
+                        event.thread_id,
+                    ),
+                    chat_title: None,
+                },
+                payload: EventPayload::MessageDelete {
+                    platform_message_id: required_string(
+                        event.platform_message_id,
+                        "platform_message_id",
+                    )?,
+                },
+            }))
+        }
         Some(pb::client_frame::Body::Acknowledgement(acknowledgement)) => {
             Ok(ConnectorInput::Acknowledgement(DispatchAcknowledgement {
                 dispatch_id: wuphf_model::DispatchId(parse_uuid(
@@ -232,6 +250,15 @@ fn output_to_proto(output: ConnectorOutput) -> pb::ServerFrame {
                     text: message.text,
                     sender_name: message.sender_name,
                     participant: message.participant,
+                }),
+                DispatchPayload::MessageDelete {
+                    target_platform_message_id,
+                    ..
+                } => pb::server_frame::Body::MessageDelete(pb::MessageDeleteDispatch {
+                    dispatch_id,
+                    target_chat_id: target.address.chat_id,
+                    target_thread_id: target.address.thread_id,
+                    target_platform_message_id,
                 }),
             }
         }

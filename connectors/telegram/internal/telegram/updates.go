@@ -2,6 +2,7 @@ package telegramconnector
 
 import (
 	"context"
+	"fmt"
 	"strconv"
 
 	"github.com/akshettrj/wuphf/proto/go/connector/v1"
@@ -36,7 +37,32 @@ func (n Normalizer) Dispatcher() tg.UpdateDispatcher {
 	dispatcher.OnEditChannelMessage(func(ctx context.Context, entities tg.Entities, update *tg.UpdateEditChannelMessage) error {
 		return n.handleEdit(ctx, entities, update.Message)
 	})
+	// Only channel/supergroup deletes carry their peer; plain UpdateDeleteMessages
+	// omits the chat, so a deleted DM/basic-group message cannot be resolved and
+	// is not mirrored.
+	dispatcher.OnDeleteChannelMessages(func(ctx context.Context, _ tg.Entities, update *tg.UpdateDeleteChannelMessages) error {
+		return n.handleDelete(ctx, fmt.Sprintf("telegram:channel:%d", update.ChannelID), update.Messages)
+	})
 	return dispatcher
+}
+
+// handleDelete reports each revoked message so the core can mirror the deletion
+// to the other copies.
+func (n Normalizer) handleDelete(ctx context.Context, chatID string, ids []int) error {
+	for _, id := range ids {
+		frame := &wuphfpb.ClientFrame{
+			Body: &wuphfpb.ClientFrame_MessageDelete{MessageDelete: &wuphfpb.MessageDeleteEvent{
+				ChatId:            chatID,
+				PlatformMessageId: strconv.Itoa(id),
+			}},
+		}
+		select {
+		case n.inputs <- frame:
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
+	return nil
 }
 
 func (n Normalizer) handle(ctx context.Context, entities tg.Entities, message tg.MessageClass) error {

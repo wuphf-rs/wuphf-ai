@@ -276,6 +276,11 @@ pub struct Message {
     pub attachments: Vec<Attachment>,
     pub reply_to: Option<MessageId>,
     pub timestamp_ms: i64,
+    /// Set once the source revoked the message. Retained (not removed) so its
+    /// native ids still resolve, letting a re-reported delete be recognized as
+    /// redundant and breaking the delete echo loop with mirror platforms.
+    #[serde(default)]
+    pub deleted: bool,
 }
 
 /// Records the native id under which a [`Message`] was delivered to one
@@ -402,6 +407,14 @@ pub enum DispatchPayload {
         message: Message,
         target_platform_message_id: String,
     },
+    /// Revoke an already-delivered copy. `target_platform_message_id` is the
+    /// native id of the copy to delete at the target endpoint; it is empty while
+    /// the dispatch is blocked and filled in when the original create is
+    /// acknowledged.
+    MessageDelete {
+        message: Message,
+        target_platform_message_id: String,
+    },
 }
 
 /// Instruction to create a thread/topic in a container before sending, used
@@ -436,14 +449,16 @@ impl DispatchCommand {
     pub fn message_id(&self) -> MessageId {
         match &self.payload {
             DispatchPayload::MessageCreate { message, .. }
-            | DispatchPayload::MessageEdit { message, .. } => message.id,
+            | DispatchPayload::MessageEdit { message, .. }
+            | DispatchPayload::MessageDelete { message, .. } => message.id,
         }
     }
 
     pub fn message_replica_set_id(&self) -> ReplicaSetId {
         match &self.payload {
             DispatchPayload::MessageCreate { message, .. }
-            | DispatchPayload::MessageEdit { message, .. } => message.replica_set_id,
+            | DispatchPayload::MessageEdit { message, .. }
+            | DispatchPayload::MessageDelete { message, .. } => message.replica_set_id,
         }
     }
 }

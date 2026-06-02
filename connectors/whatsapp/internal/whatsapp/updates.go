@@ -37,6 +37,11 @@ func (n Normalizer) Handle(ctx context.Context, message *events.Message) error {
 			return err
 		}
 	}
+	if del, ok := normalizeDelete(message); ok {
+		return n.send(ctx, &wuphfpb.ClientFrame{
+			Body: &wuphfpb.ClientFrame_MessageDelete{MessageDelete: del},
+		})
+	}
 	if message.IsEdit {
 		edit, ok := normalizeEdit(message)
 		if !ok {
@@ -76,6 +81,25 @@ func normalizeEdit(message *events.Message) (*wuphfpb.MessageEditEvent, bool) {
 		event.Text = &text
 	}
 	return event, true
+}
+
+// normalizeDelete reports an inbound revoke. WhatsApp carries a delete as a
+// protocol message of type REVOKE whose key names the revoked message; only the
+// original message id is needed, as the core resolves it to the logical message
+// and fans the deletion out to the other copies.
+func normalizeDelete(message *events.Message) (*wuphfpb.MessageDeleteEvent, bool) {
+	protocol := message.Message.GetProtocolMessage()
+	if protocol == nil || protocol.GetType() != waE2E.ProtocolMessage_REVOKE {
+		return nil, false
+	}
+	revokedID := protocol.GetKey().GetID()
+	if revokedID == "" {
+		return nil, false
+	}
+	return &wuphfpb.MessageDeleteEvent{
+		ChatId:            message.Info.Chat.String(),
+		PlatformMessageId: revokedID,
+	}, true
 }
 
 func (n Normalizer) send(ctx context.Context, frame *wuphfpb.ClientFrame) error {

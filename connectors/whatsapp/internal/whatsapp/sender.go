@@ -17,6 +17,7 @@ type SendClient interface {
 	SendMessage(context.Context, types.JID, *waE2E.Message, ...whatsmeow.SendRequestExtra) (whatsmeow.SendResponse, error)
 	Upload(context.Context, []byte, whatsmeow.MediaType) (whatsmeow.UploadResponse, error)
 	BuildEdit(types.JID, types.MessageID, *waE2E.Message) *waE2E.Message
+	BuildRevoke(chat, sender types.JID, id types.MessageID) *waE2E.Message
 }
 
 type Sender struct {
@@ -72,6 +73,21 @@ func (s Sender) EditMessage(ctx context.Context, dispatch *wuphfpb.MessageEditDi
 	edit := s.client.BuildEdit(chat, types.MessageID(dispatch.GetTargetPlatformMessageId()), textMessage(dispatch.GetText()))
 	if _, err := s.client.SendMessage(ctx, chat, edit); err != nil {
 		return "", fmt.Errorf("edit WhatsApp message: %w", err)
+	}
+	return dispatch.GetTargetPlatformMessageId(), nil
+}
+
+// DeleteMessage revokes an already-delivered copy. WhatsApp keeps the original
+// message id after a revoke, so the target id is returned unchanged for the
+// acknowledgement. The empty sender JID revokes our own (bridge-authored) copy.
+func (s Sender) DeleteMessage(ctx context.Context, dispatch *wuphfpb.MessageDeleteDispatch) (string, error) {
+	chat, err := types.ParseJID(dispatch.GetTargetChatId())
+	if err != nil {
+		return "", coreclient.Permanent(fmt.Errorf("parse WhatsApp target chat %q: %w", dispatch.GetTargetChatId(), err))
+	}
+	revoke := s.client.BuildRevoke(chat, types.EmptyJID, types.MessageID(dispatch.GetTargetPlatformMessageId()))
+	if _, err := s.client.SendMessage(ctx, chat, revoke); err != nil {
+		return "", fmt.Errorf("delete WhatsApp message: %w", err)
 	}
 	return dispatch.GetTargetPlatformMessageId(), nil
 }
