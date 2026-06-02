@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"math/rand"
+	"mime"
+	"path"
 	"strconv"
 
 	"github.com/akshettrj/wuphf/connectors/telegram/internal/config"
@@ -205,12 +207,17 @@ func (s Sender) sendAttachment(
 	if err != nil {
 		return nil, fmt.Errorf("download media from core: %w", err)
 	}
-	name := attachment.GetFileName()
-	if name == "" {
-		name = "attachment"
-	}
+	name, hasExtension := uploadName(attachment)
 	upload := builder.Upload(message.FromBytes(name, bytes))
-	switch attachment.Kind {
+	// Photo/video/audio/sticker uploads are validated by Telegram against the
+	// filename extension. When we cannot determine one, send the bytes as a
+	// document instead, which carries no extension requirement, rather than
+	// risk a PHOTO_EXT_INVALID (or equivalent) rejection.
+	kind := attachment.Kind
+	if !hasExtension {
+		kind = wuphfpb.Attachment_KIND_FILE
+	}
+	switch kind {
 	case wuphfpb.Attachment_KIND_IMAGE:
 		return upload.Photo(ctx, captionOptions...)
 	case wuphfpb.Attachment_KIND_VIDEO:
@@ -224,6 +231,48 @@ func (s Sender) sendAttachment(
 	default:
 		return nil, coreclient.Permanent(fmt.Errorf("unsupported outbound attachment kind %s", attachment.Kind))
 	}
+}
+
+// uploadName builds the filename for a Telegram media upload and reports whether
+// it carries an extension. Telegram infers a file's type from its extension and
+// rejects an extensionless typed upload (e.g. PHOTO_EXT_INVALID), yet WhatsApp
+// images arrive with no filename. An existing extension is kept; otherwise one
+// is derived from the MIME type. When neither yields an extension the caller
+// falls back to a document upload, so no extension is invented here.
+func uploadName(attachment *wuphfpb.Attachment) (string, bool) {
+	name := attachment.GetFileName()
+	if name != "" && path.Ext(name) != "" {
+		return name, true
+	}
+	if name == "" {
+		name = "attachment"
+	}
+	if ext := mimeExtension(attachment.GetMimeType()); ext != "" {
+		return name + ext, true
+	}
+	return name, false
+}
+
+func mimeExtension(mimeType string) string {
+	mediaType, _, err := mime.ParseMediaType(mimeType)
+	if err != nil {
+		return ""
+	}
+	return mimeExtensions[mediaType]
+}
+
+// mimeExtensions maps the media types WhatsApp commonly reports to an extension
+// Telegram accepts. mime.ExtensionsByType is avoided as it is locale/OS
+// dependent and can return forms (e.g. .jfif for image/jpeg) Telegram rejects.
+var mimeExtensions = map[string]string{
+	"image/jpeg": ".jpg",
+	"image/png":  ".png",
+	"image/webp": ".webp",
+	"image/gif":  ".gif",
+	"video/mp4":  ".mp4",
+	"audio/ogg":  ".ogg",
+	"audio/mpeg": ".mp3",
+	"audio/mp4":  ".m4a",
 }
 
 func replyTargetMessageID(dispatch *wuphfpb.MessageCreateDispatch) string {

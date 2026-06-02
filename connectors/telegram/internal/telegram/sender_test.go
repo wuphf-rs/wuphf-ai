@@ -3,6 +3,7 @@ package telegramconnector
 import (
 	"testing"
 
+	"github.com/akshettrj/wuphf/proto/go/connector/v1"
 	"github.com/gotd/td/tg"
 )
 
@@ -30,6 +31,53 @@ func TestAttributedText(t *testing.T) {
 		})
 	}
 }
+
+func TestUploadName(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name            string
+		attachment      *wuphfpb.Attachment
+		want            string
+		wantExtensionOK bool
+	}{
+		{
+			"image without a filename gets a mime extension",
+			&wuphfpb.Attachment{Kind: wuphfpb.Attachment_KIND_IMAGE, MimeType: ptr("image/jpeg")},
+			"attachment.jpg", true,
+		},
+		{
+			"mime parameters are ignored",
+			&wuphfpb.Attachment{Kind: wuphfpb.Attachment_KIND_AUDIO, MimeType: ptr("audio/ogg; codecs=opus")},
+			"attachment.ogg", true,
+		},
+		{
+			"unknown mime yields no extension",
+			&wuphfpb.Attachment{Kind: wuphfpb.Attachment_KIND_IMAGE, MimeType: ptr("image/heif")},
+			"attachment", false,
+		},
+		{
+			"existing extension is preserved",
+			&wuphfpb.Attachment{Kind: wuphfpb.Attachment_KIND_FILE, FileName: ptr("report.pdf"), MimeType: ptr("application/pdf")},
+			"report.pdf", true,
+		},
+		{
+			"named file without extension gets one from mime",
+			&wuphfpb.Attachment{Kind: wuphfpb.Attachment_KIND_IMAGE, FileName: ptr("photo"), MimeType: ptr("image/png")},
+			"photo.png", true,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, ok := uploadName(tc.attachment)
+			if got != tc.want || ok != tc.wantExtensionOK {
+				t.Fatalf("uploadName() = (%q, %t), want (%q, %t)", got, ok, tc.want, tc.wantExtensionOK)
+			}
+		})
+	}
+}
+
+func ptr(s string) *string { return &s }
 
 func TestSentMessageID(t *testing.T) {
 	t.Parallel()
