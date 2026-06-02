@@ -15,6 +15,7 @@ import (
 	gotd "github.com/gotd/td/telegram"
 	"github.com/gotd/td/telegram/auth"
 	"github.com/gotd/td/tg"
+	"golang.org/x/term"
 )
 
 type Connector struct {
@@ -109,14 +110,33 @@ func (c Connector) authenticate(ctx context.Context, client *gotd.Client) error 
 		return strings.TrimSpace(code), nil
 	})
 
-	var authenticator auth.UserAuthenticator
-	if c.credentials.Password == "" {
-		authenticator = auth.CodeOnly(c.credentials.Phone, codePrompt)
-	} else {
-		authenticator = auth.Constant(c.credentials.Phone, c.credentials.Password, codePrompt)
+	authenticator := passwordPrompt{
+		UserAuthenticator: auth.Constant(c.credentials.Phone, c.credentials.Password, codePrompt),
+		configured:        c.credentials.Password,
 	}
 	if err := auth.NewFlow(authenticator, auth.SendCodeOptions{}).Run(ctx, client.Auth()); err != nil {
 		return fmt.Errorf("authenticate Telegram user: %w", err)
 	}
 	return nil
+}
+
+// passwordPrompt answers the 2FA password challenge: it returns the configured
+// password when one is set, and otherwise prompts for it interactively without
+// echoing. Phone, code, sign-up, and ToS handling are inherited unchanged.
+type passwordPrompt struct {
+	auth.UserAuthenticator
+	configured string
+}
+
+func (p passwordPrompt) Password(_ context.Context) (string, error) {
+	if p.configured != "" {
+		return p.configured, nil
+	}
+	fmt.Fprint(os.Stderr, "Telegram 2FA password: ")
+	secret, err := term.ReadPassword(int(os.Stdin.Fd()))
+	fmt.Fprintln(os.Stderr)
+	if err != nil {
+		return "", fmt.Errorf("read Telegram 2FA password: %w", err)
+	}
+	return strings.TrimSpace(string(secret)), nil
 }
