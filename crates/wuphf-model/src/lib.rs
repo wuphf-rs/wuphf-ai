@@ -197,6 +197,44 @@ pub struct ConnectorCapabilities {
     pub supports_topic_create: bool,
 }
 
+/// How a connector renders a replicated edit onto an already-delivered copy.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum EditMode {
+    /// Revise the original copy in place.
+    #[default]
+    InPlace,
+    /// Leave the original copy untouched and post the revision as a reply
+    /// marked as an edit. For platforms where editing is undesirable or where
+    /// an edit notification is wanted.
+    Repost,
+}
+
+/// How a connector renders a replicated delete onto an already-delivered copy.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DeleteMode {
+    /// Delete the mirrored copy.
+    #[default]
+    Revoke,
+    /// Leave the copy in place and post a notice replying to it.
+    Tombstone,
+}
+
+/// Per-connector delivery policy: server-owned options that govern how a
+/// connector renders replicated operations on its platform. Configured on each
+/// connector and resolved against the *target* connector when routing, so policy
+/// is connector-specific and directional (per delivery destination) rather than
+/// a symmetric property of a replica set. Each option is independent and
+/// defaulted, so a connector applies the knobs its platform supports and ignores
+/// the rest; new options are added here as additive fields.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct DeliveryOptions {
+    pub edit_mode: EditMode,
+    pub delete_mode: DeleteMode,
+}
+
 /// A resolvable platform address for an endpoint. Many aliases may point at one
 /// endpoint (e.g. after a WhatsApp phone-to-LID migration); exactly one is
 /// canonical for outbound sends.
@@ -406,6 +444,10 @@ pub enum DispatchPayload {
     MessageEdit {
         message: Message,
         target_platform_message_id: String,
+        /// How the target connector should render the edit, resolved from the
+        /// target connector's delivery options at routing time.
+        #[serde(default)]
+        mode: EditMode,
     },
     /// Revoke an already-delivered copy. `target_platform_message_id` is the
     /// native id of the copy to delete at the target endpoint; it is empty while
@@ -414,6 +456,10 @@ pub enum DispatchPayload {
     MessageDelete {
         message: Message,
         target_platform_message_id: String,
+        /// How the target connector should render the delete, resolved from the
+        /// target connector's delivery options at routing time.
+        #[serde(default)]
+        mode: DeleteMode,
     },
 }
 

@@ -82,6 +82,102 @@ func (Platform) EnumDescriptor() ([]byte, []int) {
 	return file_connector_proto_rawDescGZIP(), []int{0}
 }
 
+// How a connector should render a replicated edit, resolved by the server from
+// the target connector's delivery options.
+type EditMode int32
+
+const (
+	EditMode_EDIT_MODE_IN_PLACE EditMode = 0
+	EditMode_EDIT_MODE_REPOST   EditMode = 1
+)
+
+// Enum value maps for EditMode.
+var (
+	EditMode_name = map[int32]string{
+		0: "EDIT_MODE_IN_PLACE",
+		1: "EDIT_MODE_REPOST",
+	}
+	EditMode_value = map[string]int32{
+		"EDIT_MODE_IN_PLACE": 0,
+		"EDIT_MODE_REPOST":   1,
+	}
+)
+
+func (x EditMode) Enum() *EditMode {
+	p := new(EditMode)
+	*p = x
+	return p
+}
+
+func (x EditMode) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (EditMode) Descriptor() protoreflect.EnumDescriptor {
+	return file_connector_proto_enumTypes[1].Descriptor()
+}
+
+func (EditMode) Type() protoreflect.EnumType {
+	return &file_connector_proto_enumTypes[1]
+}
+
+func (x EditMode) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use EditMode.Descriptor instead.
+func (EditMode) EnumDescriptor() ([]byte, []int) {
+	return file_connector_proto_rawDescGZIP(), []int{1}
+}
+
+// How a connector should render a replicated delete, resolved by the server from
+// the target connector's delivery options.
+type DeleteMode int32
+
+const (
+	DeleteMode_DELETE_MODE_REVOKE    DeleteMode = 0
+	DeleteMode_DELETE_MODE_TOMBSTONE DeleteMode = 1
+)
+
+// Enum value maps for DeleteMode.
+var (
+	DeleteMode_name = map[int32]string{
+		0: "DELETE_MODE_REVOKE",
+		1: "DELETE_MODE_TOMBSTONE",
+	}
+	DeleteMode_value = map[string]int32{
+		"DELETE_MODE_REVOKE":    0,
+		"DELETE_MODE_TOMBSTONE": 1,
+	}
+)
+
+func (x DeleteMode) Enum() *DeleteMode {
+	p := new(DeleteMode)
+	*p = x
+	return p
+}
+
+func (x DeleteMode) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (DeleteMode) Descriptor() protoreflect.EnumDescriptor {
+	return file_connector_proto_enumTypes[2].Descriptor()
+}
+
+func (DeleteMode) Type() protoreflect.EnumType {
+	return &file_connector_proto_enumTypes[2]
+}
+
+func (x DeleteMode) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use DeleteMode.Descriptor instead.
+func (DeleteMode) EnumDescriptor() ([]byte, []int) {
+	return file_connector_proto_rawDescGZIP(), []int{2}
+}
+
 type Attachment_Kind int32
 
 const (
@@ -124,11 +220,11 @@ func (x Attachment_Kind) String() string {
 }
 
 func (Attachment_Kind) Descriptor() protoreflect.EnumDescriptor {
-	return file_connector_proto_enumTypes[1].Descriptor()
+	return file_connector_proto_enumTypes[3].Descriptor()
 }
 
 func (Attachment_Kind) Type() protoreflect.EnumType {
-	return &file_connector_proto_enumTypes[1]
+	return &file_connector_proto_enumTypes[3]
 }
 
 func (x Attachment_Kind) Number() protoreflect.EnumNumber {
@@ -1459,6 +1555,7 @@ type MessageEditDispatch struct {
 	Text                    *string                `protobuf:"bytes,5,opt,name=text,proto3,oneof" json:"text,omitempty"`
 	SenderName              *string                `protobuf:"bytes,6,opt,name=sender_name,json=senderName,proto3,oneof" json:"sender_name,omitempty"`
 	Participant             *string                `protobuf:"bytes,7,opt,name=participant,proto3,oneof" json:"participant,omitempty"`
+	EditMode                EditMode               `protobuf:"varint,8,opt,name=edit_mode,json=editMode,proto3,enum=wuphf.connector.v1.EditMode" json:"edit_mode,omitempty"`
 	unknownFields           protoimpl.UnknownFields
 	sizeCache               protoimpl.SizeCache
 }
@@ -1542,6 +1639,13 @@ func (x *MessageEditDispatch) GetParticipant() string {
 	return ""
 }
 
+func (x *MessageEditDispatch) GetEditMode() EditMode {
+	if x != nil {
+		return x.EditMode
+	}
+	return EditMode_EDIT_MODE_IN_PLACE
+}
+
 // Instruction to revoke an already-delivered copy. `target_platform_message_id`
 // is the native id of the message to delete at this endpoint.
 type MessageDeleteDispatch struct {
@@ -1550,6 +1654,7 @@ type MessageDeleteDispatch struct {
 	TargetChatId            string                 `protobuf:"bytes,2,opt,name=target_chat_id,json=targetChatId,proto3" json:"target_chat_id,omitempty"`
 	TargetThreadId          *string                `protobuf:"bytes,3,opt,name=target_thread_id,json=targetThreadId,proto3,oneof" json:"target_thread_id,omitempty"`
 	TargetPlatformMessageId string                 `protobuf:"bytes,4,opt,name=target_platform_message_id,json=targetPlatformMessageId,proto3" json:"target_platform_message_id,omitempty"`
+	DeleteMode              DeleteMode             `protobuf:"varint,5,opt,name=delete_mode,json=deleteMode,proto3,enum=wuphf.connector.v1.DeleteMode" json:"delete_mode,omitempty"`
 	unknownFields           protoimpl.UnknownFields
 	sizeCache               protoimpl.SizeCache
 }
@@ -1610,6 +1715,13 @@ func (x *MessageDeleteDispatch) GetTargetPlatformMessageId() string {
 		return x.TargetPlatformMessageId
 	}
 	return ""
+}
+
+func (x *MessageDeleteDispatch) GetDeleteMode() DeleteMode {
+	if x != nil {
+		return x.DeleteMode
+	}
+	return DeleteMode_DELETE_MODE_REVOKE
 }
 
 type Rejected struct {
@@ -1922,7 +2034,7 @@ const file_connector_proto_rawDesc = "" +
 	"\x05_textB\x1f\n" +
 	"\x1d_reply_to_platform_message_idB\x10\n" +
 	"\x0e_reply_contextB\x0e\n" +
-	"\f_sender_name\"\xec\x02\n" +
+	"\f_sender_name\"\xa7\x03\n" +
 	"\x13MessageEditDispatch\x12\x1f\n" +
 	"\vdispatch_id\x18\x01 \x01(\tR\n" +
 	"dispatchId\x12$\n" +
@@ -1932,17 +2044,20 @@ const file_connector_proto_rawDesc = "" +
 	"\x04text\x18\x05 \x01(\tH\x01R\x04text\x88\x01\x01\x12$\n" +
 	"\vsender_name\x18\x06 \x01(\tH\x02R\n" +
 	"senderName\x88\x01\x01\x12%\n" +
-	"\vparticipant\x18\a \x01(\tH\x03R\vparticipant\x88\x01\x01B\x13\n" +
+	"\vparticipant\x18\a \x01(\tH\x03R\vparticipant\x88\x01\x01\x129\n" +
+	"\tedit_mode\x18\b \x01(\x0e2\x1c.wuphf.connector.v1.EditModeR\beditModeB\x13\n" +
 	"\x11_target_thread_idB\a\n" +
 	"\x05_textB\x0e\n" +
 	"\f_sender_nameB\x0e\n" +
-	"\f_participant\"\xdf\x01\n" +
+	"\f_participant\"\xa0\x02\n" +
 	"\x15MessageDeleteDispatch\x12\x1f\n" +
 	"\vdispatch_id\x18\x01 \x01(\tR\n" +
 	"dispatchId\x12$\n" +
 	"\x0etarget_chat_id\x18\x02 \x01(\tR\ftargetChatId\x12-\n" +
 	"\x10target_thread_id\x18\x03 \x01(\tH\x00R\x0etargetThreadId\x88\x01\x01\x12;\n" +
-	"\x1atarget_platform_message_id\x18\x04 \x01(\tR\x17targetPlatformMessageIdB\x13\n" +
+	"\x1atarget_platform_message_id\x18\x04 \x01(\tR\x17targetPlatformMessageId\x12?\n" +
+	"\vdelete_mode\x18\x05 \x01(\x0e2\x1e.wuphf.connector.v1.DeleteModeR\n" +
+	"deleteModeB\x13\n" +
 	"\x11_target_thread_id\"\"\n" +
 	"\bRejected\x12\x16\n" +
 	"\x06reason\x18\x01 \x01(\tR\x06reason\"\xc7\x02\n" +
@@ -1959,7 +2074,14 @@ const file_connector_proto_rawDesc = "" +
 	"\x10PLATFORM_DISCORD\x10\x03\x12\x13\n" +
 	"\x0fPLATFORM_SIGNAL\x10\x04\x12\x12\n" +
 	"\x0ePLATFORM_SLACK\x10\x05\x12\x13\n" +
-	"\x0fPLATFORM_MATRIX\x10\x062i\n" +
+	"\x0fPLATFORM_MATRIX\x10\x06*8\n" +
+	"\bEditMode\x12\x16\n" +
+	"\x12EDIT_MODE_IN_PLACE\x10\x00\x12\x14\n" +
+	"\x10EDIT_MODE_REPOST\x10\x01*?\n" +
+	"\n" +
+	"DeleteMode\x12\x16\n" +
+	"\x12DELETE_MODE_REVOKE\x10\x00\x12\x19\n" +
+	"\x15DELETE_MODE_TOMBSTONE\x10\x012i\n" +
 	"\x12ConnectorTransport\x12S\n" +
 	"\vOpenSession\x12\x1f.wuphf.connector.v1.ClientFrame\x1a\x1f.wuphf.connector.v1.ServerFrame(\x010\x012\xc4\x01\n" +
 	"\x0eMediaTransport\x12U\n" +
@@ -1978,66 +2100,70 @@ func file_connector_proto_rawDescGZIP() []byte {
 	return file_connector_proto_rawDescData
 }
 
-var file_connector_proto_enumTypes = make([]protoimpl.EnumInfo, 2)
+var file_connector_proto_enumTypes = make([]protoimpl.EnumInfo, 4)
 var file_connector_proto_msgTypes = make([]protoimpl.MessageInfo, 21)
 var file_connector_proto_goTypes = []any{
 	(Platform)(0),                 // 0: wuphf.connector.v1.Platform
-	(Attachment_Kind)(0),          // 1: wuphf.connector.v1.Attachment.Kind
-	(*Capabilities)(nil),          // 2: wuphf.connector.v1.Capabilities
-	(*Registration)(nil),          // 3: wuphf.connector.v1.Registration
-	(*Attachment)(nil),            // 4: wuphf.connector.v1.Attachment
-	(*MediaMetadata)(nil),         // 5: wuphf.connector.v1.MediaMetadata
-	(*UploadMediaFrame)(nil),      // 6: wuphf.connector.v1.UploadMediaFrame
-	(*DownloadMediaRequest)(nil),  // 7: wuphf.connector.v1.DownloadMediaRequest
-	(*MediaChunk)(nil),            // 8: wuphf.connector.v1.MediaChunk
-	(*MessageCreateEvent)(nil),    // 9: wuphf.connector.v1.MessageCreateEvent
-	(*MessageEditEvent)(nil),      // 10: wuphf.connector.v1.MessageEditEvent
-	(*MessageDeleteEvent)(nil),    // 11: wuphf.connector.v1.MessageDeleteEvent
-	(*IdentityMigrated)(nil),      // 12: wuphf.connector.v1.IdentityMigrated
-	(*ReplyContext)(nil),          // 13: wuphf.connector.v1.ReplyContext
-	(*Acknowledgement)(nil),       // 14: wuphf.connector.v1.Acknowledgement
-	(*DispatchFailed)(nil),        // 15: wuphf.connector.v1.DispatchFailed
-	(*ClientFrame)(nil),           // 16: wuphf.connector.v1.ClientFrame
-	(*ProvisionThread)(nil),       // 17: wuphf.connector.v1.ProvisionThread
-	(*MessageCreateDispatch)(nil), // 18: wuphf.connector.v1.MessageCreateDispatch
-	(*MessageEditDispatch)(nil),   // 19: wuphf.connector.v1.MessageEditDispatch
-	(*MessageDeleteDispatch)(nil), // 20: wuphf.connector.v1.MessageDeleteDispatch
-	(*Rejected)(nil),              // 21: wuphf.connector.v1.Rejected
-	(*ServerFrame)(nil),           // 22: wuphf.connector.v1.ServerFrame
+	(EditMode)(0),                 // 1: wuphf.connector.v1.EditMode
+	(DeleteMode)(0),               // 2: wuphf.connector.v1.DeleteMode
+	(Attachment_Kind)(0),          // 3: wuphf.connector.v1.Attachment.Kind
+	(*Capabilities)(nil),          // 4: wuphf.connector.v1.Capabilities
+	(*Registration)(nil),          // 5: wuphf.connector.v1.Registration
+	(*Attachment)(nil),            // 6: wuphf.connector.v1.Attachment
+	(*MediaMetadata)(nil),         // 7: wuphf.connector.v1.MediaMetadata
+	(*UploadMediaFrame)(nil),      // 8: wuphf.connector.v1.UploadMediaFrame
+	(*DownloadMediaRequest)(nil),  // 9: wuphf.connector.v1.DownloadMediaRequest
+	(*MediaChunk)(nil),            // 10: wuphf.connector.v1.MediaChunk
+	(*MessageCreateEvent)(nil),    // 11: wuphf.connector.v1.MessageCreateEvent
+	(*MessageEditEvent)(nil),      // 12: wuphf.connector.v1.MessageEditEvent
+	(*MessageDeleteEvent)(nil),    // 13: wuphf.connector.v1.MessageDeleteEvent
+	(*IdentityMigrated)(nil),      // 14: wuphf.connector.v1.IdentityMigrated
+	(*ReplyContext)(nil),          // 15: wuphf.connector.v1.ReplyContext
+	(*Acknowledgement)(nil),       // 16: wuphf.connector.v1.Acknowledgement
+	(*DispatchFailed)(nil),        // 17: wuphf.connector.v1.DispatchFailed
+	(*ClientFrame)(nil),           // 18: wuphf.connector.v1.ClientFrame
+	(*ProvisionThread)(nil),       // 19: wuphf.connector.v1.ProvisionThread
+	(*MessageCreateDispatch)(nil), // 20: wuphf.connector.v1.MessageCreateDispatch
+	(*MessageEditDispatch)(nil),   // 21: wuphf.connector.v1.MessageEditDispatch
+	(*MessageDeleteDispatch)(nil), // 22: wuphf.connector.v1.MessageDeleteDispatch
+	(*Rejected)(nil),              // 23: wuphf.connector.v1.Rejected
+	(*ServerFrame)(nil),           // 24: wuphf.connector.v1.ServerFrame
 }
 var file_connector_proto_depIdxs = []int32{
 	0,  // 0: wuphf.connector.v1.Registration.platform:type_name -> wuphf.connector.v1.Platform
-	2,  // 1: wuphf.connector.v1.Registration.capabilities:type_name -> wuphf.connector.v1.Capabilities
-	1,  // 2: wuphf.connector.v1.Attachment.kind:type_name -> wuphf.connector.v1.Attachment.Kind
-	1,  // 3: wuphf.connector.v1.MediaMetadata.kind:type_name -> wuphf.connector.v1.Attachment.Kind
-	5,  // 4: wuphf.connector.v1.UploadMediaFrame.metadata:type_name -> wuphf.connector.v1.MediaMetadata
-	4,  // 5: wuphf.connector.v1.MessageCreateEvent.attachments:type_name -> wuphf.connector.v1.Attachment
-	4,  // 6: wuphf.connector.v1.ReplyContext.attachments:type_name -> wuphf.connector.v1.Attachment
-	3,  // 7: wuphf.connector.v1.ClientFrame.registration:type_name -> wuphf.connector.v1.Registration
-	9,  // 8: wuphf.connector.v1.ClientFrame.message_create:type_name -> wuphf.connector.v1.MessageCreateEvent
-	14, // 9: wuphf.connector.v1.ClientFrame.acknowledgement:type_name -> wuphf.connector.v1.Acknowledgement
-	12, // 10: wuphf.connector.v1.ClientFrame.identity_migrated:type_name -> wuphf.connector.v1.IdentityMigrated
-	15, // 11: wuphf.connector.v1.ClientFrame.dispatch_failed:type_name -> wuphf.connector.v1.DispatchFailed
-	10, // 12: wuphf.connector.v1.ClientFrame.message_edit:type_name -> wuphf.connector.v1.MessageEditEvent
-	11, // 13: wuphf.connector.v1.ClientFrame.message_delete:type_name -> wuphf.connector.v1.MessageDeleteEvent
-	17, // 14: wuphf.connector.v1.MessageCreateDispatch.provision_thread:type_name -> wuphf.connector.v1.ProvisionThread
-	4,  // 15: wuphf.connector.v1.MessageCreateDispatch.attachments:type_name -> wuphf.connector.v1.Attachment
-	13, // 16: wuphf.connector.v1.MessageCreateDispatch.reply_context:type_name -> wuphf.connector.v1.ReplyContext
-	18, // 17: wuphf.connector.v1.ServerFrame.message_create:type_name -> wuphf.connector.v1.MessageCreateDispatch
-	21, // 18: wuphf.connector.v1.ServerFrame.rejected:type_name -> wuphf.connector.v1.Rejected
-	19, // 19: wuphf.connector.v1.ServerFrame.message_edit:type_name -> wuphf.connector.v1.MessageEditDispatch
-	20, // 20: wuphf.connector.v1.ServerFrame.message_delete:type_name -> wuphf.connector.v1.MessageDeleteDispatch
-	16, // 21: wuphf.connector.v1.ConnectorTransport.OpenSession:input_type -> wuphf.connector.v1.ClientFrame
-	6,  // 22: wuphf.connector.v1.MediaTransport.UploadMedia:input_type -> wuphf.connector.v1.UploadMediaFrame
-	7,  // 23: wuphf.connector.v1.MediaTransport.DownloadMedia:input_type -> wuphf.connector.v1.DownloadMediaRequest
-	22, // 24: wuphf.connector.v1.ConnectorTransport.OpenSession:output_type -> wuphf.connector.v1.ServerFrame
-	4,  // 25: wuphf.connector.v1.MediaTransport.UploadMedia:output_type -> wuphf.connector.v1.Attachment
-	8,  // 26: wuphf.connector.v1.MediaTransport.DownloadMedia:output_type -> wuphf.connector.v1.MediaChunk
-	24, // [24:27] is the sub-list for method output_type
-	21, // [21:24] is the sub-list for method input_type
-	21, // [21:21] is the sub-list for extension type_name
-	21, // [21:21] is the sub-list for extension extendee
-	0,  // [0:21] is the sub-list for field type_name
+	4,  // 1: wuphf.connector.v1.Registration.capabilities:type_name -> wuphf.connector.v1.Capabilities
+	3,  // 2: wuphf.connector.v1.Attachment.kind:type_name -> wuphf.connector.v1.Attachment.Kind
+	3,  // 3: wuphf.connector.v1.MediaMetadata.kind:type_name -> wuphf.connector.v1.Attachment.Kind
+	7,  // 4: wuphf.connector.v1.UploadMediaFrame.metadata:type_name -> wuphf.connector.v1.MediaMetadata
+	6,  // 5: wuphf.connector.v1.MessageCreateEvent.attachments:type_name -> wuphf.connector.v1.Attachment
+	6,  // 6: wuphf.connector.v1.ReplyContext.attachments:type_name -> wuphf.connector.v1.Attachment
+	5,  // 7: wuphf.connector.v1.ClientFrame.registration:type_name -> wuphf.connector.v1.Registration
+	11, // 8: wuphf.connector.v1.ClientFrame.message_create:type_name -> wuphf.connector.v1.MessageCreateEvent
+	16, // 9: wuphf.connector.v1.ClientFrame.acknowledgement:type_name -> wuphf.connector.v1.Acknowledgement
+	14, // 10: wuphf.connector.v1.ClientFrame.identity_migrated:type_name -> wuphf.connector.v1.IdentityMigrated
+	17, // 11: wuphf.connector.v1.ClientFrame.dispatch_failed:type_name -> wuphf.connector.v1.DispatchFailed
+	12, // 12: wuphf.connector.v1.ClientFrame.message_edit:type_name -> wuphf.connector.v1.MessageEditEvent
+	13, // 13: wuphf.connector.v1.ClientFrame.message_delete:type_name -> wuphf.connector.v1.MessageDeleteEvent
+	19, // 14: wuphf.connector.v1.MessageCreateDispatch.provision_thread:type_name -> wuphf.connector.v1.ProvisionThread
+	6,  // 15: wuphf.connector.v1.MessageCreateDispatch.attachments:type_name -> wuphf.connector.v1.Attachment
+	15, // 16: wuphf.connector.v1.MessageCreateDispatch.reply_context:type_name -> wuphf.connector.v1.ReplyContext
+	1,  // 17: wuphf.connector.v1.MessageEditDispatch.edit_mode:type_name -> wuphf.connector.v1.EditMode
+	2,  // 18: wuphf.connector.v1.MessageDeleteDispatch.delete_mode:type_name -> wuphf.connector.v1.DeleteMode
+	20, // 19: wuphf.connector.v1.ServerFrame.message_create:type_name -> wuphf.connector.v1.MessageCreateDispatch
+	23, // 20: wuphf.connector.v1.ServerFrame.rejected:type_name -> wuphf.connector.v1.Rejected
+	21, // 21: wuphf.connector.v1.ServerFrame.message_edit:type_name -> wuphf.connector.v1.MessageEditDispatch
+	22, // 22: wuphf.connector.v1.ServerFrame.message_delete:type_name -> wuphf.connector.v1.MessageDeleteDispatch
+	18, // 23: wuphf.connector.v1.ConnectorTransport.OpenSession:input_type -> wuphf.connector.v1.ClientFrame
+	8,  // 24: wuphf.connector.v1.MediaTransport.UploadMedia:input_type -> wuphf.connector.v1.UploadMediaFrame
+	9,  // 25: wuphf.connector.v1.MediaTransport.DownloadMedia:input_type -> wuphf.connector.v1.DownloadMediaRequest
+	24, // 26: wuphf.connector.v1.ConnectorTransport.OpenSession:output_type -> wuphf.connector.v1.ServerFrame
+	6,  // 27: wuphf.connector.v1.MediaTransport.UploadMedia:output_type -> wuphf.connector.v1.Attachment
+	10, // 28: wuphf.connector.v1.MediaTransport.DownloadMedia:output_type -> wuphf.connector.v1.MediaChunk
+	26, // [26:29] is the sub-list for method output_type
+	23, // [23:26] is the sub-list for method input_type
+	23, // [23:23] is the sub-list for extension type_name
+	23, // [23:23] is the sub-list for extension extendee
+	0,  // [0:23] is the sub-list for field type_name
 }
 
 func init() { file_connector_proto_init() }
@@ -2080,7 +2206,7 @@ func file_connector_proto_init() {
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_connector_proto_rawDesc), len(file_connector_proto_rawDesc)),
-			NumEnums:      2,
+			NumEnums:      4,
 			NumMessages:   21,
 			NumExtensions: 0,
 			NumServices:   2,

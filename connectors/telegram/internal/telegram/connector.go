@@ -60,7 +60,7 @@ func (c Connector) Run(ctx context.Context) error {
 				return err
 			}
 		}
-		sender := NewSender(client.API(), peers, media, c.cfg.EditMode, c.cfg.DeleteMode)
+		sender := NewSender(client.API(), peers, media)
 		return coreclient.New(c.cfg).Run(ctx, sender, inputs)
 	})
 }

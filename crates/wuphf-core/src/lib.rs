@@ -761,6 +761,7 @@ mod tests {
                 ConnectorInfo {
                     platform: Platform::WhatsApp,
                     capabilities: ConnectorCapabilities::default(),
+                    delivery: Default::default(),
                 },
             ),
             (
@@ -771,6 +772,7 @@ mod tests {
                         supports_threads: true,
                         supports_topic_create: true,
                     },
+                    delivery: Default::default(),
                 },
             ),
         ])
@@ -1260,6 +1262,7 @@ mod tests {
         let DispatchPayload::MessageEdit {
             message,
             target_platform_message_id,
+            ..
         } = &dispatch.command.payload
         else {
             panic!("edit should route as a message edit");

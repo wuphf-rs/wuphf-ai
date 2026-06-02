@@ -16,6 +16,15 @@ platform = "telegram"
 supports_threads = true
 supports_topic_create = true
 
+# Per-connector delivery policy. Applied to messages this connector *receives*,
+# so it is directional: a replica set may render edits/deletes differently on
+# each side. `edit_mode`: "in_place" (default) edits the existing copy,
+# "repost" sends a fresh message. `delete_mode`: "revoke" (default) removes the
+# copy, "tombstone" leaves a deletion marker.
+[connectors.delivery]
+edit_mode = "in_place"
+delete_mode = "revoke"
+
 #                       # One fixed WhatsApp chat mirrored one-to-one into one fixed Telegram topic.
 #                       [[rules]]
 #                       id = "direct-pair"

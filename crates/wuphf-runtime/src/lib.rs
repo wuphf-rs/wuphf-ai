@@ -180,6 +180,7 @@ mod tests {
                 ConnectorInfo {
                     platform: Platform::WhatsApp,
                     capabilities: ConnectorCapabilities::default(),
+                    delivery: Default::default(),
                 },
             ),
             (
@@ -187,6 +188,7 @@ mod tests {
                 ConnectorInfo {
                     platform: Platform::Telegram,
                     capabilities: telegram_capabilities(),
+                    delivery: Default::default(),
                 },
             ),
         ])

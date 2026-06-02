@@ -4,7 +4,9 @@ use serde::Deserialize;
 use std::{collections::HashMap, net::SocketAddr, path::PathBuf, sync::Arc, time::Duration};
 use tonic::transport::Server;
 use wuphf_core::{ConnectorInfo, Core, RoutingConfig};
-use wuphf_model::{ConnectorCapabilities, ConnectorId, ConnectorRegistration, Platform, Rule};
+use wuphf_model::{
+    ConnectorCapabilities, ConnectorId, ConnectorRegistration, DeliveryOptions, Platform, Rule,
+};
 use wuphf_proto::connector::connector_transport_server::ConnectorTransportServer;
 use wuphf_proto::connector::media_transport_server::MediaTransportServer;
 use wuphf_runtime::{
@@ -57,6 +59,8 @@ struct ConnectorConfiguration {
     supports_threads: bool,
     #[serde(default)]
     supports_topic_create: bool,
+    #[serde(default)]
+    delivery: DeliveryOptions,
 }
 
 #[tokio::main]
@@ -88,6 +92,7 @@ async fn serve(path: PathBuf) -> Result<()> {
             ConnectorInfo {
                 platform: platform.clone(),
                 capabilities,
+                delivery: connector.delivery,
             },
         );
         allowed.push(ConnectorRegistration {

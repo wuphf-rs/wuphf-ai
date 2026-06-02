@@ -179,6 +179,20 @@ message MessageCreateDispatch {
   optional string sender_name = 12;
 }
 
+// How a connector should render a replicated edit, resolved by the server from
+// the target connector's delivery options.
+enum EditMode {
+  EDIT_MODE_IN_PLACE = 0;
+  EDIT_MODE_REPOST = 1;
+}
+
+// How a connector should render a replicated delete, resolved by the server from
+// the target connector's delivery options.
+enum DeleteMode {
+  DELETE_MODE_REVOKE = 0;
+  DELETE_MODE_TOMBSTONE = 1;
+}
+
 // Instruction to revise an already-delivered copy. `target_platform_message_id`
 // is the native id of the message to edit at this endpoint.
 message MessageEditDispatch {
@@ -189,6 +203,7 @@ message MessageEditDispatch {
   optional string text = 5;
   optional string sender_name = 6;
   optional string participant = 7;
+  EditMode edit_mode = 8;
 }
 
 // Instruction to revoke an already-delivered copy. `target_platform_message_id`
@@ -198,6 +213,7 @@ message MessageDeleteDispatch {
   string target_chat_id = 2;
   optional string target_thread_id = 3;
   string target_platform_message_id = 4;
+  DeleteMode delete_mode = 5;
 }
 
 message Rejected {

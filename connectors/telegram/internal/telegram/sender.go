@@ -9,7 +9,6 @@ import (
 	"path"
 	"strconv"
 
-	"github.com/akshettrj/wuphf/connectors/telegram/internal/config"
 	coreclient "github.com/akshettrj/wuphf/connectors/telegram/internal/core"
 	"github.com/akshettrj/wuphf/proto/go/connector/v1"
 	"github.com/gotd/td/telegram/message"
@@ -18,22 +17,18 @@ import (
 )
 
 type Sender struct {
-	api        *tg.Client
-	sender     *message.Sender
-	peers      *PeerCache
-	media      MediaBroker
-	editMode   config.EditMode
-	deleteMode config.DeleteMode
+	api    *tg.Client
+	sender *message.Sender
+	peers  *PeerCache
+	media  MediaBroker
 }
 
-func NewSender(api *tg.Client, peers *PeerCache, media MediaBroker, editMode config.EditMode, deleteMode config.DeleteMode) Sender {
+func NewSender(api *tg.Client, peers *PeerCache, media MediaBroker) Sender {
 	return Sender{
-		api:        api,
-		sender:     message.NewSender(api),
-		peers:      peers,
-		media:      media,
-		editMode:   editMode,
-		deleteMode: deleteMode,
+		api:    api,
+		sender: message.NewSender(api),
+		peers:  peers,
+		media:  media,
 	}
 }
 
@@ -104,7 +99,7 @@ func (s Sender) EditMessage(ctx context.Context, dispatch *wuphfpb.MessageEditDi
 		return "", coreclient.Permanent(fmt.Errorf("invalid Telegram target message id %q: %w", dispatch.TargetPlatformMessageId, err))
 	}
 	body := attributedText(dispatch.GetSenderName(), dispatch.GetParticipant(), dispatch.GetText())
-	if s.editMode == config.EditModeRepost {
+	if dispatch.GetEditMode() == wuphfpb.EditMode_EDIT_MODE_REPOST {
 		body = append(body, styling.Italic("\n(edited)"))
 		if _, err := s.sender.To(peer).CloneBuilder().Reply(messageID).StyledText(ctx, body...); err != nil {
 			return "", fmt.Errorf("repost Telegram edit: %w", err)
@@ -130,7 +125,7 @@ func (s Sender) DeleteMessage(ctx context.Context, dispatch *wuphfpb.MessageDele
 	if err != nil {
 		return "", coreclient.Permanent(fmt.Errorf("invalid Telegram target message id %q: %w", dispatch.TargetPlatformMessageId, err))
 	}
-	if s.deleteMode == config.DeleteModeTombstone {
+	if dispatch.GetDeleteMode() == wuphfpb.DeleteMode_DELETE_MODE_TOMBSTONE {
 		if _, err := s.sender.To(peer).CloneBuilder().Reply(messageID).StyledText(ctx, styling.Italic("🗑 message deleted")); err != nil {
 			return "", fmt.Errorf("post Telegram tombstone: %w", err)
 		}

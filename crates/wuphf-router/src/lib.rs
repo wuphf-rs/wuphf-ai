@@ -2,9 +2,9 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use thiserror::Error;
 use wuphf_model::{
-    ConnectorCapabilities, ConnectorId, Conversation, DispatchCommand, DispatchPayload, Endpoint,
-    EndpointId, Message, MessageId, Platform, PlatformAddress, ProvisionThread, ReplyContext, Rule,
-    RuleId, SideKind, TargetAddress,
+    ConnectorCapabilities, ConnectorId, Conversation, DeliveryOptions, DispatchCommand,
+    DispatchPayload, Endpoint, EndpointId, Message, MessageId, Platform, PlatformAddress,
+    ProvisionThread, ReplyContext, Rule, RuleId, SideKind, TargetAddress,
 };
 use wuphf_storage::{Storage, StorageError};
 
@@ -14,6 +14,9 @@ use wuphf_storage::{Storage, StorageError};
 pub struct ConnectorInfo {
     pub platform: Platform,
     pub capabilities: ConnectorCapabilities,
+    /// Server-owned policy for how this connector renders replicated
+    /// operations on its platform (e.g. edit/delete rendering).
+    pub delivery: DeliveryOptions,
 }
 
 /// The rule set plus connector metadata that drives address resolution and
@@ -40,6 +43,12 @@ impl RoutingConfig {
 
     pub fn connector(&self, id: &ConnectorId) -> Option<&ConnectorInfo> {
         self.connectors.get(id)
+    }
+
+    /// The delivery policy configured for a connector, or the default when the
+    /// connector is unknown or left unconfigured.
+    pub fn delivery(&self, id: &ConnectorId) -> DeliveryOptions {
+        self.connector(id).map(|info| info.delivery).unwrap_or_default()
     }
 
     /// The first rule side whose connector and selector accept this address.
@@ -194,6 +203,7 @@ where
                 provision_thread: None,
             };
             let target_connector = endpoint.connector_id.clone();
+            let mode = self.config.delivery(&target_connector).edit_mode;
             match self
                 .storage
                 .copy_at_endpoint(message.id, endpoint_id)
@@ -206,6 +216,7 @@ where
                     payload: DispatchPayload::MessageEdit {
                         message: message.clone(),
                         target_platform_message_id: copy.platform_message_id,
+                        mode,
                     },
                 }),
                 None => outcome.blocked.push(BlockedDispatch {
@@ -216,6 +227,7 @@ where
                         payload: DispatchPayload::MessageEdit {
                             message: message.clone(),
                             target_platform_message_id: String::new(),
+                            mode,
                         },
                     },
                     waiting_for_message: message.id,
@@ -247,6 +259,7 @@ where
                 provision_thread: None,
             };
             let target_connector = endpoint.connector_id.clone();
+            let mode = self.config.delivery(&target_connector).delete_mode;
             match self
                 .storage
                 .copy_at_endpoint(message.id, endpoint_id)
@@ -259,6 +272,7 @@ where
                     payload: DispatchPayload::MessageDelete {
                         message: message.clone(),
                         target_platform_message_id: copy.platform_message_id,
+                        mode,
                     },
                 }),
                 None => outcome.blocked.push(BlockedDispatch {
@@ -269,6 +283,7 @@ where
                         payload: DispatchPayload::MessageDelete {
                             message: message.clone(),
                             target_platform_message_id: String::new(),
+                            mode,
                         },
                     },
                     waiting_for_message: message.id,
