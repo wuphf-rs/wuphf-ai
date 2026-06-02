@@ -46,6 +46,13 @@ type stubNamer struct{ title string }
 
 func (s stubNamer) ChatTitle(context.Context, types.JID) string { return s.title }
 
+func (s stubNamer) PersonName(_ context.Context, jid types.JID, pushHint string) string {
+	if pushHint != "" {
+		return pushHint
+	}
+	return jid.User
+}
+
 func TestNormalizeSetsChatTitleFromNamer(t *testing.T) {
 	t.Parallel()
 	normalizer := NewNormalizer(make(chan *wuphfpb.ClientFrame), MediaCodec{}, stubNamer{title: "Family Group"})

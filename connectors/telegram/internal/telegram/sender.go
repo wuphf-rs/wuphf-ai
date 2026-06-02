@@ -150,10 +150,10 @@ func (s Sender) DeleteMessage(ctx context.Context, dispatch *wuphfpb.MessageDele
 }
 
 // attributedText renders a dispatch body for Telegram, prefixing a bold sender
-// name on its own line for group messages so the mirror shows who authored each
-// message. Attribution is added only when a participant is present (a group
-// context); direct chats are left unlabelled. The name falls back to the raw
-// participant id when the source supplied no display name.
+// header ("🗣️: name") on its own line for group messages so the mirror shows who
+// authored each message. Attribution is added only when a participant is present
+// (a group context); direct chats are left unlabelled. The name falls back to
+// the raw participant id when the source supplied no display name.
 func attributedText(senderName, participant, text string) []message.StyledTextOption {
 	if participant == "" {
 		if text == "" {
@@ -165,10 +165,11 @@ func attributedText(senderName, participant, text string) []message.StyledTextOp
 	if label == "" {
 		label = participant
 	}
+	label = "🗣️: " + label
 	if text == "" {
 		return []message.StyledTextOption{styling.Bold(label)}
 	}
-	return []message.StyledTextOption{styling.Bold(label), styling.Plain("\n" + text)}
+	return []message.StyledTextOption{styling.Bold(label), styling.Plain("\n\n" + text)}
 }
 
 // createTopic creates a forum topic in the container and returns its root

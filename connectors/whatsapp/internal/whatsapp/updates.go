@@ -16,6 +16,9 @@ import (
 // expected to cache, as it is queried per inbound message.
 type ChatNamer interface {
 	ChatTitle(ctx context.Context, chat types.JID) string
+	// PersonName resolves a sender's display name for a mirror header. The
+	// pushHint is the push name carried on the triggering message.
+	PersonName(ctx context.Context, jid types.JID, pushHint string) string
 }
 
 type Normalizer struct {
@@ -103,6 +106,17 @@ func normalizeDelete(message *events.Message) (*wuphfpb.MessageDeleteEvent, bool
 	}, true
 }
 
+// senderName resolves the per-message sender label, formatted by the namer when
+// present and falling back to the raw push name otherwise.
+func (n Normalizer) senderName(ctx context.Context, message *events.Message) string {
+	if n.namer != nil {
+		if name := n.namer.PersonName(ctx, message.Info.Sender, message.Info.PushName); name != "" {
+			return name
+		}
+	}
+	return strings.TrimSpace(message.Info.PushName)
+}
+
 func (n Normalizer) send(ctx context.Context, frame *wuphfpb.ClientFrame) error {
 	select {
 	case n.inputs <- frame:
@@ -143,7 +157,7 @@ func (n Normalizer) normalize(ctx context.Context, message *events.Message) (*wu
 		participant := message.Info.Sender.String()
 		event.Participant = &participant
 	}
-	if name := strings.TrimSpace(message.Info.PushName); name != "" {
+	if name := n.senderName(ctx, message); name != "" {
 		event.SenderName = &name
 	}
 	if text != "" {
