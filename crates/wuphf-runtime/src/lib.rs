@@ -93,7 +93,9 @@ where
                 }
                 failure = self.failure_rx.recv() => {
                     if let Some((dispatch_id, reason)) = failure {
-                        self.core.fail_dispatch(dispatch_id, reason).await?;
+                        for dispatch in self.core.fail_dispatch(dispatch_id, reason).await? {
+                            self.send(dispatch).await?;
+                        }
                     }
                 }
             }

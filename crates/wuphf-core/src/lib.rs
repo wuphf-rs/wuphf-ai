@@ -1,4 +1,5 @@
-use std::sync::Arc;
+use std::collections::{HashMap, HashSet};
+use std::sync::{Arc, Mutex};
 use thiserror::Error;
 use wuphf_model::{
     Alias, ConnectorId, Conversation, ConversationId, DedupKey, DispatchAcknowledgement,
@@ -15,6 +16,27 @@ pub struct Core<S> {
     storage: Arc<S>,
     router: Router<S>,
     config: Arc<RoutingConfig>,
+    /// Conversations whose mirror thread is mid-provisioning, keyed by replica
+    /// set. Guards against a burst of messages each provisioning a duplicate
+    /// thread before the first provision is acknowledged. The lock is never
+    /// held across an await.
+    provisioning: Mutex<HashMap<ReplicaSetId, ProvisionState>>,
+}
+
+/// A conversation's in-flight thread provisioning: the dispatches whose
+/// acknowledgement establishes the thread, and the messages held until it does.
+#[derive(Default)]
+struct ProvisionState {
+    pending: HashSet<DispatchId>,
+    stash: Vec<StashedMessage>,
+}
+
+/// A message received while its conversation's mirror thread was still being
+/// provisioned, replayed once the thread exists.
+struct StashedMessage {
+    message: Message,
+    origin_endpoint: EndpointId,
+    provision_title: String,
 }
 
 impl<S> Core<S>
@@ -26,6 +48,7 @@ where
             router: Router::new(Arc::clone(&storage), Arc::clone(&config)),
             config,
             storage,
+            provisioning: Mutex::new(HashMap::new()),
         }
     }
 
@@ -79,13 +102,15 @@ where
             return Ok(IngestOutcome::Ignored(IgnoreReason::SentMessageEcho));
         }
 
+        // Resolve the reply parent best-effort: a reply to a message the bridge
+        // never saw (sent before startup, or never mirrored) simply loses its
+        // reply linkage rather than failing the whole message.
         let reply_to = match inbound.reply_to_platform_message_id.as_deref() {
-            Some(platform_message_id) => Some(
+            Some(platform_message_id) => {
                 self.storage
                     .message_id_for_copy(origin_endpoint, platform_message_id)
                     .await?
-                    .ok_or_else(|| CoreError::UnknownReplyTarget(platform_message_id.to_owned()))?,
-            ),
+            }
             None => None,
         };
 
@@ -134,24 +159,79 @@ where
             .chat_title
             .clone()
             .unwrap_or_else(|| source.address.chat_id.clone());
+
+        // Hold the message if this conversation's mirror thread is still being
+        // provisioned; it is replayed once the thread exists. This prevents a
+        // burst of messages from each provisioning a duplicate thread.
+        let stashed = {
+            let mut provisioning = self.provisioning.lock().unwrap();
+            match provisioning.get_mut(&replica_set_id) {
+                Some(state) if !state.pending.is_empty() => {
+                    state.stash.push(StashedMessage {
+                        message: message.clone(),
+                        origin_endpoint,
+                        provision_title: provision_title.clone(),
+                    });
+                    true
+                }
+                _ => false,
+            }
+        };
+        if stashed {
+            return Ok(IngestOutcome::Deferred {
+                message_id: message.id,
+            });
+        }
+
+        let (routing, dispatches) = self
+            .route_and_record(&message, origin_endpoint, &provision_title)
+            .await?;
+        Ok(IngestOutcome::Routed {
+            message_id: message.id,
+            routing,
+            dispatches,
+        })
+    }
+
+    /// Route a message, enqueue its dispatches, and register any thread
+    /// provisioning it triggers so that concurrent messages to the same
+    /// conversation are stashed (rather than provisioning again) until the
+    /// thread exists. Returns the routing and the immediately-sendable
+    /// dispatches.
+    async fn route_and_record(
+        &self,
+        message: &Message,
+        origin_endpoint: EndpointId,
+        provision_title: &str,
+    ) -> Result<(RoutingOutcome, Vec<StoredDispatch>), CoreError> {
         let routing = self
             .router
-            .route(&message, origin_endpoint, &provision_title)
+            .route(message, origin_endpoint, provision_title)
             .await?;
         let mut dispatches = Vec::new();
+        let mut provisioning_ids = Vec::new();
         for command in routing.dispatches.iter().cloned() {
-            dispatches.push(self.storage.enqueue_dispatch(command, None).await?);
+            let provisions = command.target.provision_thread.is_some();
+            let stored = self.storage.enqueue_dispatch(command, None).await?;
+            if provisions {
+                provisioning_ids.push(stored.id);
+            }
+            dispatches.push(stored);
         }
         for blocked in routing.blocked.iter().cloned() {
             self.storage
                 .enqueue_dispatch(blocked.command, Some(blocked.waiting_for_message))
                 .await?;
         }
-        Ok(IngestOutcome::Routed {
-            message_id: message.id,
-            routing,
-            dispatches,
-        })
+        if !provisioning_ids.is_empty() {
+            let mut provisioning = self.provisioning.lock().unwrap();
+            provisioning
+                .entry(message.replica_set_id)
+                .or_default()
+                .pending
+                .extend(provisioning_ids);
+        }
+        Ok((routing, dispatches))
     }
 
     /// Apply an inbound edit: revise the canonical message text and fan the
@@ -437,19 +517,60 @@ where
         &self,
         acknowledgement: DispatchAcknowledgement,
     ) -> Result<Vec<StoredDispatch>, CoreError> {
-        if let Some(thread_id) = acknowledgement.thread_id.clone()
-            && let Some(dispatch) = self.storage.dispatch(acknowledgement.dispatch_id).await?
+        let dispatch = self.storage.dispatch(acknowledgement.dispatch_id).await?;
+        if let (Some(thread_id), Some(dispatch)) =
+            (acknowledgement.thread_id.clone(), dispatch.as_ref())
         {
-            self.persist_provisioned_thread(&dispatch, thread_id)
-                .await?;
+            self.persist_provisioned_thread(dispatch, thread_id).await?;
         }
-        Ok(self
+        let mut dispatches = self
             .storage
             .acknowledge_dispatch(
                 acknowledgement.dispatch_id,
                 acknowledgement.platform_message_id,
             )
-            .await?)
+            .await?;
+        if let Some(dispatch) = dispatch {
+            dispatches.extend(self.resume_provisioned(&dispatch).await?);
+        }
+        Ok(dispatches)
+    }
+
+    /// Settle one provisioning dispatch (acknowledged or failed) against its
+    /// conversation. Once no provisioning dispatch remains outstanding the
+    /// mirror thread is established (or provisioning gave up), so any stashed
+    /// messages are replayed and their resulting dispatches returned.
+    async fn resume_provisioned(
+        &self,
+        dispatch: &StoredDispatch,
+    ) -> Result<Vec<StoredDispatch>, CoreError> {
+        let replica_set_id = dispatch.command.message_replica_set_id();
+        let stash = {
+            let mut provisioning = self.provisioning.lock().unwrap();
+            let Some(state) = provisioning.get_mut(&replica_set_id) else {
+                return Ok(Vec::new());
+            };
+            state.pending.remove(&dispatch.id);
+            if !state.pending.is_empty() {
+                return Ok(Vec::new());
+            }
+            provisioning
+                .remove(&replica_set_id)
+                .map(|state| state.stash)
+                .unwrap_or_default()
+        };
+        let mut dispatches = Vec::new();
+        for stashed in stash {
+            let (_, routed) = self
+                .route_and_record(
+                    &stashed.message,
+                    stashed.origin_endpoint,
+                    &stashed.provision_title,
+                )
+                .await?;
+            dispatches.extend(routed);
+        }
+        Ok(dispatches)
     }
 
     /// Record the thread a mirror dispatch created: stamp it onto the endpoint,
@@ -534,9 +655,16 @@ where
         &self,
         dispatch_id: DispatchId,
         reason: String,
-    ) -> Result<(), CoreError> {
+    ) -> Result<Vec<StoredDispatch>, CoreError> {
+        let dispatch = self.storage.dispatch(dispatch_id).await?;
         self.storage.fail_dispatch(dispatch_id, reason).await?;
-        Ok(())
+        // A failed provisioning dispatch must still release the stash, or the
+        // held messages would never send. Replaying them re-attempts the
+        // provision with the next message rather than stranding the conversation.
+        match dispatch {
+            Some(dispatch) => self.resume_provisioned(&dispatch).await,
+            None => Ok(Vec::new()),
+        }
     }
 }
 
@@ -561,6 +689,11 @@ pub enum IngestOutcome {
         routing: RoutingOutcome,
         dispatches: Vec<StoredDispatch>,
     },
+    /// Held because the conversation's mirror thread is still being
+    /// provisioned; the message is replayed once the thread exists.
+    Deferred {
+        message_id: MessageId,
+    },
     Ignored(IgnoreReason),
 }
 
@@ -568,7 +701,7 @@ impl IngestOutcome {
     pub fn dispatches(&self) -> &[StoredDispatch] {
         match self {
             Self::Routed { dispatches, .. } => dispatches,
-            Self::Ignored(_) => &[],
+            Self::Deferred { .. } | Self::Ignored(_) => &[],
         }
     }
 }
@@ -600,8 +733,6 @@ pub enum CoreError {
     UnsupportedEvent,
     #[error("deleted message {0} maps from a copy but is not stored")]
     DeleteTargetNotStored(MessageId),
-    #[error("reply target platform message {0} is unknown at the origin endpoint")]
-    UnknownReplyTarget(String),
     #[error("edited message {0} maps from a copy but is not stored")]
     EditTargetNotStored(MessageId),
     #[error("attachment media {0} is not uploaded to the core")]
@@ -821,6 +952,48 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn concurrent_messages_provision_one_thread_and_replay_the_rest() {
+        let core = core(vec![mirror_rule()]);
+
+        // The first source message provisions the mirror topic.
+        let first = core
+            .ingest(event(WHATSAPP, "111@g.us", "wa-1", None))
+            .await
+            .unwrap();
+        let IngestOutcome::Routed { dispatches, .. } = first else {
+            panic!("first message routes");
+        };
+        assert_eq!(dispatches.len(), 1);
+        assert!(dispatches[0].command.target.provision_thread.is_some());
+
+        // A second message arriving before the provision is acknowledged must be
+        // deferred rather than provisioning a second topic for the same chat.
+        let second = core
+            .ingest(event(WHATSAPP, "111@g.us", "wa-2", None))
+            .await
+            .unwrap();
+        let IngestOutcome::Deferred { .. } = second else {
+            panic!("second message is deferred while provisioning");
+        };
+
+        // Acknowledging the provision replays the stashed message onto the now
+        // known thread, without a second provision request.
+        let replayed = core
+            .acknowledge_dispatch(DispatchAcknowledgement {
+                dispatch_id: dispatches[0].id,
+                platform_message_id: "tg-1".into(),
+                thread_id: Some("777".into()),
+            })
+            .await
+            .unwrap();
+        assert_eq!(replayed.len(), 1);
+        let command = &replayed[0].command;
+        assert_eq!(command.target_connector, ConnectorId(TELEGRAM.into()));
+        assert!(command.target.provision_thread.is_none());
+        assert_eq!(command.target.address.thread_id, Some("777".into()));
+    }
+
+    #[tokio::test]
     async fn ignores_echoes_of_dispatched_copies() {
         let core = core(vec![direct_rule()]);
         let outcome = core
@@ -929,9 +1102,24 @@ mod tests {
             .ingest(event(WHATSAPP, "111@g.us", "wa-1", None))
             .await
             .unwrap();
-        let IngestOutcome::Routed { message_id, .. } = first else {
+        let IngestOutcome::Routed {
+            message_id,
+            dispatches,
+            ..
+        } = first
+        else {
             panic!("first message should route");
         };
+
+        // Establish the mirror thread so later messages reuse it instead of
+        // being held for provisioning.
+        core.acknowledge_dispatch(DispatchAcknowledgement {
+            dispatch_id: dispatches[0].id,
+            platform_message_id: "tg-1".into(),
+            thread_id: Some("777".into()),
+        })
+        .await
+        .unwrap();
 
         assert!(
             core.migrate_identity(
