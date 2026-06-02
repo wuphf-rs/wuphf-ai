@@ -1,0 +1,365 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>wuphf — multi-platform message replication</title>
+<style>
+  :root {
+    --bg: #0c0e14;
+    --bg-soft: #12151f;
+    --panel: #161a26;
+    --panel-2: #1c2130;
+    --line: #262c3d;
+    --text: #e7ebf4;
+    --muted: #9aa3b8;
+    --faint: #6b748c;
+    --accent: #7c9cff;
+    --accent-2: #57d9b3;
+    --warn: #ffcd6b;
+    --radius: 14px;
+    --mono: ui-monospace, "SF Mono", "JetBrains Mono", "Fira Code", Menlo, Consolas, monospace;
+    --sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Inter, Helvetica, Arial, sans-serif;
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body {
+    margin: 0;
+    background: radial-gradient(1100px 650px at 78% -12%, #1a2236 0%, transparent 58%), var(--bg);
+    color: var(--text);
+    font-family: var(--sans);
+    line-height: 1.62;
+    -webkit-font-smoothing: antialiased;
+  }
+  a { color: var(--accent); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  code, .mono { font-family: var(--mono); font-size: 0.92em; }
+  .wrap { max-width: 1040px; margin: 0 auto; padding: 0 24px; }
+  section { padding: 56px 0; border-top: 1px solid var(--line); }
+  section:first-of-type { border-top: none; }
+  h2 {
+    font-size: 1.55rem; margin: 0 0 6px; letter-spacing: -0.02em;
+  }
+  h2 .num { color: var(--accent); font-family: var(--mono); font-size: 1rem; margin-right: 10px; opacity: .8; }
+  .lead { color: var(--muted); max-width: 70ch; margin: 0 0 28px; }
+
+  /* hero */
+  header.hero { padding: 96px 0 64px; position: relative; overflow: hidden; }
+  .badge {
+    display: inline-flex; align-items: center; gap: 8px;
+    font-family: var(--mono); font-size: .76rem; letter-spacing: .08em; text-transform: uppercase;
+    color: var(--accent-2); background: rgba(87,217,179,.08);
+    border: 1px solid rgba(87,217,179,.25); padding: 6px 12px; border-radius: 999px;
+  }
+  .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--accent-2); box-shadow: 0 0 10px var(--accent-2); }
+  .hero h1 {
+    font-size: clamp(2.8rem, 7vw, 4.6rem); line-height: 1.02; margin: 22px 0 0;
+    letter-spacing: -0.04em; font-weight: 800;
+    background: linear-gradient(180deg, #fff 0%, #aeb8d6 120%);
+    -webkit-background-clip: text; background-clip: text; color: transparent;
+  }
+  .hero .tag { font-size: clamp(1.05rem, 2.4vw, 1.35rem); color: var(--muted); max-width: 60ch; margin-top: 18px; }
+  .hero .tag b { color: var(--text); font-weight: 600; }
+  .cta { margin-top: 32px; display: flex; gap: 12px; flex-wrap: wrap; }
+  .btn {
+    font-family: var(--mono); font-size: .9rem; padding: 11px 18px; border-radius: 10px;
+    border: 1px solid var(--line); color: var(--text); background: var(--panel); transition: .15s;
+  }
+  .btn:hover { text-decoration: none; border-color: var(--accent); transform: translateY(-1px); }
+  .btn.primary { background: linear-gradient(180deg, var(--accent), #5d7eff); border-color: transparent; color: #0b0e17; font-weight: 600; }
+
+  /* the big idea band */
+  .idea {
+    display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; gap: 18px;
+    background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 26px;
+  }
+  .idea .node {
+    text-align: center; padding: 16px; border-radius: 10px; background: var(--panel-2); border: 1px solid var(--line);
+  }
+  .idea .node .k { font-family: var(--mono); font-size: .72rem; text-transform: uppercase; letter-spacing: .1em; color: var(--faint); }
+  .idea .node .v { font-weight: 700; margin-top: 4px; }
+  .idea .fan { display: flex; flex-direction: column; gap: 8px; }
+  .idea .copy { font-family: var(--mono); font-size: .8rem; color: var(--muted); background: var(--bg-soft); border: 1px solid var(--line); border-radius: 8px; padding: 7px 10px; }
+  .arrow { color: var(--accent); font-size: 1.6rem; text-align: center; }
+
+  /* cards */
+  .grid { display: grid; gap: 16px; }
+  .grid.c2 { grid-template-columns: repeat(2, 1fr); }
+  .grid.c3 { grid-template-columns: repeat(3, 1fr); }
+  .card {
+    background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius);
+    padding: 20px; transition: .15s;
+  }
+  .card:hover { border-color: #34406a; transform: translateY(-2px); }
+  .card h3 { margin: 0 0 6px; font-size: 1.05rem; }
+  .card h3 .ic { color: var(--accent); margin-right: 8px; font-family: var(--mono); }
+  .card p { margin: 0; color: var(--muted); font-size: .95rem; }
+
+  /* pipeline */
+  .pipe { display: flex; align-items: stretch; gap: 0; flex-wrap: wrap; }
+  .stage {
+    flex: 1 1 0; min-width: 150px; background: var(--panel); border: 1px solid var(--line);
+    border-radius: 12px; padding: 16px; text-align: center;
+  }
+  .stage .label { font-weight: 700; }
+  .stage .sub { color: var(--faint); font-family: var(--mono); font-size: .74rem; margin-top: 4px; }
+  .conn { display: flex; align-items: center; justify-content: center; color: var(--accent); padding: 0 6px; font-size: 1.3rem; }
+  .pipe .core { border-color: var(--accent); box-shadow: 0 0 0 1px rgba(124,156,255,.25), 0 8px 30px -12px rgba(124,156,255,.5); }
+  .flowdir { text-align: center; color: var(--faint); font-family: var(--mono); font-size: .76rem; margin-top: 14px; }
+
+  /* component table */
+  table { width: 100%; border-collapse: collapse; font-size: .94rem; }
+  th, td { text-align: left; padding: 12px 14px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { color: var(--faint); font-family: var(--mono); font-size: .74rem; text-transform: uppercase; letter-spacing: .08em; }
+  td.k { font-family: var(--mono); color: var(--accent-2); white-space: nowrap; }
+  tr:hover td { background: var(--bg-soft); }
+
+  /* status */
+  .status { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  .status ul { margin: 8px 0 0; padding-left: 0; list-style: none; }
+  .status li { padding: 7px 0 7px 28px; position: relative; color: var(--muted); border-bottom: 1px solid var(--line); }
+  .status li:last-child { border-bottom: none; }
+  .status li::before { position: absolute; left: 0; top: 7px; font-family: var(--mono); }
+  .ok li::before { content: "✓"; color: var(--accent-2); }
+  .soon li::before { content: "○"; color: var(--warn); }
+  .panel-h { display: flex; align-items: center; gap: 10px; font-weight: 700; }
+  .pill { font-family: var(--mono); font-size: .68rem; padding: 3px 9px; border-radius: 999px; text-transform: uppercase; letter-spacing: .07em; }
+  .pill.green { color: var(--accent-2); background: rgba(87,217,179,.1); border: 1px solid rgba(87,217,179,.3); }
+  .pill.amber { color: var(--warn); background: rgba(255,205,107,.1); border: 1px solid rgba(255,205,107,.3); }
+
+  .codeblock {
+    background: #0a0c12; border: 1px solid var(--line); border-radius: 12px; padding: 18px 20px;
+    font-family: var(--mono); font-size: .85rem; color: #cdd5ea; overflow-x: auto; line-height: 1.7;
+  }
+  .codeblock .c { color: var(--faint); }
+  .codeblock .key { color: var(--accent); }
+  .codeblock .str { color: var(--accent-2); }
+
+  footer { padding: 40px 0 60px; color: var(--faint); font-size: .9rem; border-top: 1px solid var(--line); }
+  footer .mono { color: var(--muted); }
+
+  @media (max-width: 760px) {
+    .grid.c2, .grid.c3, .status { grid-template-columns: 1fr; }
+    .idea { grid-template-columns: 1fr; }
+    .arrow { transform: rotate(90deg); }
+  }
+</style>
+</head>
+<body>
+
+<header class="hero">
+  <div class="wrap">
+    <span class="badge"><span class="dot"></span> Rust core · Go connectors</span>
+    <h1>wuphf</h1>
+    <p class="tag">A multi-platform messaging replication engine. It models
+      <b>one logical message and its copies</b> across platforms — so edits,
+      deletes, replies, and identity migrations stay coherent instead of
+      degrading into blind forwarding.</p>
+    <div class="cta">
+      <a class="btn primary" href="architecture.md">Architecture →</a>
+      <a class="btn" href="connector-protocol.md">Connector protocol</a>
+      <a class="btn" href="../README.md">README</a>
+    </div>
+  </div>
+</header>
+
+<section>
+  <div class="wrap">
+    <h2><span class="num">01</span>The big idea</h2>
+    <p class="lead">Most bridges forward a message from A to B and forget it.
+      wuphf instead keeps a single internal identity for every message and tracks
+      each platform-specific <em>copy</em> of it. That record is what makes an
+      edit on WhatsApp become an edit on Telegram — not a duplicate.</p>
+    <div class="idea">
+      <div class="node">
+        <div class="k">one logical message</div>
+        <div class="v">MessageId</div>
+      </div>
+      <div class="arrow">→</div>
+      <div class="fan">
+        <div class="copy">copy @ telegram:channel:42 · msg 1183</div>
+        <div class="copy">copy @ whatsapp:12345@s.whatsapp.net · 3EB0…</div>
+        <div class="copy">copy @ … every other endpoint in the set</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <h2><span class="num">02</span>Core concepts</h2>
+    <p class="lead">Four ideas carry the whole model. Everything a connector
+      sends is resolved down to these by the core.</p>
+    <div class="grid c2">
+      <div class="card">
+        <h3><span class="ic">◆</span>Logical message</h3>
+        <p>A core-owned <code>MessageId</code>. Each delivered or received
+          platform form is a <code>MessageCopy</code> keyed by
+          <code>(MessageId, EndpointId, platform_message_id)</code>.</p>
+      </div>
+      <div class="card">
+        <h3><span class="ic">◆</span>Endpoint &amp; Alias</h3>
+        <p>An internal handle for one chat (optionally a thread) on one
+          connector. Connectors only ever send raw addresses; an <code>Alias</code>
+          resolves them — many aliases can point at one endpoint, so a
+          phone-to-LID migration changes nothing downstream.</p>
+      </div>
+      <div class="card">
+        <h3><span class="ic">◆</span>Replica set</h3>
+        <p>The set of endpoints that mirror each other. A message delivered to
+          one member fans out to all the others — and <em>never</em> back to the
+          origin.</p>
+      </div>
+      <div class="card">
+        <h3><span class="ic">◆</span>Conversation</h3>
+        <p>The abstract unit a rule pairs across sides — one per source chat —
+          backed by exactly one replica set.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <h2><span class="num">03</span>Routing rules</h2>
+    <p class="lead">Rules are the only routing input you write. Conversations,
+      endpoints, and replica sets are derived lazily at runtime. Each rule pairs
+      two or more sides; each side names a connector and a kind.</p>
+    <div class="grid c3">
+      <div class="card">
+        <h3><span class="ic">single</span></h3>
+        <p>One fixed chat, optionally one thread within it.</p>
+      </div>
+      <div class="card">
+        <h3><span class="ic">source</span></h3>
+        <p>Every real chat on a connector, filtered by explicit include/exclude
+          id lists. Owns conversation identity.</p>
+      </div>
+      <div class="card">
+        <h3><span class="ic">mirror</span></h3>
+        <p>One threaded container; the core provisions one thread per source
+          conversation. Needs a connector that supports topic creation.</p>
+      </div>
+    </div>
+    <p class="lead" style="margin-top:24px">The canonical topology is
+      <b>source → mirror</b>: every WhatsApp chat mirrored into its own Telegram
+      forum topic.</p>
+    <div class="codeblock">
+<span class="c"># every allowed WhatsApp chat → its own Telegram forum topic</span>
+[[rules]]
+id = <span class="str">"wa-to-telegram-mirror"</span>
+
+[[rules.sides]]
+connector = <span class="str">"whatsapp-main"</span>
+kind      = <span class="str">"source"</span>
+
+[[rules.sides]]
+connector = <span class="str">"telegram-main"</span>
+kind      = <span class="str">"mirror"</span>
+container = <span class="str">"telegram:channel:2060340733"</span></div>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <h2><span class="num">04</span>How a message flows</h2>
+    <p class="lead">Connectors are thin pipes. They normalize platform input
+      tagged with its native address and execute platform actions — they decide
+      nothing about routing, dedup, or identity.</p>
+    <div class="pipe">
+      <div class="stage"><div class="label">Connector</div><div class="sub">raw address in</div></div>
+      <div class="conn">→</div>
+      <div class="stage"><div class="label">Event bus</div><div class="sub">tokio channels</div></div>
+      <div class="conn">→</div>
+      <div class="stage core"><div class="label">Core + Router</div><div class="sub">identity · rules · fan-out</div></div>
+      <div class="conn">→</div>
+      <div class="stage"><div class="label">Event bus</div><div class="sub">dispatch</div></div>
+      <div class="conn">→</div>
+      <div class="stage"><div class="label">Connector</div><div class="sub">resolved target out</div></div>
+    </div>
+    <div class="flowdir">NormalizedEvent (raw) ───────────► &nbsp; resolved ───────────► DispatchCommand (target)</div>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <h2><span class="num">05</span>Components</h2>
+    <p class="lead">A small Rust workspace with one responsibility per crate,
+      plus two Go connectors.</p>
+    <table>
+      <thead><tr><th>Crate</th><th>Responsibility</th></tr></thead>
+      <tbody>
+        <tr><td class="k">wuphf-model</td><td>Shared domain types — <span class="mono">ids · routing · connector · message · dispatch</span>.</td></tr>
+        <tr><td class="k">wuphf-storage</td><td>The <code>Storage</code> trait plus two backends: <span class="mono">memory</span> (tests) and <span class="mono">sqlite</span> (durable).</td></tr>
+        <tr><td class="k">wuphf-router</td><td>Evaluates rules; resolves or lazily provisions endpoints/threads; computes targets and per-target delivery policy.</td></tr>
+        <tr><td class="k">wuphf-core</td><td>Owns logical identity, dedup, echo suppression, reply resolution, and identity migration.</td></tr>
+        <tr><td class="k">wuphf-runtime</td><td>Event bus, dispatch pipeline, connector session hub, bounded media broker, gRPC adapter.</td></tr>
+        <tr><td class="k">wuphf-proto</td><td>Canonical protobuf contract and Tonic bindings.</td></tr>
+        <tr><td class="k">wuphf-cli</td><td>Loads TOML config, wires it together, serves gRPC.</td></tr>
+        <tr><td class="k">connectors/</td><td>Go Telegram (<span class="mono">gotd/td</span>, forum topics) and WhatsApp (<span class="mono">whatsmeow</span>, QR pairing).</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <h2><span class="num">06</span>Replicated operations</h2>
+    <p class="lead">Create, edit, and delete are replicated across the set. How
+      each <em>target</em> renders an edit or delete is set per connector and
+      resolved directionally at routing time — never forced symmetrically onto a
+      replica set.</p>
+    <div class="grid c2">
+      <div class="card">
+        <h3><span class="ic">✎</span>Edit modes</h3>
+        <p><code>in_place</code> revises the existing copy; <code>repost</code>
+          leaves it and posts the revision as a reply marked as an edit.</p>
+      </div>
+      <div class="card">
+        <h3><span class="ic">⌫</span>Delete modes</h3>
+        <p><code>revoke</code> removes the copy; <code>tombstone</code> leaves it
+          and posts a deletion notice.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <h2><span class="num">07</span>Status</h2>
+    <div class="status">
+      <div class="card">
+        <div class="panel-h">Working <span class="pill green">live</span></div>
+        <ul class="ok">
+          <li>Rule-based dynamic routing &amp; lazy provisioning</li>
+          <li>Create / edit / delete replication</li>
+          <li>Directional, per-connector delivery policy</li>
+          <li>Reply identity resolution per target</li>
+          <li>Identity migration (phone-to-LID)</li>
+          <li>Durable dispatch state + dead-lettering</li>
+          <li>Bounded media broker with pruning</li>
+          <li>Telegram &amp; WhatsApp connectors</li>
+        </ul>
+      </div>
+      <div class="card">
+        <div class="panel-h">Planned <span class="pill amber">reserved</span></div>
+        <ul class="soon">
+          <li>Reaction replication</li>
+          <li>Retitle a mirror thread on source rename</li>
+          <li>Symmetric N-to-N rules</li>
+          <li>Broader media kinds &amp; deletion policy</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap">
+    <div>wuphf · <span class="mono">one logical message, many platform copies</span></div>
+    <div style="margin-top:8px">See <a href="architecture.md">architecture.md</a> and <a href="connector-protocol.md">connector-protocol.md</a> for the details behind this page.</div>
+  </div>
+</footer>
+
+</body>
+</html>

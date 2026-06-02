@@ -1,66 +1,57 @@
 # wuphf
 
-`wuphf` is a multi-platform messaging replication engine. The core models one
-platform-independent logical message and its copies at platform endpoints,
-rather than forwarding platform messages without identity tracking.
+`wuphf` is a multi-platform messaging replication engine. It models **one
+platform-independent logical message and its copies** at platform endpoints,
+rather than forwarding platform messages without identity tracking. A Rust core
+owns all identity, routing, dedup, and loop prevention; Go connectors are thin
+pipes.
 
-## Current Implementation
+For a human-friendly tour, open [`docs/index.html`](docs/index.html).
 
-This initial Rust workspace implements a minimal, extensible core slice:
+## What works
 
-- Strongly typed domain model for platforms, endpoints, replication groups,
-  logical messages, message copies, attachments, contacts, and chat settings.
-- `Storage` boundary with in-memory tests and SQLite persistence/migrations.
-- Router fan-out that never dispatches back to the origin endpoint.
-- Core ingestion for message creation, duplicate suppression, sent-message
-  echo suppression, and internal reply identity resolution.
-- Tokio channel runtime implementing `EventBus -> Core -> Dispatch`.
-- Durable pending/blocked/acknowledged dispatch state; acknowledgements record
-  sent copies and release dependent replies.
-- Connector session hub with endpoint ownership checks, per-session dispatch
-  delivery, configured registration allowlist, and acknowledgement
-  authorization.
-- Bidirectional Tonic/gRPC connector transport over canonical protobuf frames.
+- Rule-based dynamic routing: raw platform addresses resolve to endpoints
+  through an alias table; conversations, replica sets, and mirror threads are
+  minted lazily and reused. Identity migrations (e.g. WhatsApp phone-to-LID)
+  keep both addresses resolvable.
+- Message **create, edit, and delete** replication with per-connector,
+  directional delivery policy (in-place vs repost edits; revoke vs tombstone
+  deletes). Internal reply identity is resolved to native ids per target.
+- Durable dispatch state (pending / blocked / acknowledged / dead-lettered) that
+  survives restart and redelivers unacknowledged work on reconnect.
 - Core-owned media broker with bounded streaming upload/download, SQLite blob
-  persistence, and orphan-upload retention; attachments reference stable
-  internal media IDs.
-- Go Telegram connector scaffold using `gotd/td` for authenticated sessions
-  plus inbound/outbound configured text, image, and file replication and
-  acknowledgements.
-- Go WhatsApp connector using `whatsmeow` with QR-paired SQLite session state
-  plus configured text, image, and file replication; inbound reply identity
-  is normalized for routing to supported targets.
-Edits, deletes, reactions, additional attachment kinds, and outbound
-WhatsApp quoted replies are represented or reserved by the architecture but
-are not yet executed by the runtime.
+  persistence, and orphan-upload pruning.
+- Bidirectional Tonic/gRPC connector transport; connector session hub with
+  registration allowlist and capability gating.
+- Go Telegram (`gotd/td`, forum topics) and WhatsApp (`whatsmeow`, QR pairing)
+  connectors for text and media.
+
+Reactions and mirror-thread retitling are modelled or reserved but not yet
+executed.
 
 ## Layout
 
 ```text
 crates/
-  wuphf-model/     Shared domain types
+  wuphf-model/     Shared domain types (ids, routing, connector, message, dispatch)
   wuphf-proto/     Canonical protobuf contract and Tonic bindings
-  wuphf-storage/   Storage trait, in-memory store, SQLite store
-  wuphf-router/    Replication target and reply dependency logic
-  wuphf-core/      Event ingestion and identity orchestration
-  wuphf-runtime/   Tokio event-bus and dispatch pipeline
-  wuphf-cli/       Local executable entrypoint
-connectors/
-  telegram/        Go gotd/td connector
-  whatsapp/        Go whatsmeow connector
-proto/go/          Shared generated Go connector protocol bindings
+  wuphf-storage/   Storage trait, in-memory + SQLite backends
+  wuphf-router/    Rule evaluation, target resolution, delivery policy
+  wuphf-core/      Identity orchestration and event ingestion
+  wuphf-runtime/   Tokio event bus, dispatch pipeline, media broker, gRPC
+  wuphf-cli/       Server executable
+connectors/        Go Telegram (gotd/td) and WhatsApp (whatsmeow) connectors
+proto/go/          Generated Go connector bindings
 migrations/        SQLite schema migrations
-config/            Example server topology and connector assignment
+config/            Example server topology and rules
 ```
 
 ## Run
 
-Run gRPC connector server with configured endpoints and assignments:
-
 ```sh
 cargo run -p wuphf-cli -- serve --config config/example.toml
 
-# in another shell, after configuring Telegram credentials/target
+# in another shell, after configuring Telegram credentials
 (cd connectors/telegram && go run ./cmd/wuphf-telegram --config config.example.toml)
 
 # in another shell; first launch prints a WhatsApp pairing QR code
@@ -80,7 +71,5 @@ nix flake check --all-systems
 ```
 
 See [docs/architecture.md](docs/architecture.md) for the identity and routing
-constraints and [docs/connector-protocol.md](docs/connector-protocol.md) for
-the connector-facing session contract. See
-[docs/implementation-status.md](docs/implementation-status.md) for current
-workspace changes, known in-progress work, and next steps.
+model and [docs/connector-protocol.md](docs/connector-protocol.md) for the
+connector session contract.
