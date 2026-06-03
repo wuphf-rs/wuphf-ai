@@ -21,13 +21,18 @@ supports_threads = true
 supports_topic_create = true
 
 # Per-connector delivery policy. Applied to messages this connector *receives*,
-# so it is directional: a replica set may render edits/deletes differently on
-# each side. `edit_mode`: "in_place" (default) edits the existing copy,
-# "repost" sends a fresh message. `delete_mode`: "revoke" (default) removes the
-# copy, "tombstone" leaves a deletion marker.
+# so it is directional: a replica set may render operations differently on each
+# side. `edit_mode`: "in_place" (default) edits the existing copy, "repost"
+# sends a fresh message. `delete_mode`: "revoke" (default) removes the copy,
+# "tombstone" leaves a deletion marker. `attachments_as_files`: when true, send
+# every attachment as a generic file/document instead of its origin media type.
+# `max_message_length`: when set, text longer than this many characters is sent
+# as a plain-text file instead of an inline message (omit for unbounded).
 [connectors.delivery]
 edit_mode = "in_place"
 delete_mode = "revoke"
+attachments_as_files = false
+# max_message_length = 4096
 
 #                       # One fixed WhatsApp chat mirrored one-to-one into one fixed Telegram topic.
 #                       [[rules]]

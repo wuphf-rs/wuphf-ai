@@ -1,0 +1,81 @@
+syntax = "proto3";
+
+package wuphf.connector.v1;
+
+option go_package = "github.com/akshettrj/wuphf/proto/go/connector/v1;wuphfpb";
+
+import "common.proto";
+
+// Raw origin coordinates for an inbound message. The connector id is taken from
+// the session registration, not the wire, so a session cannot speak for another
+// connector. The core resolves (connector, chat_id, thread_id) to an endpoint.
+message MessageCreateEvent {
+  string chat_id = 1;
+  optional string thread_id = 2;
+  optional string chat_title = 3;
+  string platform_message_id = 4;
+  string sender = 5;
+  optional string participant = 6;
+  optional string text = 7;
+  repeated Attachment attachments = 8;
+  optional string reply_to_platform_message_id = 9;
+  int64 timestamp_ms = 10;
+  optional string sender_name = 11;
+}
+
+// The platform reported that an existing message's content changed. The
+// connector reports the original message's native id and the new text; the core
+// resolves it to the logical message and fans the edit out to the other copies.
+message MessageEditEvent {
+  string chat_id = 1;
+  optional string thread_id = 2;
+  string platform_message_id = 3;
+  optional string text = 4;
+}
+
+// The platform reported that an existing message was deleted/revoked. The
+// connector reports the original message's native id; the core resolves it to
+// the logical message and fans the deletion out to the other copies.
+message MessageDeleteEvent {
+  string chat_id = 1;
+  optional string thread_id = 2;
+  string platform_message_id = 3;
+}
+
+// The platform reported a chat address change (e.g. WhatsApp phone-to-LID).
+// Both addresses remain resolvable; the new one becomes canonical for outbound.
+message IdentityMigrated {
+  string old_chat_id = 1;
+  optional string old_thread_id = 2;
+  string new_chat_id = 3;
+  optional string new_thread_id = 4;
+}
+
+message Acknowledgement {
+  string dispatch_id = 1;
+  string platform_message_id = 2;
+  // The thread/topic the message landed in. Set when the dispatch provisioned a
+  // new thread, so the core can persist the conversation thread mapping.
+  optional string thread_id = 3;
+}
+
+// A dispatch that can never succeed (e.g. an invalid target peer). The
+// connector reports it instead of acknowledging so the core dead-letters the
+// dispatch rather than redelivering it forever. Transient failures are not
+// reported this way; the connector drops its session and the core redelivers.
+message DispatchFailed {
+  string dispatch_id = 1;
+  string reason = 2;
+}
+
+message ClientFrame {
+  oneof body {
+    Registration registration = 1;
+    MessageCreateEvent message_create = 2;
+    Acknowledgement acknowledgement = 3;
+    IdentityMigrated identity_migrated = 4;
+    DispatchFailed dispatch_failed = 5;
+    MessageEditEvent message_edit = 6;
+    MessageDeleteEvent message_delete = 7;
+  }
+}

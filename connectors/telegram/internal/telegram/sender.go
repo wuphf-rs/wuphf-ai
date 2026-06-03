@@ -8,6 +8,7 @@ import (
 	"mime"
 	"path"
 	"strconv"
+	"unicode/utf16"
 
 	coreclient "github.com/akshettrj/wuphf/connectors/telegram/internal/core"
 	"github.com/akshettrj/wuphf/proto/go/connector/v1"
@@ -67,12 +68,16 @@ func (s Sender) SendMessage(ctx context.Context, dispatch *wuphfpb.MessageCreate
 		builder = builder.Reply(topicRoot)
 	}
 
+	delivery := dispatch.GetDelivery()
 	body := attributedText(dispatch.GetSenderName(), dispatch.GetParticipant(), dispatch.GetText())
 	var updates tg.UpdatesClass
-	if len(dispatch.Attachments) == 0 {
+	switch {
+	case len(dispatch.Attachments) > 0:
+		updates, err = s.sendAttachment(ctx, builder, dispatch.Attachments[0], body, delivery.GetAttachmentsAsFiles())
+	case textExceedsLimit(dispatch.GetText(), delivery.GetMaxMessageLength()):
+		updates, err = s.sendTextAsFile(ctx, builder, dispatch.GetSenderName(), dispatch.GetParticipant(), dispatch.GetText())
+	default:
 		updates, err = builder.StyledText(ctx, body...)
-	} else {
-		updates, err = s.sendAttachment(ctx, builder, dispatch.Attachments[0], body)
 	}
 	if err != nil {
 		return "", "", fmt.Errorf("send Telegram message: %w", err)
@@ -195,6 +200,46 @@ func attributedText(senderName, participant, text string) []message.StyledTextOp
 	return []message.StyledTextOption{styling.Bold(label), styling.Plain("\n\n" + text)}
 }
 
+// plainAttributedText renders the sender attribution and body as a single plain
+// string, used as the contents of the spill-over text file when a message
+// exceeds the target's length limit.
+func plainAttributedText(senderName, participant, text string) string {
+	if participant == "" {
+		return text
+	}
+	label := senderName
+	if label == "" {
+		label = participant
+	}
+	label = "🗣️: " + label
+	if text == "" {
+		return label
+	}
+	return label + "\n\n" + text
+}
+
+// textExceedsLimit reports whether the text is longer than the configured
+// maximum, measured in UTF-16 code units to match how Telegram counts message
+// length. A zero limit means unbounded.
+func textExceedsLimit(text string, limit uint32) bool {
+	if limit == 0 {
+		return false
+	}
+	return len(utf16.Encode([]rune(text))) > int(limit)
+}
+
+// sendTextAsFile delivers an over-length message as a plain-text document so the
+// platform's per-message length cap does not truncate or reject it.
+func (s Sender) sendTextAsFile(
+	ctx context.Context,
+	builder *message.Builder,
+	senderName, participant, text string,
+) (tg.UpdatesClass, error) {
+	content := plainAttributedText(senderName, participant, text)
+	upload := builder.Upload(message.FromBytes("message.txt", []byte(content)))
+	return upload.File(ctx)
+}
+
 // createTopic creates a forum topic in the container and returns its root
 // message id, which doubles as the topic (thread) id for later sends.
 func (s Sender) createTopic(ctx context.Context, peer tg.InputPeerClass, title string) (int, error) {
@@ -221,6 +266,7 @@ func (s Sender) sendAttachment(
 	builder *message.Builder,
 	attachment *wuphfpb.Attachment,
 	captionOptions []message.StyledTextOption,
+	asFile bool,
 ) (tg.UpdatesClass, error) {
 	bytes, err := s.media.Download(ctx, attachment.MediaId)
 	if err != nil {
@@ -231,9 +277,10 @@ func (s Sender) sendAttachment(
 	// Photo/video/audio/sticker uploads are validated by Telegram against the
 	// filename extension. When we cannot determine one, send the bytes as a
 	// document instead, which carries no extension requirement, rather than
-	// risk a PHOTO_EXT_INVALID (or equivalent) rejection.
+	// risk a PHOTO_EXT_INVALID (or equivalent) rejection. The delivery policy
+	// can also force every attachment to a document regardless of its kind.
 	kind := attachment.Kind
-	if !hasExtension {
+	if asFile || !hasExtension {
 		kind = wuphfpb.Attachment_KIND_FILE
 	}
 	switch kind {

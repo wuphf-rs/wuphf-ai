@@ -79,6 +79,96 @@ func TestSendFileDispatch(t *testing.T) {
 	}
 }
 
+func TestSendAttachmentsAsFilesForcesDocument(t *testing.T) {
+	t.Parallel()
+	client := &stubSendClient{}
+	sender := NewSender(client, &stubBroker{bytes: []byte("data")}, types.JID{})
+	mime := "image/jpeg"
+	_, _, err := sender.SendMessage(context.Background(), &wuphfpb.MessageCreateDispatch{
+		TargetChatId: "123@s.whatsapp.net",
+		Attachments: []*wuphfpb.Attachment{{
+			MediaId:  "media-id",
+			Kind:     wuphfpb.Attachment_KIND_IMAGE,
+			MimeType: &mime,
+		}},
+		Delivery: &wuphfpb.DeliveryOptions{AttachmentsAsFiles: true},
+	})
+	if err != nil {
+		t.Fatalf("SendMessage() error = %v", err)
+	}
+	if client.media != whatsmeow.MediaDocument {
+		t.Fatalf("upload media = %q, want document", client.media)
+	}
+	if client.sent.GetDocumentMessage() == nil || client.sent.GetImageMessage() != nil {
+		t.Fatalf("sent message = %#v, want document not image", client.sent)
+	}
+}
+
+func TestSendOverLengthTextAsFile(t *testing.T) {
+	t.Parallel()
+	client := &stubSendClient{}
+	sender := NewSender(client, &stubBroker{}, types.JID{})
+	text := "hello world"
+	limit := uint32(5)
+	_, _, err := sender.SendMessage(context.Background(), &wuphfpb.MessageCreateDispatch{
+		TargetChatId: "123@s.whatsapp.net",
+		Text:         &text,
+		Delivery:     &wuphfpb.DeliveryOptions{MaxMessageLength: &limit},
+	})
+	if err != nil {
+		t.Fatalf("SendMessage() error = %v", err)
+	}
+	if client.media != whatsmeow.MediaDocument || string(client.uploaded) != text {
+		t.Fatalf("upload = (%q, %q), want document carrying the text", client.media, client.uploaded)
+	}
+	document := client.sent.GetDocumentMessage()
+	if document.GetFileName() != "message.txt" || document.GetMimetype() != "text/plain" {
+		t.Fatalf("sent document = %#v, want message.txt/text/plain", document)
+	}
+}
+
+func TestSendWithinLengthLimitStaysInline(t *testing.T) {
+	t.Parallel()
+	client := &stubSendClient{}
+	sender := NewSender(client, &stubBroker{}, types.JID{})
+	text := "hi"
+	limit := uint32(5)
+	_, _, err := sender.SendMessage(context.Background(), &wuphfpb.MessageCreateDispatch{
+		TargetChatId: "123@s.whatsapp.net",
+		Text:         &text,
+		Delivery:     &wuphfpb.DeliveryOptions{MaxMessageLength: &limit},
+	})
+	if err != nil {
+		t.Fatalf("SendMessage() error = %v", err)
+	}
+	if client.sent.GetConversation() != text || client.sent.GetDocumentMessage() != nil {
+		t.Fatalf("sent message = %#v, want inline conversation", client.sent)
+	}
+}
+
+func TestTextExceedsLimit(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name  string
+		text  string
+		limit uint32
+		want  bool
+	}{
+		{"zero limit is unbounded", "anything goes", 0, false},
+		{"within limit", "hi", 5, false},
+		{"at limit", "hello", 5, false},
+		{"over limit", "hello!", 5, true},
+		{"counts runes not bytes", "héllo", 5, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := textExceedsLimit(tc.text, tc.limit); got != tc.want {
+				t.Fatalf("textExceedsLimit(%q, %d) = %t, want %t", tc.text, tc.limit, got, tc.want)
+			}
+		})
+	}
+}
+
 func TestSendOutboundReplyBuildsQuotedContext(t *testing.T) {
 	t.Parallel()
 	client := &stubSendClient{}

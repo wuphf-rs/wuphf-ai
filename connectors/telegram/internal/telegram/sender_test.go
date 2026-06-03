@@ -79,6 +79,53 @@ func TestUploadName(t *testing.T) {
 
 func ptr(s string) *string { return &s }
 
+func TestTextExceedsLimit(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name  string
+		text  string
+		limit uint32
+		want  bool
+	}{
+		{"zero limit is unbounded", "anything goes here", 0, false},
+		{"within limit", "hello", 5, false},
+		{"over limit", "hello!", 5, true},
+		{"astral chars count as two utf-16 units", "😀😀😀", 5, true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := textExceedsLimit(tc.text, tc.limit); got != tc.want {
+				t.Fatalf("textExceedsLimit(%q, %d) = %t, want %t", tc.text, tc.limit, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestPlainAttributedText(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name        string
+		senderName  string
+		participant string
+		text        string
+		want        string
+	}{
+		{"direct message left unlabelled", "Alice", "", "hi", "hi"},
+		{"group message gets name header", "Alice", "p1", "hi", "🗣️: Alice\n\nhi"},
+		{"group header falls back to participant id", "", "p1", "hi", "🗣️: p1\n\nhi"},
+		{"group header only when body empty", "Alice", "p1", "", "🗣️: Alice"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := plainAttributedText(tc.senderName, tc.participant, tc.text); got != tc.want {
+				t.Fatalf("plainAttributedText() = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
 func TestSentMessageID(t *testing.T) {
 	t.Parallel()
 

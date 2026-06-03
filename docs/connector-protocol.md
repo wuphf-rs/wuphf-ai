@@ -39,7 +39,12 @@ host a threaded mirror.
 - `MessageCreateDispatch` — addressed by `target_chat_id`/`target_thread_id`,
   with reply context and attachments. If a threaded mirror has no thread yet it
   carries `provision_thread { container, title }`; the connector creates the
-  thread, sends, and reports the new thread id in the acknowledgement.
+  thread, sends, and reports the new thread id in the acknowledgement. Carries a
+  `delivery { attachments_as_files, max_message_length }` block resolved
+  server-side from the target connector's delivery options: when
+  `attachments_as_files` is set the connector sends every attachment as a generic
+  file, and when the text exceeds `max_message_length` it sends the text as a
+  plain-text file instead of an inline message.
 - `MessageEditDispatch` / `MessageDeleteDispatch` — the target copy's native id
   plus an `edit_mode` / `delete_mode` resolved server-side from the target
   connector's delivery options, so the connector renders the operation without

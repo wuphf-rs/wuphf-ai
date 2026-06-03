@@ -3,6 +3,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .build_server(true)
         .build_client(true)
         .boxed(".wuphf.connector.v1.ServerFrame.body.message_create")
-        .compile_protos(&["connector.proto"], &["."])?;
+        .compile_protos(
+            &[
+                "common.proto",
+                "media.proto",
+                "client.proto",
+                "server.proto",
+                "connector.proto",
+            ],
+            &["."],
+        )?;
     Ok(())
 }

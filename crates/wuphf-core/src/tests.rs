@@ -367,6 +367,7 @@ async fn maps_replies_through_internal_identity_and_target_copy() {
     let DispatchPayload::MessageCreate {
         message,
         reply_context,
+        ..
     } = &reply.dispatches()[0].command.payload
     else {
         panic!("reply should route as a message create");

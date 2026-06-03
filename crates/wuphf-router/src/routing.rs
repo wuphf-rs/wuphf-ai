@@ -42,6 +42,7 @@ where
                 .resolve_target(&endpoint, conversation.as_ref(), provision_title)
                 .await?;
             let target_connector = endpoint.connector_id.clone();
+            let delivery = self.config.delivery(&target_connector);
 
             let reply_context = match message.reply_to {
                 Some(parent_id) => {
@@ -67,6 +68,7 @@ where
                                     payload: DispatchPayload::MessageCreate {
                                         message: message.clone(),
                                         reply_context: None,
+                                        delivery,
                                     },
                                 },
                                 waiting_for_message: parent_id,
@@ -85,6 +87,7 @@ where
                 payload: DispatchPayload::MessageCreate {
                     message: message.clone(),
                     reply_context,
+                    delivery,
                 },
             });
         }

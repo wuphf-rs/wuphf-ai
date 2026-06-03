@@ -1,0 +1,51 @@
+syntax = "proto3";
+
+package wuphf.connector.v1;
+
+option go_package = "github.com/akshettrj/wuphf/proto/go/connector/v1;wuphfpb";
+
+enum Platform {
+  PLATFORM_UNSPECIFIED = 0;
+  PLATFORM_WHATSAPP = 1;
+  PLATFORM_TELEGRAM = 2;
+  PLATFORM_DISCORD = 3;
+  PLATFORM_SIGNAL = 4;
+  PLATFORM_SLACK = 5;
+  PLATFORM_MATRIX = 6;
+  PLATFORM_INSTAGRAM = 7;
+}
+
+message Capabilities {
+  bool supports_threads = 1;
+  bool supports_topic_create = 2;
+}
+
+message Registration {
+  string connector_id = 1;
+  Platform platform = 2;
+  Capabilities capabilities = 3;
+}
+
+message Attachment {
+  enum Kind {
+    KIND_UNSPECIFIED = 0;
+    KIND_IMAGE = 1;
+    KIND_VIDEO = 2;
+    KIND_AUDIO = 3;
+    KIND_FILE = 4;
+    KIND_STICKER = 5;
+  }
+
+  string media_id = 1;
+  Kind kind = 2;
+  optional string file_name = 3;
+  optional string mime_type = 4;
+  optional uint64 size_bytes = 5;
+}
+
+message MediaMetadata {
+  Attachment.Kind kind = 1;
+  optional string file_name = 2;
+  optional string mime_type = 3;
+  optional uint64 size_bytes = 4;
+}

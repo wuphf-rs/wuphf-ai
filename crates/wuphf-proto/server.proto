@@ -1,0 +1,116 @@
+syntax = "proto3";
+
+package wuphf.connector.v1;
+
+option go_package = "github.com/akshettrj/wuphf/proto/go/connector/v1;wuphfpb";
+
+import "common.proto";
+
+message ReplyContext {
+  string logical_message_id = 1;
+  string platform_message_id = 2;
+  string sender = 3;
+  optional string participant = 4;
+  optional string text = 5;
+  repeated Attachment attachments = 6;
+}
+
+// Instruction to create a thread/topic in a container before sending, used when
+// a mirror conversation has no thread yet. The connector creates the thread,
+// sends, and reports the resulting thread id back in the acknowledgement.
+message ProvisionThread {
+  string container = 1;
+  string title = 2;
+}
+
+// Per-dispatch delivery policy, resolved by the server from the target
+// connector's delivery options, that governs how a connector renders a created
+// copy on its platform. Each field is independent; a connector applies the
+// knobs its platform supports and ignores the rest.
+message DeliveryOptions {
+  // Send every attachment using the platform's generic file/document method,
+  // regardless of its origin kind.
+  bool attachments_as_files = 1;
+  // Maximum text length, in characters, to carry in a single message. When the
+  // text exceeds it, the connector sends the text as a plain-text file instead.
+  // Absent means unbounded.
+  optional uint32 max_message_length = 2;
+}
+
+message MessageCreateDispatch {
+  string dispatch_id = 1;
+  string target_chat_id = 2;
+  optional string target_thread_id = 3;
+  optional ProvisionThread provision_thread = 4;
+  string sender = 5;
+  optional string participant = 6;
+  optional string text = 7;
+  repeated Attachment attachments = 8;
+  optional string reply_to_platform_message_id = 9;
+  int64 timestamp_ms = 10;
+  optional ReplyContext reply_context = 11;
+  optional string sender_name = 12;
+  DeliveryOptions delivery = 13;
+}
+
+// How a connector should render a replicated edit, resolved by the server from
+// the target connector's delivery options.
+enum EditMode {
+  EDIT_MODE_IN_PLACE = 0;
+  EDIT_MODE_REPOST = 1;
+}
+
+// How a connector should render a replicated delete, resolved by the server from
+// the target connector's delivery options.
+enum DeleteMode {
+  DELETE_MODE_REVOKE = 0;
+  DELETE_MODE_TOMBSTONE = 1;
+}
+
+// Instruction to revise an already-delivered copy. `target_platform_message_id`
+// is the native id of the message to edit at this endpoint.
+message MessageEditDispatch {
+  string dispatch_id = 1;
+  string target_chat_id = 2;
+  optional string target_thread_id = 3;
+  string target_platform_message_id = 4;
+  optional string text = 5;
+  optional string sender_name = 6;
+  optional string participant = 7;
+  EditMode edit_mode = 8;
+}
+
+// Instruction to revoke an already-delivered copy. `target_platform_message_id`
+// is the native id of the message to delete at this endpoint.
+message MessageDeleteDispatch {
+  string dispatch_id = 1;
+  string target_chat_id = 2;
+  optional string target_thread_id = 3;
+  string target_platform_message_id = 4;
+  DeleteMode delete_mode = 5;
+}
+
+// Instruction to rename an already-provisioned mirror thread when its source
+// conversation's title changes. Addresses the thread by its container and
+// thread id; carries no message because a retitle is a conversation property,
+// not a per-message operation. Acknowledged like any dispatch.
+message MessageRetitleDispatch {
+  string dispatch_id = 1;
+  string target_chat_id = 2;
+  string target_thread_id = 3;
+  string title = 4;
+}
+
+message Rejected {
+  string reason = 1;
+}
+
+message ServerFrame {
+  oneof body {
+    MessageCreateDispatch message_create = 1;
+    Rejected rejected = 2;
+    MessageEditDispatch message_edit = 3;
+    MessageDeleteDispatch message_delete = 4;
+    MessageRetitleDispatch message_retitle = 5;
+  }
+}

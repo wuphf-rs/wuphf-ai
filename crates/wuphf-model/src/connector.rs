@@ -49,6 +49,15 @@ pub enum DeleteMode {
 pub struct DeliveryOptions {
     pub edit_mode: EditMode,
     pub delete_mode: DeleteMode,
+    /// Mirror every attachment using the platform's generic file/document send
+    /// method, regardless of its origin kind (image/video/audio/sticker). For
+    /// platforms where preserving the original media type is undesirable.
+    pub attachments_as_files: bool,
+    /// Maximum text length, in characters, the target platform should carry in a
+    /// single message. When a mirrored message's text exceeds it, the text is
+    /// sent as a plain-text file attachment instead. `None` leaves text
+    /// unbounded. The connector counts in whatever unit its platform enforces.
+    pub max_message_length: Option<u32>,
 }
 
 /// A connector declared in core configuration. Endpoints are no longer

@@ -10,6 +10,11 @@ pub enum DispatchPayload {
     MessageCreate {
         message: Message,
         reply_context: Option<ReplyContext>,
+        /// The target connector's delivery policy, resolved at routing time, that
+        /// governs how this copy is rendered (e.g. attachments-as-files, text
+        /// length spillover). Carried whole so new create-time knobs are additive.
+        #[serde(default)]
+        delivery: DeliveryOptions,
     },
     /// Revise an already-delivered copy. `target_platform_message_id` is the
     /// native id of the copy to edit at the target endpoint; it is empty while

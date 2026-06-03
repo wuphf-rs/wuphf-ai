@@ -64,13 +64,17 @@ dedup, reply mapping, loop prevention, or address mapping.
 
 ## Replicated Operations
 
-- **Create** — fanned out to every other endpoint in the replica set.
+- **Create** — fanned out to every other endpoint in the replica set, carrying
+  the target's resolved `DeliveryOptions` so the connector renders attachments
+  and over-length text per policy.
 - **Edit / Delete** — resolved to the original copies and fanned out. How each
   target renders them is governed by per-connector **`DeliveryOptions`**:
-  `edit_mode` (`in_place` | `repost`) and `delete_mode` (`revoke` | `tombstone`).
-  Options are configured on each connector and resolved against the *target*
-  connector at routing time, so policy is connector-specific and directional —
-  never a symmetric property of a replica set.
+  `edit_mode` (`in_place` | `repost`), `delete_mode` (`revoke` | `tombstone`),
+  `attachments_as_files` (send every attachment as a generic file), and
+  `max_message_length` (spill over-length text into a plain-text file). Options
+  are configured on each connector and resolved against the *target* connector at
+  routing time, so policy is connector-specific and directional — never a
+  symmetric property of a replica set.
 - **Reactions** are modelled but not yet executed.
 
 ## Media

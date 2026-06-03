@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"unicode/utf8"
 
 	coreclient "github.com/akshettrj/wuphf/connectors/whatsapp/internal/core"
 	wuphfpb "github.com/akshettrj/wuphf/proto/go/connector/v1"
@@ -45,14 +46,21 @@ func (s Sender) SendMessage(ctx context.Context, dispatch *wuphfpb.MessageCreate
 	if err != nil {
 		return "", "", err
 	}
+	delivery := dispatch.GetDelivery()
 	var message *waE2E.Message
-	if len(dispatch.Attachments) == 0 {
-		message = textMessage(dispatch.GetText())
-	} else {
-		message, err = s.attachmentMessage(ctx, dispatch.Attachments[0], dispatch.GetText())
+	switch {
+	case len(dispatch.Attachments) > 0:
+		message, err = s.attachmentMessage(ctx, dispatch.Attachments[0], dispatch.GetText(), delivery.GetAttachmentsAsFiles())
 		if err != nil {
 			return "", "", err
 		}
+	case textExceedsLimit(dispatch.GetText(), delivery.GetMaxMessageLength()):
+		message, err = s.textFileMessage(ctx, dispatch.GetText())
+		if err != nil {
+			return "", "", err
+		}
+	default:
+		message = textMessage(dispatch.GetText())
 	}
 	message = withContext(message, contextInfo)
 	response, err := s.client.SendMessage(ctx, chat, message)
@@ -184,13 +192,20 @@ func (s Sender) attachmentMessage(
 	ctx context.Context,
 	attachment *wuphfpb.Attachment,
 	caption string,
+	asFile bool,
 ) (*waE2E.Message, error) {
 	bytes, err := s.media.Download(ctx, attachment.MediaId)
 	if err != nil {
 		return nil, fmt.Errorf("download media from core: %w", err)
 	}
 	mimeType := attachment.GetMimeType()
-	switch attachment.Kind {
+	// The delivery policy can force every attachment to a document regardless of
+	// its origin kind.
+	kind := attachment.Kind
+	if asFile {
+		kind = wuphfpb.Attachment_KIND_FILE
+	}
+	switch kind {
 	case wuphfpb.Attachment_KIND_IMAGE:
 		uploaded, err := s.client.Upload(ctx, bytes, whatsmeow.MediaImage)
 		if err != nil {
@@ -272,6 +287,34 @@ func (s Sender) attachmentMessage(
 
 func textMessage(text string) *waE2E.Message {
 	return &waE2E.Message{Conversation: proto.String(text)}
+}
+
+// textExceedsLimit reports whether the text is longer than the configured
+// maximum, measured in Unicode code points. A zero limit means unbounded.
+func textExceedsLimit(text string, limit uint32) bool {
+	if limit == 0 {
+		return false
+	}
+	return utf8.RuneCountInString(text) > int(limit)
+}
+
+// textFileMessage delivers an over-length message as a plain-text document so
+// the platform's per-message length cap does not truncate or reject it.
+func (s Sender) textFileMessage(ctx context.Context, text string) (*waE2E.Message, error) {
+	uploaded, err := s.client.Upload(ctx, []byte(text), whatsmeow.MediaDocument)
+	if err != nil {
+		return nil, fmt.Errorf("upload WhatsApp text file: %w", err)
+	}
+	return &waE2E.Message{DocumentMessage: &waE2E.DocumentMessage{
+		Mimetype:      optionalProtoString("text/plain"),
+		FileName:      optionalProtoString("message.txt"),
+		URL:           &uploaded.URL,
+		DirectPath:    &uploaded.DirectPath,
+		MediaKey:      uploaded.MediaKey,
+		FileEncSHA256: uploaded.FileEncSHA256,
+		FileSHA256:    uploaded.FileSHA256,
+		FileLength:    &uploaded.FileLength,
+	}}, nil
 }
 
 func optionalProtoString(value string) *string {

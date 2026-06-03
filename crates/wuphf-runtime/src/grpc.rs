@@ -7,9 +7,9 @@ use tonic::{Request, Response, Status};
 use uuid::Uuid;
 use wuphf_model::{
     Attachment, AttachmentKind, ConnectorCapabilities, ConnectorId, ConnectorInput,
-    ConnectorOutput, ConnectorRegistration, DeleteMode, DispatchAcknowledgement, DispatchPayload,
-    EditMode, EventPayload, InboundMessage, MediaId, NormalizedEvent, Platform, PlatformAddress,
-    ProvisionThread, ReplyContext, SourceAddress,
+    ConnectorOutput, ConnectorRegistration, DeleteMode, DeliveryOptions, DispatchAcknowledgement,
+    DispatchPayload, EditMode, EventPayload, InboundMessage, MediaId, NormalizedEvent, Platform,
+    PlatformAddress, ProvisionThread, ReplyContext, SourceAddress,
 };
 use wuphf_proto::connector as pb;
 use wuphf_proto::connector::connector_transport_server::ConnectorTransport;
@@ -216,6 +216,7 @@ fn output_to_proto(output: ConnectorOutput) -> pb::ServerFrame {
                 DispatchPayload::MessageCreate {
                     message,
                     reply_context,
+                    delivery,
                 } => {
                     let reply_to_platform_message_id = reply_context
                         .as_ref()
@@ -237,6 +238,7 @@ fn output_to_proto(output: ConnectorOutput) -> pb::ServerFrame {
                         timestamp_ms: message.timestamp_ms,
                         reply_context: reply_context.map(reply_context_to_proto),
                         sender_name: message.sender_name,
+                        delivery: Some(delivery_options_to_proto(delivery)),
                     }))
                 }
                 DispatchPayload::MessageEdit {
@@ -279,6 +281,13 @@ fn output_to_proto(output: ConnectorOutput) -> pb::ServerFrame {
         }
     };
     pb::ServerFrame { body: Some(body) }
+}
+
+fn delivery_options_to_proto(delivery: DeliveryOptions) -> pb::DeliveryOptions {
+    pb::DeliveryOptions {
+        attachments_as_files: delivery.attachments_as_files,
+        max_message_length: delivery.max_message_length,
+    }
 }
 
 fn edit_mode_to_proto(mode: EditMode) -> pb::EditMode {
