@@ -4,22 +4,34 @@ import (
 	"context"
 	"strings"
 	"sync"
+	"time"
 
 	"go.mau.fi/whatsmeow"
 	"go.mau.fi/whatsmeow/types"
 )
 
-// chatNamer resolves chat titles through the WhatsApp client and caches them, as
-// the normalizer queries a title for every inbound message but the value only
-// changes on a group rename, newsletter rename, or contact update.
+// titleTTL bounds how long a resolved chat title is reused before it is looked
+// up again, so a group rename or a contact saved after the thread was created is
+// picked up on the next refresh instead of being cached for the session.
+const titleTTL = 5 * time.Minute
+
+type cachedTitle struct {
+	value string
+	at    time.Time
+}
+
+// chatNamer resolves chat titles through the WhatsApp client and caches them
+// with a short TTL, as the normalizer queries a title for every inbound message
+// but the value only changes on a group rename, newsletter rename, or contact
+// update.
 type chatNamer struct {
 	client *whatsmeow.Client
 	mu     sync.RWMutex
-	titles map[string]string
+	titles map[string]cachedTitle
 }
 
 func newChatNamer(client *whatsmeow.Client) *chatNamer {
-	return &chatNamer{client: client, titles: make(map[string]string)}
+	return &chatNamer{client: client, titles: make(map[string]cachedTitle)}
 }
 
 func (n *chatNamer) ChatTitle(ctx context.Context, chat types.JID) string {
@@ -27,13 +39,13 @@ func (n *chatNamer) ChatTitle(ctx context.Context, chat types.JID) string {
 	n.mu.RLock()
 	cached, ok := n.titles[key]
 	n.mu.RUnlock()
-	if ok {
-		return cached
+	if ok && time.Since(cached.at) < titleTTL {
+		return cached.value
 	}
 	title := n.resolve(ctx, chat)
 	if title != "" {
 		n.mu.Lock()
-		n.titles[key] = title
+		n.titles[key] = cachedTitle{value: title, at: time.Now()}
 		n.mu.Unlock()
 	}
 	return title
@@ -75,13 +87,22 @@ func (n *chatNamer) contactName(ctx context.Context, chat types.JID) string {
 
 // PersonName resolves a person's display name for a mirror header (the sender of
 // a group message) or a direct-chat thread title. The pushHint is the freshest
-// push name carried on the triggering message, preferred over the stored one.
+// push name carried on the triggering message, preferred over the stored one. A
+// LID-addressed person is mapped to its phone JID first, where the address-book
+// contact and the real number live; without that step a saved contact would be
+// shown as its raw LID id.
 func (n *chatNamer) PersonName(ctx context.Context, jid types.JID, pushHint string) string {
-	contact, err := n.client.Store.Contacts.GetContact(ctx, jid)
-	if err != nil {
-		return formatPersonName(jid, types.ContactInfo{}, pushHint)
+	number := jid
+	if jid.Server == types.HiddenUserServer {
+		if pn, err := n.client.Store.LIDs.GetPNForLID(ctx, jid); err == nil && !pn.IsEmpty() {
+			number = pn
+		}
 	}
-	return formatPersonName(jid, contact, pushHint)
+	contact, err := n.client.Store.Contacts.GetContact(ctx, number)
+	if err != nil {
+		contact = types.ContactInfo{}
+	}
+	return formatPersonName(number, contact, pushHint)
 }
 
 // formatPersonName renders a person by descending specificity: a saved contact
