@@ -31,6 +31,7 @@ const (
 	Platform_PLATFORM_SIGNAL      Platform = 4
 	Platform_PLATFORM_SLACK       Platform = 5
 	Platform_PLATFORM_MATRIX      Platform = 6
+	Platform_PLATFORM_INSTAGRAM   Platform = 7
 )
 
 // Enum value maps for Platform.
@@ -43,6 +44,7 @@ var (
 		4: "PLATFORM_SIGNAL",
 		5: "PLATFORM_SLACK",
 		6: "PLATFORM_MATRIX",
+		7: "PLATFORM_INSTAGRAM",
 	}
 	Platform_value = map[string]int32{
 		"PLATFORM_UNSPECIFIED": 0,
@@ -52,6 +54,7 @@ var (
 		"PLATFORM_SIGNAL":      4,
 		"PLATFORM_SLACK":       5,
 		"PLATFORM_MATRIX":      6,
+		"PLATFORM_INSTAGRAM":   7,
 	}
 )
 
@@ -2161,7 +2164,7 @@ const file_connector_proto_rawDesc = "" +
 	"\fmessage_edit\x18\x03 \x01(\v2'.wuphf.connector.v1.MessageEditDispatchH\x00R\vmessageEdit\x12R\n" +
 	"\x0emessage_delete\x18\x04 \x01(\v2).wuphf.connector.v1.MessageDeleteDispatchH\x00R\rmessageDelete\x12U\n" +
 	"\x0fmessage_retitle\x18\x05 \x01(\v2*.wuphf.connector.v1.MessageRetitleDispatchH\x00R\x0emessageRetitleB\x06\n" +
-	"\x04body*\xa6\x01\n" +
+	"\x04body*\xbe\x01\n" +
 	"\bPlatform\x12\x18\n" +
 	"\x14PLATFORM_UNSPECIFIED\x10\x00\x12\x15\n" +
 	"\x11PLATFORM_WHATSAPP\x10\x01\x12\x15\n" +
@@ -2169,7 +2172,8 @@ const file_connector_proto_rawDesc = "" +
 	"\x10PLATFORM_DISCORD\x10\x03\x12\x13\n" +
 	"\x0fPLATFORM_SIGNAL\x10\x04\x12\x12\n" +
 	"\x0ePLATFORM_SLACK\x10\x05\x12\x13\n" +
-	"\x0fPLATFORM_MATRIX\x10\x06*8\n" +
+	"\x0fPLATFORM_MATRIX\x10\x06\x12\x16\n" +
+	"\x12PLATFORM_INSTAGRAM\x10\a*8\n" +
 	"\bEditMode\x12\x16\n" +
 	"\x12EDIT_MODE_IN_PLACE\x10\x00\x12\x14\n" +
 	"\x10EDIT_MODE_REPOST\x10\x01*?\n" +

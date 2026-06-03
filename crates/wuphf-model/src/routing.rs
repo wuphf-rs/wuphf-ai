@@ -15,6 +15,7 @@ pub enum Platform {
     Signal,
     Slack,
     Matrix,
+    Instagram,
     Other(String),
 }
 

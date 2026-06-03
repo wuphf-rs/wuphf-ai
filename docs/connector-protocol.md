@@ -74,3 +74,8 @@ rejects events whose attachment metadata doesn't match the broker-issued record.
   a mirror), reports phone-to-LID migrations, syncs newsletter/contact names,
   and builds real quoted replies. Linked-account messages are still submitted so
   the core decides echo suppression.
+- **Instagram** (`connectors/instagram`, `mautrix/meta`) — cookie-authenticated
+  via a JSON session file, keyed by numeric thread ids. Declares no thread
+  capabilities (never a mirror). Currently an MVP: inbound and outbound text
+  only, with native reply ids carried through. Own-account messages are still
+  submitted so the core decides echo suppression.

@@ -364,6 +364,7 @@ fn platform_from_proto(value: i32) -> Result<Platform, WireError> {
         pb::Platform::Signal => Ok(Platform::Signal),
         pb::Platform::Slack => Ok(Platform::Slack),
         pb::Platform::Matrix => Ok(Platform::Matrix),
+        pb::Platform::Instagram => Ok(Platform::Instagram),
         pb::Platform::Unspecified => Err(WireError("platform required".into())),
     }
 }

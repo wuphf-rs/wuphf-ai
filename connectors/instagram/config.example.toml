@@ -1,0 +1,21 @@
+core_address = "127.0.0.1:50051"
+connector_id = "instagram-main"
+
+# JSON map of Instagram session cookies, exported from a logged-in browser
+# session, e.g. {"sessionid": "...", "csrftoken": "...", "ds_user_id": "...",
+# "mid": "...", "ig_did": "..."}. Used only until a session file is written.
+cookies_file = "instagram.cookies.json"
+
+# Where the connector stores the latest (refreshed) cookies on shutdown and
+# reloads them on the next start, so a restart does not need a fresh export.
+session_file = "instagram.session.json"
+
+# Instagram has no threads/topics, so leave both capabilities false. The core
+# may only use this connector as a single target or an identity source, never
+# as a threaded mirror.
+supports_threads = false
+supports_topic_create = false
+
+# Routing is owned entirely by the core. Configure which conversations map
+# where through the core's [[rules]] using Instagram thread keys (decimal
+# numbers) as chat IDs.

@@ -60,7 +60,7 @@ dedup, reply mapping, loop prevention, or address mapping.
 | `wuphf-runtime` | Tokio event bus + dispatch pipeline; connector session hub; bounded media broker; gRPC transport adapter. |
 | `wuphf-proto` | Canonical protobuf contract and Tonic bindings. |
 | `wuphf-cli` | Loads TOML config, wires storage/core/runtime, serves gRPC. |
-| `connectors/` | Go connectors: Telegram (`gotd/td`, forum topics) and WhatsApp (`whatsmeow`, QR pairing). |
+| `connectors/` | Go connectors: Telegram (`gotd/td`, forum topics), WhatsApp (`whatsmeow`, QR pairing), and Instagram (`mautrix/meta`, cookie auth). |
 
 ## Replicated Operations
 

@@ -9,6 +9,7 @@
 # Go connector build output
 /connectors/telegram/wuphf-telegram
 /connectors/whatsapp/wuphf-whatsapp
+/connectors/instagram/wuphf-instagram
 
 # Local runtime state and configuration
 *.db
@@ -21,6 +22,7 @@
 /.env.*
 /config.local.toml
 *.session.json
+*.cookies.json
 
 # Editor and operating system files
 .DS_Store

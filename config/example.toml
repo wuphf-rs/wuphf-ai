@@ -11,6 +11,10 @@ id = "whatsapp-main"
 platform = "whatsapp"
 
 [[connectors]]
+id = "instagram-main"
+platform = "instagram"
+
+[[connectors]]
 id = "telegram-main"
 platform = "telegram"
 supports_threads = true
@@ -48,6 +52,19 @@ id = "wa-to-telegram-mirror"
 
 [[rules.sides]]
 connector = "whatsapp-main"
+kind = "source"
+exclude = []
+
+[[rules.sides]]
+connector = "telegram-main"
+kind = "mirror"
+container = "telegram:channel:2060340733"
+
+[[rules]]
+id = "ig-to-telegram-mirror"
+
+[[rules.sides]]
+connector = "instagram-main"
 kind = "source"
 exclude = []
 

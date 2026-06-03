@@ -138,6 +138,7 @@ fn platform(name: &str) -> Result<Platform> {
         "signal" => Ok(Platform::Signal),
         "slack" => Ok(Platform::Slack),
         "matrix" => Ok(Platform::Matrix),
+        "instagram" => Ok(Platform::Instagram),
         _ if name.starts_with("other:") => Ok(Platform::Other(name[6..].to_owned())),
         _ => bail!("unsupported platform {name}"),
     }

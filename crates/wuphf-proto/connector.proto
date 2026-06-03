@@ -21,6 +21,7 @@ enum Platform {
   PLATFORM_SIGNAL = 4;
   PLATFORM_SLACK = 5;
   PLATFORM_MATRIX = 6;
+  PLATFORM_INSTAGRAM = 7;
 }
 
 message Capabilities {
