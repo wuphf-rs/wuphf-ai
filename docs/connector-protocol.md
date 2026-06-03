@@ -44,6 +44,10 @@ host a threaded mirror.
   plus an `edit_mode` / `delete_mode` resolved server-side from the target
   connector's delivery options, so the connector renders the operation without
   any local policy.
+- `MessageRetitleDispatch` — `target_chat_id`/`target_thread_id` plus the new
+  `title`, sent when a source conversation is renamed so the mirror thread's
+  title tracks it. Carries no message; the connector renames the thread and
+  acknowledges with the thread id.
 - `Rejected` — the connector's last input violated session ownership.
 
 Dispatches remain pending until acknowledged with the same `dispatch_id`; a
@@ -62,8 +66,9 @@ rejects events whose attachment metadata doesn't match the broker-issued record.
 
 - **Telegram** (`connectors/telegram`, `gotd/td`) — registers with forum-topic
   capabilities, emits typed chat ids (`telegram:channel|chat|user:N`) via an
-  access-hash peer cache, provisions forum topics on demand, and renders
-  replicated edits/deletes per the dispatch-supplied mode.
+  access-hash peer cache, provisions forum topics on demand, renames them on a
+  source rename, and renders replicated edits/deletes per the dispatch-supplied
+  mode.
 - **WhatsApp** (`connectors/whatsapp`, `whatsmeow`) — QR-paired with its own
   SQLite session, keyed by JID chat ids. Declares no thread capabilities (never
   a mirror), reports phone-to-LID migrations, syncs newsletter/contact names,

@@ -35,6 +35,14 @@ pub enum DispatchPayload {
         #[serde(default)]
         mode: DeleteMode,
     },
+    /// Rename an already-provisioned mirror thread when its source
+    /// conversation's title changes. Carries no message because a retitle is a
+    /// conversation property, not a per-message operation; the target thread is
+    /// addressed by the resolved [`TargetAddress`].
+    RetitleThread {
+        replica_set_id: ReplicaSetId,
+        title: String,
+    },
 }
 
 /// Instruction to create a thread/topic in a container before sending, used
@@ -66,11 +74,16 @@ pub struct DispatchCommand {
 }
 
 impl DispatchCommand {
-    pub fn message_id(&self) -> MessageId {
+    /// The logical message a dispatch carries, or `None` for payloads that
+    /// operate on a conversation rather than a message (a thread retitle). The
+    /// id keys the delivered copy a later edit/delete revises; a retitle has no
+    /// copy to record, so it has no id.
+    pub fn message_id(&self) -> Option<MessageId> {
         match &self.payload {
             DispatchPayload::MessageCreate { message, .. }
             | DispatchPayload::MessageEdit { message, .. }
-            | DispatchPayload::MessageDelete { message, .. } => message.id,
+            | DispatchPayload::MessageDelete { message, .. } => Some(message.id),
+            DispatchPayload::RetitleThread { .. } => None,
         }
     }
 
@@ -79,6 +92,7 @@ impl DispatchCommand {
             DispatchPayload::MessageCreate { message, .. }
             | DispatchPayload::MessageEdit { message, .. }
             | DispatchPayload::MessageDelete { message, .. } => message.replica_set_id,
+            DispatchPayload::RetitleThread { replica_set_id, .. } => *replica_set_id,
         }
     }
 }

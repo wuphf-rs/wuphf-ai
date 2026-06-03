@@ -125,6 +125,11 @@ pub struct Conversation {
     pub replica_set_id: ReplicaSetId,
     pub source_connector: ConnectorId,
     pub source_address: PlatformAddress,
+    /// The last source title persisted for this conversation. Tracked so the
+    /// core can detect when a source chat is renamed and fan a retitle out to
+    /// the mirror threads. `None` until a title is first observed.
+    #[serde(default)]
+    pub title: Option<String>,
 }
 
 /// Records the mirror thread created for a conversation in a container.

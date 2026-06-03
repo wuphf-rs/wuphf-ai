@@ -264,6 +264,14 @@ fn output_to_proto(output: ConnectorOutput) -> pb::ServerFrame {
                     target_platform_message_id,
                     delete_mode: delete_mode_to_proto(mode) as i32,
                 }),
+                DispatchPayload::RetitleThread { title, .. } => {
+                    pb::server_frame::Body::MessageRetitle(pb::MessageRetitleDispatch {
+                        dispatch_id,
+                        target_chat_id: target.address.chat_id,
+                        target_thread_id: target.address.thread_id.unwrap_or_default(),
+                        title,
+                    })
+                }
             }
         }
         ConnectorOutput::Rejected { reason } => {

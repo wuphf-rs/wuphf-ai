@@ -1724,6 +1724,78 @@ func (x *MessageDeleteDispatch) GetDeleteMode() DeleteMode {
 	return DeleteMode_DELETE_MODE_REVOKE
 }
 
+// Instruction to rename an already-provisioned mirror thread when its source
+// conversation's title changes. Addresses the thread by its container and
+// thread id; carries no message because a retitle is a conversation property,
+// not a per-message operation. Acknowledged like any dispatch.
+type MessageRetitleDispatch struct {
+	state          protoimpl.MessageState `protogen:"open.v1"`
+	DispatchId     string                 `protobuf:"bytes,1,opt,name=dispatch_id,json=dispatchId,proto3" json:"dispatch_id,omitempty"`
+	TargetChatId   string                 `protobuf:"bytes,2,opt,name=target_chat_id,json=targetChatId,proto3" json:"target_chat_id,omitempty"`
+	TargetThreadId string                 `protobuf:"bytes,3,opt,name=target_thread_id,json=targetThreadId,proto3" json:"target_thread_id,omitempty"`
+	Title          string                 `protobuf:"bytes,4,opt,name=title,proto3" json:"title,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
+}
+
+func (x *MessageRetitleDispatch) Reset() {
+	*x = MessageRetitleDispatch{}
+	mi := &file_connector_proto_msgTypes[19]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *MessageRetitleDispatch) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*MessageRetitleDispatch) ProtoMessage() {}
+
+func (x *MessageRetitleDispatch) ProtoReflect() protoreflect.Message {
+	mi := &file_connector_proto_msgTypes[19]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use MessageRetitleDispatch.ProtoReflect.Descriptor instead.
+func (*MessageRetitleDispatch) Descriptor() ([]byte, []int) {
+	return file_connector_proto_rawDescGZIP(), []int{19}
+}
+
+func (x *MessageRetitleDispatch) GetDispatchId() string {
+	if x != nil {
+		return x.DispatchId
+	}
+	return ""
+}
+
+func (x *MessageRetitleDispatch) GetTargetChatId() string {
+	if x != nil {
+		return x.TargetChatId
+	}
+	return ""
+}
+
+func (x *MessageRetitleDispatch) GetTargetThreadId() string {
+	if x != nil {
+		return x.TargetThreadId
+	}
+	return ""
+}
+
+func (x *MessageRetitleDispatch) GetTitle() string {
+	if x != nil {
+		return x.Title
+	}
+	return ""
+}
+
 type Rejected struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Reason        string                 `protobuf:"bytes,1,opt,name=reason,proto3" json:"reason,omitempty"`
@@ -1733,7 +1805,7 @@ type Rejected struct {
 
 func (x *Rejected) Reset() {
 	*x = Rejected{}
-	mi := &file_connector_proto_msgTypes[19]
+	mi := &file_connector_proto_msgTypes[20]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1745,7 +1817,7 @@ func (x *Rejected) String() string {
 func (*Rejected) ProtoMessage() {}
 
 func (x *Rejected) ProtoReflect() protoreflect.Message {
-	mi := &file_connector_proto_msgTypes[19]
+	mi := &file_connector_proto_msgTypes[20]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1758,7 +1830,7 @@ func (x *Rejected) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Rejected.ProtoReflect.Descriptor instead.
 func (*Rejected) Descriptor() ([]byte, []int) {
-	return file_connector_proto_rawDescGZIP(), []int{19}
+	return file_connector_proto_rawDescGZIP(), []int{20}
 }
 
 func (x *Rejected) GetReason() string {
@@ -1776,6 +1848,7 @@ type ServerFrame struct {
 	//	*ServerFrame_Rejected
 	//	*ServerFrame_MessageEdit
 	//	*ServerFrame_MessageDelete
+	//	*ServerFrame_MessageRetitle
 	Body          isServerFrame_Body `protobuf_oneof:"body"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -1783,7 +1856,7 @@ type ServerFrame struct {
 
 func (x *ServerFrame) Reset() {
 	*x = ServerFrame{}
-	mi := &file_connector_proto_msgTypes[20]
+	mi := &file_connector_proto_msgTypes[21]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1795,7 +1868,7 @@ func (x *ServerFrame) String() string {
 func (*ServerFrame) ProtoMessage() {}
 
 func (x *ServerFrame) ProtoReflect() protoreflect.Message {
-	mi := &file_connector_proto_msgTypes[20]
+	mi := &file_connector_proto_msgTypes[21]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1808,7 +1881,7 @@ func (x *ServerFrame) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ServerFrame.ProtoReflect.Descriptor instead.
 func (*ServerFrame) Descriptor() ([]byte, []int) {
-	return file_connector_proto_rawDescGZIP(), []int{20}
+	return file_connector_proto_rawDescGZIP(), []int{21}
 }
 
 func (x *ServerFrame) GetBody() isServerFrame_Body {
@@ -1854,6 +1927,15 @@ func (x *ServerFrame) GetMessageDelete() *MessageDeleteDispatch {
 	return nil
 }
 
+func (x *ServerFrame) GetMessageRetitle() *MessageRetitleDispatch {
+	if x != nil {
+		if x, ok := x.Body.(*ServerFrame_MessageRetitle); ok {
+			return x.MessageRetitle
+		}
+	}
+	return nil
+}
+
 type isServerFrame_Body interface {
 	isServerFrame_Body()
 }
@@ -1874,6 +1956,10 @@ type ServerFrame_MessageDelete struct {
 	MessageDelete *MessageDeleteDispatch `protobuf:"bytes,4,opt,name=message_delete,json=messageDelete,proto3,oneof"`
 }
 
+type ServerFrame_MessageRetitle struct {
+	MessageRetitle *MessageRetitleDispatch `protobuf:"bytes,5,opt,name=message_retitle,json=messageRetitle,proto3,oneof"`
+}
+
 func (*ServerFrame_MessageCreate) isServerFrame_Body() {}
 
 func (*ServerFrame_Rejected) isServerFrame_Body() {}
@@ -1881,6 +1967,8 @@ func (*ServerFrame_Rejected) isServerFrame_Body() {}
 func (*ServerFrame_MessageEdit) isServerFrame_Body() {}
 
 func (*ServerFrame_MessageDelete) isServerFrame_Body() {}
+
+func (*ServerFrame_MessageRetitle) isServerFrame_Body() {}
 
 var File_connector_proto protoreflect.FileDescriptor
 
@@ -2058,14 +2146,21 @@ const file_connector_proto_rawDesc = "" +
 	"\x1atarget_platform_message_id\x18\x04 \x01(\tR\x17targetPlatformMessageId\x12?\n" +
 	"\vdelete_mode\x18\x05 \x01(\x0e2\x1e.wuphf.connector.v1.DeleteModeR\n" +
 	"deleteModeB\x13\n" +
-	"\x11_target_thread_id\"\"\n" +
+	"\x11_target_thread_id\"\x9f\x01\n" +
+	"\x16MessageRetitleDispatch\x12\x1f\n" +
+	"\vdispatch_id\x18\x01 \x01(\tR\n" +
+	"dispatchId\x12$\n" +
+	"\x0etarget_chat_id\x18\x02 \x01(\tR\ftargetChatId\x12(\n" +
+	"\x10target_thread_id\x18\x03 \x01(\tR\x0etargetThreadId\x12\x14\n" +
+	"\x05title\x18\x04 \x01(\tR\x05title\"\"\n" +
 	"\bRejected\x12\x16\n" +
-	"\x06reason\x18\x01 \x01(\tR\x06reason\"\xc7\x02\n" +
+	"\x06reason\x18\x01 \x01(\tR\x06reason\"\x9e\x03\n" +
 	"\vServerFrame\x12R\n" +
 	"\x0emessage_create\x18\x01 \x01(\v2).wuphf.connector.v1.MessageCreateDispatchH\x00R\rmessageCreate\x12:\n" +
 	"\brejected\x18\x02 \x01(\v2\x1c.wuphf.connector.v1.RejectedH\x00R\brejected\x12L\n" +
 	"\fmessage_edit\x18\x03 \x01(\v2'.wuphf.connector.v1.MessageEditDispatchH\x00R\vmessageEdit\x12R\n" +
-	"\x0emessage_delete\x18\x04 \x01(\v2).wuphf.connector.v1.MessageDeleteDispatchH\x00R\rmessageDeleteB\x06\n" +
+	"\x0emessage_delete\x18\x04 \x01(\v2).wuphf.connector.v1.MessageDeleteDispatchH\x00R\rmessageDelete\x12U\n" +
+	"\x0fmessage_retitle\x18\x05 \x01(\v2*.wuphf.connector.v1.MessageRetitleDispatchH\x00R\x0emessageRetitleB\x06\n" +
 	"\x04body*\xa6\x01\n" +
 	"\bPlatform\x12\x18\n" +
 	"\x14PLATFORM_UNSPECIFIED\x10\x00\x12\x15\n" +
@@ -2101,33 +2196,34 @@ func file_connector_proto_rawDescGZIP() []byte {
 }
 
 var file_connector_proto_enumTypes = make([]protoimpl.EnumInfo, 4)
-var file_connector_proto_msgTypes = make([]protoimpl.MessageInfo, 21)
+var file_connector_proto_msgTypes = make([]protoimpl.MessageInfo, 22)
 var file_connector_proto_goTypes = []any{
-	(Platform)(0),                 // 0: wuphf.connector.v1.Platform
-	(EditMode)(0),                 // 1: wuphf.connector.v1.EditMode
-	(DeleteMode)(0),               // 2: wuphf.connector.v1.DeleteMode
-	(Attachment_Kind)(0),          // 3: wuphf.connector.v1.Attachment.Kind
-	(*Capabilities)(nil),          // 4: wuphf.connector.v1.Capabilities
-	(*Registration)(nil),          // 5: wuphf.connector.v1.Registration
-	(*Attachment)(nil),            // 6: wuphf.connector.v1.Attachment
-	(*MediaMetadata)(nil),         // 7: wuphf.connector.v1.MediaMetadata
-	(*UploadMediaFrame)(nil),      // 8: wuphf.connector.v1.UploadMediaFrame
-	(*DownloadMediaRequest)(nil),  // 9: wuphf.connector.v1.DownloadMediaRequest
-	(*MediaChunk)(nil),            // 10: wuphf.connector.v1.MediaChunk
-	(*MessageCreateEvent)(nil),    // 11: wuphf.connector.v1.MessageCreateEvent
-	(*MessageEditEvent)(nil),      // 12: wuphf.connector.v1.MessageEditEvent
-	(*MessageDeleteEvent)(nil),    // 13: wuphf.connector.v1.MessageDeleteEvent
-	(*IdentityMigrated)(nil),      // 14: wuphf.connector.v1.IdentityMigrated
-	(*ReplyContext)(nil),          // 15: wuphf.connector.v1.ReplyContext
-	(*Acknowledgement)(nil),       // 16: wuphf.connector.v1.Acknowledgement
-	(*DispatchFailed)(nil),        // 17: wuphf.connector.v1.DispatchFailed
-	(*ClientFrame)(nil),           // 18: wuphf.connector.v1.ClientFrame
-	(*ProvisionThread)(nil),       // 19: wuphf.connector.v1.ProvisionThread
-	(*MessageCreateDispatch)(nil), // 20: wuphf.connector.v1.MessageCreateDispatch
-	(*MessageEditDispatch)(nil),   // 21: wuphf.connector.v1.MessageEditDispatch
-	(*MessageDeleteDispatch)(nil), // 22: wuphf.connector.v1.MessageDeleteDispatch
-	(*Rejected)(nil),              // 23: wuphf.connector.v1.Rejected
-	(*ServerFrame)(nil),           // 24: wuphf.connector.v1.ServerFrame
+	(Platform)(0),                  // 0: wuphf.connector.v1.Platform
+	(EditMode)(0),                  // 1: wuphf.connector.v1.EditMode
+	(DeleteMode)(0),                // 2: wuphf.connector.v1.DeleteMode
+	(Attachment_Kind)(0),           // 3: wuphf.connector.v1.Attachment.Kind
+	(*Capabilities)(nil),           // 4: wuphf.connector.v1.Capabilities
+	(*Registration)(nil),           // 5: wuphf.connector.v1.Registration
+	(*Attachment)(nil),             // 6: wuphf.connector.v1.Attachment
+	(*MediaMetadata)(nil),          // 7: wuphf.connector.v1.MediaMetadata
+	(*UploadMediaFrame)(nil),       // 8: wuphf.connector.v1.UploadMediaFrame
+	(*DownloadMediaRequest)(nil),   // 9: wuphf.connector.v1.DownloadMediaRequest
+	(*MediaChunk)(nil),             // 10: wuphf.connector.v1.MediaChunk
+	(*MessageCreateEvent)(nil),     // 11: wuphf.connector.v1.MessageCreateEvent
+	(*MessageEditEvent)(nil),       // 12: wuphf.connector.v1.MessageEditEvent
+	(*MessageDeleteEvent)(nil),     // 13: wuphf.connector.v1.MessageDeleteEvent
+	(*IdentityMigrated)(nil),       // 14: wuphf.connector.v1.IdentityMigrated
+	(*ReplyContext)(nil),           // 15: wuphf.connector.v1.ReplyContext
+	(*Acknowledgement)(nil),        // 16: wuphf.connector.v1.Acknowledgement
+	(*DispatchFailed)(nil),         // 17: wuphf.connector.v1.DispatchFailed
+	(*ClientFrame)(nil),            // 18: wuphf.connector.v1.ClientFrame
+	(*ProvisionThread)(nil),        // 19: wuphf.connector.v1.ProvisionThread
+	(*MessageCreateDispatch)(nil),  // 20: wuphf.connector.v1.MessageCreateDispatch
+	(*MessageEditDispatch)(nil),    // 21: wuphf.connector.v1.MessageEditDispatch
+	(*MessageDeleteDispatch)(nil),  // 22: wuphf.connector.v1.MessageDeleteDispatch
+	(*MessageRetitleDispatch)(nil), // 23: wuphf.connector.v1.MessageRetitleDispatch
+	(*Rejected)(nil),               // 24: wuphf.connector.v1.Rejected
+	(*ServerFrame)(nil),            // 25: wuphf.connector.v1.ServerFrame
 }
 var file_connector_proto_depIdxs = []int32{
 	0,  // 0: wuphf.connector.v1.Registration.platform:type_name -> wuphf.connector.v1.Platform
@@ -2150,20 +2246,21 @@ var file_connector_proto_depIdxs = []int32{
 	1,  // 17: wuphf.connector.v1.MessageEditDispatch.edit_mode:type_name -> wuphf.connector.v1.EditMode
 	2,  // 18: wuphf.connector.v1.MessageDeleteDispatch.delete_mode:type_name -> wuphf.connector.v1.DeleteMode
 	20, // 19: wuphf.connector.v1.ServerFrame.message_create:type_name -> wuphf.connector.v1.MessageCreateDispatch
-	23, // 20: wuphf.connector.v1.ServerFrame.rejected:type_name -> wuphf.connector.v1.Rejected
+	24, // 20: wuphf.connector.v1.ServerFrame.rejected:type_name -> wuphf.connector.v1.Rejected
 	21, // 21: wuphf.connector.v1.ServerFrame.message_edit:type_name -> wuphf.connector.v1.MessageEditDispatch
 	22, // 22: wuphf.connector.v1.ServerFrame.message_delete:type_name -> wuphf.connector.v1.MessageDeleteDispatch
-	18, // 23: wuphf.connector.v1.ConnectorTransport.OpenSession:input_type -> wuphf.connector.v1.ClientFrame
-	8,  // 24: wuphf.connector.v1.MediaTransport.UploadMedia:input_type -> wuphf.connector.v1.UploadMediaFrame
-	9,  // 25: wuphf.connector.v1.MediaTransport.DownloadMedia:input_type -> wuphf.connector.v1.DownloadMediaRequest
-	24, // 26: wuphf.connector.v1.ConnectorTransport.OpenSession:output_type -> wuphf.connector.v1.ServerFrame
-	6,  // 27: wuphf.connector.v1.MediaTransport.UploadMedia:output_type -> wuphf.connector.v1.Attachment
-	10, // 28: wuphf.connector.v1.MediaTransport.DownloadMedia:output_type -> wuphf.connector.v1.MediaChunk
-	26, // [26:29] is the sub-list for method output_type
-	23, // [23:26] is the sub-list for method input_type
-	23, // [23:23] is the sub-list for extension type_name
-	23, // [23:23] is the sub-list for extension extendee
-	0,  // [0:23] is the sub-list for field type_name
+	23, // 23: wuphf.connector.v1.ServerFrame.message_retitle:type_name -> wuphf.connector.v1.MessageRetitleDispatch
+	18, // 24: wuphf.connector.v1.ConnectorTransport.OpenSession:input_type -> wuphf.connector.v1.ClientFrame
+	8,  // 25: wuphf.connector.v1.MediaTransport.UploadMedia:input_type -> wuphf.connector.v1.UploadMediaFrame
+	9,  // 26: wuphf.connector.v1.MediaTransport.DownloadMedia:input_type -> wuphf.connector.v1.DownloadMediaRequest
+	25, // 27: wuphf.connector.v1.ConnectorTransport.OpenSession:output_type -> wuphf.connector.v1.ServerFrame
+	6,  // 28: wuphf.connector.v1.MediaTransport.UploadMedia:output_type -> wuphf.connector.v1.Attachment
+	10, // 29: wuphf.connector.v1.MediaTransport.DownloadMedia:output_type -> wuphf.connector.v1.MediaChunk
+	27, // [27:30] is the sub-list for method output_type
+	24, // [24:27] is the sub-list for method input_type
+	24, // [24:24] is the sub-list for extension type_name
+	24, // [24:24] is the sub-list for extension extendee
+	0,  // [0:24] is the sub-list for field type_name
 }
 
 func init() { file_connector_proto_init() }
@@ -2195,11 +2292,12 @@ func file_connector_proto_init() {
 	file_connector_proto_msgTypes[16].OneofWrappers = []any{}
 	file_connector_proto_msgTypes[17].OneofWrappers = []any{}
 	file_connector_proto_msgTypes[18].OneofWrappers = []any{}
-	file_connector_proto_msgTypes[20].OneofWrappers = []any{
+	file_connector_proto_msgTypes[21].OneofWrappers = []any{
 		(*ServerFrame_MessageCreate)(nil),
 		(*ServerFrame_Rejected)(nil),
 		(*ServerFrame_MessageEdit)(nil),
 		(*ServerFrame_MessageDelete)(nil),
+		(*ServerFrame_MessageRetitle)(nil),
 	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
@@ -2207,7 +2305,7 @@ func file_connector_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_connector_proto_rawDesc), len(file_connector_proto_rawDesc)),
 			NumEnums:      4,
-			NumMessages:   21,
+			NumMessages:   22,
 			NumExtensions: 0,
 			NumServices:   2,
 		},

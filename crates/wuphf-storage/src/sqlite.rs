@@ -461,8 +461,14 @@ impl Storage for SqliteStorage {
             .bind(dispatch.id.to_string())
             .execute(&mut *transaction)
             .await?;
+        // A retitle carries no logical message, so it records no copy and
+        // releases no replies; acknowledging it just closes out the dispatch.
+        let Some(message_id) = dispatch.command.message_id() else {
+            transaction.commit().await?;
+            return Ok(Vec::new());
+        };
         let copy = MessageCopy {
-            message_id: dispatch.command.message_id(),
+            message_id,
             endpoint_id: dispatch.command.target_endpoint,
             platform_message_id: platform_message_id.clone(),
         };
@@ -484,7 +490,7 @@ impl Storage for SqliteStorage {
         let rows = sqlx::query(
             "SELECT payload FROM dispatches WHERE state = 'blocked' AND waiting_for = ? AND target_endpoint = ?",
         )
-        .bind(dispatch.command.message_id().to_string())
+        .bind(message_id.to_string())
         .bind(dispatch.command.target_endpoint.to_string())
         .fetch_all(&mut *transaction)
         .await?;
@@ -494,10 +500,10 @@ impl Storage for SqliteStorage {
             return Ok(released);
         }
         let parent_row = sqlx::query("SELECT payload FROM messages WHERE id = ?")
-            .bind(dispatch.command.message_id().to_string())
+            .bind(message_id.to_string())
             .fetch_optional(&mut *transaction)
             .await?
-            .ok_or(StorageError::MessageNotFound(dispatch.command.message_id()))?;
+            .ok_or(StorageError::MessageNotFound(message_id))?;
         let parent: Message = serde_json::from_str(parent_row.get("payload"))?;
         for row in rows {
             let mut blocked: StoredDispatch = serde_json::from_str(row.get("payload"))?;
@@ -609,7 +615,7 @@ async fn insert_dispatch(pool: &SqlitePool, dispatch: &StoredDispatch) -> Storag
     )
     .bind(dispatch.id.to_string())
     .bind(dispatch.command.target_endpoint.to_string())
-    .bind(dispatch.command.message_id().to_string())
+    .bind(dispatch.command.message_id().map(|id| id.to_string()))
     .bind(waiting_for(dispatch).map(|id| id.to_string()))
     .bind(state_name(&dispatch.state))
     .bind(serde_json::to_string(dispatch)?)

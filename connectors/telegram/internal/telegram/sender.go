@@ -149,6 +149,29 @@ func (s Sender) DeleteMessage(ctx context.Context, dispatch *wuphfpb.MessageDele
 	return dispatch.TargetPlatformMessageId, nil
 }
 
+// RetitleThread renames an already-provisioned forum topic when its source
+// conversation's title changes. The thread id is returned unchanged for the
+// acknowledgement, as a retitle creates no new message.
+func (s Sender) RetitleThread(ctx context.Context, dispatch *wuphfpb.MessageRetitleDispatch) (string, error) {
+	peer, err := s.peers.InputPeer(dispatch.TargetChatId)
+	if err != nil {
+		return "", err
+	}
+	topicID, err := strconv.Atoi(dispatch.TargetThreadId)
+	if err != nil {
+		return "", coreclient.Permanent(fmt.Errorf("invalid Telegram target thread id %q: %w", dispatch.TargetThreadId, err))
+	}
+	request := &tg.MessagesEditForumTopicRequest{
+		Peer:    peer,
+		TopicID: topicID,
+	}
+	request.SetTitle(dispatch.Title)
+	if _, err := s.api.MessagesEditForumTopic(ctx, request); err != nil {
+		return "", fmt.Errorf("edit Telegram forum topic: %w", err)
+	}
+	return dispatch.TargetThreadId, nil
+}
+
 // attributedText renders a dispatch body for Telegram, prefixing a bold sender
 // header ("🗣️: name") on its own line for group messages so the mirror shows who
 // authored each message. Attribution is added only when a participant is present

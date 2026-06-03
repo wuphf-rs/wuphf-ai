@@ -216,6 +216,17 @@ message MessageDeleteDispatch {
   DeleteMode delete_mode = 5;
 }
 
+// Instruction to rename an already-provisioned mirror thread when its source
+// conversation's title changes. Addresses the thread by its container and
+// thread id; carries no message because a retitle is a conversation property,
+// not a per-message operation. Acknowledged like any dispatch.
+message MessageRetitleDispatch {
+  string dispatch_id = 1;
+  string target_chat_id = 2;
+  string target_thread_id = 3;
+  string title = 4;
+}
+
 message Rejected {
   string reason = 1;
 }
@@ -226,5 +237,6 @@ message ServerFrame {
     Rejected rejected = 2;
     MessageEditDispatch message_edit = 3;
     MessageDeleteDispatch message_delete = 4;
+    MessageRetitleDispatch message_retitle = 5;
   }
 }

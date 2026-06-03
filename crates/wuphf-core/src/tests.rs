@@ -209,6 +209,52 @@ async fn mirror_dispatch_requests_thread_provisioning_then_persists_mapping() {
 }
 
 #[tokio::test]
+async fn source_rename_retitles_the_provisioned_mirror_thread() {
+    let core = core(vec![mirror_rule()]);
+    let first = core
+        .ingest(event(WHATSAPP, "111@g.us", "wa-1", None))
+        .await
+        .unwrap();
+    core.acknowledge_dispatch(DispatchAcknowledgement {
+        dispatch_id: first.dispatches()[0].id,
+        platform_message_id: "tg-1".into(),
+        thread_id: Some("777".into()),
+    })
+    .await
+    .unwrap();
+
+    let mut renamed = event(WHATSAPP, "111@g.us", "wa-2", None);
+    renamed.source.chat_title = Some("Renamed".into());
+    let outcome = core.ingest(renamed).await.unwrap();
+    let (retitle, title) = outcome
+        .dispatches()
+        .iter()
+        .find_map(|stored| match &stored.command.payload {
+            DispatchPayload::RetitleThread { title, .. } => Some((stored, title.clone())),
+            _ => None,
+        })
+        .expect("a source rename fans out a retitle dispatch");
+    assert_eq!(title, "Renamed");
+    assert_eq!(
+        retitle.command.target_connector,
+        ConnectorId(TELEGRAM.into())
+    );
+    assert_eq!(
+        retitle.command.target.address,
+        PlatformAddress::new("-1001234567", Some("777".into()))
+    );
+
+    // The same title on a later message fans out no further retitle.
+    let mut unchanged = event(WHATSAPP, "111@g.us", "wa-3", None);
+    unchanged.source.chat_title = Some("Renamed".into());
+    let stable = core.ingest(unchanged).await.unwrap();
+    assert!(stable.dispatches().iter().all(|stored| !matches!(
+        stored.command.payload,
+        DispatchPayload::RetitleThread { .. }
+    )));
+}
+
+#[tokio::test]
 async fn concurrent_messages_provision_one_thread_and_replay_the_rest() {
     let core = core(vec![mirror_rule()]);
 

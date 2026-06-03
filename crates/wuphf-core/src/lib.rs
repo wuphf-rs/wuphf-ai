@@ -183,14 +183,62 @@ where
             });
         }
 
-        let (routing, dispatches) = self
+        let (routing, mut dispatches) = self
             .route_and_record(&message, origin_endpoint, &provision_title)
             .await?;
+        dispatches.extend(
+            self.maybe_retitle(&origin, replica_set_id, source.chat_title.as_deref())
+                .await?,
+        );
         Ok(IngestOutcome::Routed {
             message_id: message.id,
             routing,
             dispatches,
         })
+    }
+
+    /// Detect a source chat rename and fan it out to the mirror threads. The
+    /// conversation title is tracked only from its source side; a message from
+    /// any other endpoint (e.g. a reply typed into a mirror topic) carries its
+    /// own container's title and must not retitle the conversation. The first
+    /// observed title is recorded without dispatching, because the mirror thread
+    /// is provisioned with that same title — only a later change needs a rename.
+    async fn maybe_retitle(
+        &self,
+        origin: &Endpoint,
+        replica_set_id: ReplicaSetId,
+        new_title: Option<&str>,
+    ) -> Result<Vec<StoredDispatch>, CoreError> {
+        let Some(new_title) = new_title.map(str::trim).filter(|title| !title.is_empty()) else {
+            return Ok(Vec::new());
+        };
+        let Some(mut conversation) = self
+            .storage
+            .conversation_for_replica_set(replica_set_id)
+            .await?
+        else {
+            return Ok(Vec::new());
+        };
+        if conversation.source_connector != origin.connector_id
+            || conversation.source_address.chat_id != origin.chat_id
+        {
+            return Ok(Vec::new());
+        }
+        if conversation.title.as_deref() == Some(new_title) {
+            return Ok(Vec::new());
+        }
+        let first_title = conversation.title.is_none();
+        conversation.title = Some(new_title.to_owned());
+        self.storage.put_conversation(conversation.clone()).await?;
+        if first_title {
+            return Ok(Vec::new());
+        }
+        let routing = self.router.route_retitle(&conversation, new_title).await?;
+        let mut dispatches = Vec::new();
+        for command in routing.dispatches.iter().cloned() {
+            dispatches.push(self.storage.enqueue_dispatch(command, None).await?);
+        }
+        Ok(dispatches)
     }
 
     /// Route a message, enqueue its dispatches, and register any thread
@@ -407,6 +455,7 @@ where
             replica_set_id,
             source_connector: identity_connector,
             source_address: identity_address.clone(),
+            title: None,
         };
         self.storage.put_conversation(conversation.clone()).await?;
         Ok(conversation)

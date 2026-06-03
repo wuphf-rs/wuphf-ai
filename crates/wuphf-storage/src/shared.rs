@@ -41,5 +41,8 @@ pub(crate) fn bind_native_parent(
             target_platform_message_id,
             ..
         } => *target_platform_message_id = platform_message_id,
+        // A retitle is never blocked on a parent message, so it is never
+        // released with one.
+        DispatchPayload::RetitleThread { .. } => {}
     }
 }

@@ -95,11 +95,12 @@ identity. Uploads not linked into a logical message are pruned after
 - A dispatch the connector reports as permanently unsendable is dead-lettered
   (`Failed`) instead of being redelivered forever.
 - A mirror conversation's thread is provisioned on first dispatch and reused.
+- A mirror thread's title tracks its source conversation: the core records the
+  source title and fans a retitle dispatch to provisioned threads on a change.
 - Inbound attachments are accepted only after their media and metadata match a
   broker-issued record.
 
 ## Planned
 
-- Retitle a mirror thread when its source conversation is renamed.
 - Symmetric N-to-N rules (every side both source and mirror).
 - Execute reactions; broaden media kinds and define a media-deletion policy.

@@ -295,6 +295,51 @@ where
         Ok(outcome)
     }
 
+    /// Fan a source-title change out to every mirror endpoint that has already
+    /// provisioned a thread. Endpoints without a thread are skipped: their
+    /// thread is created with the current title by the next message that routes
+    /// through it, so there is nothing to rename yet.
+    pub async fn route_retitle(
+        &self,
+        conversation: &Conversation,
+        title: &str,
+    ) -> Result<RoutingOutcome, RouterError> {
+        let replica_set = self
+            .storage
+            .replica_set(conversation.replica_set_id)
+            .await?;
+        let Some(rule) = self.config.rule(&conversation.rule_id) else {
+            return Ok(RoutingOutcome::default());
+        };
+        let mut outcome = RoutingOutcome::default();
+        for endpoint_id in replica_set.endpoints {
+            let endpoint = self.storage.endpoint(endpoint_id).await?;
+            if !is_mirror_side(rule, &endpoint.connector_id, &endpoint.chat_id) {
+                continue;
+            }
+            let Some(thread) = self
+                .storage
+                .thread_for_conversation(conversation.id, &endpoint.connector_id)
+                .await?
+            else {
+                continue;
+            };
+            outcome.dispatches.push(DispatchCommand {
+                target_endpoint: endpoint_id,
+                target_connector: endpoint.connector_id.clone(),
+                target: TargetAddress {
+                    address: PlatformAddress::new(endpoint.chat_id.clone(), Some(thread)),
+                    provision_thread: None,
+                },
+                payload: DispatchPayload::RetitleThread {
+                    replica_set_id: conversation.replica_set_id,
+                    title: title.to_owned(),
+                },
+            });
+        }
+        Ok(outcome)
+    }
+
     /// Resolve the platform destination for one target endpoint. Mirror
     /// endpoints either reuse their provisioned thread or carry a provision
     /// instruction; all other endpoints send to their canonical address.
