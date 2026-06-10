@@ -256,6 +256,36 @@ async fn source_rename_retitles_the_provisioned_mirror_thread() {
 }
 
 #[tokio::test]
+async fn first_title_retitles_a_thread_provisioned_without_one() {
+    // A thread provisioned before any title was known is named with the raw
+    // chat id; the first real title that arrives later must rename it.
+    let core = core(vec![mirror_rule()]);
+    let mut untitled = event(WHATSAPP, "111@g.us", "wa-1", None);
+    untitled.source.chat_title = None;
+    let first = core.ingest(untitled).await.unwrap();
+    core.acknowledge_dispatch(DispatchAcknowledgement {
+        dispatch_id: first.dispatches()[0].id,
+        platform_message_id: "tg-1".into(),
+        thread_id: Some("777".into()),
+    })
+    .await
+    .unwrap();
+
+    let mut titled = event(WHATSAPP, "111@g.us", "wa-2", None);
+    titled.source.chat_title = Some("Real Name".into());
+    let outcome = core.ingest(titled).await.unwrap();
+    let title = outcome
+        .dispatches()
+        .iter()
+        .find_map(|stored| match &stored.command.payload {
+            DispatchPayload::RetitleThread { title, .. } => Some(title.clone()),
+            _ => None,
+        })
+        .expect("the first real title retitles the existing thread");
+    assert_eq!(title, "Real Name");
+}
+
+#[tokio::test]
 async fn concurrent_messages_provision_one_thread_and_replay_the_rest() {
     let core = core(vec![mirror_rule()]);
 

@@ -125,12 +125,17 @@ where
         })
     }
 
-    /// Detect a source chat rename and fan it out to the mirror threads. The
-    /// conversation title is tracked only from its source side; a message from
-    /// any other endpoint (e.g. a reply typed into a mirror topic) carries its
-    /// own container's title and must not retitle the conversation. The first
-    /// observed title is recorded without dispatching, because the mirror thread
-    /// is provisioned with that same title — only a later change needs a rename.
+    /// Detect a source chat title change and fan it out to the mirror threads.
+    /// The conversation title is tracked only from its source side; a message
+    /// from any other endpoint (e.g. a reply typed into a mirror topic) carries
+    /// its own container's title and must not retitle the conversation.
+    ///
+    /// A newly recorded title only dispatches when a mirror thread already
+    /// exists: on the message that first provisions a thread the mapping is not
+    /// yet acknowledged, so `route_retitle` naturally yields nothing and the
+    /// thread simply takes the provisioned title. When a thread already exists —
+    /// including one provisioned before any title was known (named with the raw
+    /// chat id) — the first real title is a genuine change and is fanned out.
     async fn maybe_retitle(
         &self,
         origin: &Endpoint,
@@ -155,12 +160,8 @@ where
         if conversation.title.as_deref() == Some(new_title) {
             return Ok(Vec::new());
         }
-        let first_title = conversation.title.is_none();
         conversation.title = Some(new_title.to_owned());
         self.storage.put_conversation(conversation.clone()).await?;
-        if first_title {
-            return Ok(Vec::new());
-        }
         let routing = self.router.route_retitle(&conversation, new_title).await?;
         let mut dispatches = Vec::new();
         for command in routing.dispatches.iter().cloned() {
