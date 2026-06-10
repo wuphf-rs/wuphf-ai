@@ -162,6 +162,28 @@ func TestNormalizeLabelsOwnMessagesAsMe(t *testing.T) {
 	}
 }
 
+func TestNormalizeTagsOwnLinkedDeviceMessages(t *testing.T) {
+	t.Parallel()
+	normalizer := NewNormalizer(make(chan *wuphfpb.ClientFrame), MediaCodec{}, stubNamer{})
+	event, ok, err := normalizer.normalize(context.Background(), &events.Message{
+		Info: types.MessageInfo{
+			MessageSource: types.MessageSource{
+				Chat:     types.NewJID("15550001111", types.DefaultUserServer),
+				Sender:   types.JID{User: "19998887777", Server: types.DefaultUserServer, Device: 12},
+				IsFromMe: true,
+			},
+			ID: "wa-linked",
+		},
+		Message: &waE2E.Message{Conversation: proto.String("from desktop")},
+	})
+	if err != nil || !ok {
+		t.Fatalf("normalize() ok=%v err=%v", ok, err)
+	}
+	if event.GetSenderName() != "Me (linked device)" {
+		t.Fatalf("sender name = %q, want linked-device tag", event.GetSenderName())
+	}
+}
+
 func TestIdentityMigrationTreatsLIDAsCanonical(t *testing.T) {
 	t.Parallel()
 	phone := types.NewJID("15550001111", types.DefaultUserServer)

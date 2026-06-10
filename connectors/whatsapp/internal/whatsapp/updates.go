@@ -109,9 +109,15 @@ func normalizeDelete(message *events.Message) (*wuphfpb.MessageDeleteEvent, bool
 // senderName resolves the per-message sender label, formatted by the namer when
 // present and falling back to the raw push name otherwise. The account owner's
 // own messages are labelled "Me" rather than their profile name, so a direct
-// chat's two sides stay distinguishable at a glance on the mirror.
+// chat's two sides stay distinguishable at a glance on the mirror. An own
+// message whose sender device is not the primary phone (device 0) is tagged as
+// coming from a linked device; bridge-authored sends never reach this point,
+// as the core drops them as sent-copy echoes before dispatching.
 func (n Normalizer) senderName(ctx context.Context, message *events.Message) string {
 	if message.Info.IsFromMe {
+		if message.Info.Sender.Device != 0 {
+			return "Me (linked device)"
+		}
 		return "Me"
 	}
 	if n.namer != nil {
