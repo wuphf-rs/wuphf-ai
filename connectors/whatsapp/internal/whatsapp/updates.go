@@ -107,8 +107,13 @@ func normalizeDelete(message *events.Message) (*wuphfpb.MessageDeleteEvent, bool
 }
 
 // senderName resolves the per-message sender label, formatted by the namer when
-// present and falling back to the raw push name otherwise.
+// present and falling back to the raw push name otherwise. The account owner's
+// own messages are labelled "Me" rather than their profile name, so a direct
+// chat's two sides stay distinguishable at a glance on the mirror.
 func (n Normalizer) senderName(ctx context.Context, message *events.Message) string {
+	if message.Info.IsFromMe {
+		return "Me"
+	}
 	if n.namer != nil {
 		if name := n.namer.PersonName(ctx, message.Info.Sender, message.Info.PushName); name != "" {
 			return name
@@ -153,10 +158,13 @@ func (n Normalizer) normalize(ctx context.Context, message *events.Message) (*wu
 			event.ChatTitle = &title
 		}
 	}
-	if message.Info.IsGroup {
-		participant := message.Info.Sender.String()
-		event.Participant = &participant
-	}
+	// The participant is set for every chat kind, not only groups: mirror
+	// targets label a message with its author only when a participant is
+	// present, and a direct chat shows both sides of the conversation, so
+	// without the label the account owner's messages and the peer's are
+	// indistinguishable on the mirror.
+	participant := message.Info.Sender.String()
+	event.Participant = &participant
 	if name := n.senderName(ctx, message); name != "" {
 		event.SenderName = &name
 	}

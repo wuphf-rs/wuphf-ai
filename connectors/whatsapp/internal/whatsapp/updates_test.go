@@ -115,6 +115,53 @@ func TestNormalizeIncludesOwnUserMessagesForCoreEchoDecision(t *testing.T) {
 	}
 }
 
+func TestNormalizeDirectChatCarriesParticipant(t *testing.T) {
+	t.Parallel()
+	normalizer := NewNormalizer(make(chan *wuphfpb.ClientFrame), MediaCodec{}, stubNamer{})
+	event, ok, err := normalizer.normalize(context.Background(), &events.Message{
+		Info: types.MessageInfo{
+			MessageSource: types.MessageSource{
+				Chat:   types.NewJID("15550001111", types.DefaultUserServer),
+				Sender: types.NewJID("15550001111", types.DefaultUserServer),
+			},
+			ID:       "wa-dm",
+			PushName: "Alice",
+		},
+		Message: &waE2E.Message{Conversation: proto.String("hi")},
+	})
+	if err != nil || !ok {
+		t.Fatalf("normalize() ok=%v err=%v", ok, err)
+	}
+	if event.GetParticipant() != "15550001111@s.whatsapp.net" {
+		t.Fatalf("participant = %q, want sender on a direct chat", event.GetParticipant())
+	}
+	if event.GetSenderName() != "Alice" {
+		t.Fatalf("sender name = %q, want Alice", event.GetSenderName())
+	}
+}
+
+func TestNormalizeLabelsOwnMessagesAsMe(t *testing.T) {
+	t.Parallel()
+	normalizer := NewNormalizer(make(chan *wuphfpb.ClientFrame), MediaCodec{}, stubNamer{})
+	event, ok, err := normalizer.normalize(context.Background(), &events.Message{
+		Info: types.MessageInfo{
+			MessageSource: types.MessageSource{
+				Chat:     types.NewJID("15550001111", types.DefaultUserServer),
+				Sender:   types.NewJID("19998887777", types.DefaultUserServer),
+				IsFromMe: true,
+			},
+			ID: "wa-own",
+		},
+		Message: &waE2E.Message{Conversation: proto.String("mine")},
+	})
+	if err != nil || !ok {
+		t.Fatalf("normalize() ok=%v err=%v", ok, err)
+	}
+	if event.GetSenderName() != "Me" {
+		t.Fatalf("sender name = %q, want Me", event.GetSenderName())
+	}
+}
+
 func TestIdentityMigrationTreatsLIDAsCanonical(t *testing.T) {
 	t.Parallel()
 	phone := types.NewJID("15550001111", types.DefaultUserServer)

@@ -49,9 +49,13 @@ func (s stubFetcher) FetchMedia(context.Context, string, string) (*responses.Fet
 	return s.resp, s.err
 }
 
+// testOwnUserID is the logged-in account id used by test normalizers; senders
+// with this id are labelled "Me".
+const testOwnUserID int64 = 555000
+
 func newTestNormalizer(broker MediaBroker, doer HTTPDoer) (*Normalizer, chan *wuphfpb.ClientFrame) {
 	ch := make(chan *wuphfpb.ClientFrame, 16)
-	return NewNormalizer(ch, NewMediaCodec(broker, doer, nil), zerolog.Nop()), ch
+	return NewNormalizer(ch, NewMediaCodec(broker, doer, nil), testOwnUserID, zerolog.Nop()), ch
 }
 
 func drain(ch <-chan *wuphfpb.ClientFrame) []*wuphfpb.ClientFrame {
@@ -108,6 +112,33 @@ func TestHandleCreateTitleFromContactForDM(t *testing.T) {
 	frames := drain(ch)
 	if len(frames) != 1 || frames[0].GetMessageCreate().GetChatTitle() != "Alice" {
 		t.Fatalf("frames = %#v, want DM titled Alice", frames)
+	}
+}
+
+func TestHandleCreateLabelsSenders(t *testing.T) {
+	t.Parallel()
+	n, ch := newTestNormalizer(&stubBroker{}, &stubDoer{})
+	err := n.Handle(context.Background(), &table.LSTable{
+		LSVerifyContactRowExists: []*table.LSVerifyContactRowExists{{ContactId: 99, Name: "Alice"}},
+		LSInsertMessage: []*table.LSInsertMessage{
+			{Text: "hi", ThreadKey: 99, SenderId: 99, MessageId: "m1"},
+			{Text: "yo", ThreadKey: 99, SenderId: testOwnUserID, MessageId: "m2"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Handle() error = %v", err)
+	}
+	frames := drain(ch)
+	if len(frames) != 2 {
+		t.Fatalf("frames = %d, want 2", len(frames))
+	}
+	peer := frames[0].GetMessageCreate()
+	if peer.GetParticipant() != "99" || peer.GetSenderName() != "Alice" {
+		t.Fatalf("peer participant = %q name = %q, want 99/Alice", peer.GetParticipant(), peer.GetSenderName())
+	}
+	own := frames[1].GetMessageCreate()
+	if own.GetSenderName() != "Me" {
+		t.Fatalf("own sender name = %q, want Me", own.GetSenderName())
 	}
 }
 

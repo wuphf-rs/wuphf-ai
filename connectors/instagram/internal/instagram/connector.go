@@ -45,7 +45,7 @@ func (c Connector) Run(ctx context.Context) error {
 
 	inputs := make(chan *wuphfpb.ClientFrame, 128)
 	codec := NewMediaCodec(media, http.DefaultClient, client.Instagram)
-	normalizer := NewNormalizer(inputs, codec, logger)
+	normalizer := NewNormalizer(inputs, codec, jar.GetUserID(), logger)
 	eventErrors := make(chan error, 1)
 	client.SetEventHandler(func(ctx context.Context, raw any) {
 		switch evt := raw.(type) {

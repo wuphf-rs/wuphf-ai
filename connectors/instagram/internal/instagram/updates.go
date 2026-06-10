@@ -24,7 +24,11 @@ import (
 type Normalizer struct {
 	inputs chan<- *wuphfpb.ClientFrame
 	media  MediaCodec
-	logger zerolog.Logger
+	// ownUserID is the logged-in account's user id (from the ds_user_id
+	// cookie), used to label the account owner's own messages as "Me" so a
+	// direct chat's two sides stay distinguishable on the mirror.
+	ownUserID int64
+	logger    zerolog.Logger
 
 	mu             sync.Mutex
 	threadNames    map[int64]string
@@ -32,10 +36,11 @@ type Normalizer struct {
 	messageThreads map[string]int64
 }
 
-func NewNormalizer(inputs chan<- *wuphfpb.ClientFrame, media MediaCodec, logger zerolog.Logger) *Normalizer {
+func NewNormalizer(inputs chan<- *wuphfpb.ClientFrame, media MediaCodec, ownUserID int64, logger zerolog.Logger) *Normalizer {
 	return &Normalizer{
 		inputs:         inputs,
 		media:          media,
+		ownUserID:      ownUserID,
 		logger:         logger,
 		threadNames:    map[int64]string{},
 		contactNames:   map[int64]string{},
@@ -128,13 +133,20 @@ func (n *Normalizer) emitCreate(ctx context.Context, message *table.LSInsertMess
 	if text == "" && len(attachments) == 0 {
 		return nil
 	}
+	// The participant is set for every message so mirror targets label the
+	// author; without it a direct chat's two sides are indistinguishable.
+	participant := strconv.FormatInt(message.SenderId, 10)
 	event := &wuphfpb.MessageCreateEvent{
 		ChatId:            strconv.FormatInt(message.ThreadKey, 10),
 		ChatTitle:         n.chatTitle(message.ThreadKey),
 		PlatformMessageId: message.MessageId,
 		Sender:            strconv.FormatInt(message.SenderId, 10),
+		Participant:       &participant,
 		TimestampMs:       message.TimestampMs,
 		Attachments:       attachments,
+	}
+	if name := n.senderLabel(message.SenderId); name != "" {
+		event.SenderName = &name
 	}
 	if text != "" {
 		event.Text = &text
@@ -193,6 +205,19 @@ func (n *Normalizer) emitDelete(ctx context.Context, threadKey int64, messageID 
 	return n.send(ctx, &wuphfpb.ClientFrame{
 		Body: &wuphfpb.ClientFrame_MessageDelete{MessageDelete: event},
 	})
+}
+
+// senderLabel resolves a message author's display label: the account owner's
+// own messages are labelled "Me", others resolve through the contact-name
+// cache. Returns "" when the sender is unknown, in which case mirror targets
+// fall back to the raw participant id.
+func (n *Normalizer) senderLabel(senderID int64) string {
+	if n.ownUserID != 0 && senderID == n.ownUserID {
+		return "Me"
+	}
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	return n.contactNames[senderID]
 }
 
 // chatTitle resolves a thread's display name, preferring an explicit group name
