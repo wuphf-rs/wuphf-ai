@@ -109,23 +109,26 @@ func normalizeDelete(message *events.Message) (*wuphfpb.MessageDeleteEvent, bool
 // senderName resolves the per-message sender label, formatted by the namer when
 // present and falling back to the raw push name otherwise. The account owner's
 // own messages are labelled "Me" rather than their profile name, so a direct
-// chat's two sides stay distinguishable at a glance on the mirror. An own
-// message whose sender device is not the primary phone (device 0) is tagged as
-// coming from a linked device; bridge-authored sends never reach this point,
-// as the core drops them as sent-copy echoes before dispatching.
+// chat's two sides stay distinguishable at a glance on the mirror.
+//
+// Any sender whose device is not the primary phone (device 0) is tagged as
+// writing from a linked device (WhatsApp Web/Desktop), the account owner and
+// other people alike. Bridge-authored sends never reach this point, as the
+// core drops them as sent-copy echoes before dispatching.
 func (n Normalizer) senderName(ctx context.Context, message *events.Message) string {
+	name := ""
 	if message.Info.IsFromMe {
-		if message.Info.Sender.Device != 0 {
-			return "Me (linked device)"
-		}
-		return "Me"
+		name = "Me"
+	} else if n.namer != nil {
+		name = n.namer.PersonName(ctx, message.Info.Sender, message.Info.PushName)
 	}
-	if n.namer != nil {
-		if name := n.namer.PersonName(ctx, message.Info.Sender, message.Info.PushName); name != "" {
-			return name
-		}
+	if name == "" {
+		name = strings.TrimSpace(message.Info.PushName)
 	}
-	return strings.TrimSpace(message.Info.PushName)
+	if name != "" && message.Info.Sender.Device != 0 {
+		name += " (linked device)"
+	}
+	return name
 }
 
 func (n Normalizer) send(ctx context.Context, frame *wuphfpb.ClientFrame) error {
