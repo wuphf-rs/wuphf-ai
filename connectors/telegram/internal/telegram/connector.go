@@ -15,16 +15,18 @@ import (
 	gotd "github.com/gotd/td/telegram"
 	"github.com/gotd/td/telegram/auth"
 	"github.com/gotd/td/tg"
+	"github.com/rs/zerolog"
 	"golang.org/x/term"
 )
 
 type Connector struct {
 	cfg         config.File
 	credentials config.Credentials
+	logger      zerolog.Logger
 }
 
-func New(cfg config.File, credentials config.Credentials) Connector {
-	return Connector{cfg: cfg, credentials: credentials}
+func New(cfg config.File, credentials config.Credentials, logger zerolog.Logger) Connector {
+	return Connector{cfg: cfg, credentials: credentials, logger: logger}
 }
 
 func (c Connector) Run(ctx context.Context) error {
@@ -60,8 +62,9 @@ func (c Connector) Run(ctx context.Context) error {
 				return err
 			}
 		}
+		c.logger.Info().Msg("Telegram session connected")
 		sender := NewSender(client.API(), peers, media)
-		return coreclient.New(c.cfg).Run(ctx, sender, inputs)
+		return coreclient.New(c.cfg, c.logger).Run(ctx, sender, inputs)
 	})
 }
 

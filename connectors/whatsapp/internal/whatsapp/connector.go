@@ -11,21 +11,25 @@ import (
 	wuphfpb "github.com/akshettrj/wuphf/proto/go/connector/v1"
 	_ "github.com/mattn/go-sqlite3"
 	"github.com/mdp/qrterminal/v3"
+	"github.com/rs/zerolog"
 	"go.mau.fi/whatsmeow"
 	"go.mau.fi/whatsmeow/store/sqlstore"
 	"go.mau.fi/whatsmeow/types/events"
+	waLog "go.mau.fi/whatsmeow/util/log"
 )
 
 type Connector struct {
-	cfg config.File
+	cfg    config.File
+	logger zerolog.Logger
 }
 
-func New(cfg config.File) Connector {
-	return Connector{cfg: cfg}
+func New(cfg config.File, logger zerolog.Logger) Connector {
+	return Connector{cfg: cfg, logger: logger}
 }
 
 func (c Connector) Run(ctx context.Context) error {
-	container, err := sqlstore.New(ctx, "sqlite3", c.cfg.SessionDatabase, nil)
+	dbLog := waLog.Zerolog(c.logger.With().Str("component", "whatsmeow-db").Logger())
+	container, err := sqlstore.New(ctx, "sqlite3", c.cfg.SessionDatabase, dbLog)
 	if err != nil {
 		return fmt.Errorf("open WhatsApp session database: %w", err)
 	}
@@ -34,7 +38,7 @@ func (c Connector) Run(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("load WhatsApp device: %w", err)
 	}
-	client := whatsmeow.NewClient(device, nil)
+	client := whatsmeow.NewClient(device, waLog.Zerolog(c.logger.With().Str("component", "whatsmeow").Logger()))
 	media, err := coreclient.DialMedia(c.cfg.CoreAddress)
 	if err != nil {
 		return err
@@ -63,9 +67,10 @@ func (c Connector) Run(ctx context.Context) error {
 		return errors.New("WhatsApp session has no account JID after pairing")
 	}
 	ownJID := *client.Store.ID
+	c.logger.Info().Str("jid", ownJID.String()).Msg("WhatsApp session connected")
 	runResult := make(chan error, 1)
 	go func() {
-		runResult <- coreclient.New(c.cfg).Run(ctx, NewSender(client, media, ownJID), inputs)
+		runResult <- coreclient.New(c.cfg, c.logger).Run(ctx, NewSender(client, media, ownJID), inputs)
 	}()
 	select {
 	case <-ctx.Done():

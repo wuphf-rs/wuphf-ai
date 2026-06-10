@@ -29,6 +29,8 @@ tokio-stream = "0.1"
 tonic = "0.12"
 tonic-build = "0.12"
 toml = "0.8"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 uuid = { version = "1", features = ["serde", "v4"] }
 wuphf-core = { path = "crates/wuphf-core" }
 wuphf-model = { path = "crates/wuphf-model" }

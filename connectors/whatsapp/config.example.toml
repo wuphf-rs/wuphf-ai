@@ -11,3 +11,6 @@ supports_topic_create = false
 # Routing is owned entirely by the core. Configure which conversations map
 # where through the core's [[rules]] using WhatsApp JIDs such as
 # "12345@s.whatsapp.net" or "12345@g.us" as chat IDs.
+
+# Log verbosity: trace, debug, info, warn, error (WUPHF_LOG_LEVEL overrides).
+log_level = "info"

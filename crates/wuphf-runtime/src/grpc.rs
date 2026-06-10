@@ -54,13 +54,26 @@ impl ConnectorTransport for GrpcConnectorService {
         let input = connection.input.clone();
         tokio::spawn(async move {
             while let Ok(Some(frame)) = incoming.message().await {
-                let Ok(message) = input_from_proto(frame, &connector_id) else {
-                    return;
+                let message = match input_from_proto(frame, &connector_id) {
+                    Ok(message) => message,
+                    Err(error) => {
+                        tracing::warn!(
+                            connector = %connector_id.0,
+                            %error,
+                            "closing connector stream after malformed frame",
+                        );
+                        return;
+                    }
                 };
                 if input.try_send(message).is_err() {
+                    tracing::warn!(
+                        connector = %connector_id.0,
+                        "closing connector stream: input channel is full or closed",
+                    );
                     return;
                 }
             }
+            tracing::info!(connector = %connector_id.0, "connector stream ended");
         });
         let (outgoing_tx, outgoing_rx) = mpsc::channel(32);
         tokio::spawn(async move {

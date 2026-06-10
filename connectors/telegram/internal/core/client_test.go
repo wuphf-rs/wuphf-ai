@@ -7,6 +7,7 @@ import (
 
 	wuphfpb "github.com/akshettrj/wuphf/proto/go/connector/v1"
 	"github.com/gotd/td/tgerr"
+	"github.com/rs/zerolog"
 )
 
 type permanentSender struct{ calls int }
@@ -62,7 +63,7 @@ func sendOpFor(sender Sender) sendOp {
 func TestSendWithRetrySucceedsAfterTransientFailures(t *testing.T) {
 	t.Parallel()
 	sender := &flakySender{failures: maxSendAttempts - 1}
-	id, threadID, err := sendWithRetry(context.Background(), "d1", sendOpFor(sender))
+	id, threadID, err := Client{logger: zerolog.Nop()}.sendWithRetry(context.Background(), "d1", sendOpFor(sender))
 	if err != nil {
 		t.Fatalf("sendWithRetry() error = %v", err)
 	}
@@ -74,7 +75,7 @@ func TestSendWithRetrySucceedsAfterTransientFailures(t *testing.T) {
 func TestSendWithRetryGivesUpAfterMaxAttempts(t *testing.T) {
 	t.Parallel()
 	sender := &flakySender{failures: maxSendAttempts}
-	_, _, err := sendWithRetry(context.Background(), "d1", sendOpFor(sender))
+	_, _, err := Client{logger: zerolog.Nop()}.sendWithRetry(context.Background(), "d1", sendOpFor(sender))
 	if err == nil || sender.calls != maxSendAttempts {
 		t.Fatalf("err = %v, calls = %d", err, sender.calls)
 	}
@@ -83,7 +84,7 @@ func TestSendWithRetryGivesUpAfterMaxAttempts(t *testing.T) {
 func TestSendWithRetryDoesNotRetryPermanentFailures(t *testing.T) {
 	t.Parallel()
 	sender := &permanentSender{}
-	_, _, err := sendWithRetry(context.Background(), "d1", sendOpFor(sender))
+	_, _, err := Client{logger: zerolog.Nop()}.sendWithRetry(context.Background(), "d1", sendOpFor(sender))
 	if err == nil || !isPermanent(err) || sender.calls != 1 {
 		t.Fatalf("err = %v, permanent = %v, calls = %d", err, isPermanent(err), sender.calls)
 	}
@@ -107,7 +108,7 @@ func TestSendWithRetryStopsOnContextCancel(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	sender := &flakySender{failures: maxSendAttempts}
-	_, _, err := sendWithRetry(ctx, "d1", sendOpFor(sender))
+	_, _, err := Client{logger: zerolog.Nop()}.sendWithRetry(ctx, "d1", sendOpFor(sender))
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("err = %v, want context.Canceled", err)
 	}

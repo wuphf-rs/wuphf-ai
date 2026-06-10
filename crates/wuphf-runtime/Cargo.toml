@@ -9,6 +9,7 @@ thiserror.workspace = true
 tokio = { workspace = true, features = ["macros", "net", "rt-multi-thread", "sync"] }
 tokio-stream = { workspace = true, features = ["net"] }
 tonic.workspace = true
+tracing.workspace = true
 uuid.workspace = true
 wuphf-core.workspace = true
 wuphf-model.workspace = true

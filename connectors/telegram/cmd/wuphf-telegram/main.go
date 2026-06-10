@@ -8,6 +8,7 @@ import (
 	"os/signal"
 
 	"github.com/akshettrj/wuphf/connectors/telegram/internal/config"
+	"github.com/akshettrj/wuphf/connectors/telegram/internal/logging"
 	telegramconnector "github.com/akshettrj/wuphf/connectors/telegram/internal/telegram"
 )
 
@@ -80,7 +81,7 @@ func newConnector(configPath string) (telegramconnector.Connector, error) {
 	if err != nil {
 		return telegramconnector.Connector{}, err
 	}
-	return telegramconnector.New(cfg, credentials), nil
+	return telegramconnector.New(cfg, credentials, logging.New(cfg.LogLevel)), nil
 }
 
 func exit(err error) {

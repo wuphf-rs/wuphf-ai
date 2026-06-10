@@ -16,3 +16,6 @@ supports_topic_create = true
 # Routing is owned entirely by the core. Configure which conversations map
 # where through the core's [[rules]] using typed chat IDs such as
 # "telegram:channel:1234567890", "telegram:chat:7", or "telegram:user:88".
+
+# Log verbosity: trace, debug, info, warn, error (WUPHF_LOG_LEVEL overrides).
+log_level = "info"

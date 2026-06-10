@@ -1,10 +1,11 @@
 use std::sync::Arc;
 use thiserror::Error;
 use tokio::sync::mpsc;
-use wuphf_core::{Core, CoreError};
+use tracing::{debug, info, warn};
+use wuphf_core::{Core, CoreError, IngestOutcome};
 use wuphf_model::{
-    ConnectorId, DispatchAcknowledgement, DispatchId, NormalizedEvent, PlatformAddress,
-    StoredDispatch,
+    ConnectorId, DispatchAcknowledgement, DispatchId, EventPayload, NormalizedEvent,
+    PlatformAddress, StoredDispatch,
 };
 use wuphf_storage::Storage;
 
@@ -65,14 +66,21 @@ where
     }
 
     pub async fn run(mut self) -> Result<(), RuntimeError> {
-        for dispatch in self.core.pending_dispatches().await? {
+        let pending = self.core.pending_dispatches().await?;
+        if !pending.is_empty() {
+            info!(
+                count = pending.len(),
+                "redelivering dispatches pending from a previous run"
+            );
+        }
+        for dispatch in pending {
             self.send(dispatch).await?;
         }
         loop {
             tokio::select! {
                 event = self.event_rx.recv() => match event {
                     Some(event) => {
-                        let outcome = self.core.ingest(event).await?;
+                        let outcome = self.ingest(event).await?;
                         for dispatch in outcome.dispatches().iter().cloned() {
                             self.send(dispatch).await?;
                         }
@@ -81,6 +89,7 @@ where
                 },
                 acknowledgement = self.acknowledgement_rx.recv() => {
                     if let Some(acknowledgement) = acknowledgement {
+                        debug!(dispatch_id = %acknowledgement.dispatch_id, "dispatch acknowledged");
                         for dispatch in self.core.acknowledge_dispatch(acknowledgement).await? {
                             self.send(dispatch).await?;
                         }
@@ -88,11 +97,18 @@ where
                 }
                 migration = self.migration_rx.recv() => {
                     if let Some((connector_id, old, new)) = migration {
+                        info!(
+                            connector = %connector_id.0,
+                            old = %old.chat_id,
+                            new = %new.chat_id,
+                            "migrating chat identity",
+                        );
                         self.core.migrate_identity(connector_id, old, new).await?;
                     }
                 }
                 failure = self.failure_rx.recv() => {
                     if let Some((dispatch_id, reason)) = failure {
+                        warn!(dispatch_id = %dispatch_id, reason, "dispatch failed permanently, dead-lettering");
                         for dispatch in self.core.fail_dispatch(dispatch_id, reason).await? {
                             self.send(dispatch).await?;
                         }
@@ -101,6 +117,46 @@ where
             }
         }
         Ok(())
+    }
+
+    /// Ingest one connector event and log the core's verdict. This is the single
+    /// observation point for inbound traffic: the core itself stays log-free and
+    /// communicates through [`IngestOutcome`].
+    async fn ingest(&self, event: NormalizedEvent) -> Result<IngestOutcome, RuntimeError> {
+        let connector = event.source.connector_id.0.clone();
+        let chat = event.source.address.chat_id.clone();
+        let kind = match &event.payload {
+            EventPayload::MessageCreate(_) => "create",
+            EventPayload::MessageEdit { .. } => "edit",
+            EventPayload::MessageDelete { .. } => "delete",
+            EventPayload::ReactionAdd(_) => "reaction",
+        };
+        let outcome = self.core.ingest(event).await?;
+        match &outcome {
+            IngestOutcome::Routed {
+                message_id,
+                dispatches,
+                ..
+            } => debug!(
+                connector,
+                chat,
+                kind,
+                message_id = %message_id,
+                dispatches = dispatches.len(),
+                "event routed",
+            ),
+            IngestOutcome::Deferred { message_id } => debug!(
+                connector,
+                chat,
+                kind,
+                message_id = %message_id,
+                "event deferred until mirror thread provisioning completes",
+            ),
+            IngestOutcome::Ignored(reason) => {
+                debug!(connector, chat, kind, ?reason, "event ignored")
+            }
+        }
+        Ok(outcome)
     }
 
     async fn send(&self, dispatch: StoredDispatch) -> Result<(), RuntimeError> {

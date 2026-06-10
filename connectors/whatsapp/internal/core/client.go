@@ -4,11 +4,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log"
 	"time"
 
 	"github.com/akshettrj/wuphf/connectors/whatsapp/internal/config"
 	wuphfpb "github.com/akshettrj/wuphf/proto/go/connector/v1"
+	"github.com/rs/zerolog"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 )
@@ -59,11 +59,12 @@ type Sender interface {
 type sendOp func(context.Context) (messageID string, threadID string, err error)
 
 type Client struct {
-	cfg config.File
+	cfg    config.File
+	logger zerolog.Logger
 }
 
-func New(cfg config.File) Client {
-	return Client{cfg: cfg}
+func New(cfg config.File, logger zerolog.Logger) Client {
+	return Client{cfg: cfg, logger: logger.With().Str("component", "core-client").Logger()}
 }
 
 // Run maintains a connector session against the core, reconnecting with
@@ -77,7 +78,7 @@ func (c Client) Run(ctx context.Context, sender Sender, inputs <-chan *wuphfpb.C
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
-		log.Printf("connector session ended, reconnecting in %s: %v", backoff, err)
+		c.logger.Warn().Err(err).Dur("backoff", backoff).Msg("connector session ended, reconnecting")
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
@@ -117,6 +118,7 @@ func (c Client) runSession(
 		return fmt.Errorf("register connector: %w", err)
 	}
 	onConnected()
+	c.logger.Info().Str("connector_id", c.cfg.ConnectorID).Msg("connector session registered with core")
 	frames := make(chan *wuphfpb.ServerFrame)
 	receiveErrors := make(chan error, 1)
 	go func() {
@@ -147,14 +149,14 @@ func (c Client) runSession(
 			switch body := frame.Body.(type) {
 			case *wuphfpb.ServerFrame_MessageCreate:
 				dispatch := body.MessageCreate
-				if err := deliver(ctx, stream, dispatch.DispatchId, func(ctx context.Context) (string, string, error) {
+				if err := c.deliver(ctx, stream, dispatch.DispatchId, func(ctx context.Context) (string, string, error) {
 					return sender.SendMessage(ctx, dispatch)
 				}); err != nil {
 					return err
 				}
 			case *wuphfpb.ServerFrame_MessageEdit:
 				dispatch := body.MessageEdit
-				if err := deliver(ctx, stream, dispatch.DispatchId, func(ctx context.Context) (string, string, error) {
+				if err := c.deliver(ctx, stream, dispatch.DispatchId, func(ctx context.Context) (string, string, error) {
 					messageID, err := sender.EditMessage(ctx, dispatch)
 					return messageID, "", err
 				}); err != nil {
@@ -162,7 +164,7 @@ func (c Client) runSession(
 				}
 			case *wuphfpb.ServerFrame_MessageDelete:
 				dispatch := body.MessageDelete
-				if err := deliver(ctx, stream, dispatch.DispatchId, func(ctx context.Context) (string, string, error) {
+				if err := c.deliver(ctx, stream, dispatch.DispatchId, func(ctx context.Context) (string, string, error) {
 					messageID, err := sender.DeleteMessage(ctx, dispatch)
 					return messageID, "", err
 				}); err != nil {
@@ -181,15 +183,15 @@ func (c Client) runSession(
 // a successful send is acknowledged, a permanent failure is dead-lettered, and a
 // transient failure is surfaced to the session loop, which drops the session so
 // the core can redeliver the still-unacknowledged dispatch.
-func deliver(ctx context.Context, stream wuphfpb.ConnectorTransport_OpenSessionClient, dispatchID string, op sendOp) error {
-	messageID, threadID, err := sendWithRetry(ctx, dispatchID, op)
+func (c Client) deliver(ctx context.Context, stream wuphfpb.ConnectorTransport_OpenSessionClient, dispatchID string, op sendOp) error {
+	messageID, threadID, err := c.sendWithRetry(ctx, dispatchID, op)
 	if err != nil {
 		if !isPermanent(err) {
 			return fmt.Errorf("send dispatch %s: %w", dispatchID, err)
 		}
 		// A permanent failure cannot be retried; report it so the core
 		// dead-letters the dispatch and the session keeps serving others.
-		log.Printf("dispatch %s permanently failed, dead-lettering: %v", dispatchID, err)
+		c.logger.Error().Err(err).Str("dispatch_id", dispatchID).Msg("dispatch permanently failed, dead-lettering")
 		if err := stream.Send(&wuphfpb.ClientFrame{
 			Body: &wuphfpb.ClientFrame_DispatchFailed{DispatchFailed: &wuphfpb.DispatchFailed{
 				DispatchId: dispatchID,
@@ -212,12 +214,13 @@ func deliver(ctx context.Context, stream wuphfpb.ConnectorTransport_OpenSessionC
 	}); err != nil {
 		return fmt.Errorf("acknowledge dispatch %s: %w", dispatchID, err)
 	}
+	c.logger.Debug().Str("dispatch_id", dispatchID).Str("platform_message_id", messageID).Msg("dispatch delivered and acknowledged")
 	return nil
 }
 
 // sendWithRetry retries a transient dispatch op a bounded number of times before
 // surfacing the failure to the caller.
-func sendWithRetry(ctx context.Context, dispatchID string, op sendOp) (string, string, error) {
+func (c Client) sendWithRetry(ctx context.Context, dispatchID string, op sendOp) (string, string, error) {
 	var lastErr error
 	for attempt := 0; attempt < maxSendAttempts; attempt++ {
 		if attempt > 0 {
@@ -232,7 +235,7 @@ func sendWithRetry(ctx context.Context, dispatchID string, op sendOp) (string, s
 			return messageID, threadID, nil
 		}
 		lastErr = err
-		log.Printf("dispatch %s send attempt %d failed: %v", dispatchID, attempt+1, err)
+		c.logger.Warn().Err(err).Str("dispatch_id", dispatchID).Int("attempt", attempt+1).Msg("dispatch send attempt failed")
 		if isPermanent(err) {
 			return "", "", err
 		}

@@ -6,6 +6,7 @@ require (
 	github.com/akshettrj/wuphf/proto/go v0.0.0
 	github.com/gotd/td v0.144.0
 	github.com/pelletier/go-toml/v2 v2.2.4
+	github.com/rs/zerolog v1.35.1
 	golang.org/x/term v0.41.0
 	google.golang.org/grpc v1.76.0
 )

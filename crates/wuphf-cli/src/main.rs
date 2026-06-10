@@ -65,9 +65,22 @@ struct ConnectorConfiguration {
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    init_logging();
     match Arguments::parse().command {
         Command::Serve { config } => serve(config).await,
     }
+}
+
+/// Install the global tracing subscriber. Verbosity is controlled with the
+/// standard `RUST_LOG` filter (e.g. `RUST_LOG=wuphf_runtime=debug,info`),
+/// defaulting to `info` for everything.
+fn init_logging() {
+    let filter = tracing_subscriber::EnvFilter::try_from_default_env()
+        .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info"));
+    tracing_subscriber::fmt()
+        .with_env_filter(filter)
+        .with_writer(std::io::stderr)
+        .init();
 }
 
 async fn serve(path: PathBuf) -> Result<()> {
@@ -112,10 +125,7 @@ async fn serve(path: PathBuf) -> Result<()> {
     let (hub, handle) = ConnectorHub::new(channels, allowed);
     let runtime_task = tokio::spawn(runtime.run());
     let hub_task = tokio::spawn(hub.run());
-    println!(
-        "wuphf connector gRPC server listening on {}",
-        configuration.listen
-    );
+    tracing::info!(listen = %configuration.listen, "wuphf connector gRPC server listening");
     let server = Server::builder()
         .add_service(ConnectorTransportServer::new(GrpcConnectorService::new(
             handle,

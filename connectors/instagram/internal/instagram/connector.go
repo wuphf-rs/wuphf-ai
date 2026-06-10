@@ -18,11 +18,12 @@ import (
 )
 
 type Connector struct {
-	cfg config.File
+	cfg    config.File
+	logger zerolog.Logger
 }
 
-func New(cfg config.File) Connector {
-	return Connector{cfg: cfg}
+func New(cfg config.File, logger zerolog.Logger) Connector {
+	return Connector{cfg: cfg, logger: logger}
 }
 
 func (c Connector) Run(ctx context.Context) error {
@@ -33,8 +34,8 @@ func (c Connector) Run(ctx context.Context) error {
 	if !jar.IsLoggedIn() {
 		return fmt.Errorf("Instagram cookies are missing a session (missing %v)", jar.GetMissingCookieNames())
 	}
-	logger := zerolog.New(zerolog.ConsoleWriter{Out: os.Stderr}).With().Timestamp().Logger()
-	client := messagix.NewClient(jar, logger, &messagix.Config{})
+	logger := c.logger
+	client := messagix.NewClient(jar, logger.With().Str("component", "messagix").Logger(), &messagix.Config{})
 
 	media, err := coreclient.DialMedia(c.cfg.CoreAddress)
 	if err != nil {
@@ -79,9 +80,10 @@ func (c Connector) Run(ctx context.Context) error {
 		}
 	}()
 
+	logger.Info().Msg("Instagram session connected")
 	runResult := make(chan error, 1)
 	go func() {
-		runResult <- coreclient.New(c.cfg).Run(ctx, NewSender(client), inputs)
+		runResult <- coreclient.New(c.cfg, logger).Run(ctx, NewSender(client), inputs)
 	}()
 	select {
 	case <-ctx.Done():

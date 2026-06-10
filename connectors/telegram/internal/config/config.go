@@ -15,6 +15,9 @@ type File struct {
 	SessionFile         string `toml:"session_file"`
 	SupportsThreads     bool   `toml:"supports_threads"`
 	SupportsTopicCreate bool   `toml:"supports_topic_create"`
+	// LogLevel sets log verbosity (trace, debug, info, warn, error). Empty
+	// means info; the WUPHF_LOG_LEVEL environment variable overrides it.
+	LogLevel string `toml:"log_level"`
 }
 
 type Credentials struct {

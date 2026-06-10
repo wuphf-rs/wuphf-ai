@@ -2,8 +2,8 @@ use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
 use thiserror::Error;
 use wuphf_model::{
-    ConnectorId, DispatchId, EndpointId, EventPayload, MediaId, Message, MessageId, NormalizedEvent,
-    ReplicaSetId, Rule, SideKind, StoredDispatch,
+    ConnectorId, DispatchId, EndpointId, EventPayload, MediaId, Message, MessageId,
+    NormalizedEvent, ReplicaSetId, Rule, SideKind, StoredDispatch,
 };
 use wuphf_router::{Router, RouterError, RoutingOutcome};
 use wuphf_storage::{Storage, StorageError};

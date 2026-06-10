@@ -9,6 +9,7 @@ import (
 
 	"github.com/akshettrj/wuphf/connectors/instagram/internal/config"
 	instagramconnector "github.com/akshettrj/wuphf/connectors/instagram/internal/instagram"
+	"github.com/akshettrj/wuphf/connectors/instagram/internal/logging"
 )
 
 func main() {
@@ -18,10 +19,12 @@ func main() {
 	if err != nil {
 		exit(err)
 	}
+	logger := logging.New(cfg.LogLevel)
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer cancel()
-	if err := instagramconnector.New(cfg).Run(ctx); err != nil {
-		exit(err)
+	if err := instagramconnector.New(cfg, logger).Run(ctx); err != nil {
+		logger.Error().Err(err).Msg("connector stopped")
+		os.Exit(1)
 	}
 }
 

@@ -3,9 +3,7 @@
 //! provisioning and blocking dispatches whose reply parent or target copy does
 //! not yet exist.
 
-use crate::{
-    BlockedDispatch, Router, RouterError, RoutingOutcome, is_mirror_side, reply_context,
-};
+use crate::{BlockedDispatch, Router, RouterError, RoutingOutcome, is_mirror_side, reply_context};
 use wuphf_model::{
     Conversation, DispatchCommand, DispatchPayload, Endpoint, EndpointId, Message, PlatformAddress,
     ProvisionThread, TargetAddress,

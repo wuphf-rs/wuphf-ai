@@ -8,6 +8,7 @@ import (
 	"os/signal"
 
 	"github.com/akshettrj/wuphf/connectors/whatsapp/internal/config"
+	"github.com/akshettrj/wuphf/connectors/whatsapp/internal/logging"
 	whatsappconnector "github.com/akshettrj/wuphf/connectors/whatsapp/internal/whatsapp"
 )
 
@@ -18,10 +19,12 @@ func main() {
 	if err != nil {
 		exit(err)
 	}
+	logger := logging.New(cfg.LogLevel)
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer cancel()
-	if err := whatsappconnector.New(cfg).Run(ctx); err != nil {
-		exit(err)
+	if err := whatsappconnector.New(cfg, logger).Run(ctx); err != nil {
+		logger.Error().Err(err).Msg("connector stopped")
+		os.Exit(1)
 	}
 }
 

@@ -1,6 +1,7 @@
 use crate::RuntimeChannels;
 use std::collections::HashMap;
 use tokio::sync::{mpsc, oneshot};
+use tracing::{debug, info, warn};
 use wuphf_model::{
     ConnectorId, ConnectorInput, ConnectorOutput, ConnectorRegistration, DispatchId, StoredDispatch,
 };
@@ -107,11 +108,16 @@ impl ConnectorHub {
     async fn register(&mut self, request: ConnectRequest) {
         let connector_id = request.registration.id.clone();
         if self.allowed.get(&connector_id) != Some(&request.registration) {
+            warn!(
+                connector = %connector_id.0,
+                "rejecting connector session: registration does not match configuration",
+            );
             let _ = request.result_tx.send(Err(
                 "connector registration does not match configuration".to_owned(),
             ));
             return;
         }
+        info!(connector = %connector_id.0, "connector session registered");
         self.sessions.insert(
             connector_id.clone(),
             Session {
@@ -140,6 +146,13 @@ impl ConnectorHub {
             .filter(|(owner, _)| *owner == connector_id)
             .map(|(_, dispatch)| dispatch.clone())
             .collect();
+        if !unacknowledged.is_empty() {
+            info!(
+                connector = %connector_id.0,
+                count = unacknowledged.len(),
+                "redelivering dispatches unacknowledged by the previous session",
+            );
+        }
         for dispatch in unacknowledged {
             self.deliver_or_hold(dispatch).await;
         }
@@ -151,6 +164,7 @@ impl ConnectorHub {
 
     async fn accept_input(&mut self, connector_id: ConnectorId, input: ConnectorInput) {
         if !self.sessions.contains_key(&connector_id) {
+            debug!(connector = %connector_id.0, "dropping input from a session that is no longer registered");
             return;
         }
         match input {
@@ -201,6 +215,11 @@ impl ConnectorHub {
     async fn deliver_or_hold(&mut self, dispatch: StoredDispatch) {
         let connector_id = dispatch.command.target_connector.clone();
         let Some(session) = self.sessions.get(&connector_id) else {
+            debug!(
+                connector = %connector_id.0,
+                dispatch_id = %dispatch.id,
+                "holding dispatch until target connector connects",
+            );
             self.held.push(dispatch);
             return;
         };
@@ -218,6 +237,7 @@ impl ConnectorHub {
     }
 
     async fn reject(&self, connector_id: &ConnectorId, reason: &str) {
+        warn!(connector = %connector_id.0, reason, "rejecting connector input");
         if let Some(session) = self.sessions.get(connector_id) {
             let _ = session
                 .output
