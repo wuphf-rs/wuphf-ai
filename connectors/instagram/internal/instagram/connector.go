@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
 	"os"
 
 	"github.com/akshettrj/wuphf/connectors/instagram/internal/config"
@@ -42,7 +43,8 @@ func (c Connector) Run(ctx context.Context) error {
 	defer media.Close()
 
 	inputs := make(chan *wuphfpb.ClientFrame, 128)
-	normalizer := NewNormalizer(inputs)
+	codec := NewMediaCodec(media, http.DefaultClient, client.Instagram)
+	normalizer := NewNormalizer(inputs, codec, logger)
 	eventErrors := make(chan error, 1)
 	client.SetEventHandler(func(ctx context.Context, raw any) {
 		switch evt := raw.(type) {
@@ -55,10 +57,17 @@ func (c Connector) Run(ctx context.Context) error {
 		}
 	})
 
-	// Authenticate and load the account; the returned backlog table is ignored so
-	// a restart does not replay already-bridged history.
-	if _, _, err := client.LoadMessagesPage(ctx); err != nil {
+	// Authenticate and load the account. The backlog messages are not replayed
+	// (a restart must not re-bridge history), but the page's thread and contact
+	// rows are primed into the title cache: incremental message deltas do not
+	// carry thread names, so without this seed live events would have no
+	// chat_title and mirror threads would never be named.
+	_, initial, err := client.LoadMessagesPage(ctx)
+	if err != nil {
 		return fmt.Errorf("load Instagram account: %w", err)
+	}
+	if initial != nil {
+		normalizer.cacheTitles(initial)
 	}
 	if err := client.Connect(ctx); err != nil {
 		return fmt.Errorf("connect Instagram session: %w", err)

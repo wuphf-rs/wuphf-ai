@@ -97,14 +97,40 @@ func resolveSentMessageID(response *table.LSTable, otid string) (string, error) 
 	return "", coreclient.Permanent(fmt.Errorf("%w: send response carried no message id", ErrSendRejected))
 }
 
-// EditMessage is not implemented for the Instagram MVP. Reporting it permanent
-// lets the core dead-letter the dispatch instead of redelivering it forever.
-func (s Sender) EditMessage(context.Context, *wuphfpb.MessageEditDispatch) (string, error) {
-	return "", coreclient.Permanent(errors.New("Instagram edit is not implemented"))
+// EditMessage revises a message in place. Instagram keeps the message id across
+// an edit, so the target id is returned unchanged.
+func (s Sender) EditMessage(ctx context.Context, dispatch *wuphfpb.MessageEditDispatch) (string, error) {
+	messageID := dispatch.GetTargetPlatformMessageId()
+	if messageID == "" {
+		return "", coreclient.Permanent(errors.New("Instagram edit dispatch has no target message id"))
+	}
+	if dispatch.GetText() == "" {
+		return "", coreclient.Permanent(errors.New("Instagram edit dispatch has no text"))
+	}
+	if err := s.client.WaitUntilCanSendMessages(ctx, sendReadyTimeout); err != nil {
+		return "", fmt.Errorf("wait for Instagram send readiness: %w", err)
+	}
+	task := &socket.EditMessageTask{MessageID: messageID, Text: dispatch.GetText()}
+	if _, err := s.client.ExecuteTasks(ctx, task); err != nil {
+		return "", fmt.Errorf("edit Instagram message: %w", err)
+	}
+	return messageID, nil
 }
 
-// DeleteMessage is not implemented for the Instagram MVP. Reporting it permanent
-// lets the core dead-letter the dispatch instead of redelivering it forever.
-func (s Sender) DeleteMessage(context.Context, *wuphfpb.MessageDeleteDispatch) (string, error) {
-	return "", coreclient.Permanent(errors.New("Instagram delete is not implemented"))
+// DeleteMessage unsends a message for everyone, the only deletion Instagram
+// exposes that propagates to other participants. The deleted message id is
+// returned unchanged.
+func (s Sender) DeleteMessage(ctx context.Context, dispatch *wuphfpb.MessageDeleteDispatch) (string, error) {
+	messageID := dispatch.GetTargetPlatformMessageId()
+	if messageID == "" {
+		return "", coreclient.Permanent(errors.New("Instagram delete dispatch has no target message id"))
+	}
+	if err := s.client.WaitUntilCanSendMessages(ctx, sendReadyTimeout); err != nil {
+		return "", fmt.Errorf("wait for Instagram send readiness: %w", err)
+	}
+	task := &socket.DeleteMessageTask{MessageId: messageID}
+	if _, err := s.client.ExecuteTasks(ctx, task); err != nil {
+		return "", fmt.Errorf("delete Instagram message: %w", err)
+	}
+	return messageID, nil
 }
