@@ -57,12 +57,22 @@ func (n *chatNamer) ChatTitle(ctx context.Context, chat types.JID) string {
 func (n *chatNamer) resolve(ctx context.Context, chat types.JID) string {
 	switch chat.Server {
 	case types.GroupServer:
-		return n.groupName(ctx, chat)
+		return tagged("G", n.groupName(ctx, chat))
 	case types.NewsletterServer:
-		return n.newsletterName(ctx, chat)
+		return tagged("C", n.newsletterName(ctx, chat))
 	default:
-		return n.contactName(ctx, chat)
+		return tagged("P", n.contactName(ctx, chat))
 	}
+}
+
+// tagged prefixes a chat title with its kind ([G] group, [C] channel, [P]
+// private) so a mirror topic shows what kind of chat it bridges. An empty title
+// is left empty, as a bare tag would name nothing.
+func tagged(kind, title string) string {
+	if title == "" {
+		return ""
+	}
+	return "[" + kind + "] " + title
 }
 
 func (n *chatNamer) groupName(ctx context.Context, chat types.JID) string {

@@ -30,3 +30,13 @@ func TestFormatPersonName(t *testing.T) {
 		})
 	}
 }
+
+func TestTagged(t *testing.T) {
+	t.Parallel()
+	if got := tagged("G", "Family"); got != "[G] Family" {
+		t.Fatalf("tagged() = %q, want [G] Family", got)
+	}
+	if got := tagged("P", ""); got != "" {
+		t.Fatalf("tagged() = %q, want empty for an empty title", got)
+	}
+}

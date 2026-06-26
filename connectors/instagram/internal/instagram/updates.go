@@ -278,11 +278,15 @@ func (n *Normalizer) senderLabel(senderID int64) string {
 func (n *Normalizer) chatTitle(threadKey int64) *string {
 	n.mu.Lock()
 	defer n.mu.Unlock()
+	// A named thread is a group; a thread keyed by a contact id is a one-to-one
+	// DM. Tag the title with its kind ([G]/[P]) so the mirror topic shows it.
 	if name := n.threadNames[threadKey]; name != "" {
-		return &name
+		tagged := "[G] " + name
+		return &tagged
 	}
 	if name := n.contactNames[threadKey]; name != "" {
-		return &name
+		tagged := "[P] " + name
+		return &tagged
 	}
 	return nil
 }

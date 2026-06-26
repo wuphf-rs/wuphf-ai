@@ -91,7 +91,7 @@ func TestHandleCreateCarriesGroupTitle(t *testing.T) {
 	if event == nil {
 		t.Fatalf("frame = %#v, want create", frames[0])
 	}
-	if event.ChatId != "42" || event.GetChatTitle() != "Squad" {
+	if event.ChatId != "42" || event.GetChatTitle() != "[G] Squad" {
 		t.Fatalf("chat = %q title = %q", event.ChatId, event.GetChatTitle())
 	}
 	if event.GetText() != "hello" || event.GetReplyToPlatformMessageId() != "m0" {
@@ -110,8 +110,8 @@ func TestHandleCreateTitleFromContactForDM(t *testing.T) {
 		t.Fatalf("Handle() error = %v", err)
 	}
 	frames := drain(ch)
-	if len(frames) != 1 || frames[0].GetMessageCreate().GetChatTitle() != "Alice" {
-		t.Fatalf("frames = %#v, want DM titled Alice", frames)
+	if len(frames) != 1 || frames[0].GetMessageCreate().GetChatTitle() != "[P] Alice" {
+		t.Fatalf("frames = %#v, want DM titled [P] Alice", frames)
 	}
 }
 
