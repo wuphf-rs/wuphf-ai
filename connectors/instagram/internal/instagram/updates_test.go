@@ -158,6 +158,47 @@ func TestHandleUnsentInsertEmitsDelete(t *testing.T) {
 	}
 }
 
+func TestHandleReactionEmitsReactionEvent(t *testing.T) {
+	t.Parallel()
+	n, ch := newTestNormalizer(&stubBroker{}, &stubDoer{})
+	// Seed the message so the reaction's thread can be resolved from the cache.
+	if err := n.Handle(context.Background(), &table.LSTable{
+		LSInsertMessage: []*table.LSInsertMessage{{Text: "hi", ThreadKey: 42, MessageId: "m1", SenderId: 7}},
+	}); err != nil {
+		t.Fatalf("seed Handle() error = %v", err)
+	}
+	drain(ch) // discard the seed message's create frame
+	if err := n.Handle(context.Background(), &table.LSTable{
+		LSUpsertReaction: []*table.LSUpsertReaction{{ThreadKey: 42, MessageId: "m1", ActorId: testOwnUserID, Reaction: "❤️"}},
+		LSDeleteReaction: []*table.LSDeleteReaction{{ThreadKey: 42, MessageId: "m1", ActorId: 7}},
+	}); err != nil {
+		t.Fatalf("reaction Handle() error = %v", err)
+	}
+	frames := drain(ch)
+	set := frames[0].GetReaction()
+	if set == nil || set.GetChatId() != "42" || set.GetPlatformMessageId() != "m1" ||
+		set.GetEmoji() != "❤️" || !set.GetFromMe() {
+		t.Fatalf("frames[0] = %#v, want own ❤️ reaction set", frames[0])
+	}
+	cleared := frames[1].GetReaction()
+	if cleared == nil || cleared.GetEmoji() != "" || cleared.GetSender() != "7" || cleared.GetFromMe() {
+		t.Fatalf("frames[1] = %#v, want peer reaction cleared", frames[1])
+	}
+}
+
+func TestHandleReactionForUnknownMessageIsSkipped(t *testing.T) {
+	t.Parallel()
+	n, ch := newTestNormalizer(&stubBroker{}, &stubDoer{})
+	if err := n.Handle(context.Background(), &table.LSTable{
+		LSUpsertReaction: []*table.LSUpsertReaction{{ThreadKey: 42, MessageId: "ghost", ActorId: 7, Reaction: "👍"}},
+	}); err != nil {
+		t.Fatalf("Handle() error = %v", err)
+	}
+	if frames := drain(ch); len(frames) != 0 {
+		t.Fatalf("frames = %#v, want none for unknown message", frames)
+	}
+}
+
 func TestHandleDeleteRow(t *testing.T) {
 	t.Parallel()
 	n, ch := newTestNormalizer(&stubBroker{}, &stubDoer{})

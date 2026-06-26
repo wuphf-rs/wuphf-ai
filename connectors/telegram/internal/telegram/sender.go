@@ -154,6 +154,37 @@ func (s Sender) DeleteMessage(ctx context.Context, dispatch *wuphfpb.MessageDele
 	return dispatch.TargetPlatformMessageId, nil
 }
 
+// ApplyReaction renders a reaction change as text, the chosen display for
+// mirrored reactions on Telegram: a short reply to the reacted message naming
+// the reactor and their emoji, or noting they cleared it. The reacted copy's
+// native id is returned unchanged for the acknowledgement, so the reaction
+// dispatch leaves the parent's copy mapping intact (the posted note is not
+// tracked as a copy).
+func (s Sender) ApplyReaction(ctx context.Context, dispatch *wuphfpb.ReactionDispatch) (string, error) {
+	peer, err := s.peers.InputPeer(dispatch.TargetChatId)
+	if err != nil {
+		return "", err
+	}
+	messageID, err := strconv.Atoi(dispatch.TargetPlatformMessageId)
+	if err != nil {
+		return "", coreclient.Permanent(fmt.Errorf("invalid Telegram target message id %q: %w", dispatch.TargetPlatformMessageId, err))
+	}
+	reactor := dispatch.GetReactorName()
+	if reactor == "" {
+		reactor = dispatch.GetReactor()
+	}
+	var note []styling.StyledTextOption
+	if emoji := dispatch.GetEmoji(); emoji != "" {
+		note = []styling.StyledTextOption{styling.Italic(fmt.Sprintf("%s reacted %s", reactor, emoji))}
+	} else {
+		note = []styling.StyledTextOption{styling.Italic(fmt.Sprintf("%s removed their reaction", reactor))}
+	}
+	if _, err := s.sender.To(peer).CloneBuilder().Reply(messageID).StyledText(ctx, note...); err != nil {
+		return "", fmt.Errorf("post Telegram reaction note: %w", err)
+	}
+	return dispatch.TargetPlatformMessageId, nil
+}
+
 // RetitleThread renames an already-provisioned forum topic when its source
 // conversation's title changes. The thread id is returned unchanged for the
 // acknowledgement, as a retitle creates no new message.

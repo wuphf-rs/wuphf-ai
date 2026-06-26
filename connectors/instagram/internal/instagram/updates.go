@@ -64,7 +64,59 @@ func (n *Normalizer) Handle(ctx context.Context, tbl *table.LSTable) error {
 	if err := n.handleEdits(ctx, tbl); err != nil {
 		return err
 	}
-	return n.handleDeletes(ctx, tbl)
+	if err := n.handleDeletes(ctx, tbl); err != nil {
+		return err
+	}
+	return n.handleReactions(ctx, tbl)
+}
+
+// handleReactions bridges reaction toggles. An upsert sets the reactor's emoji;
+// a delete clears it (empty emoji). Instagram keys reactions by (message, actor),
+// matching the core's per-reactor toggle model. The core resolves the message id
+// and fans the reaction to the other endpoints, which decide how to render it.
+func (n *Normalizer) handleReactions(ctx context.Context, tbl *table.LSTable) error {
+	for _, reaction := range tbl.LSUpsertReaction {
+		if reaction.MessageId == "" {
+			continue
+		}
+		if err := n.emitReaction(ctx, reaction.MessageId, reaction.ActorId, reaction.Reaction); err != nil {
+			return err
+		}
+	}
+	for _, reaction := range tbl.LSDeleteReaction {
+		if reaction.MessageId == "" {
+			continue
+		}
+		if err := n.emitReaction(ctx, reaction.MessageId, reaction.ActorId, ""); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (n *Normalizer) emitReaction(ctx context.Context, messageID string, actorID int64, emoji string) error {
+	// The thread is recovered from the message->thread cache: routing only needs
+	// the chat id the reacted message lives in, the same source the edit path
+	// relies on. A reaction for a message we never observed cannot be placed.
+	threadKey, ok := n.messageThread(messageID)
+	if !ok {
+		n.logger.Warn().Str("message_id", messageID).Msg("skipping Instagram reaction for unknown message")
+		return nil
+	}
+	sender := strconv.FormatInt(actorID, 10)
+	event := &wuphfpb.ReactionEvent{
+		ChatId:            strconv.FormatInt(threadKey, 10),
+		PlatformMessageId: messageID,
+		Sender:            sender,
+		Emoji:             emoji,
+		FromMe:            n.ownUserID != 0 && actorID == n.ownUserID,
+	}
+	if name := n.senderLabel(actorID); name != "" {
+		event.SenderName = &name
+	}
+	return n.send(ctx, &wuphfpb.ClientFrame{
+		Body: &wuphfpb.ClientFrame_Reaction{Reaction: event},
+	})
 }
 
 // cacheTitles records group thread names and contact names so chat titles can be

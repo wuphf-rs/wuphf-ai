@@ -67,6 +67,10 @@ type Sender interface {
 	// RetitleThread renames an already-provisioned mirror thread and returns the
 	// thread id, which the retitle leaves unchanged.
 	RetitleThread(context.Context, *wuphfpb.MessageRetitleDispatch) (threadID string, err error)
+	// ApplyReaction reflects a reaction change on an already-delivered copy and
+	// returns the reacted copy's platform message id, which is left unchanged so
+	// the reaction does not disturb the copy mapping.
+	ApplyReaction(context.Context, *wuphfpb.ReactionDispatch) (messageID string, err error)
 }
 
 // sendOp performs one outbound delivery attempt, returning the resulting
@@ -193,6 +197,14 @@ func (c Client) runSession(
 				if err := c.deliver(ctx, stream, dispatch.DispatchId, func(ctx context.Context) (string, string, error) {
 					threadID, err := sender.RetitleThread(ctx, dispatch)
 					return threadID, "", err
+				}); err != nil {
+					return err
+				}
+			case *wuphfpb.ServerFrame_Reaction:
+				dispatch := body.Reaction
+				if err := c.deliver(ctx, stream, dispatch.DispatchId, func(ctx context.Context) (string, string, error) {
+					messageID, err := sender.ApplyReaction(ctx, dispatch)
+					return messageID, "", err
 				}); err != nil {
 					return err
 				}
