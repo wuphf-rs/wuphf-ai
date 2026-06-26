@@ -105,6 +105,35 @@ async fn transports_ready_dispatches_over_tokio_channels() {
 }
 
 #[tokio::test]
+async fn interleaved_connectors_route_through_independent_workers() {
+    // Events from two different source connectors, interleaved on the shared
+    // intake, must each be demuxed to their own ingest worker and routed to the
+    // opposite side. A demux bug funnelling everything to one worker would drop
+    // or misroute one of the two dispatches.
+    let (runtime, mut channels) = Runtime::channelled(core(), 8);
+    let task = tokio::spawn(runtime.run());
+    channels.events.send(wa_event("wa-1", None)).await.unwrap();
+    channels.events.send(tg_event("tg-1", None)).await.unwrap();
+
+    let first = channels.dispatches.recv().await.unwrap();
+    let second = channels.dispatches.recv().await.unwrap();
+    let targets = [
+        first.command.target_connector,
+        second.command.target_connector,
+    ];
+    assert!(
+        targets.contains(&ConnectorId(WA.into())),
+        "Telegram event should route to WhatsApp",
+    );
+    assert!(
+        targets.contains(&ConnectorId(TG.into())),
+        "WhatsApp event should route to Telegram",
+    );
+    drop(channels.events);
+    task.await.unwrap().unwrap();
+}
+
+#[tokio::test]
 async fn acknowledgement_releases_reply_with_target_native_parent_id() {
     let (runtime, mut channels) = Runtime::channelled(core(), 8);
     let task = tokio::spawn(runtime.run());
@@ -412,10 +441,33 @@ fn registration_frame(
 }
 
 fn wa_event(native_id: &str, reply_to: Option<&str>) -> NormalizedEvent {
+    source_event(
+        ConnectorId(WA.into()),
+        PlatformAddress::new("wa-chat", None),
+        native_id,
+        reply_to,
+    )
+}
+
+fn tg_event(native_id: &str, reply_to: Option<&str>) -> NormalizedEvent {
+    source_event(
+        ConnectorId(TG.into()),
+        PlatformAddress::new("tg-chat", Some("topic".into())),
+        native_id,
+        reply_to,
+    )
+}
+
+fn source_event(
+    connector_id: ConnectorId,
+    address: PlatformAddress,
+    native_id: &str,
+    reply_to: Option<&str>,
+) -> NormalizedEvent {
     NormalizedEvent {
         source: wuphf_model::SourceAddress {
-            connector_id: ConnectorId(WA.into()),
-            address: PlatformAddress::new("wa-chat", None),
+            connector_id,
+            address,
             chat_title: None,
         },
         payload: EventPayload::MessageCreate(InboundMessage {
