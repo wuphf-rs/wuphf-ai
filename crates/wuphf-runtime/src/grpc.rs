@@ -216,12 +216,31 @@ fn input_from_proto(
         Some(pb::client_frame::Body::Registration(_)) => {
             Err(WireError("registration already completed".into()))
         }
-        // TODO(reactions #85): translate into EventPayload::ReactionSet / ReadReceipt
-        // once the model carries them; rejected for now so the wire is defined but
-        // inert.
-        Some(pb::client_frame::Body::Reaction(_)) => {
-            Err(WireError("reaction events are not handled yet".into()))
+        Some(pb::client_frame::Body::Reaction(event)) => {
+            Ok(ConnectorInput::Event(NormalizedEvent {
+                source: SourceAddress {
+                    connector_id: connector_id.clone(),
+                    address: PlatformAddress::new(
+                        required_string(event.chat_id, "chat_id")?,
+                        event.thread_id,
+                    ),
+                    chat_title: None,
+                },
+                payload: EventPayload::ReactionSet {
+                    platform_message_id: required_string(
+                        event.platform_message_id,
+                        "platform_message_id",
+                    )?,
+                    reactor: required_string(event.sender, "sender")?,
+                    reactor_name: event.sender_name,
+                    // An empty emoji is the toggle's "cleared" state.
+                    emoji: (!event.emoji.is_empty()).then_some(event.emoji),
+                    from_me: event.from_me,
+                },
+            }))
         }
+        // TODO(read receipts #84): translate into EventPayload::ReadReceipt once
+        // the core surfaces seen receipts; rejected until then.
         Some(pb::client_frame::Body::ReadReceipt(_)) => {
             Err(WireError("read receipts are not handled yet".into()))
         }
