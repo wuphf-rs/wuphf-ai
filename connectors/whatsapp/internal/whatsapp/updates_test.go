@@ -6,6 +6,7 @@ import (
 	"time"
 
 	wuphfpb "github.com/akshettrj/wuphf/proto/go/connector/v1"
+	waCommon "go.mau.fi/whatsmeow/proto/waCommon"
 	waE2E "go.mau.fi/whatsmeow/proto/waE2E"
 	"go.mau.fi/whatsmeow/types"
 	"go.mau.fi/whatsmeow/types/events"
@@ -278,6 +279,63 @@ func TestNormalizeStripsSenderDeviceFromIdentity(t *testing.T) {
 	}
 	if event.GetParticipant() != "15550001111@s.whatsapp.net" {
 		t.Fatalf("participant = %q, want per-device suffix stripped", event.GetParticipant())
+	}
+}
+
+func TestNormalizeReactionEmitsToggle(t *testing.T) {
+	t.Parallel()
+	normalizer := NewNormalizer(make(chan *wuphfpb.ClientFrame), MediaCodec{}, stubNamer{}, nil)
+	message := &events.Message{
+		Info: types.MessageInfo{
+			MessageSource: types.MessageSource{
+				Chat:   types.NewJID("15550001111", types.DefaultUserServer),
+				Sender: types.NewJID("15550001111", types.DefaultUserServer),
+			},
+			ID:       "wa-react",
+			PushName: "Alice",
+		},
+		Message: &waE2E.Message{ReactionMessage: &waE2E.ReactionMessage{
+			Key:  &waCommon.MessageKey{ID: proto.String("wa-target")},
+			Text: proto.String("❤️"),
+		}},
+	}
+	chat := normalizer.canonical(context.Background(), message.Info.Chat)
+	event, ok := normalizer.normalizeReaction(context.Background(), message, chat)
+	if !ok {
+		t.Fatal("normalizeReaction() did not recognise a reaction message")
+	}
+	if event.GetPlatformMessageId() != "wa-target" {
+		t.Fatalf("reacted message = %q, want wa-target", event.GetPlatformMessageId())
+	}
+	if event.GetEmoji() != "❤️" {
+		t.Fatalf("emoji = %q, want ❤️", event.GetEmoji())
+	}
+	if event.GetSenderName() != "Alice" {
+		t.Fatalf("reactor name = %q, want Alice", event.GetSenderName())
+	}
+}
+
+func TestNormalizeReactionClearedHasEmptyEmoji(t *testing.T) {
+	t.Parallel()
+	normalizer := NewNormalizer(make(chan *wuphfpb.ClientFrame), MediaCodec{}, stubNamer{}, nil)
+	message := &events.Message{
+		Info: types.MessageInfo{
+			MessageSource: types.MessageSource{
+				Chat:     types.NewJID("15550001111", types.DefaultUserServer),
+				Sender:   types.NewJID("15550001111", types.DefaultUserServer),
+				IsFromMe: true,
+			},
+			ID: "wa-unreact",
+		},
+		Message: &waE2E.Message{ReactionMessage: &waE2E.ReactionMessage{
+			Key:  &waCommon.MessageKey{ID: proto.String("wa-target")},
+			Text: proto.String(""),
+		}},
+	}
+	chat := normalizer.canonical(context.Background(), message.Info.Chat)
+	event, ok := normalizer.normalizeReaction(context.Background(), message, chat)
+	if !ok || event.GetEmoji() != "" || !event.GetFromMe() {
+		t.Fatalf("normalizeReaction() = %#v, %v; want own cleared reaction", event, ok)
 	}
 }
 

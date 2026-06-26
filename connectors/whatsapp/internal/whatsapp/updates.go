@@ -68,6 +68,11 @@ func (n Normalizer) Handle(ctx context.Context, message *events.Message) error {
 			return err
 		}
 	}
+	if reaction, ok := n.normalizeReaction(ctx, message, chat); ok {
+		return n.send(ctx, &wuphfpb.ClientFrame{
+			Body: &wuphfpb.ClientFrame_Reaction{Reaction: reaction},
+		})
+	}
 	if del, ok := n.normalizeDelete(ctx, message); ok {
 		return n.send(ctx, &wuphfpb.ClientFrame{
 			Body: &wuphfpb.ClientFrame_MessageDelete{MessageDelete: del},
@@ -154,6 +159,35 @@ func (n Normalizer) normalizeDelete(ctx context.Context, message *events.Message
 		ChatId:            n.canonical(ctx, message.Info.Chat).String(),
 		PlatformMessageId: revokedID,
 	}, true
+}
+
+// normalizeReaction reports an inbound reaction. WhatsApp carries a reaction as
+// a message whose ReactionMessage names the reacted message and holds the emoji
+// (empty text clears the reactor's reaction). The reactor is the message sender,
+// canonicalized like any other id; the core resolves the reacted message and
+// fans the reaction to the other endpoints. Encrypted group reactions
+// (EncReactionMessage) need the client to decrypt and are not handled here yet.
+func (n Normalizer) normalizeReaction(ctx context.Context, message *events.Message, chat types.JID) (*wuphfpb.ReactionEvent, bool) {
+	reaction := message.Message.GetReactionMessage()
+	if reaction == nil {
+		return nil, false
+	}
+	target := reaction.GetKey().GetID()
+	if target == "" {
+		return nil, false
+	}
+	sender := n.canonical(ctx, message.Info.Sender).String()
+	event := &wuphfpb.ReactionEvent{
+		ChatId:            chat.String(),
+		PlatformMessageId: target,
+		Sender:            sender,
+		Emoji:             reaction.GetText(),
+		FromMe:            message.Info.IsFromMe,
+	}
+	if name := n.senderName(ctx, message); name != "" {
+		event.SenderName = &name
+	}
+	return event, true
 }
 
 // senderName resolves the per-message sender label, formatted by the namer when
