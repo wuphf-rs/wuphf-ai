@@ -1,4 +1,4 @@
-use crate::RuntimeChannels;
+use crate::{InboundWork, RuntimeChannels};
 use std::collections::HashMap;
 use tokio::sync::{mpsc, oneshot};
 use tracing::{debug, info, warn};
@@ -172,7 +172,7 @@ impl ConnectorHub {
                 // The session is the authority on which connector spoke; stamp it
                 // so a connector cannot present itself as another.
                 event.source.connector_id = connector_id;
-                let _ = self.runtime.events.send(event).await;
+                let _ = self.runtime.inbound.send(InboundWork::Event(event)).await;
             }
             ConnectorInput::Acknowledgement(acknowledgement) => {
                 if self
@@ -191,7 +191,15 @@ impl ConnectorHub {
                 }
             }
             ConnectorInput::IdentityMigrated { old, new, .. } => {
-                let _ = self.runtime.migrations.send((connector_id, old, new)).await;
+                let _ = self
+                    .runtime
+                    .inbound
+                    .send(InboundWork::Migration {
+                        connector_id,
+                        old,
+                        new,
+                    })
+                    .await;
             }
             ConnectorInput::DispatchFailed {
                 dispatch_id,

@@ -96,11 +96,11 @@ fn core() -> Arc<Core<InMemoryStorage>> {
 async fn transports_ready_dispatches_over_tokio_channels() {
     let (runtime, mut channels) = Runtime::channelled(core(), 4);
     let task = tokio::spawn(runtime.run());
-    channels.events.send(wa_event("wa-1", None)).await.unwrap();
+    send_event(&channels, wa_event("wa-1", None)).await;
     let dispatch = channels.dispatches.recv().await.unwrap();
     assert_eq!(dispatch.command.target_connector, ConnectorId(TG.into()));
     assert_eq!(dispatch.command.target.address.chat_id, "tg-chat");
-    drop(channels.events);
+    drop(channels.inbound);
     task.await.unwrap().unwrap();
 }
 
@@ -112,8 +112,8 @@ async fn interleaved_connectors_route_through_independent_workers() {
     // or misroute one of the two dispatches.
     let (runtime, mut channels) = Runtime::channelled(core(), 8);
     let task = tokio::spawn(runtime.run());
-    channels.events.send(wa_event("wa-1", None)).await.unwrap();
-    channels.events.send(tg_event("tg-1", None)).await.unwrap();
+    send_event(&channels, wa_event("wa-1", None)).await;
+    send_event(&channels, tg_event("tg-1", None)).await;
 
     let first = channels.dispatches.recv().await.unwrap();
     let second = channels.dispatches.recv().await.unwrap();
@@ -129,7 +129,50 @@ async fn interleaved_connectors_route_through_independent_workers() {
         targets.contains(&ConnectorId(TG.into())),
         "WhatsApp event should route to Telegram",
     );
-    drop(channels.events);
+    drop(channels.inbound);
+    task.await.unwrap().unwrap();
+}
+
+#[tokio::test]
+async fn migration_before_event_is_applied_first_on_one_connector() {
+    // A connector sends an identity migration then a message under the new
+    // address, in that frame order. Both travel one per-connector worker queue,
+    // so the migration's alias is written before the message resolves: the
+    // message under the migrated-to address routes to the existing endpoint
+    // instead of being ignored as an unknown chat.
+    let (runtime, mut channels) = Runtime::channelled(core(), 8);
+    let task = tokio::spawn(runtime.run());
+    // First sighting on the rule's WhatsApp chat mints its endpoint + alias.
+    send_event(&channels, wa_event("wa-1", None)).await;
+    let _ = channels.dispatches.recv().await.unwrap();
+
+    // Rebind that chat to a new address, then immediately send under the new one.
+    channels
+        .inbound
+        .send(InboundWork::Migration {
+            connector_id: ConnectorId(WA.into()),
+            old: PlatformAddress::new("wa-chat", None),
+            new: PlatformAddress::new("wa-chat-migrated", None),
+        })
+        .await
+        .unwrap();
+    send_event(
+        &channels,
+        source_event(
+            ConnectorId(WA.into()),
+            PlatformAddress::new("wa-chat-migrated", None),
+            "wa-2",
+            None,
+        ),
+    )
+    .await;
+
+    // The message under the migrated address routes only if the migration was
+    // applied first; otherwise it matches no rule and yields no dispatch.
+    let dispatch = channels.dispatches.recv().await.unwrap();
+    assert_eq!(dispatch.command.target_connector, ConnectorId(TG.into()));
+    assert_eq!(dispatch.command.target.address.chat_id, "tg-chat");
+    drop(channels.inbound);
     task.await.unwrap().unwrap();
 }
 
@@ -137,17 +180,9 @@ async fn interleaved_connectors_route_through_independent_workers() {
 async fn acknowledgement_releases_reply_with_target_native_parent_id() {
     let (runtime, mut channels) = Runtime::channelled(core(), 8);
     let task = tokio::spawn(runtime.run());
-    channels
-        .events
-        .send(wa_event("wa-parent", None))
-        .await
-        .unwrap();
+    send_event(&channels, wa_event("wa-parent", None)).await;
     let parent_dispatch = channels.dispatches.recv().await.unwrap();
-    channels
-        .events
-        .send(wa_event("wa-reply", Some("wa-parent")))
-        .await
-        .unwrap();
+    send_event(&channels, wa_event("wa-reply", Some("wa-parent"))).await;
 
     channels
         .acknowledgements
@@ -165,7 +200,7 @@ async fn acknowledgement_releases_reply_with_target_native_parent_id() {
     };
     let reply_context = reply_context.expect("reply context set on release");
     assert_eq!(reply_context.platform_message_id, "tg-parent");
-    drop(channels.events);
+    drop(channels.inbound);
     task.await.unwrap().unwrap();
 }
 
@@ -438,6 +473,14 @@ fn registration_frame(
             capabilities,
         })),
     }
+}
+
+async fn send_event(channels: &RuntimeChannels, event: NormalizedEvent) {
+    channels
+        .inbound
+        .send(InboundWork::Event(event))
+        .await
+        .unwrap();
 }
 
 fn wa_event(native_id: &str, reply_to: Option<&str>) -> NormalizedEvent {

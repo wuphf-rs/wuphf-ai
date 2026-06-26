@@ -14,17 +14,36 @@ pub mod connector;
 pub mod grpc;
 pub mod media;
 
-/// A platform identity migration request: `(connector, old address, new address)`.
-pub type Migration = (ConnectorId, PlatformAddress, PlatformAddress);
-
 /// A terminal dispatch failure reported by a connector: `(dispatch, reason)`.
 pub type DispatchFailure = (DispatchId, String);
 
+/// Ordered inbound work from one connector: a normalized event or an identity
+/// migration. Both travel one per-connector path so the connector's frame order
+/// is preserved end to end. A migration that precedes a message is applied
+/// before that message is ingested, so the message cannot mint a fresh endpoint
+/// under an address the migration was meant to rebind.
+pub enum InboundWork {
+    Event(NormalizedEvent),
+    Migration {
+        connector_id: ConnectorId,
+        old: PlatformAddress,
+        new: PlatformAddress,
+    },
+}
+
+impl InboundWork {
+    fn connector_id(&self) -> &ConnectorId {
+        match self {
+            InboundWork::Event(event) => &event.source.connector_id,
+            InboundWork::Migration { connector_id, .. } => connector_id,
+        }
+    }
+}
+
 pub struct Runtime<S> {
     core: Arc<Core<S>>,
-    event_rx: mpsc::Receiver<NormalizedEvent>,
+    inbound_rx: mpsc::Receiver<InboundWork>,
     acknowledgement_rx: mpsc::Receiver<DispatchAcknowledgement>,
-    migration_rx: mpsc::Receiver<Migration>,
     failure_rx: mpsc::Receiver<DispatchFailure>,
     dispatch_tx: mpsc::Sender<StoredDispatch>,
     /// Per-connector ingest worker queue depth. Sized to the runtime capacity so
@@ -34,9 +53,8 @@ pub struct Runtime<S> {
 }
 
 pub struct RuntimeChannels {
-    pub events: mpsc::Sender<NormalizedEvent>,
+    pub inbound: mpsc::Sender<InboundWork>,
     pub acknowledgements: mpsc::Sender<DispatchAcknowledgement>,
-    pub migrations: mpsc::Sender<Migration>,
     pub failures: mpsc::Sender<DispatchFailure>,
     pub dispatches: mpsc::Receiver<StoredDispatch>,
 }
@@ -46,25 +64,22 @@ where
     S: Storage,
 {
     pub fn channelled(core: Arc<Core<S>>, capacity: usize) -> (Self, RuntimeChannels) {
-        let (event_tx, event_rx) = mpsc::channel(capacity);
+        let (inbound_tx, inbound_rx) = mpsc::channel(capacity);
         let (acknowledgement_tx, acknowledgement_rx) = mpsc::channel(capacity);
-        let (migration_tx, migration_rx) = mpsc::channel(capacity);
         let (failure_tx, failure_rx) = mpsc::channel(capacity);
         let (dispatch_tx, dispatch_rx) = mpsc::channel(capacity);
         (
             Self {
                 core,
-                event_rx,
+                inbound_rx,
                 acknowledgement_rx,
-                migration_rx,
                 failure_rx,
                 dispatch_tx,
                 worker_capacity: capacity,
             },
             RuntimeChannels {
-                events: event_tx,
+                inbound: inbound_tx,
                 acknowledgements: acknowledgement_tx,
-                migrations: migration_tx,
                 failures: failure_tx,
                 dispatches: dispatch_rx,
             },
@@ -83,19 +98,22 @@ where
             self.send(dispatch).await?;
         }
         // Each connector gets its own ingest worker so one connector's offline
-        // backlog cannot starve the others: the run loop only demuxes events to
-        // the right worker, while the workers ingest concurrently and feed their
-        // dispatches back into the shared dispatch channel. Per-connector
-        // ordering is preserved because a worker drains its queue serially and a
-        // conversation lives on a single connector. A worker's first fatal core
-        // error is surfaced here so it still aborts the runtime as before.
-        let mut workers: HashMap<ConnectorId, mpsc::Sender<NormalizedEvent>> = HashMap::new();
+        // backlog cannot starve the others: the run loop only demuxes inbound
+        // work to the right worker, while the workers process concurrently and
+        // feed their dispatches back into the shared dispatch channel. A
+        // connector's events and identity migrations share one worker queue, so
+        // they apply in the connector's frame order (a migration before the
+        // message it precedes). Per-connector ordering holds because a worker
+        // drains its queue serially and a conversation lives on one connector. A
+        // worker's first fatal core error is surfaced here so it still aborts the
+        // runtime as before.
+        let mut workers: HashMap<ConnectorId, mpsc::Sender<InboundWork>> = HashMap::new();
         let (worker_error_tx, mut worker_error_rx) = mpsc::channel::<RuntimeError>(1);
         loop {
             tokio::select! {
-                event = self.event_rx.recv() => match event {
-                    Some(event) => {
-                        let connector_id = event.source.connector_id.clone();
+                work = self.inbound_rx.recv() => match work {
+                    Some(work) => {
+                        let connector_id = work.connector_id().clone();
                         let worker = workers.entry(connector_id).or_insert_with(|| {
                             spawn_ingest_worker(
                                 self.core.clone(),
@@ -106,8 +124,8 @@ where
                         });
                         // A closed worker queue means its task aborted on a fatal
                         // error; the worker_error_rx branch carries the cause and
-                        // ends the run, so dropping the event here is fine.
-                        let _ = worker.send(event).await;
+                        // ends the run, so dropping the work here is fine.
+                        let _ = worker.send(work).await;
                     }
                     None => break,
                 },
@@ -118,17 +136,6 @@ where
                         for dispatch in self.core.acknowledge_dispatch(acknowledgement).await? {
                             self.send(dispatch).await?;
                         }
-                    }
-                }
-                migration = self.migration_rx.recv() => {
-                    if let Some((connector_id, old, new)) = migration {
-                        info!(
-                            connector = %connector_id.0,
-                            old = %old.chat_id,
-                            new = %new.chat_id,
-                            "migrating chat identity",
-                        );
-                        self.core.migrate_identity(connector_id, old, new).await?;
                     }
                 }
                 failure = self.failure_rx.recv() => {
@@ -152,30 +159,31 @@ where
     }
 }
 
-/// Spawn a per-connector ingest worker. It drains its event queue serially,
-/// ingesting each event through the core and forwarding the resulting dispatches
-/// to the shared dispatch channel. On the first fatal core error it reports the
+/// Spawn a per-connector ingest worker. It drains its queue serially, processing
+/// each item through the core and forwarding any resulting dispatches to the
+/// shared dispatch channel. Events and identity migrations share the queue so
+/// they apply in arrival order. On the first fatal core error it reports the
 /// cause and stops, which closes its queue and ends the runtime.
 fn spawn_ingest_worker<S>(
     core: Arc<Core<S>>,
     dispatch_tx: mpsc::Sender<StoredDispatch>,
     error_tx: mpsc::Sender<RuntimeError>,
     capacity: usize,
-) -> mpsc::Sender<NormalizedEvent>
+) -> mpsc::Sender<InboundWork>
 where
     S: Storage,
 {
-    let (event_tx, mut event_rx) = mpsc::channel::<NormalizedEvent>(capacity);
+    let (work_tx, mut work_rx) = mpsc::channel::<InboundWork>(capacity);
     tokio::spawn(async move {
-        while let Some(event) = event_rx.recv().await {
-            let outcome = match ingest_event(core.as_ref(), event).await {
-                Ok(outcome) => outcome,
+        while let Some(work) = work_rx.recv().await {
+            let dispatches = match process_work(core.as_ref(), work).await {
+                Ok(dispatches) => dispatches,
                 Err(error) => {
                     let _ = error_tx.send(error).await;
                     return;
                 }
             };
-            for dispatch in outcome.dispatches().iter().cloned() {
+            for dispatch in dispatches {
                 // A closed dispatch channel means the runtime is shutting down;
                 // stop quietly rather than reporting it as a fatal error.
                 if dispatch_tx.send(dispatch).await.is_err() {
@@ -184,7 +192,37 @@ where
             }
         }
     });
-    event_tx
+    work_tx
+}
+
+/// Apply one unit of inbound work and return any dispatches it produced. An
+/// event is ingested through the core; a migration rebinds an address and yields
+/// no dispatches. Both run on the connector's worker so they apply in the order
+/// the connector sent them.
+async fn process_work<S>(
+    core: &Core<S>,
+    work: InboundWork,
+) -> Result<Vec<StoredDispatch>, RuntimeError>
+where
+    S: Storage,
+{
+    match work {
+        InboundWork::Event(event) => Ok(ingest_event(core, event).await?.dispatches().to_vec()),
+        InboundWork::Migration {
+            connector_id,
+            old,
+            new,
+        } => {
+            info!(
+                connector = %connector_id.0,
+                old = %old.chat_id,
+                new = %new.chat_id,
+                "migrating chat identity",
+            );
+            core.migrate_identity(connector_id, old, new).await?;
+            Ok(Vec::new())
+        }
+    }
 }
 
 /// Ingest one connector event and log the core's verdict. This is the single
