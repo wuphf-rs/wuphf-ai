@@ -84,12 +84,28 @@ where
                 self.ingest_delete(origin_endpoint, platform_message_id)
                     .await
             }
-            // TODO(reactions #82/#84): fan the reaction to mirror endpoints and
-            // surface read receipts on the origin copy. Unreachable until the
-            // runtime translates these inbound frames (#85).
-            EventPayload::ReactionSet { .. } | EventPayload::ReadReceipt { .. } => {
-                Err(CoreError::UnsupportedEvent)
+            EventPayload::ReactionSet {
+                platform_message_id,
+                reactor,
+                reactor_name,
+                emoji,
+                // from_me is unused in the source-to-text direction: the bridge
+                // never applies a native reaction the source could echo back, so
+                // every reported reaction (including the owner's own) mirrors.
+                from_me: _,
+            } => {
+                self.ingest_reaction(
+                    origin_endpoint,
+                    platform_message_id,
+                    reactor,
+                    reactor_name,
+                    emoji,
+                )
+                .await
             }
+            // TODO(read receipts #84): surface as a seen receipt on the origin
+            // copy. Unreachable until the runtime translates the inbound frame.
+            EventPayload::ReadReceipt { .. } => Err(CoreError::UnsupportedEvent),
         }
     }
 }
@@ -161,6 +177,8 @@ pub enum CoreError {
     DeleteTargetNotStored(MessageId),
     #[error("edited message {0} maps from a copy but is not stored")]
     EditTargetNotStored(MessageId),
+    #[error("reacted message {0} maps from a copy but is not stored")]
+    ReactionTargetNotStored(MessageId),
     #[error("attachment media {0} is not uploaded to the core")]
     UnknownMedia(MediaId),
     #[error("attachment metadata for media {0} differs from the core record")]

@@ -299,4 +299,51 @@ where
             dispatches,
         })
     }
+
+    /// Apply an inbound reaction: resolve the reacted copy to its logical
+    /// message and fan the reaction out to the other endpoints, blocking targets
+    /// whose copy is not delivered yet. The reaction is a toggle (`emoji` None
+    /// clears the reactor's reaction); the connector decides how to render it.
+    /// No echo guard is needed in the source-to-text direction, as the bridge
+    /// never applies a native reaction the source could report back.
+    pub(crate) async fn ingest_reaction(
+        &self,
+        origin_endpoint: EndpointId,
+        platform_message_id: String,
+        reactor: String,
+        reactor_name: Option<String>,
+        emoji: Option<String>,
+    ) -> Result<IngestOutcome, CoreError> {
+        let Some(message_id) = self
+            .storage
+            .message_id_for_copy(origin_endpoint, &platform_message_id)
+            .await?
+        else {
+            return Ok(IngestOutcome::Ignored(IgnoreReason::Unmatched));
+        };
+        let message = self
+            .storage
+            .message(message_id)
+            .await?
+            .ok_or(CoreError::ReactionTargetNotStored(message_id))?;
+
+        let routing = self
+            .router
+            .route_reaction(&message, origin_endpoint, reactor, reactor_name, emoji)
+            .await?;
+        let mut dispatches = Vec::new();
+        for command in routing.dispatches.iter().cloned() {
+            dispatches.push(self.storage.enqueue_dispatch(command, None).await?);
+        }
+        for blocked in routing.blocked.iter().cloned() {
+            self.storage
+                .enqueue_dispatch(blocked.command, Some(blocked.waiting_for_message))
+                .await?;
+        }
+        Ok(IngestOutcome::Routed {
+            message_id,
+            routing,
+            dispatches,
+        })
+    }
 }

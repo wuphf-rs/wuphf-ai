@@ -209,6 +209,68 @@ where
         Ok(outcome)
     }
 
+    /// Fan a reaction change out to the other endpoints. Like an edit, each
+    /// target carries the native id of the copy the reaction applies to, blocked
+    /// until that copy is delivered. The connector decides how to render the
+    /// reaction (e.g. as text), so the router only carries the reactor and emoji.
+    pub async fn route_reaction(
+        &self,
+        message: &Message,
+        origin_endpoint: EndpointId,
+        reactor: String,
+        reactor_name: Option<String>,
+        emoji: Option<String>,
+    ) -> Result<RoutingOutcome, RouterError> {
+        let replica_set = self.storage.replica_set(message.replica_set_id).await?;
+        if !replica_set.endpoints.contains(&origin_endpoint) {
+            return Err(RouterError::OriginOutsideReplicaSet(origin_endpoint));
+        }
+
+        let mut outcome = RoutingOutcome::default();
+        for endpoint_id in replica_set
+            .endpoints
+            .into_iter()
+            .filter(|endpoint_id| *endpoint_id != origin_endpoint)
+        {
+            let endpoint = self.storage.endpoint(endpoint_id).await?;
+            let target = TargetAddress {
+                address: endpoint.address(),
+                provision_thread: None,
+            };
+            let target_connector = endpoint.connector_id.clone();
+            let reaction = |target_platform_message_id| DispatchPayload::Reaction {
+                message_id: message.id,
+                replica_set_id: message.replica_set_id,
+                target_platform_message_id,
+                reactor: reactor.clone(),
+                reactor_name: reactor_name.clone(),
+                emoji: emoji.clone(),
+            };
+            match self
+                .storage
+                .copy_at_endpoint(message.id, endpoint_id)
+                .await?
+            {
+                Some(copy) => outcome.dispatches.push(DispatchCommand {
+                    target_endpoint: endpoint_id,
+                    target_connector,
+                    target,
+                    payload: reaction(copy.platform_message_id),
+                }),
+                None => outcome.blocked.push(BlockedDispatch {
+                    command: DispatchCommand {
+                        target_endpoint: endpoint_id,
+                        target_connector,
+                        target,
+                        payload: reaction(String::new()),
+                    },
+                    waiting_for_message: message.id,
+                }),
+            }
+        }
+        Ok(outcome)
+    }
+
     /// Fan a source-title change out to every mirror endpoint that has already
     /// provisioned a thread. Endpoints without a thread are skipped: their
     /// thread is created with the current title by the next message that routes

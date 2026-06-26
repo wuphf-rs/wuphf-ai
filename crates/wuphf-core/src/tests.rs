@@ -664,6 +664,147 @@ async fn edit_before_delivery_blocks_then_releases_with_native_id() {
     assert_eq!(target_platform_message_id, "tg-1");
 }
 
+fn reaction_event(
+    connector: &str,
+    chat_id: &str,
+    native_id: &str,
+    emoji: Option<&str>,
+) -> NormalizedEvent {
+    NormalizedEvent {
+        source: SourceAddress {
+            connector_id: ConnectorId(connector.into()),
+            address: PlatformAddress::new(chat_id, None),
+            chat_title: None,
+        },
+        payload: EventPayload::ReactionSet {
+            platform_message_id: native_id.into(),
+            reactor: "reactor-1".into(),
+            reactor_name: Some("Alice".into()),
+            emoji: emoji.map(str::to_owned),
+            from_me: false,
+        },
+    }
+}
+
+#[tokio::test]
+async fn reaction_after_delivery_fans_to_the_delivered_copy() {
+    let core = core(vec![direct_rule()]);
+    let IngestOutcome::Routed {
+        message_id,
+        dispatches,
+        ..
+    } = core
+        .ingest(event(WHATSAPP, "12345@s.whatsapp.net", "wa-1", None))
+        .await
+        .unwrap()
+    else {
+        panic!("create should route");
+    };
+    let telegram = dispatches[0].command.target_endpoint;
+    core.record_dispatched_copy(message_id, telegram, "tg-1")
+        .await
+        .unwrap();
+
+    let reacted = core
+        .ingest(reaction_event(
+            WHATSAPP,
+            "12345@s.whatsapp.net",
+            "wa-1",
+            Some("❤️"),
+        ))
+        .await
+        .unwrap();
+    let dispatch = &reacted.dispatches()[0];
+    assert_eq!(
+        dispatch.command.target_connector,
+        ConnectorId(TELEGRAM.into())
+    );
+    let DispatchPayload::Reaction {
+        target_platform_message_id,
+        emoji,
+        reactor_name,
+        ..
+    } = &dispatch.command.payload
+    else {
+        panic!("reaction should route as a reaction dispatch");
+    };
+    assert_eq!(target_platform_message_id, "tg-1");
+    assert_eq!(emoji.as_deref(), Some("❤️"));
+    assert_eq!(reactor_name.as_deref(), Some("Alice"));
+}
+
+#[tokio::test]
+async fn reaction_before_delivery_blocks_then_releases_with_native_id() {
+    let core = core(vec![direct_rule()]);
+    let IngestOutcome::Routed { dispatches, .. } = core
+        .ingest(event(WHATSAPP, "12345@s.whatsapp.net", "wa-1", None))
+        .await
+        .unwrap()
+    else {
+        panic!("create should route");
+    };
+    let create_dispatch = dispatches[0].clone();
+
+    let reacted = core
+        .ingest(reaction_event(
+            WHATSAPP,
+            "12345@s.whatsapp.net",
+            "wa-1",
+            Some("👍"),
+        ))
+        .await
+        .unwrap();
+    let IngestOutcome::Routed {
+        routing,
+        dispatches,
+        ..
+    } = reacted
+    else {
+        panic!("reaction should be stored while delivery is blocked");
+    };
+    assert!(dispatches.is_empty());
+    assert_eq!(routing.blocked.len(), 1);
+
+    let released = core
+        .acknowledge_dispatch(DispatchAcknowledgement {
+            dispatch_id: create_dispatch.id,
+            platform_message_id: "tg-1".into(),
+            thread_id: None,
+        })
+        .await
+        .unwrap();
+    let reaction = released
+        .iter()
+        .find(|dispatch| matches!(dispatch.command.payload, DispatchPayload::Reaction { .. }))
+        .expect("acknowledging the create releases the blocked reaction");
+    let DispatchPayload::Reaction {
+        target_platform_message_id,
+        emoji,
+        ..
+    } = &reaction.command.payload
+    else {
+        unreachable!();
+    };
+    assert_eq!(target_platform_message_id, "tg-1");
+    assert_eq!(emoji.as_deref(), Some("👍"));
+}
+
+#[tokio::test]
+async fn reaction_for_unknown_message_is_ignored() {
+    let core = core(vec![direct_rule()]);
+    assert_eq!(
+        core.ingest(reaction_event(
+            WHATSAPP,
+            "12345@s.whatsapp.net",
+            "wa-unknown",
+            Some("❤️"),
+        ))
+        .await
+        .unwrap(),
+        IngestOutcome::Ignored(IgnoreReason::Unmatched),
+    );
+}
+
 #[tokio::test]
 async fn edit_that_does_not_change_text_is_ignored() {
     let core = core(vec![direct_rule()]);
