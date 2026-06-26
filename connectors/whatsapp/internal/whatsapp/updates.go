@@ -22,32 +22,59 @@ type ChatNamer interface {
 }
 
 type Normalizer struct {
-	inputs chan<- *wuphfpb.ClientFrame
-	media  MediaCodec
-	namer  ChatNamer
+	inputs   chan<- *wuphfpb.ClientFrame
+	media    MediaCodec
+	namer    ChatNamer
+	identity identityResolver
+	// migrations dedupes the phone-to-LID address changes already reported to
+	// the core, so a long-lived chat does not re-emit the same migration on
+	// every message. It is a pointer so the shared gate survives the value
+	// receiver copies the normalizer is invoked through.
+	migrations *migrationGate
 }
 
-func NewNormalizer(inputs chan<- *wuphfpb.ClientFrame, media MediaCodec, namer ChatNamer) Normalizer {
-	return Normalizer{inputs: inputs, media: media, namer: namer}
+func NewNormalizer(inputs chan<- *wuphfpb.ClientFrame, media MediaCodec, namer ChatNamer, identity identityResolver) Normalizer {
+	return Normalizer{
+		inputs:     inputs,
+		media:      media,
+		namer:      namer,
+		identity:   identity,
+		migrations: newMigrationGate(),
+	}
+}
+
+// canonical resolves a chat/peer/sender JID to its stable bridge identity. The
+// device is always stripped, even without a resolver, so a per-device AD-JID
+// never splits a chat; LID promotion needs the resolver and is skipped when none
+// is wired (as in tests).
+func (n Normalizer) canonical(ctx context.Context, jid types.JID) types.JID {
+	if n.identity == nil {
+		return jid.ToNonAD()
+	}
+	return n.identity.Canonical(ctx, jid)
 }
 
 func (n Normalizer) Handle(ctx context.Context, message *events.Message) error {
-	// A phone/LID migration must be reported before the message so the core can
-	// link both addresses to one conversation before resolving this event.
-	if migration := identityMigration(message); migration != nil {
+	// The chat is canonicalized once and threaded through every frame below so
+	// creates, edits, and deletes for one peer always carry the same chat id no
+	// matter which address form WhatsApp used for this particular message.
+	chat := n.canonical(ctx, message.Info.Chat)
+	// Any phone/LID migration must be reported before the message so the core
+	// can bind both addresses to one conversation before resolving this event.
+	for _, migration := range n.migrationsFor(message, chat) {
 		if err := n.send(ctx, &wuphfpb.ClientFrame{
 			Body: &wuphfpb.ClientFrame_IdentityMigrated{IdentityMigrated: migration},
 		}); err != nil {
 			return err
 		}
 	}
-	if del, ok := normalizeDelete(message); ok {
+	if del, ok := n.normalizeDelete(ctx, message); ok {
 		return n.send(ctx, &wuphfpb.ClientFrame{
 			Body: &wuphfpb.ClientFrame_MessageDelete{MessageDelete: del},
 		})
 	}
 	if message.IsEdit {
-		edit, ok := normalizeEdit(message)
+		edit, ok := n.normalizeEdit(ctx, message)
 		if !ok {
 			return nil
 		}
@@ -64,11 +91,34 @@ func (n Normalizer) Handle(ctx context.Context, message *events.Message) error {
 	})
 }
 
+// migrationsFor collects the chat identity migrations implied by this message,
+// deduped against ones already reported. Two signals feed it: WhatsApp's own
+// alt-address hint (RecipientAlt) and a canonical shift detected here, where the
+// chat's raw address differs from its resolved identity because the LID mapping
+// was learned after an earlier message already minted an endpoint under the
+// phone JID. Reporting the shift rebinds that stale endpoint instead of letting
+// the LID form mint a second mirror thread.
+func (n Normalizer) migrationsFor(message *events.Message, chat types.JID) []*wuphfpb.IdentityMigrated {
+	var migrations []*wuphfpb.IdentityMigrated
+	if migration := identityMigration(message); migration != nil {
+		migrations = append(migrations, migration)
+	}
+	if !message.Info.IsGroup {
+		if raw := message.Info.Chat.String(); raw != chat.String() {
+			migrations = append(migrations, &wuphfpb.IdentityMigrated{
+				OldChatId: raw,
+				NewChatId: chat.String(),
+			})
+		}
+	}
+	return n.migrations.unseen(migrations)
+}
+
 // normalizeEdit reports an inbound content revision. WhatsApp carries an edit as
 // a protocol message whose key names the original message and whose edited body
 // holds the new content; the core suppresses no-op and echoed edits by comparing
 // text, so only the original message id and new text are needed here.
-func normalizeEdit(message *events.Message) (*wuphfpb.MessageEditEvent, bool) {
+func (n Normalizer) normalizeEdit(ctx context.Context, message *events.Message) (*wuphfpb.MessageEditEvent, bool) {
 	protocol := message.Message.GetProtocolMessage()
 	if protocol == nil {
 		return nil, false
@@ -78,7 +128,7 @@ func normalizeEdit(message *events.Message) (*wuphfpb.MessageEditEvent, bool) {
 		return nil, false
 	}
 	event := &wuphfpb.MessageEditEvent{
-		ChatId:            message.Info.Chat.String(),
+		ChatId:            n.canonical(ctx, message.Info.Chat).String(),
 		PlatformMessageId: originalID,
 	}
 	if text := messageText(protocol.GetEditedMessage()); text != "" {
@@ -91,7 +141,7 @@ func normalizeEdit(message *events.Message) (*wuphfpb.MessageEditEvent, bool) {
 // protocol message of type REVOKE whose key names the revoked message; only the
 // original message id is needed, as the core resolves it to the logical message
 // and fans the deletion out to the other copies.
-func normalizeDelete(message *events.Message) (*wuphfpb.MessageDeleteEvent, bool) {
+func (n Normalizer) normalizeDelete(ctx context.Context, message *events.Message) (*wuphfpb.MessageDeleteEvent, bool) {
 	protocol := message.Message.GetProtocolMessage()
 	if protocol == nil || protocol.GetType() != waE2E.ProtocolMessage_REVOKE {
 		return nil, false
@@ -101,7 +151,7 @@ func normalizeDelete(message *events.Message) (*wuphfpb.MessageDeleteEvent, bool
 		return nil, false
 	}
 	return &wuphfpb.MessageDeleteEvent{
-		ChatId:            message.Info.Chat.String(),
+		ChatId:            n.canonical(ctx, message.Info.Chat).String(),
 		PlatformMessageId: revokedID,
 	}, true
 }
@@ -155,10 +205,14 @@ func (n Normalizer) normalize(ctx context.Context, message *events.Message) (*wu
 	if text == "" && len(attachments) == 0 {
 		return nil, false, nil
 	}
+	// The sender is canonicalized like the chat so one author is not shown as
+	// two identities when WhatsApp reports them under a phone JID on one message
+	// and a LID on the next.
+	sender := n.canonical(ctx, message.Info.Sender).String()
 	event := &wuphfpb.MessageCreateEvent{
-		ChatId:            message.Info.Chat.String(),
+		ChatId:            n.canonical(ctx, message.Info.Chat).String(),
 		PlatformMessageId: string(message.Info.ID),
-		Sender:            message.Info.Sender.String(),
+		Sender:            sender,
 		Attachments:       attachments,
 		TimestampMs:       message.Info.Timestamp.UnixMilli(),
 	}
@@ -172,7 +226,7 @@ func (n Normalizer) normalize(ctx context.Context, message *events.Message) (*wu
 	// present, and a direct chat shows both sides of the conversation, so
 	// without the label the account owner's messages and the peer's are
 	// indistinguishable on the mirror.
-	participant := message.Info.Sender.String()
+	participant := sender
 	event.Participant = &participant
 	if name := n.senderName(ctx, message); name != "" {
 		event.SenderName = &name

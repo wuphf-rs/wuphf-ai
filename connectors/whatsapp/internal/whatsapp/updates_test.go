@@ -14,7 +14,7 @@ import (
 
 func TestNormalizeGroupTextAndReply(t *testing.T) {
 	t.Parallel()
-	normalizer := NewNormalizer(make(chan *wuphfpb.ClientFrame), MediaCodec{}, nil)
+	normalizer := NewNormalizer(make(chan *wuphfpb.ClientFrame), MediaCodec{}, nil, nil)
 	event, ok, err := normalizer.normalize(context.Background(), &events.Message{
 		Info: types.MessageInfo{
 			MessageSource: types.MessageSource{
@@ -55,7 +55,7 @@ func (s stubNamer) PersonName(_ context.Context, jid types.JID, pushHint string)
 
 func TestNormalizeSetsChatTitleFromNamer(t *testing.T) {
 	t.Parallel()
-	normalizer := NewNormalizer(make(chan *wuphfpb.ClientFrame), MediaCodec{}, stubNamer{title: "Family Group"})
+	normalizer := NewNormalizer(make(chan *wuphfpb.ClientFrame), MediaCodec{}, stubNamer{title: "Family Group"}, nil)
 	event, ok, err := normalizer.normalize(context.Background(), &events.Message{
 		Info: types.MessageInfo{
 			MessageSource: types.MessageSource{
@@ -78,7 +78,7 @@ func TestNormalizeSetsChatTitleFromNamer(t *testing.T) {
 func TestHandleQueuesMessageCreateFrame(t *testing.T) {
 	t.Parallel()
 	inputs := make(chan *wuphfpb.ClientFrame, 1)
-	normalizer := NewNormalizer(inputs, MediaCodec{}, nil)
+	normalizer := NewNormalizer(inputs, MediaCodec{}, nil, nil)
 	if err := normalizer.Handle(context.Background(), &events.Message{
 		Info: types.MessageInfo{
 			MessageSource: types.MessageSource{
@@ -98,7 +98,7 @@ func TestHandleQueuesMessageCreateFrame(t *testing.T) {
 
 func TestNormalizeIncludesOwnUserMessagesForCoreEchoDecision(t *testing.T) {
 	t.Parallel()
-	normalizer := NewNormalizer(make(chan *wuphfpb.ClientFrame), MediaCodec{}, nil)
+	normalizer := NewNormalizer(make(chan *wuphfpb.ClientFrame), MediaCodec{}, nil, nil)
 	event, ok, err := normalizer.normalize(context.Background(), &events.Message{
 		Info: types.MessageInfo{
 			MessageSource: types.MessageSource{
@@ -117,7 +117,7 @@ func TestNormalizeIncludesOwnUserMessagesForCoreEchoDecision(t *testing.T) {
 
 func TestNormalizeDirectChatCarriesParticipant(t *testing.T) {
 	t.Parallel()
-	normalizer := NewNormalizer(make(chan *wuphfpb.ClientFrame), MediaCodec{}, stubNamer{})
+	normalizer := NewNormalizer(make(chan *wuphfpb.ClientFrame), MediaCodec{}, stubNamer{}, nil)
 	event, ok, err := normalizer.normalize(context.Background(), &events.Message{
 		Info: types.MessageInfo{
 			MessageSource: types.MessageSource{
@@ -142,7 +142,7 @@ func TestNormalizeDirectChatCarriesParticipant(t *testing.T) {
 
 func TestNormalizeLabelsOwnMessagesAsMe(t *testing.T) {
 	t.Parallel()
-	normalizer := NewNormalizer(make(chan *wuphfpb.ClientFrame), MediaCodec{}, stubNamer{})
+	normalizer := NewNormalizer(make(chan *wuphfpb.ClientFrame), MediaCodec{}, stubNamer{}, nil)
 	event, ok, err := normalizer.normalize(context.Background(), &events.Message{
 		Info: types.MessageInfo{
 			MessageSource: types.MessageSource{
@@ -164,7 +164,7 @@ func TestNormalizeLabelsOwnMessagesAsMe(t *testing.T) {
 
 func TestNormalizeTagsOwnLinkedDeviceMessages(t *testing.T) {
 	t.Parallel()
-	normalizer := NewNormalizer(make(chan *wuphfpb.ClientFrame), MediaCodec{}, stubNamer{})
+	normalizer := NewNormalizer(make(chan *wuphfpb.ClientFrame), MediaCodec{}, stubNamer{}, nil)
 	event, ok, err := normalizer.normalize(context.Background(), &events.Message{
 		Info: types.MessageInfo{
 			MessageSource: types.MessageSource{
@@ -186,7 +186,7 @@ func TestNormalizeTagsOwnLinkedDeviceMessages(t *testing.T) {
 
 func TestNormalizeTagsPeerLinkedDeviceMessages(t *testing.T) {
 	t.Parallel()
-	normalizer := NewNormalizer(make(chan *wuphfpb.ClientFrame), MediaCodec{}, stubNamer{})
+	normalizer := NewNormalizer(make(chan *wuphfpb.ClientFrame), MediaCodec{}, stubNamer{}, nil)
 	event, ok, err := normalizer.normalize(context.Background(), &events.Message{
 		Info: types.MessageInfo{
 			MessageSource: types.MessageSource{
@@ -203,6 +203,81 @@ func TestNormalizeTagsPeerLinkedDeviceMessages(t *testing.T) {
 	}
 	if event.GetSenderName() != "Alice (linked device)" {
 		t.Fatalf("sender name = %q, want peer linked-device tag", event.GetSenderName())
+	}
+}
+
+// fakeIdentity is a resolver that strips the device (like the real one) and
+// promotes configured phone JIDs to their LID, without touching a whatsmeow
+// store.
+type fakeIdentity struct{ lids map[string]types.JID }
+
+func (f fakeIdentity) Canonical(_ context.Context, jid types.JID) types.JID {
+	jid = jid.ToNonAD()
+	if lid, ok := f.lids[jid.String()]; ok {
+		return lid
+	}
+	return jid
+}
+
+func TestHandleCanonicalizesChatAndEmitsMigrationOnce(t *testing.T) {
+	t.Parallel()
+	phone := types.NewJID("15550001111", types.DefaultUserServer)
+	lid := types.NewJID("88887777", types.HiddenUserServer)
+	identity := fakeIdentity{lids: map[string]types.JID{phone.String(): lid}}
+	inputs := make(chan *wuphfpb.ClientFrame, 8)
+	normalizer := NewNormalizer(inputs, MediaCodec{}, stubNamer{}, identity)
+	message := &events.Message{
+		Info: types.MessageInfo{
+			MessageSource: types.MessageSource{Chat: phone, Sender: phone},
+			ID:            "wa-1",
+			PushName:      "Alice",
+		},
+		Message: &waE2E.Message{Conversation: proto.String("hi")},
+	}
+	if err := normalizer.Handle(context.Background(), message); err != nil {
+		t.Fatalf("Handle() error = %v", err)
+	}
+	migration := (<-inputs).GetIdentityMigrated()
+	if migration.GetOldChatId() != phone.String() || migration.GetNewChatId() != lid.String() {
+		t.Fatalf("first frame = %#v, want phone-to-LID migration", migration)
+	}
+	create := (<-inputs).GetMessageCreate()
+	if create.GetChatId() != lid.String() {
+		t.Fatalf("chat id = %q, want canonical LID", create.GetChatId())
+	}
+	if create.GetParticipant() != lid.String() {
+		t.Fatalf("participant = %q, want canonical LID", create.GetParticipant())
+	}
+
+	// A second message on the same chat must not re-report the migration, or the
+	// migration stream would carry one entry per message.
+	message.Info.ID = "wa-2"
+	if err := normalizer.Handle(context.Background(), message); err != nil {
+		t.Fatalf("Handle() error = %v", err)
+	}
+	if next := (<-inputs).GetMessageCreate(); next.GetPlatformMessageId() != "wa-2" {
+		t.Fatalf("second message did not lead with its create; migration re-emitted")
+	}
+}
+
+func TestNormalizeStripsSenderDeviceFromIdentity(t *testing.T) {
+	t.Parallel()
+	normalizer := NewNormalizer(make(chan *wuphfpb.ClientFrame), MediaCodec{}, stubNamer{}, nil)
+	event, ok, err := normalizer.normalize(context.Background(), &events.Message{
+		Info: types.MessageInfo{
+			MessageSource: types.MessageSource{
+				Chat:   types.NewJID("15550001111", types.DefaultUserServer),
+				Sender: types.JID{User: "15550001111", Server: types.DefaultUserServer, Device: 7},
+			},
+			ID: "wa-dev",
+		},
+		Message: &waE2E.Message{Conversation: proto.String("hi")},
+	})
+	if err != nil || !ok {
+		t.Fatalf("normalize() ok=%v err=%v", ok, err)
+	}
+	if event.GetParticipant() != "15550001111@s.whatsapp.net" {
+		t.Fatalf("participant = %q, want per-device suffix stripped", event.GetParticipant())
 	}
 }
 
