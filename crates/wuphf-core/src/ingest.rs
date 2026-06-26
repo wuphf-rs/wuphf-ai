@@ -346,4 +346,59 @@ where
             dispatches,
         })
     }
+
+    /// Surface a read receipt as a seen signal on the message's origin copy. The
+    /// receipt is observed at the reader's endpoint; the signal goes to the
+    /// endpoint the message was authored on (its origin), so the author's side
+    /// can show it was seen. The reader's own (from_me) reads are ignored, as is
+    /// a receipt for a message authored on the reading side (nothing to surface).
+    /// The connector decides how to render it (Telegram reacts 👀 in DMs).
+    pub(crate) async fn ingest_read_receipt(
+        &self,
+        reader_endpoint: EndpointId,
+        platform_message_id: String,
+        from_me: bool,
+    ) -> Result<IngestOutcome, CoreError> {
+        if from_me {
+            return Ok(IngestOutcome::Ignored(IgnoreReason::Unmatched));
+        }
+        let Some(message_id) = self
+            .storage
+            .message_id_for_copy(reader_endpoint, &platform_message_id)
+            .await?
+        else {
+            return Ok(IngestOutcome::Ignored(IgnoreReason::Unmatched));
+        };
+        let Some(origin) = self.storage.received_copy(message_id).await? else {
+            return Ok(IngestOutcome::Ignored(IgnoreReason::Unmatched));
+        };
+        if origin.endpoint_id == reader_endpoint {
+            return Ok(IngestOutcome::Ignored(IgnoreReason::Unmatched));
+        }
+        let endpoint = self.storage.endpoint(origin.endpoint_id).await?;
+        let replica_set_id = self
+            .storage
+            .replica_set_for_endpoint(origin.endpoint_id)
+            .await?
+            .ok_or(CoreError::OriginWithoutReplicaSet(origin.endpoint_id))?;
+        let command = wuphf_model::DispatchCommand {
+            target_endpoint: endpoint.id,
+            target_connector: endpoint.connector_id.clone(),
+            target: wuphf_model::TargetAddress {
+                address: endpoint.address(),
+                provision_thread: None,
+            },
+            payload: wuphf_model::DispatchPayload::SeenReceipt {
+                message_id,
+                replica_set_id,
+                target_platform_message_id: origin.platform_message_id,
+            },
+        };
+        let dispatches = vec![self.storage.enqueue_dispatch(command, None).await?];
+        Ok(IngestOutcome::Routed {
+            message_id,
+            routing: RoutingOutcome::default(),
+            dispatches,
+        })
+    }
 }

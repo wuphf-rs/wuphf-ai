@@ -350,6 +350,18 @@ impl Storage for SqliteStorage {
             .map_err(Into::into)
     }
 
+    async fn received_copy(&self, message_id: MessageId) -> StorageResult<Option<MessageCopy>> {
+        let row = sqlx::query(
+            "SELECT payload FROM message_copies WHERE message_id = ? AND sent = 0 LIMIT 1",
+        )
+        .bind(message_id.to_string())
+        .fetch_optional(&self.pool)
+        .await?;
+        row.map(|row| serde_json::from_str(row.get("payload")))
+            .transpose()
+            .map_err(Into::into)
+    }
+
     async fn put_contact(&self, contact: Contact) -> StorageResult<()> {
         upsert_json(&self.pool, "contacts", "id", contact.id.clone(), &contact).await
     }
@@ -461,8 +473,13 @@ impl Storage for SqliteStorage {
             .bind(dispatch.id.to_string())
             .execute(&mut *transaction)
             .await?;
-        // A retitle carries no logical message, so it records no copy and
-        // releases no replies; acknowledging it just closes out the dispatch.
+        // Signals that act on an existing copy (reactions, delivery acks, seen
+        // receipts) and retitles record no copy and release no replies;
+        // acknowledging them just closes out the dispatch.
+        if !dispatch.command.records_copy() {
+            transaction.commit().await?;
+            return Ok(Vec::new());
+        }
         let Some(message_id) = dispatch.command.message_id() else {
             transaction.commit().await?;
             return Ok(Vec::new());

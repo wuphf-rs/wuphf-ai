@@ -292,6 +292,20 @@ impl Storage for InMemoryStorage {
             .cloned())
     }
 
+    async fn received_copy(&self, message_id: MessageId) -> StorageResult<Option<MessageCopy>> {
+        let state = self.state.read().await;
+        Ok(state
+            .copies
+            .iter()
+            .find(|((copy_message_id, _), copy)| {
+                *copy_message_id == message_id
+                    && !state
+                        .sent_copies
+                        .contains(&(copy.endpoint_id, copy.platform_message_id.clone()))
+            })
+            .map(|(_, copy)| copy.clone()))
+    }
+
     async fn put_contact(&self, contact: Contact) -> StorageResult<()> {
         self.state
             .write()

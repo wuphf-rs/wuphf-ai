@@ -122,6 +122,20 @@ impl DispatchCommand {
         }
     }
 
+    /// Whether acknowledging this dispatch records a delivered copy. Only the
+    /// message-bearing payloads establish (or re-affirm) a copy; reactions,
+    /// delivery acks, seen receipts, and retitles act on existing copies and
+    /// must not record one — a signal targeting the origin copy would otherwise
+    /// flip its received copy to a sent copy.
+    pub fn records_copy(&self) -> bool {
+        matches!(
+            self.payload,
+            DispatchPayload::MessageCreate { .. }
+                | DispatchPayload::MessageEdit { .. }
+                | DispatchPayload::MessageDelete { .. }
+        )
+    }
+
     pub fn message_replica_set_id(&self) -> ReplicaSetId {
         match &self.payload {
             DispatchPayload::MessageCreate { message, .. }

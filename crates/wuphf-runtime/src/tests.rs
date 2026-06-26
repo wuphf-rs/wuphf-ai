@@ -193,12 +193,14 @@ async fn acknowledgement_releases_reply_with_target_native_parent_id() {
         })
         .await
         .unwrap();
-    let reply_dispatch = channels.dispatches.recv().await.unwrap();
-    let DispatchPayload::MessageCreate { reply_context, .. } = reply_dispatch.command.payload
-    else {
-        panic!("released reply should be a message create");
+    // Acknowledging the parent also emits a delivery-ack to the origin, so skip
+    // to the released reply create among the dispatches.
+    let reply_context = loop {
+        let dispatch = channels.dispatches.recv().await.unwrap();
+        if let DispatchPayload::MessageCreate { reply_context, .. } = dispatch.command.payload {
+            break reply_context.expect("reply context set on release");
+        }
     };
-    let reply_context = reply_context.expect("reply context set on release");
     assert_eq!(reply_context.platform_message_id, "tg-parent");
     drop(channels.inbound);
     task.await.unwrap().unwrap();

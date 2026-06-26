@@ -103,9 +103,14 @@ where
                 )
                 .await
             }
-            // TODO(read receipts #84): surface as a seen receipt on the origin
-            // copy. Unreachable until the runtime translates the inbound frame.
-            EventPayload::ReadReceipt { .. } => Err(CoreError::UnsupportedEvent),
+            EventPayload::ReadReceipt {
+                platform_message_id,
+                reader: _,
+                from_me,
+            } => {
+                self.ingest_read_receipt(origin_endpoint, platform_message_id, from_me)
+                    .await
+            }
         }
     }
 }

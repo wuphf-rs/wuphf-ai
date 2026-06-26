@@ -113,6 +113,9 @@ pub trait Storage: Send + Sync + 'static {
         message_id: MessageId,
         endpoint_id: EndpointId,
     ) -> StorageResult<Option<MessageCopy>>;
+    /// The copy of a message at the endpoint it was received on (its origin), if
+    /// recorded. Used to target the origin with delivery acks and seen receipts.
+    async fn received_copy(&self, message_id: MessageId) -> StorageResult<Option<MessageCopy>>;
     async fn put_contact(&self, contact: Contact) -> StorageResult<()>;
     async fn put_chat_settings(&self, settings: ChatSettings) -> StorageResult<()>;
     async fn put_media(&self, media: MediaBlob, stored_at_ms: i64) -> StorageResult<()>;

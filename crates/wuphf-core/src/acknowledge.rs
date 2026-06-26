@@ -47,9 +47,51 @@ where
             )
             .await?;
         if let Some(dispatch) = dispatch {
+            if let Some(ack) = self.delivery_ack_for(&dispatch).await? {
+                dispatches.push(ack);
+            }
             dispatches.extend(self.resume_provisioned(&dispatch).await?);
         }
         Ok(dispatches)
+    }
+
+    /// Build a delivery-ack dispatch for a just-acknowledged mirror create: a
+    /// signal to the message's origin endpoint that the copy reached a mirror.
+    /// Only message creates trigger it (an edit/delete/reaction ack is not a new
+    /// delivery), and only when the origin copy is known. The connector decides
+    /// how to surface it (Telegram reacts 👍; sources ignore it). Multiple
+    /// mirrors each emit one; the signal is idempotent.
+    async fn delivery_ack_for(
+        &self,
+        dispatch: &StoredDispatch,
+    ) -> Result<Option<StoredDispatch>, CoreError> {
+        if !matches!(
+            dispatch.command.payload,
+            wuphf_model::DispatchPayload::MessageCreate { .. }
+        ) {
+            return Ok(None);
+        }
+        let Some(message_id) = dispatch.command.message_id() else {
+            return Ok(None);
+        };
+        let Some(origin) = self.storage.received_copy(message_id).await? else {
+            return Ok(None);
+        };
+        let endpoint = self.storage.endpoint(origin.endpoint_id).await?;
+        let command = wuphf_model::DispatchCommand {
+            target_endpoint: endpoint.id,
+            target_connector: endpoint.connector_id.clone(),
+            target: wuphf_model::TargetAddress {
+                address: endpoint.address(),
+                provision_thread: None,
+            },
+            payload: wuphf_model::DispatchPayload::DeliveryAck {
+                message_id,
+                replica_set_id: dispatch.command.message_replica_set_id(),
+                target_platform_message_id: origin.platform_message_id,
+            },
+        };
+        Ok(Some(self.storage.enqueue_dispatch(command, None).await?))
     }
 
     /// Settle one provisioning dispatch (acknowledged or failed) against its

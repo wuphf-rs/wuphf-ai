@@ -320,8 +320,18 @@ async fn concurrent_messages_provision_one_thread_and_replay_the_rest() {
         })
         .await
         .unwrap();
-    assert_eq!(replayed.len(), 1);
-    let command = &replayed[0].command;
+    // Acknowledging the create also emits a delivery-ack to the origin, so the
+    // replayed stashed message is found among the released dispatches.
+    let command = &replayed
+        .iter()
+        .find(|dispatch| {
+            matches!(
+                dispatch.command.payload,
+                DispatchPayload::MessageCreate { .. }
+            )
+        })
+        .expect("the stashed message is replayed")
+        .command;
     assert_eq!(command.target_connector, ConnectorId(TELEGRAM.into()));
     assert!(command.target.provision_thread.is_none());
     assert_eq!(command.target.address.thread_id, Some("777".into()));
@@ -787,6 +797,115 @@ async fn reaction_before_delivery_blocks_then_releases_with_native_id() {
     };
     assert_eq!(target_platform_message_id, "tg-1");
     assert_eq!(emoji.as_deref(), Some("👍"));
+}
+
+#[tokio::test]
+async fn acknowledging_a_mirror_create_emits_a_delivery_ack_to_the_origin() {
+    let core = core(vec![direct_rule()]);
+    let IngestOutcome::Routed { dispatches, .. } = core
+        .ingest(event(WHATSAPP, "12345@s.whatsapp.net", "wa-1", None))
+        .await
+        .unwrap()
+    else {
+        panic!("create should route");
+    };
+    let released = core
+        .acknowledge_dispatch(DispatchAcknowledgement {
+            dispatch_id: dispatches[0].id,
+            platform_message_id: "tg-1".into(),
+            thread_id: None,
+        })
+        .await
+        .unwrap();
+    let ack = released
+        .iter()
+        .find(|dispatch| {
+            matches!(
+                dispatch.command.payload,
+                DispatchPayload::DeliveryAck { .. }
+            )
+        })
+        .expect("acknowledging the mirror create emits a delivery ack");
+    assert_eq!(ack.command.target_connector, ConnectorId(WHATSAPP.into()));
+    let DispatchPayload::DeliveryAck {
+        target_platform_message_id,
+        ..
+    } = &ack.command.payload
+    else {
+        unreachable!();
+    };
+    assert_eq!(target_platform_message_id, "wa-1");
+}
+
+#[tokio::test]
+async fn read_receipt_on_a_mirror_copy_surfaces_a_seen_receipt_on_the_origin() {
+    let core = core(vec![direct_rule()]);
+    let IngestOutcome::Routed {
+        message_id,
+        dispatches,
+        ..
+    } = core
+        .ingest(event(WHATSAPP, "12345@s.whatsapp.net", "wa-1", None))
+        .await
+        .unwrap()
+    else {
+        panic!("create should route");
+    };
+    let telegram = dispatches[0].command.target_endpoint;
+    core.record_dispatched_copy(message_id, telegram, "tg-1")
+        .await
+        .unwrap();
+
+    let seen = core
+        .ingest(NormalizedEvent {
+            source: SourceAddress {
+                connector_id: ConnectorId(TELEGRAM.into()),
+                address: PlatformAddress::new("-100123", Some("12".into())),
+                chat_title: None,
+            },
+            payload: EventPayload::ReadReceipt {
+                platform_message_id: "tg-1".into(),
+                reader: "peer".into(),
+                from_me: false,
+            },
+        })
+        .await
+        .unwrap();
+    let dispatch = &seen.dispatches()[0];
+    assert_eq!(
+        dispatch.command.target_connector,
+        ConnectorId(WHATSAPP.into())
+    );
+    let DispatchPayload::SeenReceipt {
+        target_platform_message_id,
+        ..
+    } = &dispatch.command.payload
+    else {
+        panic!("read receipt should surface a seen receipt");
+    };
+    assert_eq!(target_platform_message_id, "wa-1");
+}
+
+#[tokio::test]
+async fn own_read_receipt_is_ignored() {
+    let core = core(vec![direct_rule()]);
+    assert_eq!(
+        core.ingest(NormalizedEvent {
+            source: SourceAddress {
+                connector_id: ConnectorId(WHATSAPP.into()),
+                address: PlatformAddress::new("12345@s.whatsapp.net", None),
+                chat_title: None,
+            },
+            payload: EventPayload::ReadReceipt {
+                platform_message_id: "wa-1".into(),
+                reader: "me".into(),
+                from_me: true,
+            },
+        })
+        .await
+        .unwrap(),
+        IngestOutcome::Ignored(IgnoreReason::Unmatched),
+    );
 }
 
 #[tokio::test]
