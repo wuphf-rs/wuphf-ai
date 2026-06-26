@@ -71,6 +71,11 @@ type Sender interface {
 	// returns the reacted copy's platform message id, which is left unchanged so
 	// the reaction does not disturb the copy mapping.
 	ApplyReaction(context.Context, *wuphfpb.ReactionDispatch) (messageID string, err error)
+	// AckDelivery surfaces that a sent message reached the source (a 👍
+	// reaction); MarkSeen surfaces that it was read (a 👀 reaction). Each returns
+	// the target copy's platform message id unchanged.
+	AckDelivery(context.Context, *wuphfpb.DeliveryAckDispatch) (messageID string, err error)
+	MarkSeen(context.Context, *wuphfpb.SeenReceiptDispatch) (messageID string, err error)
 }
 
 // sendOp performs one outbound delivery attempt, returning the resulting
@@ -204,6 +209,22 @@ func (c Client) runSession(
 				dispatch := body.Reaction
 				if err := c.deliver(ctx, stream, dispatch.DispatchId, func(ctx context.Context) (string, string, error) {
 					messageID, err := sender.ApplyReaction(ctx, dispatch)
+					return messageID, "", err
+				}); err != nil {
+					return err
+				}
+			case *wuphfpb.ServerFrame_DeliveryAck:
+				dispatch := body.DeliveryAck
+				if err := c.deliver(ctx, stream, dispatch.DispatchId, func(ctx context.Context) (string, string, error) {
+					messageID, err := sender.AckDelivery(ctx, dispatch)
+					return messageID, "", err
+				}); err != nil {
+					return err
+				}
+			case *wuphfpb.ServerFrame_SeenReceipt:
+				dispatch := body.SeenReceipt
+				if err := c.deliver(ctx, stream, dispatch.DispatchId, func(ctx context.Context) (string, string, error) {
+					messageID, err := sender.MarkSeen(ctx, dispatch)
 					return messageID, "", err
 				}); err != nil {
 					return err

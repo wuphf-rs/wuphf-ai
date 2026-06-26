@@ -48,11 +48,16 @@ func (c Connector) Run(ctx context.Context) error {
 	normalizer := NewNormalizer(inputs, NewMediaCodec(media, client), newChatNamer(client), newIdentityResolver(client))
 	eventErrors := make(chan error, 1)
 	client.AddEventHandler(func(raw any) {
-		message, ok := raw.(*events.Message)
-		if !ok {
+		var err error
+		switch evt := raw.(type) {
+		case *events.Message:
+			err = normalizer.Handle(ctx, evt)
+		case *events.Receipt:
+			err = normalizer.HandleReceipt(ctx, evt)
+		default:
 			return
 		}
-		if err := normalizer.Handle(ctx, message); err != nil {
+		if err != nil {
 			select {
 			case eventErrors <- err:
 			default:

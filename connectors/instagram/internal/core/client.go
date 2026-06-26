@@ -58,6 +58,13 @@ type Sender interface {
 // platform message id and, when a thread was provisioned, its id.
 type sendOp func(context.Context) (messageID string, threadID string, err error)
 
+// ackOnly is a send op that performs no platform action and acknowledges the
+// dispatch with the given target id. It settles signals the connector chooses
+// not to render, so the core stops redelivering them.
+func ackOnly(targetMessageID string) sendOp {
+	return func(context.Context) (string, string, error) { return targetMessageID, "", nil }
+}
+
 type Client struct {
 	cfg    config.File
 	logger zerolog.Logger
@@ -168,6 +175,24 @@ func (c Client) runSession(
 					messageID, err := sender.DeleteMessage(ctx, dispatch)
 					return messageID, "", err
 				}); err != nil {
+					return err
+				}
+			case *wuphfpb.ServerFrame_Reaction:
+				// Instagram does not surface mirrored reactions, delivery acks, or
+				// seen receipts; it acknowledges the signal so the core stops
+				// redelivering it.
+				dispatch := body.Reaction
+				if err := c.deliver(ctx, stream, dispatch.DispatchId, ackOnly(dispatch.TargetPlatformMessageId)); err != nil {
+					return err
+				}
+			case *wuphfpb.ServerFrame_DeliveryAck:
+				dispatch := body.DeliveryAck
+				if err := c.deliver(ctx, stream, dispatch.DispatchId, ackOnly(dispatch.TargetPlatformMessageId)); err != nil {
+					return err
+				}
+			case *wuphfpb.ServerFrame_SeenReceipt:
+				dispatch := body.SeenReceipt
+				if err := c.deliver(ctx, stream, dispatch.DispatchId, ackOnly(dispatch.TargetPlatformMessageId)); err != nil {
 					return err
 				}
 			case *wuphfpb.ServerFrame_Rejected:

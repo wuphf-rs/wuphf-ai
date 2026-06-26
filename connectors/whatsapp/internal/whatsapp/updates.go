@@ -161,6 +161,32 @@ func (n Normalizer) normalizeDelete(ctx context.Context, message *events.Message
 	}, true
 }
 
+// HandleReceipt reports a read receipt as a seen signal. Only peer reads in a
+// direct chat are bridged: seen receipts are a DM feature, and group reads are
+// per-participant noise. The core surfaces it on the origin copy (a 👀 reaction
+// on the Telegram side); the chat and reader are canonicalized like any id.
+func (n Normalizer) HandleReceipt(ctx context.Context, receipt *events.Receipt) error {
+	if receipt.Type != types.ReceiptTypeRead || receipt.IsGroup {
+		return nil
+	}
+	chat := n.canonical(ctx, receipt.Chat).String()
+	reader := n.canonical(ctx, receipt.Sender).String()
+	for _, id := range receipt.MessageIDs {
+		event := &wuphfpb.ReadReceipt{
+			ChatId:            chat,
+			PlatformMessageId: string(id),
+			Reader:            reader,
+			FromMe:            receipt.IsFromMe,
+		}
+		if err := n.send(ctx, &wuphfpb.ClientFrame{
+			Body: &wuphfpb.ClientFrame_ReadReceipt{ReadReceipt: event},
+		}); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // normalizeReaction reports an inbound reaction. WhatsApp carries a reaction as
 // a message whose ReactionMessage names the reacted message and holds the emoji
 // (empty text clears the reactor's reaction). The reactor is the message sender,

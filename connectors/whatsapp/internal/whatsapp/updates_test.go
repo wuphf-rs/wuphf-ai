@@ -339,6 +339,52 @@ func TestNormalizeReactionClearedHasEmptyEmoji(t *testing.T) {
 	}
 }
 
+func TestHandleReceiptEmitsReadReceiptForDM(t *testing.T) {
+	t.Parallel()
+	inputs := make(chan *wuphfpb.ClientFrame, 4)
+	normalizer := NewNormalizer(inputs, MediaCodec{}, stubNamer{}, nil)
+	err := normalizer.HandleReceipt(context.Background(), &events.Receipt{
+		MessageSource: types.MessageSource{
+			Chat:   types.NewJID("15550001111", types.DefaultUserServer),
+			Sender: types.NewJID("15550001111", types.DefaultUserServer),
+		},
+		MessageIDs: []types.MessageID{"wa-1"},
+		Type:       types.ReceiptTypeRead,
+	})
+	if err != nil {
+		t.Fatalf("HandleReceipt() error = %v", err)
+	}
+	receipt := (<-inputs).GetReadReceipt()
+	if receipt.GetPlatformMessageId() != "wa-1" || receipt.GetChatId() != "15550001111@s.whatsapp.net" {
+		t.Fatalf("read receipt = %#v", receipt)
+	}
+}
+
+func TestHandleReceiptSkipsGroupAndNonRead(t *testing.T) {
+	t.Parallel()
+	inputs := make(chan *wuphfpb.ClientFrame, 4)
+	normalizer := NewNormalizer(inputs, MediaCodec{}, stubNamer{}, nil)
+	// A group read is per-participant noise, not a DM seen receipt.
+	if err := normalizer.HandleReceipt(context.Background(), &events.Receipt{
+		MessageSource: types.MessageSource{Chat: types.NewJID("1", types.GroupServer), IsGroup: true},
+		MessageIDs:    []types.MessageID{"x"},
+		Type:          types.ReceiptTypeRead,
+	}); err != nil {
+		t.Fatalf("HandleReceipt() error = %v", err)
+	}
+	// A non-read receipt (delivered/read-self) is not a seen receipt.
+	if err := normalizer.HandleReceipt(context.Background(), &events.Receipt{
+		MessageSource: types.MessageSource{Chat: types.NewJID("2", types.DefaultUserServer)},
+		MessageIDs:    []types.MessageID{"y"},
+		Type:          types.ReceiptTypeReadSelf,
+	}); err != nil {
+		t.Fatalf("HandleReceipt() error = %v", err)
+	}
+	if len(inputs) != 0 {
+		t.Fatalf("emitted %d frames, want none", len(inputs))
+	}
+}
+
 func TestIdentityMigrationTreatsLIDAsCanonical(t *testing.T) {
 	t.Parallel()
 	phone := types.NewJID("15550001111", types.DefaultUserServer)

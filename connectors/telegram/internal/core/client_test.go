@@ -33,6 +33,14 @@ func (s *permanentSender) ApplyReaction(context.Context, *wuphfpb.ReactionDispat
 	return "", nil
 }
 
+func (s *permanentSender) AckDelivery(context.Context, *wuphfpb.DeliveryAckDispatch) (string, error) {
+	return "", nil
+}
+
+func (s *permanentSender) MarkSeen(context.Context, *wuphfpb.SeenReceiptDispatch) (string, error) {
+	return "", nil
+}
+
 type flakySender struct {
 	failures int
 	calls    int
@@ -59,6 +67,14 @@ func (s *flakySender) RetitleThread(context.Context, *wuphfpb.MessageRetitleDisp
 }
 
 func (s *flakySender) ApplyReaction(context.Context, *wuphfpb.ReactionDispatch) (string, error) {
+	return "", nil
+}
+
+func (s *flakySender) AckDelivery(context.Context, *wuphfpb.DeliveryAckDispatch) (string, error) {
+	return "", nil
+}
+
+func (s *flakySender) MarkSeen(context.Context, *wuphfpb.SeenReceiptDispatch) (string, error) {
 	return "", nil
 }
 

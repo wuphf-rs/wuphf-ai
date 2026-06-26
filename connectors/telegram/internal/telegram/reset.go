@@ -100,7 +100,7 @@ func resetForum(ctx context.Context, api *tg.Client, peers *PeerCache, targetCha
 // the offset trio (date, top message id, topic id) Telegram expects.
 func collectForumTopics(ctx context.Context, api *tg.Client, peer tg.InputPeerClass) ([]int, error) {
 	var (
-		ids                                []int
+		ids                               []int
 		offsetDate, offsetID, offsetTopic int
 	)
 	for {

@@ -185,6 +185,38 @@ func (s Sender) ApplyReaction(ctx context.Context, dispatch *wuphfpb.ReactionDis
 	return dispatch.TargetPlatformMessageId, nil
 }
 
+// AckDelivery surfaces a delivery acknowledgement as a 👍 reaction on the
+// message the user sent, confirming it reached the source. MarkSeen surfaces a
+// read receipt as a 👀 reaction. Both leave the target's native id unchanged
+// for the acknowledgement.
+func (s Sender) AckDelivery(ctx context.Context, dispatch *wuphfpb.DeliveryAckDispatch) (string, error) {
+	return s.react(ctx, dispatch.TargetChatId, dispatch.TargetPlatformMessageId, "👍")
+}
+
+func (s Sender) MarkSeen(ctx context.Context, dispatch *wuphfpb.SeenReceiptDispatch) (string, error) {
+	return s.react(ctx, dispatch.TargetChatId, dispatch.TargetPlatformMessageId, "👀")
+}
+
+// react sets one of the bridge's own native reactions on a message. It is used
+// only for the bridge's signalling emoji (delivery 👍, seen 👀); mirrored source
+// reactions render as text instead.
+func (s Sender) react(ctx context.Context, chatID, messageID, emoji string) (string, error) {
+	peer, err := s.peers.InputPeer(chatID)
+	if err != nil {
+		return "", err
+	}
+	id, err := strconv.Atoi(messageID)
+	if err != nil {
+		return "", coreclient.Permanent(fmt.Errorf("invalid Telegram target message id %q: %w", messageID, err))
+	}
+	request := &tg.MessagesSendReactionRequest{Peer: peer, MsgID: id}
+	request.SetReaction([]tg.ReactionClass{&tg.ReactionEmoji{Emoticon: emoji}})
+	if _, err := s.api.MessagesSendReaction(ctx, request); err != nil {
+		return "", fmt.Errorf("send Telegram reaction: %w", err)
+	}
+	return messageID, nil
+}
+
 // RetitleThread renames an already-provisioned forum topic when its source
 // conversation's title changes. The thread id is returned unchanged for the
 // acknowledgement, as a retitle creates no new message.
