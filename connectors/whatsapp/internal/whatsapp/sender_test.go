@@ -12,14 +12,16 @@ import (
 
 type stubSendClient struct {
 	sent       *waE2E.Message
+	sentTo     types.JID
 	uploaded   []byte
 	media      whatsmeow.MediaType
 	editedKey  types.MessageID
 	revokedKey types.MessageID
 }
 
-func (s *stubSendClient) SendMessage(_ context.Context, _ types.JID, message *waE2E.Message, _ ...whatsmeow.SendRequestExtra) (whatsmeow.SendResponse, error) {
+func (s *stubSendClient) SendMessage(_ context.Context, to types.JID, message *waE2E.Message, _ ...whatsmeow.SendRequestExtra) (whatsmeow.SendResponse, error) {
 	s.sent = message
+	s.sentTo = to
 	return whatsmeow.SendResponse{ID: "sent-id"}, nil
 }
 
@@ -238,6 +240,31 @@ func TestSendOutboundReplyQuotesMediaParent(t *testing.T) {
 	}
 	if image.GetCaption() != parentCaption || image.GetMimetype() != mime {
 		t.Fatalf("quoted image = %#v", image)
+	}
+}
+
+// Inbound chats are canonicalized to a LID (see identityResolver), so a reply
+// dispatch targets a `@lid` chat id. whatsmeow sends natively to a LID JID, so
+// the dispatch must reach SendMessage with the LID as the destination chat,
+// landing the reply in the same conversation the original arrived on.
+func TestSendDeliversToCanonicalLIDTarget(t *testing.T) {
+	t.Parallel()
+	client := &stubSendClient{}
+	sender := NewSender(client, &stubBroker{}, types.JID{})
+	lid := types.NewJID("88887777", types.HiddenUserServer)
+	text := "reply to lid chat"
+	messageID, _, err := sender.SendMessage(context.Background(), &wuphfpb.MessageCreateDispatch{
+		TargetChatId: lid.String(),
+		Text:         &text,
+	})
+	if err != nil {
+		t.Fatalf("SendMessage() error = %v", err)
+	}
+	if messageID != "sent-id" {
+		t.Fatalf("SendMessage() id = %q", messageID)
+	}
+	if client.sentTo != lid {
+		t.Fatalf("sent to %q, want canonical LID %q", client.sentTo, lid)
 	}
 }
 
