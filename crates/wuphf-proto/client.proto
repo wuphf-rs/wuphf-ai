@@ -68,6 +68,33 @@ message DispatchFailed {
   string reason = 2;
 }
 
+// The platform reported a reaction change on a message. Reactions are toggles:
+// `emoji` empty means the reactor cleared their reaction. The connector reports
+// the reacted message's native id (resolved to the logical message like an
+// edit), the reactor, and `from_me` so the core can recognize a reaction it
+// applied being echoed back. Mirrored reactions render as text, so this has no
+// dispatch counterpart in the source-to-mirror direction.
+message ReactionEvent {
+  string chat_id = 1;
+  optional string thread_id = 2;
+  string platform_message_id = 3;
+  string sender = 4;
+  optional string sender_name = 5;
+  string emoji = 6;
+  bool from_me = 7;
+}
+
+// The platform reported that a message was read. Used to surface a seen receipt
+// on the origin copy (a 👀 reaction in DMs). The connector reports the read
+// message's native id; the core resolves it to the logical message.
+message ReadReceipt {
+  string chat_id = 1;
+  optional string thread_id = 2;
+  string platform_message_id = 3;
+  string reader = 4;
+  bool from_me = 5;
+}
+
 message ClientFrame {
   oneof body {
     Registration registration = 1;
@@ -77,5 +104,7 @@ message ClientFrame {
     DispatchFailed dispatch_failed = 5;
     MessageEditEvent message_edit = 6;
     MessageDeleteEvent message_delete = 7;
+    ReactionEvent reaction = 8;
+    ReadReceipt read_receipt = 9;
   }
 }

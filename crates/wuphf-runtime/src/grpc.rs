@@ -216,6 +216,15 @@ fn input_from_proto(
         Some(pb::client_frame::Body::Registration(_)) => {
             Err(WireError("registration already completed".into()))
         }
+        // TODO(reactions #85): translate into EventPayload::ReactionSet / ReadReceipt
+        // once the model carries them; rejected for now so the wire is defined but
+        // inert.
+        Some(pb::client_frame::Body::Reaction(_)) => {
+            Err(WireError("reaction events are not handled yet".into()))
+        }
+        Some(pb::client_frame::Body::ReadReceipt(_)) => {
+            Err(WireError("read receipts are not handled yet".into()))
+        }
         None => Err(WireError("client frame body required".into())),
     }
 }

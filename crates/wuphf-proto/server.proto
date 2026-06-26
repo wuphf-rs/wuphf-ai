@@ -101,6 +101,43 @@ message MessageRetitleDispatch {
   string title = 4;
 }
 
+// A reaction on a message changed on another side and should be reflected on
+// this copy. Addresses the copy by its native id and carries the reactor and
+// the new emoji (`emoji` empty means that reactor cleared theirs). The core
+// only resolves and routes the signal; the connector decides how to render it
+// (e.g. Telegram shows it as a companion text line rather than a native
+// reaction). Acknowledged like any dispatch.
+message ReactionDispatch {
+  string dispatch_id = 1;
+  string target_chat_id = 2;
+  optional string target_thread_id = 3;
+  string target_platform_message_id = 4;
+  string reactor = 5;
+  optional string reactor_name = 6;
+  string emoji = 7;
+}
+
+// Signal that a message this connector delivered has been replicated to all of
+// its mirrors. Addresses the origin copy by its native id; the connector
+// decides how to surface it (e.g. a 👍 reaction). Acknowledged like any
+// dispatch.
+message DeliveryAckDispatch {
+  string dispatch_id = 1;
+  string target_chat_id = 2;
+  optional string target_thread_id = 3;
+  string target_platform_message_id = 4;
+}
+
+// Signal that a message this connector delivered was read on a mirror.
+// Addresses the origin copy by its native id; the connector decides how to
+// surface it (e.g. a 👀 reaction in DMs). Acknowledged like any dispatch.
+message SeenReceiptDispatch {
+  string dispatch_id = 1;
+  string target_chat_id = 2;
+  optional string target_thread_id = 3;
+  string target_platform_message_id = 4;
+}
+
 message Rejected {
   string reason = 1;
 }
@@ -112,5 +149,8 @@ message ServerFrame {
     MessageEditDispatch message_edit = 3;
     MessageDeleteDispatch message_delete = 4;
     MessageRetitleDispatch message_retitle = 5;
+    ReactionDispatch reaction = 6;
+    DeliveryAckDispatch delivery_ack = 7;
+    SeenReceiptDispatch seen_receipt = 8;
   }
 }
