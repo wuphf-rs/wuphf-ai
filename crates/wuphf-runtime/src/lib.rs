@@ -241,7 +241,8 @@ where
         EventPayload::MessageCreate(_) => "create",
         EventPayload::MessageEdit { .. } => "edit",
         EventPayload::MessageDelete { .. } => "delete",
-        EventPayload::ReactionAdd(_) => "reaction",
+        EventPayload::ReactionSet { .. } => "reaction",
+        EventPayload::ReadReceipt { .. } => "read_receipt",
     };
     let outcome = core.ingest(event).await?;
     match &outcome {

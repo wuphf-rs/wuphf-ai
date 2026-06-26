@@ -84,7 +84,12 @@ where
                 self.ingest_delete(origin_endpoint, platform_message_id)
                     .await
             }
-            EventPayload::ReactionAdd(_) => Err(CoreError::UnsupportedEvent),
+            // TODO(reactions #82/#84): fan the reaction to mirror endpoints and
+            // surface read receipts on the origin copy. Unreachable until the
+            // runtime translates these inbound frames (#85).
+            EventPayload::ReactionSet { .. } | EventPayload::ReadReceipt { .. } => {
+                Err(CoreError::UnsupportedEvent)
+            }
         }
     }
 }

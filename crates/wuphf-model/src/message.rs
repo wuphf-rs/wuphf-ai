@@ -127,14 +127,6 @@ pub struct InboundMessage {
     pub timestamp_ms: i64,
 }
 
-/// An emoji reaction added to a message.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct Reaction {
-    pub message_id: MessageId,
-    pub user_id: String,
-    pub emoji: String,
-}
-
 /// The kind of inbound event a connector reports for a chat.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum EventPayload {
@@ -146,7 +138,25 @@ pub enum EventPayload {
     MessageDelete {
         platform_message_id: String,
     },
-    ReactionAdd(Reaction),
+    /// A reactor set or cleared their reaction on a message (reactions are
+    /// toggles). `platform_message_id` is the reacted message's native id,
+    /// resolved to the logical message like an edit; `emoji` is `None` when the
+    /// reactor cleared theirs; `from_me` flags the account owner so the core can
+    /// recognise a reaction it applied being echoed back.
+    ReactionSet {
+        platform_message_id: String,
+        reactor: String,
+        reactor_name: Option<String>,
+        emoji: Option<String>,
+        from_me: bool,
+    },
+    /// A message was read on the source platform. Surfaced as a seen receipt on
+    /// the origin copy. `platform_message_id` is the read message's native id.
+    ReadReceipt {
+        platform_message_id: String,
+        reader: String,
+        from_me: bool,
+    },
 }
 
 /// Raw origin coordinates for an inbound event. The connector supplies its id

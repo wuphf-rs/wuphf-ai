@@ -296,6 +296,39 @@ fn output_to_proto(output: ConnectorOutput) -> pb::ServerFrame {
                         title,
                     })
                 }
+                DispatchPayload::Reaction {
+                    target_platform_message_id,
+                    reactor,
+                    reactor_name,
+                    emoji,
+                    ..
+                } => pb::server_frame::Body::Reaction(pb::ReactionDispatch {
+                    dispatch_id,
+                    target_chat_id: target.address.chat_id,
+                    target_thread_id: target.address.thread_id,
+                    target_platform_message_id,
+                    reactor,
+                    reactor_name,
+                    emoji: emoji.unwrap_or_default(),
+                }),
+                DispatchPayload::DeliveryAck {
+                    target_platform_message_id,
+                    ..
+                } => pb::server_frame::Body::DeliveryAck(pb::DeliveryAckDispatch {
+                    dispatch_id,
+                    target_chat_id: target.address.chat_id,
+                    target_thread_id: target.address.thread_id,
+                    target_platform_message_id,
+                }),
+                DispatchPayload::SeenReceipt {
+                    target_platform_message_id,
+                    ..
+                } => pb::server_frame::Body::SeenReceipt(pb::SeenReceiptDispatch {
+                    dispatch_id,
+                    target_chat_id: target.address.chat_id,
+                    target_thread_id: target.address.thread_id,
+                    target_platform_message_id,
+                }),
             }
         }
         ConnectorOutput::Rejected { reason } => {

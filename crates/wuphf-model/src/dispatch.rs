@@ -48,6 +48,33 @@ pub enum DispatchPayload {
         replica_set_id: ReplicaSetId,
         title: String,
     },
+    /// Reflect a reaction change on an already-delivered copy. The core only
+    /// routes the signal; the connector decides how to render it (e.g. Telegram
+    /// shows text rather than a native reaction). `target_platform_message_id`
+    /// is the native id of the reacted copy at the target endpoint — empty while
+    /// the dispatch is blocked, filled when the parent create is acknowledged.
+    Reaction {
+        message_id: MessageId,
+        replica_set_id: ReplicaSetId,
+        target_platform_message_id: String,
+        reactor: String,
+        reactor_name: Option<String>,
+        emoji: Option<String>,
+    },
+    /// Signal the origin copy that its message reached all of its mirrors. The
+    /// connector decides how to surface it (e.g. a 👍 reaction).
+    DeliveryAck {
+        message_id: MessageId,
+        replica_set_id: ReplicaSetId,
+        target_platform_message_id: String,
+    },
+    /// Signal the origin copy that its message was read on a mirror. The
+    /// connector decides how to surface it (e.g. a 👀 reaction in DMs).
+    SeenReceipt {
+        message_id: MessageId,
+        replica_set_id: ReplicaSetId,
+        target_platform_message_id: String,
+    },
 }
 
 /// Instruction to create a thread/topic in a container before sending, used
@@ -88,6 +115,9 @@ impl DispatchCommand {
             DispatchPayload::MessageCreate { message, .. }
             | DispatchPayload::MessageEdit { message, .. }
             | DispatchPayload::MessageDelete { message, .. } => Some(message.id),
+            DispatchPayload::Reaction { message_id, .. }
+            | DispatchPayload::DeliveryAck { message_id, .. }
+            | DispatchPayload::SeenReceipt { message_id, .. } => Some(*message_id),
             DispatchPayload::RetitleThread { .. } => None,
         }
     }
@@ -97,7 +127,10 @@ impl DispatchCommand {
             DispatchPayload::MessageCreate { message, .. }
             | DispatchPayload::MessageEdit { message, .. }
             | DispatchPayload::MessageDelete { message, .. } => message.replica_set_id,
-            DispatchPayload::RetitleThread { replica_set_id, .. } => *replica_set_id,
+            DispatchPayload::Reaction { replica_set_id, .. }
+            | DispatchPayload::DeliveryAck { replica_set_id, .. }
+            | DispatchPayload::SeenReceipt { replica_set_id, .. }
+            | DispatchPayload::RetitleThread { replica_set_id, .. } => *replica_set_id,
         }
     }
 }

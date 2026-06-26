@@ -40,6 +40,18 @@ pub(crate) fn bind_native_parent(
         | DispatchPayload::MessageDelete {
             target_platform_message_id,
             ..
+        }
+        | DispatchPayload::Reaction {
+            target_platform_message_id,
+            ..
+        }
+        | DispatchPayload::DeliveryAck {
+            target_platform_message_id,
+            ..
+        }
+        | DispatchPayload::SeenReceipt {
+            target_platform_message_id,
+            ..
         } => *target_platform_message_id = platform_message_id,
         // A retitle is never blocked on a parent message, so it is never
         // released with one.
