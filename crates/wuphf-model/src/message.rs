@@ -150,13 +150,28 @@ pub enum EventPayload {
         emoji: Option<String>,
         from_me: bool,
     },
-    /// A message was read on the source platform. Surfaced as a seen receipt on
-    /// the origin copy. `platform_message_id` is the read message's native id.
-    ReadReceipt {
+    /// A delivery or read receipt observed on the source platform. Surfaced on
+    /// the message's other copies (a 👍 for delivered, 👀 for read in DMs).
+    /// `platform_message_id` is the receipted message's native id; `observer` is
+    /// the peer that delivered/read it; `from_me` flags the owner's own receipt,
+    /// which the core ignores. The same path serves messages the bridge sent and
+    /// messages the owner sent from another device, since the peer's receipt
+    /// names the message regardless of which device authored it.
+    ReceiptSet {
         platform_message_id: String,
-        reader: String,
+        observer: String,
         from_me: bool,
+        kind: ReceiptKind,
     },
+}
+
+/// Whether a receipt reports the message reached the peer's device (delivered)
+/// or was opened by the peer (read). Picks the signal the connector renders.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ReceiptKind {
+    Delivered,
+    Read,
 }
 
 /// Raw origin coordinates for an inbound event. The connector supplies its id

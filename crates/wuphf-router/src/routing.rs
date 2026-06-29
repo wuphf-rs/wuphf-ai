@@ -6,7 +6,7 @@
 use crate::{BlockedDispatch, Router, RouterError, RoutingOutcome, is_mirror_side, reply_context};
 use wuphf_model::{
     Conversation, DispatchCommand, DispatchPayload, Endpoint, EndpointId, Message, PlatformAddress,
-    ProvisionThread, TargetAddress,
+    ProvisionThread, ReceiptKind, TargetAddress,
 };
 use wuphf_storage::Storage;
 
@@ -263,6 +263,74 @@ where
                         target_connector,
                         target,
                         payload: reaction(String::new()),
+                    },
+                    waiting_for_message: message.id,
+                }),
+            }
+        }
+        Ok(outcome)
+    }
+
+    /// Fan a delivery/read receipt out to every other endpoint that holds a
+    /// copy of the message. Like a reaction, each target carries the native id
+    /// of its copy and is blocked until that copy is delivered. The receipt
+    /// kind picks the signal: a delivered receipt becomes a `DeliveryAck`, a
+    /// read receipt a `SeenReceipt`; the connector decides how to render each.
+    /// Fanning to all non-observer endpoints (rather than only the origin) means
+    /// a message the owner authored from another source device — which lands as
+    /// a mirror copy on the other endpoints — still surfaces its receipt there.
+    pub async fn route_receipt(
+        &self,
+        message: &Message,
+        observer_endpoint: EndpointId,
+        kind: ReceiptKind,
+    ) -> Result<RoutingOutcome, RouterError> {
+        let replica_set = self.storage.replica_set(message.replica_set_id).await?;
+        if !replica_set.endpoints.contains(&observer_endpoint) {
+            return Err(RouterError::OriginOutsideReplicaSet(observer_endpoint));
+        }
+
+        let mut outcome = RoutingOutcome::default();
+        for endpoint_id in replica_set
+            .endpoints
+            .into_iter()
+            .filter(|endpoint_id| *endpoint_id != observer_endpoint)
+        {
+            let endpoint = self.storage.endpoint(endpoint_id).await?;
+            let target = TargetAddress {
+                address: endpoint.address(),
+                provision_thread: None,
+            };
+            let target_connector = endpoint.connector_id.clone();
+            let receipt = |target_platform_message_id| match kind {
+                ReceiptKind::Delivered => DispatchPayload::DeliveryAck {
+                    message_id: message.id,
+                    replica_set_id: message.replica_set_id,
+                    target_platform_message_id,
+                },
+                ReceiptKind::Read => DispatchPayload::SeenReceipt {
+                    message_id: message.id,
+                    replica_set_id: message.replica_set_id,
+                    target_platform_message_id,
+                },
+            };
+            match self
+                .storage
+                .copy_at_endpoint(message.id, endpoint_id)
+                .await?
+            {
+                Some(copy) => outcome.dispatches.push(DispatchCommand {
+                    target_endpoint: endpoint_id,
+                    target_connector,
+                    target,
+                    payload: receipt(copy.platform_message_id),
+                }),
+                None => outcome.blocked.push(BlockedDispatch {
+                    command: DispatchCommand {
+                        target_endpoint: endpoint_id,
+                        target_connector,
+                        target,
+                        payload: receipt(String::new()),
                     },
                     waiting_for_message: message.id,
                 }),

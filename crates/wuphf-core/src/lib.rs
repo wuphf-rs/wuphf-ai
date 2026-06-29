@@ -103,12 +103,13 @@ where
                 )
                 .await
             }
-            EventPayload::ReadReceipt {
+            EventPayload::ReceiptSet {
                 platform_message_id,
-                reader: _,
+                observer: _,
                 from_me,
+                kind,
             } => {
-                self.ingest_read_receipt(origin_endpoint, platform_message_id, from_me)
+                self.ingest_receipt(origin_endpoint, platform_message_id, from_me, kind)
                     .await
             }
         }
@@ -184,6 +185,8 @@ pub enum CoreError {
     EditTargetNotStored(MessageId),
     #[error("reacted message {0} maps from a copy but is not stored")]
     ReactionTargetNotStored(MessageId),
+    #[error("receipted message {0} maps from a copy but is not stored")]
+    ReceiptTargetNotStored(MessageId),
     #[error("attachment media {0} is not uploaded to the core")]
     UnknownMedia(MediaId),
     #[error("attachment metadata for media {0} differs from the core record")]

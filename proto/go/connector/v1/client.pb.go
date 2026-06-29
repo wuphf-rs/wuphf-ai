@@ -21,6 +21,57 @@ const (
 	_ = protoimpl.EnforceVersion(protoimpl.MaxVersion - 20)
 )
 
+// Whether a receipt reports the message reached the peer's device (delivered) or
+// was opened by the peer (read).
+type ReceiptKind int32
+
+const (
+	ReceiptKind_RECEIPT_KIND_UNSPECIFIED ReceiptKind = 0
+	ReceiptKind_RECEIPT_KIND_DELIVERED   ReceiptKind = 1
+	ReceiptKind_RECEIPT_KIND_READ        ReceiptKind = 2
+)
+
+// Enum value maps for ReceiptKind.
+var (
+	ReceiptKind_name = map[int32]string{
+		0: "RECEIPT_KIND_UNSPECIFIED",
+		1: "RECEIPT_KIND_DELIVERED",
+		2: "RECEIPT_KIND_READ",
+	}
+	ReceiptKind_value = map[string]int32{
+		"RECEIPT_KIND_UNSPECIFIED": 0,
+		"RECEIPT_KIND_DELIVERED":   1,
+		"RECEIPT_KIND_READ":        2,
+	}
+)
+
+func (x ReceiptKind) Enum() *ReceiptKind {
+	p := new(ReceiptKind)
+	*p = x
+	return p
+}
+
+func (x ReceiptKind) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (ReceiptKind) Descriptor() protoreflect.EnumDescriptor {
+	return file_client_proto_enumTypes[0].Descriptor()
+}
+
+func (ReceiptKind) Type() protoreflect.EnumType {
+	return &file_client_proto_enumTypes[0]
+}
+
+func (x ReceiptKind) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use ReceiptKind.Descriptor instead.
+func (ReceiptKind) EnumDescriptor() ([]byte, []int) {
+	return file_client_proto_rawDescGZIP(), []int{0}
+}
+
 // Raw origin coordinates for an inbound message. The connector id is taken from
 // the session registration, not the wire, so a session cannot speak for another
 // connector. The core resolves (connector, chat_id, thread_id) to an endpoint.
@@ -568,34 +619,41 @@ func (x *ReactionEvent) GetFromMe() bool {
 	return false
 }
 
-// The platform reported that a message was read. Used to surface a seen receipt
-// on the origin copy (a 👀 reaction in DMs). The connector reports the read
-// message's native id; the core resolves it to the logical message.
-type ReadReceipt struct {
+// The platform reported a delivery or read receipt for a message. Surfaced on
+// the message's other copies: a 👍 reaction for delivered, a 👀 reaction for
+// read (DMs only). This works for messages the bridge sent and for messages the
+// account owner sent from another of the platform's devices, since the peer's
+// receipt names the message either way. The connector reports the message's
+// native id; the core resolves it to the logical message and fans the signal to
+// the non-observer endpoints. `observer` is the peer that delivered/read it;
+// `from_me` flags the owner's own receipt (e.g. a read on another device), which
+// the core ignores.
+type ReceiptEvent struct {
 	state             protoimpl.MessageState `protogen:"open.v1"`
 	ChatId            string                 `protobuf:"bytes,1,opt,name=chat_id,json=chatId,proto3" json:"chat_id,omitempty"`
 	ThreadId          *string                `protobuf:"bytes,2,opt,name=thread_id,json=threadId,proto3,oneof" json:"thread_id,omitempty"`
 	PlatformMessageId string                 `protobuf:"bytes,3,opt,name=platform_message_id,json=platformMessageId,proto3" json:"platform_message_id,omitempty"`
-	Reader            string                 `protobuf:"bytes,4,opt,name=reader,proto3" json:"reader,omitempty"`
+	Observer          string                 `protobuf:"bytes,4,opt,name=observer,proto3" json:"observer,omitempty"`
 	FromMe            bool                   `protobuf:"varint,5,opt,name=from_me,json=fromMe,proto3" json:"from_me,omitempty"`
+	Kind              ReceiptKind            `protobuf:"varint,6,opt,name=kind,proto3,enum=wuphf.connector.v1.ReceiptKind" json:"kind,omitempty"`
 	unknownFields     protoimpl.UnknownFields
 	sizeCache         protoimpl.SizeCache
 }
 
-func (x *ReadReceipt) Reset() {
-	*x = ReadReceipt{}
+func (x *ReceiptEvent) Reset() {
+	*x = ReceiptEvent{}
 	mi := &file_client_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *ReadReceipt) String() string {
+func (x *ReceiptEvent) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*ReadReceipt) ProtoMessage() {}
+func (*ReceiptEvent) ProtoMessage() {}
 
-func (x *ReadReceipt) ProtoReflect() protoreflect.Message {
+func (x *ReceiptEvent) ProtoReflect() protoreflect.Message {
 	mi := &file_client_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -607,44 +665,51 @@ func (x *ReadReceipt) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use ReadReceipt.ProtoReflect.Descriptor instead.
-func (*ReadReceipt) Descriptor() ([]byte, []int) {
+// Deprecated: Use ReceiptEvent.ProtoReflect.Descriptor instead.
+func (*ReceiptEvent) Descriptor() ([]byte, []int) {
 	return file_client_proto_rawDescGZIP(), []int{7}
 }
 
-func (x *ReadReceipt) GetChatId() string {
+func (x *ReceiptEvent) GetChatId() string {
 	if x != nil {
 		return x.ChatId
 	}
 	return ""
 }
 
-func (x *ReadReceipt) GetThreadId() string {
+func (x *ReceiptEvent) GetThreadId() string {
 	if x != nil && x.ThreadId != nil {
 		return *x.ThreadId
 	}
 	return ""
 }
 
-func (x *ReadReceipt) GetPlatformMessageId() string {
+func (x *ReceiptEvent) GetPlatformMessageId() string {
 	if x != nil {
 		return x.PlatformMessageId
 	}
 	return ""
 }
 
-func (x *ReadReceipt) GetReader() string {
+func (x *ReceiptEvent) GetObserver() string {
 	if x != nil {
-		return x.Reader
+		return x.Observer
 	}
 	return ""
 }
 
-func (x *ReadReceipt) GetFromMe() bool {
+func (x *ReceiptEvent) GetFromMe() bool {
 	if x != nil {
 		return x.FromMe
 	}
 	return false
+}
+
+func (x *ReceiptEvent) GetKind() ReceiptKind {
+	if x != nil {
+		return x.Kind
+	}
+	return ReceiptKind_RECEIPT_KIND_UNSPECIFIED
 }
 
 type ClientFrame struct {
@@ -659,7 +724,7 @@ type ClientFrame struct {
 	//	*ClientFrame_MessageEdit
 	//	*ClientFrame_MessageDelete
 	//	*ClientFrame_Reaction
-	//	*ClientFrame_ReadReceipt
+	//	*ClientFrame_Receipt
 	Body          isClientFrame_Body `protobuf_oneof:"body"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -774,10 +839,10 @@ func (x *ClientFrame) GetReaction() *ReactionEvent {
 	return nil
 }
 
-func (x *ClientFrame) GetReadReceipt() *ReadReceipt {
+func (x *ClientFrame) GetReceipt() *ReceiptEvent {
 	if x != nil {
-		if x, ok := x.Body.(*ClientFrame_ReadReceipt); ok {
-			return x.ReadReceipt
+		if x, ok := x.Body.(*ClientFrame_Receipt); ok {
+			return x.Receipt
 		}
 	}
 	return nil
@@ -819,8 +884,8 @@ type ClientFrame_Reaction struct {
 	Reaction *ReactionEvent `protobuf:"bytes,8,opt,name=reaction,proto3,oneof"`
 }
 
-type ClientFrame_ReadReceipt struct {
-	ReadReceipt *ReadReceipt `protobuf:"bytes,9,opt,name=read_receipt,json=readReceipt,proto3,oneof"`
+type ClientFrame_Receipt struct {
+	Receipt *ReceiptEvent `protobuf:"bytes,9,opt,name=receipt,proto3,oneof"`
 }
 
 func (*ClientFrame_Registration) isClientFrame_Body() {}
@@ -839,7 +904,7 @@ func (*ClientFrame_MessageDelete) isClientFrame_Body() {}
 
 func (*ClientFrame_Reaction) isClientFrame_Body() {}
 
-func (*ClientFrame_ReadReceipt) isClientFrame_Body() {}
+func (*ClientFrame_Receipt) isClientFrame_Body() {}
 
 var File_client_proto protoreflect.FileDescriptor
 
@@ -911,15 +976,16 @@ const file_client_proto_rawDesc = "" +
 	"\afrom_me\x18\a \x01(\bR\x06fromMeB\f\n" +
 	"\n" +
 	"_thread_idB\x0e\n" +
-	"\f_sender_name\"\xb7\x01\n" +
-	"\vReadReceipt\x12\x17\n" +
+	"\f_sender_name\"\xf1\x01\n" +
+	"\fReceiptEvent\x12\x17\n" +
 	"\achat_id\x18\x01 \x01(\tR\x06chatId\x12 \n" +
 	"\tthread_id\x18\x02 \x01(\tH\x00R\bthreadId\x88\x01\x01\x12.\n" +
-	"\x13platform_message_id\x18\x03 \x01(\tR\x11platformMessageId\x12\x16\n" +
-	"\x06reader\x18\x04 \x01(\tR\x06reader\x12\x17\n" +
-	"\afrom_me\x18\x05 \x01(\bR\x06fromMeB\f\n" +
+	"\x13platform_message_id\x18\x03 \x01(\tR\x11platformMessageId\x12\x1a\n" +
+	"\bobserver\x18\x04 \x01(\tR\bobserver\x12\x17\n" +
+	"\afrom_me\x18\x05 \x01(\bR\x06fromMe\x123\n" +
+	"\x04kind\x18\x06 \x01(\x0e2\x1f.wuphf.connector.v1.ReceiptKindR\x04kindB\f\n" +
 	"\n" +
-	"_thread_id\"\xc6\x05\n" +
+	"_thread_id\"\xbe\x05\n" +
 	"\vClientFrame\x12F\n" +
 	"\fregistration\x18\x01 \x01(\v2 .wuphf.connector.v1.RegistrationH\x00R\fregistration\x12O\n" +
 	"\x0emessage_create\x18\x02 \x01(\v2&.wuphf.connector.v1.MessageCreateEventH\x00R\rmessageCreate\x12O\n" +
@@ -928,9 +994,13 @@ const file_client_proto_rawDesc = "" +
 	"\x0fdispatch_failed\x18\x05 \x01(\v2\".wuphf.connector.v1.DispatchFailedH\x00R\x0edispatchFailed\x12I\n" +
 	"\fmessage_edit\x18\x06 \x01(\v2$.wuphf.connector.v1.MessageEditEventH\x00R\vmessageEdit\x12O\n" +
 	"\x0emessage_delete\x18\a \x01(\v2&.wuphf.connector.v1.MessageDeleteEventH\x00R\rmessageDelete\x12?\n" +
-	"\breaction\x18\b \x01(\v2!.wuphf.connector.v1.ReactionEventH\x00R\breaction\x12D\n" +
-	"\fread_receipt\x18\t \x01(\v2\x1f.wuphf.connector.v1.ReadReceiptH\x00R\vreadReceiptB\x06\n" +
-	"\x04bodyB:Z8github.com/akshettrj/wuphf/proto/go/connector/v1;wuphfpbb\x06proto3"
+	"\breaction\x18\b \x01(\v2!.wuphf.connector.v1.ReactionEventH\x00R\breaction\x12<\n" +
+	"\areceipt\x18\t \x01(\v2 .wuphf.connector.v1.ReceiptEventH\x00R\areceiptB\x06\n" +
+	"\x04body*^\n" +
+	"\vReceiptKind\x12\x1c\n" +
+	"\x18RECEIPT_KIND_UNSPECIFIED\x10\x00\x12\x1a\n" +
+	"\x16RECEIPT_KIND_DELIVERED\x10\x01\x12\x15\n" +
+	"\x11RECEIPT_KIND_READ\x10\x02B:Z8github.com/akshettrj/wuphf/proto/go/connector/v1;wuphfpbb\x06proto3"
 
 var (
 	file_client_proto_rawDescOnce sync.Once
@@ -944,36 +1014,39 @@ func file_client_proto_rawDescGZIP() []byte {
 	return file_client_proto_rawDescData
 }
 
+var file_client_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
 var file_client_proto_msgTypes = make([]protoimpl.MessageInfo, 9)
 var file_client_proto_goTypes = []any{
-	(*MessageCreateEvent)(nil), // 0: wuphf.connector.v1.MessageCreateEvent
-	(*MessageEditEvent)(nil),   // 1: wuphf.connector.v1.MessageEditEvent
-	(*MessageDeleteEvent)(nil), // 2: wuphf.connector.v1.MessageDeleteEvent
-	(*IdentityMigrated)(nil),   // 3: wuphf.connector.v1.IdentityMigrated
-	(*Acknowledgement)(nil),    // 4: wuphf.connector.v1.Acknowledgement
-	(*DispatchFailed)(nil),     // 5: wuphf.connector.v1.DispatchFailed
-	(*ReactionEvent)(nil),      // 6: wuphf.connector.v1.ReactionEvent
-	(*ReadReceipt)(nil),        // 7: wuphf.connector.v1.ReadReceipt
-	(*ClientFrame)(nil),        // 8: wuphf.connector.v1.ClientFrame
-	(*Attachment)(nil),         // 9: wuphf.connector.v1.Attachment
-	(*Registration)(nil),       // 10: wuphf.connector.v1.Registration
+	(ReceiptKind)(0),           // 0: wuphf.connector.v1.ReceiptKind
+	(*MessageCreateEvent)(nil), // 1: wuphf.connector.v1.MessageCreateEvent
+	(*MessageEditEvent)(nil),   // 2: wuphf.connector.v1.MessageEditEvent
+	(*MessageDeleteEvent)(nil), // 3: wuphf.connector.v1.MessageDeleteEvent
+	(*IdentityMigrated)(nil),   // 4: wuphf.connector.v1.IdentityMigrated
+	(*Acknowledgement)(nil),    // 5: wuphf.connector.v1.Acknowledgement
+	(*DispatchFailed)(nil),     // 6: wuphf.connector.v1.DispatchFailed
+	(*ReactionEvent)(nil),      // 7: wuphf.connector.v1.ReactionEvent
+	(*ReceiptEvent)(nil),       // 8: wuphf.connector.v1.ReceiptEvent
+	(*ClientFrame)(nil),        // 9: wuphf.connector.v1.ClientFrame
+	(*Attachment)(nil),         // 10: wuphf.connector.v1.Attachment
+	(*Registration)(nil),       // 11: wuphf.connector.v1.Registration
 }
 var file_client_proto_depIdxs = []int32{
-	9,  // 0: wuphf.connector.v1.MessageCreateEvent.attachments:type_name -> wuphf.connector.v1.Attachment
-	10, // 1: wuphf.connector.v1.ClientFrame.registration:type_name -> wuphf.connector.v1.Registration
-	0,  // 2: wuphf.connector.v1.ClientFrame.message_create:type_name -> wuphf.connector.v1.MessageCreateEvent
-	4,  // 3: wuphf.connector.v1.ClientFrame.acknowledgement:type_name -> wuphf.connector.v1.Acknowledgement
-	3,  // 4: wuphf.connector.v1.ClientFrame.identity_migrated:type_name -> wuphf.connector.v1.IdentityMigrated
-	5,  // 5: wuphf.connector.v1.ClientFrame.dispatch_failed:type_name -> wuphf.connector.v1.DispatchFailed
-	1,  // 6: wuphf.connector.v1.ClientFrame.message_edit:type_name -> wuphf.connector.v1.MessageEditEvent
-	2,  // 7: wuphf.connector.v1.ClientFrame.message_delete:type_name -> wuphf.connector.v1.MessageDeleteEvent
-	6,  // 8: wuphf.connector.v1.ClientFrame.reaction:type_name -> wuphf.connector.v1.ReactionEvent
-	7,  // 9: wuphf.connector.v1.ClientFrame.read_receipt:type_name -> wuphf.connector.v1.ReadReceipt
-	10, // [10:10] is the sub-list for method output_type
-	10, // [10:10] is the sub-list for method input_type
-	10, // [10:10] is the sub-list for extension type_name
-	10, // [10:10] is the sub-list for extension extendee
-	0,  // [0:10] is the sub-list for field type_name
+	10, // 0: wuphf.connector.v1.MessageCreateEvent.attachments:type_name -> wuphf.connector.v1.Attachment
+	0,  // 1: wuphf.connector.v1.ReceiptEvent.kind:type_name -> wuphf.connector.v1.ReceiptKind
+	11, // 2: wuphf.connector.v1.ClientFrame.registration:type_name -> wuphf.connector.v1.Registration
+	1,  // 3: wuphf.connector.v1.ClientFrame.message_create:type_name -> wuphf.connector.v1.MessageCreateEvent
+	5,  // 4: wuphf.connector.v1.ClientFrame.acknowledgement:type_name -> wuphf.connector.v1.Acknowledgement
+	4,  // 5: wuphf.connector.v1.ClientFrame.identity_migrated:type_name -> wuphf.connector.v1.IdentityMigrated
+	6,  // 6: wuphf.connector.v1.ClientFrame.dispatch_failed:type_name -> wuphf.connector.v1.DispatchFailed
+	2,  // 7: wuphf.connector.v1.ClientFrame.message_edit:type_name -> wuphf.connector.v1.MessageEditEvent
+	3,  // 8: wuphf.connector.v1.ClientFrame.message_delete:type_name -> wuphf.connector.v1.MessageDeleteEvent
+	7,  // 9: wuphf.connector.v1.ClientFrame.reaction:type_name -> wuphf.connector.v1.ReactionEvent
+	8,  // 10: wuphf.connector.v1.ClientFrame.receipt:type_name -> wuphf.connector.v1.ReceiptEvent
+	11, // [11:11] is the sub-list for method output_type
+	11, // [11:11] is the sub-list for method input_type
+	11, // [11:11] is the sub-list for extension type_name
+	11, // [11:11] is the sub-list for extension extendee
+	0,  // [0:11] is the sub-list for field type_name
 }
 
 func init() { file_client_proto_init() }
@@ -998,20 +1071,21 @@ func file_client_proto_init() {
 		(*ClientFrame_MessageEdit)(nil),
 		(*ClientFrame_MessageDelete)(nil),
 		(*ClientFrame_Reaction)(nil),
-		(*ClientFrame_ReadReceipt)(nil),
+		(*ClientFrame_Receipt)(nil),
 	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_client_proto_rawDesc), len(file_client_proto_rawDesc)),
-			NumEnums:      0,
+			NumEnums:      1,
 			NumMessages:   9,
 			NumExtensions: 0,
 			NumServices:   0,
 		},
 		GoTypes:           file_client_proto_goTypes,
 		DependencyIndexes: file_client_proto_depIdxs,
+		EnumInfos:         file_client_proto_enumTypes,
 		MessageInfos:      file_client_proto_msgTypes,
 	}.Build()
 	File_client_proto = out.File

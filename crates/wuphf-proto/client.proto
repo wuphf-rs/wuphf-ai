@@ -84,15 +84,30 @@ message ReactionEvent {
   bool from_me = 7;
 }
 
-// The platform reported that a message was read. Used to surface a seen receipt
-// on the origin copy (a 👀 reaction in DMs). The connector reports the read
-// message's native id; the core resolves it to the logical message.
-message ReadReceipt {
+// Whether a receipt reports the message reached the peer's device (delivered) or
+// was opened by the peer (read).
+enum ReceiptKind {
+  RECEIPT_KIND_UNSPECIFIED = 0;
+  RECEIPT_KIND_DELIVERED = 1;
+  RECEIPT_KIND_READ = 2;
+}
+
+// The platform reported a delivery or read receipt for a message. Surfaced on
+// the message's other copies: a 👍 reaction for delivered, a 👀 reaction for
+// read (DMs only). This works for messages the bridge sent and for messages the
+// account owner sent from another of the platform's devices, since the peer's
+// receipt names the message either way. The connector reports the message's
+// native id; the core resolves it to the logical message and fans the signal to
+// the non-observer endpoints. `observer` is the peer that delivered/read it;
+// `from_me` flags the owner's own receipt (e.g. a read on another device), which
+// the core ignores.
+message ReceiptEvent {
   string chat_id = 1;
   optional string thread_id = 2;
   string platform_message_id = 3;
-  string reader = 4;
+  string observer = 4;
   bool from_me = 5;
+  ReceiptKind kind = 6;
 }
 
 message ClientFrame {
@@ -105,6 +120,6 @@ message ClientFrame {
     MessageEditEvent message_edit = 6;
     MessageDeleteEvent message_delete = 7;
     ReactionEvent reaction = 8;
-    ReadReceipt read_receipt = 9;
+    ReceiptEvent receipt = 9;
   }
 }

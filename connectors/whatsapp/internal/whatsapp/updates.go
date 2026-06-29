@@ -161,30 +161,53 @@ func (n Normalizer) normalizeDelete(ctx context.Context, message *events.Message
 	}, true
 }
 
-// HandleReceipt reports a read receipt as a seen signal. Only peer reads in a
-// direct chat are bridged: seen receipts are a DM feature, and group reads are
-// per-participant noise. The core surfaces it on the origin copy (a 👀 reaction
-// on the Telegram side); the chat and reader are canonicalized like any id.
+// HandleReceipt reports a delivery or read receipt. Only direct-chat receipts
+// are bridged: these are a DM feature, and group receipts are per-participant
+// noise. A delivered receipt surfaces as a 👍 and a read receipt as a 👀 on the
+// message's mirror copy. This covers messages the bridge sent and messages the
+// account owner sent from another device alike, as the peer's receipt names the
+// message either way; the core ignores the owner's own (from_me) receipts. The
+// chat and observer are canonicalized like any id.
 func (n Normalizer) HandleReceipt(ctx context.Context, receipt *events.Receipt) error {
-	if receipt.Type != types.ReceiptTypeRead || receipt.IsGroup {
+	if receipt.IsGroup {
+		return nil
+	}
+	kind, ok := receiptKind(receipt.Type)
+	if !ok {
 		return nil
 	}
 	chat := n.canonical(ctx, receipt.Chat).String()
-	reader := n.canonical(ctx, receipt.Sender).String()
+	observer := n.canonical(ctx, receipt.Sender).String()
 	for _, id := range receipt.MessageIDs {
-		event := &wuphfpb.ReadReceipt{
+		event := &wuphfpb.ReceiptEvent{
 			ChatId:            chat,
 			PlatformMessageId: string(id),
-			Reader:            reader,
+			Observer:          observer,
 			FromMe:            receipt.IsFromMe,
+			Kind:              kind,
 		}
 		if err := n.send(ctx, &wuphfpb.ClientFrame{
-			Body: &wuphfpb.ClientFrame_ReadReceipt{ReadReceipt: event},
+			Body: &wuphfpb.ClientFrame_Receipt{Receipt: event},
 		}); err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+// receiptKind maps a whatsmeow receipt type to the bridge's receipt kind,
+// reporting whether it is one the bridge surfaces. Delivered (the default,
+// empty type) and read are surfaced; sender/retry/played and self-reads carry
+// no peer-acknowledgement meaning for the mirror and are dropped.
+func receiptKind(t types.ReceiptType) (wuphfpb.ReceiptKind, bool) {
+	switch t {
+	case types.ReceiptTypeDelivered:
+		return wuphfpb.ReceiptKind_RECEIPT_KIND_DELIVERED, true
+	case types.ReceiptTypeRead:
+		return wuphfpb.ReceiptKind_RECEIPT_KIND_READ, true
+	default:
+		return wuphfpb.ReceiptKind_RECEIPT_KIND_UNSPECIFIED, false
+	}
 }
 
 // normalizeReaction reports an inbound reaction. WhatsApp carries a reaction as

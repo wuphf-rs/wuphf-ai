@@ -6,7 +6,7 @@ use tracing::{debug, info, warn};
 use wuphf_core::{Core, CoreError, IngestOutcome};
 use wuphf_model::{
     ConnectorId, DispatchAcknowledgement, DispatchId, EventPayload, NormalizedEvent,
-    PlatformAddress, StoredDispatch,
+    PlatformAddress, ReceiptKind, StoredDispatch,
 };
 use wuphf_storage::Storage;
 
@@ -242,7 +242,14 @@ where
         EventPayload::MessageEdit { .. } => "edit",
         EventPayload::MessageDelete { .. } => "delete",
         EventPayload::ReactionSet { .. } => "reaction",
-        EventPayload::ReadReceipt { .. } => "read_receipt",
+        EventPayload::ReceiptSet {
+            kind: ReceiptKind::Delivered,
+            ..
+        } => "delivery_receipt",
+        EventPayload::ReceiptSet {
+            kind: ReceiptKind::Read,
+            ..
+        } => "read_receipt",
     };
     let outcome = core.ingest(event).await?;
     match &outcome {

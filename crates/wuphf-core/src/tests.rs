@@ -2,8 +2,8 @@ use super::*;
 use std::collections::HashMap;
 use wuphf_model::{
     Attachment, AttachmentKind, ConnectorCapabilities, DispatchAcknowledgement, DispatchPayload,
-    InboundMessage, MediaBlob, MediaId, Platform, PlatformAddress, Rule, RuleId, RuleSide,
-    SourceAddress,
+    InboundMessage, MediaBlob, MediaId, Platform, PlatformAddress, ReceiptKind, Rule, RuleId,
+    RuleSide, SourceAddress,
 };
 use wuphf_storage::InMemoryStorage;
 
@@ -696,6 +696,28 @@ fn reaction_event(
     }
 }
 
+fn receipt_event(
+    connector: &str,
+    chat_id: &str,
+    native_id: &str,
+    kind: ReceiptKind,
+    from_me: bool,
+) -> NormalizedEvent {
+    NormalizedEvent {
+        source: SourceAddress {
+            connector_id: ConnectorId(connector.into()),
+            address: PlatformAddress::new(chat_id, None),
+            chat_title: None,
+        },
+        payload: EventPayload::ReceiptSet {
+            platform_message_id: native_id.into(),
+            observer: "peer".into(),
+            from_me,
+            kind,
+        },
+    }
+}
+
 #[tokio::test]
 async fn reaction_after_delivery_fans_to_the_delivered_copy() {
     let core = core(vec![direct_rule()]);
@@ -863,10 +885,11 @@ async fn read_receipt_on_a_mirror_copy_surfaces_a_seen_receipt_on_the_origin() {
                 address: PlatformAddress::new("-100123", Some("12".into())),
                 chat_title: None,
             },
-            payload: EventPayload::ReadReceipt {
+            payload: EventPayload::ReceiptSet {
                 platform_message_id: "tg-1".into(),
-                reader: "peer".into(),
+                observer: "peer".into(),
                 from_me: false,
+                kind: ReceiptKind::Read,
             },
         })
         .await
@@ -887,21 +910,81 @@ async fn read_receipt_on_a_mirror_copy_surfaces_a_seen_receipt_on_the_origin() {
 }
 
 #[tokio::test]
-async fn own_read_receipt_is_ignored() {
+async fn receipts_for_a_message_sent_from_another_source_device_surface_on_the_mirror() {
+    let core = core(vec![direct_rule()]);
+    // The owner sent this from another WhatsApp device; it arrives at the source
+    // and is mirrored to Telegram, where the Telegram copy is a sent (not origin)
+    // copy. A peer delivery/read receipt is observed at the WhatsApp endpoint.
+    let IngestOutcome::Routed {
+        message_id,
+        dispatches,
+        ..
+    } = core
+        .ingest(event(WHATSAPP, "12345@s.whatsapp.net", "wa-1", None))
+        .await
+        .unwrap()
+    else {
+        panic!("create should route");
+    };
+    let telegram = dispatches[0].command.target_endpoint;
+    core.record_dispatched_copy(message_id, telegram, "tg-1")
+        .await
+        .unwrap();
+
+    let delivered = core
+        .ingest(receipt_event(
+            WHATSAPP,
+            "12345@s.whatsapp.net",
+            "wa-1",
+            ReceiptKind::Delivered,
+            false,
+        ))
+        .await
+        .unwrap();
+    let ack = &delivered.dispatches()[0];
+    assert_eq!(ack.command.target_connector, ConnectorId(TELEGRAM.into()));
+    let DispatchPayload::DeliveryAck {
+        target_platform_message_id,
+        ..
+    } = &ack.command.payload
+    else {
+        panic!("delivered receipt should surface a delivery ack on the mirror");
+    };
+    assert_eq!(target_platform_message_id, "tg-1");
+
+    let read = core
+        .ingest(receipt_event(
+            WHATSAPP,
+            "12345@s.whatsapp.net",
+            "wa-1",
+            ReceiptKind::Read,
+            false,
+        ))
+        .await
+        .unwrap();
+    let seen = &read.dispatches()[0];
+    assert_eq!(seen.command.target_connector, ConnectorId(TELEGRAM.into()));
+    let DispatchPayload::SeenReceipt {
+        target_platform_message_id,
+        ..
+    } = &seen.command.payload
+    else {
+        panic!("read receipt should surface a seen receipt on the mirror");
+    };
+    assert_eq!(target_platform_message_id, "tg-1");
+}
+
+#[tokio::test]
+async fn own_receipt_is_ignored() {
     let core = core(vec![direct_rule()]);
     assert_eq!(
-        core.ingest(NormalizedEvent {
-            source: SourceAddress {
-                connector_id: ConnectorId(WHATSAPP.into()),
-                address: PlatformAddress::new("12345@s.whatsapp.net", None),
-                chat_title: None,
-            },
-            payload: EventPayload::ReadReceipt {
-                platform_message_id: "wa-1".into(),
-                reader: "me".into(),
-                from_me: true,
-            },
-        })
+        core.ingest(receipt_event(
+            WHATSAPP,
+            "12345@s.whatsapp.net",
+            "wa-1",
+            ReceiptKind::Read,
+            true,
+        ))
         .await
         .unwrap(),
         IngestOutcome::Ignored(IgnoreReason::Unmatched),

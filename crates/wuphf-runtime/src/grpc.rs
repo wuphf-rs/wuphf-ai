@@ -9,7 +9,7 @@ use wuphf_model::{
     Attachment, AttachmentKind, ConnectorCapabilities, ConnectorId, ConnectorInput,
     ConnectorOutput, ConnectorRegistration, DeleteMode, DeliveryOptions, DispatchAcknowledgement,
     DispatchPayload, EditMode, EventPayload, InboundMessage, MediaId, NormalizedEvent, Platform,
-    PlatformAddress, ProvisionThread, ReplyContext, SourceAddress,
+    PlatformAddress, ProvisionThread, ReceiptKind, ReplyContext, SourceAddress,
 };
 use wuphf_proto::connector as pb;
 use wuphf_proto::connector::connector_transport_server::ConnectorTransport;
@@ -239,7 +239,16 @@ fn input_from_proto(
                 },
             }))
         }
-        Some(pb::client_frame::Body::ReadReceipt(event)) => {
+        Some(pb::client_frame::Body::Receipt(event)) => {
+            let kind = match pb::ReceiptKind::try_from(event.kind)
+                .map_err(|_| WireError("invalid receipt kind".into()))?
+            {
+                pb::ReceiptKind::Delivered => ReceiptKind::Delivered,
+                pb::ReceiptKind::Read => ReceiptKind::Read,
+                pb::ReceiptKind::Unspecified => {
+                    return Err(WireError("receipt kind required".into()));
+                }
+            };
             Ok(ConnectorInput::Event(NormalizedEvent {
                 source: SourceAddress {
                     connector_id: connector_id.clone(),
@@ -249,13 +258,14 @@ fn input_from_proto(
                     ),
                     chat_title: None,
                 },
-                payload: EventPayload::ReadReceipt {
+                payload: EventPayload::ReceiptSet {
                     platform_message_id: required_string(
                         event.platform_message_id,
                         "platform_message_id",
                     )?,
-                    reader: required_string(event.reader, "reader")?,
+                    observer: required_string(event.observer, "observer")?,
                     from_me: event.from_me,
+                    kind,
                 },
             }))
         }

@@ -347,57 +347,56 @@ where
         })
     }
 
-    /// Surface a read receipt as a seen signal on the message's origin copy. The
-    /// receipt is observed at the reader's endpoint; the signal goes to the
-    /// endpoint the message was authored on (its origin), so the author's side
-    /// can show it was seen. The reader's own (from_me) reads are ignored, as is
-    /// a receipt for a message authored on the reading side (nothing to surface).
-    /// The connector decides how to render it (Telegram reacts 👀 in DMs).
-    pub(crate) async fn ingest_read_receipt(
+    /// Surface a delivery/read receipt on the message's other copies. The
+    /// receipt is observed at the endpoint where the peer acknowledged it; the
+    /// signal fans to every other endpoint that holds a copy (a 👍 for
+    /// delivered, 👀 for read), so the side the owner reads the mirror on shows
+    /// the message landed/was seen. Because it keys on the logical message and
+    /// not on which side authored it, this works both for messages the bridge
+    /// sent and for messages the owner sent from another of the source's devices
+    /// — the latter arrive mirrored to the other endpoints, where the receipt is
+    /// now surfaced. The owner's own (from_me) receipts are ignored. Targets
+    /// whose copy is not delivered yet are blocked until it is. The connector
+    /// decides how to render the signal.
+    pub(crate) async fn ingest_receipt(
         &self,
-        reader_endpoint: EndpointId,
+        observer_endpoint: EndpointId,
         platform_message_id: String,
         from_me: bool,
+        kind: wuphf_model::ReceiptKind,
     ) -> Result<IngestOutcome, CoreError> {
         if from_me {
             return Ok(IngestOutcome::Ignored(IgnoreReason::Unmatched));
         }
         let Some(message_id) = self
             .storage
-            .message_id_for_copy(reader_endpoint, &platform_message_id)
+            .message_id_for_copy(observer_endpoint, &platform_message_id)
             .await?
         else {
             return Ok(IngestOutcome::Ignored(IgnoreReason::Unmatched));
         };
-        let Some(origin) = self.storage.received_copy(message_id).await? else {
-            return Ok(IngestOutcome::Ignored(IgnoreReason::Unmatched));
-        };
-        if origin.endpoint_id == reader_endpoint {
-            return Ok(IngestOutcome::Ignored(IgnoreReason::Unmatched));
-        }
-        let endpoint = self.storage.endpoint(origin.endpoint_id).await?;
-        let replica_set_id = self
+        let message = self
             .storage
-            .replica_set_for_endpoint(origin.endpoint_id)
+            .message(message_id)
             .await?
-            .ok_or(CoreError::OriginWithoutReplicaSet(origin.endpoint_id))?;
-        let command = wuphf_model::DispatchCommand {
-            target_endpoint: endpoint.id,
-            target_connector: endpoint.connector_id.clone(),
-            target: wuphf_model::TargetAddress {
-                address: endpoint.address(),
-                provision_thread: None,
-            },
-            payload: wuphf_model::DispatchPayload::SeenReceipt {
-                message_id,
-                replica_set_id,
-                target_platform_message_id: origin.platform_message_id,
-            },
-        };
-        let dispatches = vec![self.storage.enqueue_dispatch(command, None).await?];
+            .ok_or(CoreError::ReceiptTargetNotStored(message_id))?;
+
+        let routing = self
+            .router
+            .route_receipt(&message, observer_endpoint, kind)
+            .await?;
+        let mut dispatches = Vec::new();
+        for command in routing.dispatches.iter().cloned() {
+            dispatches.push(self.storage.enqueue_dispatch(command, None).await?);
+        }
+        for blocked in routing.blocked.iter().cloned() {
+            self.storage
+                .enqueue_dispatch(blocked.command, Some(blocked.waiting_for_message))
+                .await?;
+        }
         Ok(IngestOutcome::Routed {
             message_id,
-            routing: RoutingOutcome::default(),
+            routing,
             dispatches,
         })
     }
