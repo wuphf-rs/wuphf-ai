@@ -28,4 +28,4 @@ log_level = "info"
 # sync). The core dedups by native id, so a restart re-bridges only newly-missed
 # messages; on a fresh install the recent inbox is bridged once. Defaults to
 # true when unset; set to false to skip the replay.
-# backfill_on_start = true
+backfill_on_start = true
