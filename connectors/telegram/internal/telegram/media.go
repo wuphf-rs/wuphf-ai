@@ -86,6 +86,7 @@ func inboundMedia(
 			Kind:      documentKind(document),
 			MimeType:  stringPointer(document.MimeType),
 			SizeBytes: &size,
+			Animated:  documentAnimated(document),
 		}
 		if name := documentFileName(document); name != "" {
 			metadata.FileName = &name
@@ -131,6 +132,26 @@ func documentKind(document *tg.Document) wuphfpb.Attachment_Kind {
 		}
 	}
 	return wuphfpb.Attachment_KIND_FILE
+}
+
+// documentAnimated reports whether a document plays: a GIF (animated mp4) or an
+// animated sticker. Telegram marks GIFs with DocumentAttributeAnimated, video
+// stickers (WebM) with a video attribute alongside the sticker attribute, and
+// Lottie stickers with the application/x-tgsticker mime. Each is forwarded as
+// the animated hint so the target can render motion.
+func documentAnimated(document *tg.Document) bool {
+	var sticker, video bool
+	for _, attribute := range document.Attributes {
+		switch attribute.(type) {
+		case *tg.DocumentAttributeAnimated:
+			return true
+		case *tg.DocumentAttributeSticker:
+			sticker = true
+		case *tg.DocumentAttributeVideo:
+			video = true
+		}
+	}
+	return sticker && (video || document.MimeType == "application/x-tgsticker")
 }
 
 func documentFileName(document *tg.Document) string {

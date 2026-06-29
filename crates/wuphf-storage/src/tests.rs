@@ -64,6 +64,7 @@ async fn sqlite_persists_media_blobs() {
         file_name: Some("photo.jpg".into()),
         mime_type: Some("image/jpeg".into()),
         size_bytes: Some(5),
+        animated: false,
     };
     let storage = SqliteStorage::connect(&url).await.unwrap();
     storage
@@ -134,6 +135,7 @@ fn attachment() -> Attachment {
         file_name: Some("file.bin".into()),
         mime_type: None,
         size_bytes: Some(3),
+        animated: false,
     }
 }
 

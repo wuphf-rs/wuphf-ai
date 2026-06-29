@@ -507,6 +507,7 @@ async fn rejects_unknown_or_modified_media_before_claiming_event() {
         file_name: Some("photo.jpg".into()),
         mime_type: Some("image/jpeg".into()),
         size_bytes: Some(5),
+        animated: false,
     };
     let media_event = |attachment: Attachment| {
         let mut event = event(WHATSAPP, "12345@s.whatsapp.net", "wa-media", None);

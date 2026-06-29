@@ -313,6 +313,7 @@ async fn media_transport_stores_downloadable_bytes_prunes_orphans_and_enforces_l
                     file_name: Some("photo.jpg".into()),
                     mime_type: Some("image/jpeg".into()),
                     size_bytes: Some(5),
+                    animated: false,
                 })),
             },
             pb::UploadMediaFrame {
@@ -347,6 +348,7 @@ async fn media_transport_stores_downloadable_bytes_prunes_orphans_and_enforces_l
                     file_name: None,
                     mime_type: None,
                     size_bytes: Some(1),
+                    animated: false,
                 })),
             },
             pb::UploadMediaFrame {
@@ -371,6 +373,7 @@ async fn media_transport_stores_downloadable_bytes_prunes_orphans_and_enforces_l
                     file_name: None,
                     mime_type: None,
                     size_bytes: None,
+                    animated: false,
                 })),
             },
             pb::UploadMediaFrame {

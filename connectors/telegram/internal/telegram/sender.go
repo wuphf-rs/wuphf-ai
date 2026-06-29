@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"unicode/utf16"
 
+	"github.com/akshettrj/wuphf/connectors/mediaconv"
 	coreclient "github.com/akshettrj/wuphf/connectors/telegram/internal/core"
 	"github.com/akshettrj/wuphf/proto/go/connector/v1"
 	"github.com/gotd/td/telegram/message"
@@ -335,13 +336,23 @@ func (s Sender) sendAttachment(
 	if err != nil {
 		return nil, fmt.Errorf("download media from core: %w", err)
 	}
+	// Stickers and GIFs carry motion that is lost if they degrade to a file, so
+	// they are handled before the extension/force-file logic that governs plain
+	// media. An animated sticker is rendered as a Telegram WebM video sticker; a
+	// GIF (an animated video) as a Telegram animation.
+	if attachment.Kind == wuphfpb.Attachment_KIND_STICKER {
+		return s.sendSticker(ctx, builder, attachment, bytes)
+	}
+	if attachment.Kind == wuphfpb.Attachment_KIND_VIDEO && attachment.GetAnimated() && !asFile {
+		return builder.Upload(message.FromBytes(gifUploadName(attachment), bytes)).GIF(ctx, captionOptions...)
+	}
 	name, hasExtension := uploadName(attachment)
 	upload := builder.Upload(message.FromBytes(name, bytes))
-	// Photo/video/audio/sticker uploads are validated by Telegram against the
-	// filename extension. When we cannot determine one, send the bytes as a
-	// document instead, which carries no extension requirement, rather than
-	// risk a PHOTO_EXT_INVALID (or equivalent) rejection. The delivery policy
-	// can also force every attachment to a document regardless of its kind.
+	// Photo/video/audio uploads are validated by Telegram against the filename
+	// extension. When we cannot determine one, send the bytes as a document
+	// instead, which carries no extension requirement, rather than risk a
+	// PHOTO_EXT_INVALID (or equivalent) rejection. The delivery policy can also
+	// force every attachment to a document regardless of its kind.
 	kind := attachment.Kind
 	if asFile || !hasExtension {
 		kind = wuphfpb.Attachment_KIND_FILE
@@ -353,13 +364,54 @@ func (s Sender) sendAttachment(
 		return upload.Video(ctx, captionOptions...)
 	case wuphfpb.Attachment_KIND_AUDIO:
 		return upload.Audio(ctx, captionOptions...)
-	case wuphfpb.Attachment_KIND_STICKER:
-		return upload.Sticker(ctx, captionOptions...)
 	case wuphfpb.Attachment_KIND_FILE:
 		return upload.File(ctx, captionOptions...)
 	default:
 		return nil, coreclient.Permanent(fmt.Errorf("unsupported outbound attachment kind %s", attachment.Kind))
 	}
+}
+
+// sendSticker delivers a sticker, preserving animation. A static sticker is sent
+// as-is (WebP). An animated sticker is delivered as a WebM/VP9 video sticker:
+// WhatsApp animated stickers arrive as animated WebP, which Telegram renders only
+// as a still frame, so they are transcoded to WebM first. If the transcode is
+// unavailable (libwebp/ffmpeg missing) or fails, it degrades to a static sticker
+// (the first frame) rather than dropping the message.
+func (s Sender) sendSticker(
+	ctx context.Context,
+	builder *message.Builder,
+	attachment *wuphfpb.Attachment,
+	data []byte,
+) (tg.UpdatesClass, error) {
+	if attachment.GetAnimated() {
+		if webm, err := s.animatedStickerWebM(ctx, attachment, data); err == nil {
+			if file, ferr := builder.Upload(message.FromBytes("sticker.webm", webm)).AsInputFile(ctx); ferr == nil {
+				media := message.UploadedDocument(file).MIME("video/webm").Filename("sticker.webm").UploadedSticker()
+				return builder.Media(ctx, media)
+			}
+		}
+		// Fall through: deliver the original as a static sticker (first frame).
+	}
+	return builder.Upload(message.FromBytes("sticker.webp", data)).Sticker(ctx)
+}
+
+// animatedStickerWebM returns the sticker as WebM/VP9 bytes, transcoding from
+// animated WebP when needed. A source already in WebM (an animated sticker that
+// originated elsewhere as video) is passed through unchanged.
+func (s Sender) animatedStickerWebM(ctx context.Context, attachment *wuphfpb.Attachment, data []byte) ([]byte, error) {
+	if attachment.GetMimeType() == "video/webm" {
+		return data, nil
+	}
+	return mediaconv.AnimatedWebPToWebM(ctx, data)
+}
+
+// gifUploadName names a GIF upload with a .mp4 extension, the container Telegram
+// animations use, falling back when the source supplied no name.
+func gifUploadName(attachment *wuphfpb.Attachment) string {
+	if name := attachment.GetFileName(); name != "" && path.Ext(name) != "" {
+		return name
+	}
+	return "animation.mp4"
 }
 
 // uploadName builds the filename for a Telegram media upload and reports whether

@@ -24,6 +24,12 @@ pub struct Attachment {
     pub file_name: Option<String>,
     pub mime_type: Option<String>,
     pub size_bytes: Option<u64>,
+    /// Whether the media plays: an animated sticker or a GIF (a `Video` with GIF
+    /// playback semantics). A target uses it to render motion natively, as the
+    /// mime type alone cannot tell a static WebP from an animated one, or a GIF
+    /// from a normal video.
+    #[serde(default)]
+    pub animated: bool,
 }
 
 /// An [`Attachment`] together with its raw bytes, as moved through the media

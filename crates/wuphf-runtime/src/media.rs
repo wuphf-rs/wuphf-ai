@@ -97,6 +97,7 @@ where
             file_name: metadata.file_name,
             mime_type: metadata.mime_type,
             size_bytes: Some(bytes.len() as u64),
+            animated: metadata.animated,
         };
         self.storage
             .put_media(

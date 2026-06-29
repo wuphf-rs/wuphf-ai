@@ -39,6 +39,11 @@
             rustc
             rustfmt
             sqlite
+            ffmpeg
+            # ImageMagick decodes animated WebP (which ffmpeg cannot), used by the
+            # sticker transcoder to turn WhatsApp animated stickers into a form
+            # ffmpeg can re-encode to a Telegram WebM video sticker.
+            imagemagick
           ];
 
           env.RUST_BACKTRACE = "1";

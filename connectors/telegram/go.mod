@@ -3,6 +3,7 @@ module github.com/akshettrj/wuphf/connectors/telegram
 go 1.25.0
 
 require (
+	github.com/akshettrj/wuphf/connectors/mediaconv v0.0.0
 	github.com/akshettrj/wuphf/proto/go v0.0.0
 	github.com/gotd/td v0.144.0
 	github.com/pelletier/go-toml/v2 v2.2.4
@@ -12,6 +13,8 @@ require (
 )
 
 replace github.com/akshettrj/wuphf/proto/go => ../../proto/go
+
+replace github.com/akshettrj/wuphf/connectors/mediaconv => ../mediaconv
 
 require (
 	github.com/cenkalti/backoff/v4 v4.3.0 // indirect

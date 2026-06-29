@@ -63,10 +63,14 @@ func inboundMedia(message *waE2E.Message) (*wuphfpb.MediaMetadata, whatsmeow.Dow
 	}
 	if video := message.GetVideoMessage(); video != nil {
 		size := video.GetFileLength()
+		// A WhatsApp GIF is an MP4 flagged for GIF playback, not a real GIF; the
+		// flag is the only thing distinguishing it from a normal video, so it is
+		// carried through as the animated hint for the target to render as a GIF.
 		return &wuphfpb.MediaMetadata{
 			Kind:      wuphfpb.Attachment_KIND_VIDEO,
 			MimeType:  optionalString(video.GetMimetype()),
 			SizeBytes: &size,
+			Animated:  video.GetGifPlayback(),
 		}, video, true
 	}
 	if audio := message.GetAudioMessage(); audio != nil {
@@ -79,10 +83,14 @@ func inboundMedia(message *waE2E.Message) (*wuphfpb.MediaMetadata, whatsmeow.Dow
 	}
 	if sticker := message.GetStickerMessage(); sticker != nil {
 		size := sticker.GetFileLength()
+		// WhatsApp animated stickers are animated WebP; the mime is image/webp
+		// either way, so IsAnimated is the only signal and is forwarded so the
+		// target can render motion (e.g. transcode to a WebM sticker).
 		return &wuphfpb.MediaMetadata{
 			Kind:      wuphfpb.Attachment_KIND_STICKER,
 			MimeType:  optionalString(sticker.GetMimetype()),
 			SizeBytes: &size,
+			Animated:  sticker.GetIsAnimated(),
 		}, sticker, true
 	}
 	return nil, nil, false

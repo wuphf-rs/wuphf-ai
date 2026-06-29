@@ -41,6 +41,12 @@ message Attachment {
   optional string file_name = 3;
   optional string mime_type = 4;
   optional uint64 size_bytes = 5;
+  // Whether the media plays: an animated sticker (animated WebP, WebM/.tgs
+  // sticker) or a GIF (KIND_VIDEO with GIF playback semantics). Lets a target
+  // render motion natively — e.g. a WhatsApp animated sticker becomes a Telegram
+  // WebM video sticker rather than a still frame — since the mime type alone
+  // cannot distinguish a static from an animated WebP, or a GIF from a video.
+  bool animated = 6;
 }
 
 message MediaMetadata {
@@ -48,4 +54,5 @@ message MediaMetadata {
   optional string file_name = 2;
   optional string mime_type = 3;
   optional uint64 size_bytes = 4;
+  bool animated = 5;
 }

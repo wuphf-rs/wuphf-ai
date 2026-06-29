@@ -444,6 +444,7 @@ fn attachment_from_proto(attachment: pb::Attachment) -> Result<Attachment, WireE
         file_name: attachment.file_name,
         mime_type: attachment.mime_type,
         size_bytes: attachment.size_bytes,
+        animated: attachment.animated,
     })
 }
 
@@ -461,6 +462,7 @@ pub(crate) fn attachment_to_proto(attachment: Attachment) -> pb::Attachment {
         file_name: attachment.file_name,
         mime_type: attachment.mime_type,
         size_bytes: attachment.size_bytes,
+        animated: attachment.animated,
     }
 }
 

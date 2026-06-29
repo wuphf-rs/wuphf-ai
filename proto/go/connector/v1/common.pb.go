@@ -256,12 +256,18 @@ func (x *Registration) GetCapabilities() *Capabilities {
 }
 
 type Attachment struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	MediaId       string                 `protobuf:"bytes,1,opt,name=media_id,json=mediaId,proto3" json:"media_id,omitempty"`
-	Kind          Attachment_Kind        `protobuf:"varint,2,opt,name=kind,proto3,enum=wuphf.connector.v1.Attachment_Kind" json:"kind,omitempty"`
-	FileName      *string                `protobuf:"bytes,3,opt,name=file_name,json=fileName,proto3,oneof" json:"file_name,omitempty"`
-	MimeType      *string                `protobuf:"bytes,4,opt,name=mime_type,json=mimeType,proto3,oneof" json:"mime_type,omitempty"`
-	SizeBytes     *uint64                `protobuf:"varint,5,opt,name=size_bytes,json=sizeBytes,proto3,oneof" json:"size_bytes,omitempty"`
+	state     protoimpl.MessageState `protogen:"open.v1"`
+	MediaId   string                 `protobuf:"bytes,1,opt,name=media_id,json=mediaId,proto3" json:"media_id,omitempty"`
+	Kind      Attachment_Kind        `protobuf:"varint,2,opt,name=kind,proto3,enum=wuphf.connector.v1.Attachment_Kind" json:"kind,omitempty"`
+	FileName  *string                `protobuf:"bytes,3,opt,name=file_name,json=fileName,proto3,oneof" json:"file_name,omitempty"`
+	MimeType  *string                `protobuf:"bytes,4,opt,name=mime_type,json=mimeType,proto3,oneof" json:"mime_type,omitempty"`
+	SizeBytes *uint64                `protobuf:"varint,5,opt,name=size_bytes,json=sizeBytes,proto3,oneof" json:"size_bytes,omitempty"`
+	// Whether the media plays: an animated sticker (animated WebP, WebM/.tgs
+	// sticker) or a GIF (KIND_VIDEO with GIF playback semantics). Lets a target
+	// render motion natively — e.g. a WhatsApp animated sticker becomes a Telegram
+	// WebM video sticker rather than a still frame — since the mime type alone
+	// cannot distinguish a static from an animated WebP, or a GIF from a video.
+	Animated      bool `protobuf:"varint,6,opt,name=animated,proto3" json:"animated,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -331,12 +337,20 @@ func (x *Attachment) GetSizeBytes() uint64 {
 	return 0
 }
 
+func (x *Attachment) GetAnimated() bool {
+	if x != nil {
+		return x.Animated
+	}
+	return false
+}
+
 type MediaMetadata struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Kind          Attachment_Kind        `protobuf:"varint,1,opt,name=kind,proto3,enum=wuphf.connector.v1.Attachment_Kind" json:"kind,omitempty"`
 	FileName      *string                `protobuf:"bytes,2,opt,name=file_name,json=fileName,proto3,oneof" json:"file_name,omitempty"`
 	MimeType      *string                `protobuf:"bytes,3,opt,name=mime_type,json=mimeType,proto3,oneof" json:"mime_type,omitempty"`
 	SizeBytes     *uint64                `protobuf:"varint,4,opt,name=size_bytes,json=sizeBytes,proto3,oneof" json:"size_bytes,omitempty"`
+	Animated      bool                   `protobuf:"varint,5,opt,name=animated,proto3" json:"animated,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -399,6 +413,13 @@ func (x *MediaMetadata) GetSizeBytes() uint64 {
 	return 0
 }
 
+func (x *MediaMetadata) GetAnimated() bool {
+	if x != nil {
+		return x.Animated
+	}
+	return false
+}
+
 var File_common_proto protoreflect.FileDescriptor
 
 const file_common_proto_rawDesc = "" +
@@ -410,7 +431,7 @@ const file_common_proto_rawDesc = "" +
 	"\fRegistration\x12!\n" +
 	"\fconnector_id\x18\x01 \x01(\tR\vconnectorId\x128\n" +
 	"\bplatform\x18\x02 \x01(\x0e2\x1c.wuphf.connector.v1.PlatformR\bplatform\x12D\n" +
-	"\fcapabilities\x18\x03 \x01(\v2 .wuphf.connector.v1.CapabilitiesR\fcapabilities\"\xe2\x02\n" +
+	"\fcapabilities\x18\x03 \x01(\v2 .wuphf.connector.v1.CapabilitiesR\fcapabilities\"\xfe\x02\n" +
 	"\n" +
 	"Attachment\x12\x19\n" +
 	"\bmedia_id\x18\x01 \x01(\tR\amediaId\x127\n" +
@@ -418,7 +439,8 @@ const file_common_proto_rawDesc = "" +
 	"\tfile_name\x18\x03 \x01(\tH\x00R\bfileName\x88\x01\x01\x12 \n" +
 	"\tmime_type\x18\x04 \x01(\tH\x01R\bmimeType\x88\x01\x01\x12\"\n" +
 	"\n" +
-	"size_bytes\x18\x05 \x01(\x04H\x02R\tsizeBytes\x88\x01\x01\"m\n" +
+	"size_bytes\x18\x05 \x01(\x04H\x02R\tsizeBytes\x88\x01\x01\x12\x1a\n" +
+	"\banimated\x18\x06 \x01(\bR\banimated\"m\n" +
 	"\x04Kind\x12\x14\n" +
 	"\x10KIND_UNSPECIFIED\x10\x00\x12\x0e\n" +
 	"\n" +
@@ -433,13 +455,14 @@ const file_common_proto_rawDesc = "" +
 	"_file_nameB\f\n" +
 	"\n" +
 	"_mime_typeB\r\n" +
-	"\v_size_bytes\"\xdb\x01\n" +
+	"\v_size_bytes\"\xf7\x01\n" +
 	"\rMediaMetadata\x127\n" +
 	"\x04kind\x18\x01 \x01(\x0e2#.wuphf.connector.v1.Attachment.KindR\x04kind\x12 \n" +
 	"\tfile_name\x18\x02 \x01(\tH\x00R\bfileName\x88\x01\x01\x12 \n" +
 	"\tmime_type\x18\x03 \x01(\tH\x01R\bmimeType\x88\x01\x01\x12\"\n" +
 	"\n" +
-	"size_bytes\x18\x04 \x01(\x04H\x02R\tsizeBytes\x88\x01\x01B\f\n" +
+	"size_bytes\x18\x04 \x01(\x04H\x02R\tsizeBytes\x88\x01\x01\x12\x1a\n" +
+	"\banimated\x18\x05 \x01(\bR\banimatedB\f\n" +
 	"\n" +
 	"_file_nameB\f\n" +
 	"\n" +

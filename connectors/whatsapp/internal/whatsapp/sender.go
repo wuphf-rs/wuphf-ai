@@ -4,8 +4,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"path"
 	"unicode/utf8"
 
+	"github.com/akshettrj/wuphf/connectors/mediaconv"
 	coreclient "github.com/akshettrj/wuphf/connectors/whatsapp/internal/core"
 	wuphfpb "github.com/akshettrj/wuphf/proto/go/connector/v1"
 	"go.mau.fi/whatsmeow"
@@ -222,29 +224,18 @@ func (s Sender) attachmentMessage(
 			FileLength:    &uploaded.FileLength,
 		}}, nil
 	case wuphfpb.Attachment_KIND_FILE:
-		uploaded, err := s.client.Upload(ctx, bytes, whatsmeow.MediaDocument)
-		if err != nil {
-			return nil, fmt.Errorf("upload WhatsApp file: %w", err)
-		}
-		return &waE2E.Message{DocumentMessage: &waE2E.DocumentMessage{
-			Caption:       optionalProtoString(caption),
-			Mimetype:      optionalProtoString(mimeType),
-			FileName:      optionalProtoString(attachment.GetFileName()),
-			URL:           &uploaded.URL,
-			DirectPath:    &uploaded.DirectPath,
-			MediaKey:      uploaded.MediaKey,
-			FileEncSHA256: uploaded.FileEncSHA256,
-			FileSHA256:    uploaded.FileSHA256,
-			FileLength:    &uploaded.FileLength,
-		}}, nil
+		return s.documentMessage(ctx, bytes, mimeType, attachment.GetFileName(), caption)
 	case wuphfpb.Attachment_KIND_VIDEO:
 		uploaded, err := s.client.Upload(ctx, bytes, whatsmeow.MediaVideo)
 		if err != nil {
 			return nil, fmt.Errorf("upload WhatsApp video: %w", err)
 		}
 		return &waE2E.Message{VideoMessage: &waE2E.VideoMessage{
-			Caption:       optionalProtoString(caption),
-			Mimetype:      optionalProtoString(mimeType),
+			Caption:  optionalProtoString(caption),
+			Mimetype: optionalProtoString(mimeType),
+			// A WhatsApp GIF is an MP4 with this flag set, so an animated video
+			// (a GIF on the source) is marked to loop and play without sound.
+			GifPlayback:   proto.Bool(attachment.GetAnimated()),
 			URL:           &uploaded.URL,
 			DirectPath:    &uploaded.DirectPath,
 			MediaKey:      uploaded.MediaKey,
@@ -267,22 +258,94 @@ func (s Sender) attachmentMessage(
 			FileLength:    &uploaded.FileLength,
 		}}, nil
 	case wuphfpb.Attachment_KIND_STICKER:
-		uploaded, err := s.client.Upload(ctx, bytes, whatsmeow.MediaImage)
-		if err != nil {
-			return nil, fmt.Errorf("upload WhatsApp sticker: %w", err)
-		}
-		return &waE2E.Message{StickerMessage: &waE2E.StickerMessage{
-			Mimetype:      optionalProtoString(mimeType),
-			URL:           &uploaded.URL,
-			DirectPath:    &uploaded.DirectPath,
-			MediaKey:      uploaded.MediaKey,
-			FileEncSHA256: uploaded.FileEncSHA256,
-			FileSHA256:    uploaded.FileSHA256,
-			FileLength:    &uploaded.FileLength,
-		}}, nil
+		return s.stickerMessage(ctx, attachment, bytes, mimeType)
 	default:
 		return nil, coreclient.Permanent(fmt.Errorf("unsupported outbound attachment kind %s", attachment.Kind))
 	}
+}
+
+// stickerMessage delivers a sticker, preserving animation. WhatsApp stickers are
+// WebP (animated stickers are animated WebP), so an animated sticker arriving in
+// another format — chiefly a Telegram WebM video sticker — is transcoded to
+// animated WebP first. A static sticker (already WebP) is uploaded unchanged.
+// When the transcode cannot run (a Lottie .tgs has no raster form, or the tools
+// are missing) the original is delivered as a file so the message is not lost.
+func (s Sender) stickerMessage(
+	ctx context.Context,
+	attachment *wuphfpb.Attachment,
+	data []byte,
+	mimeType string,
+) (*waE2E.Message, error) {
+	if attachment.GetAnimated() && mimeType != "image/webp" {
+		converted, err := mediaconv.ToAnimatedWebP(ctx, data, stickerSourceExt(attachment))
+		if err != nil {
+			return s.documentMessage(ctx, data, mimeType, stickerFileName(attachment), "")
+		}
+		data, mimeType = converted, "image/webp"
+	}
+	uploaded, err := s.client.Upload(ctx, data, whatsmeow.MediaImage)
+	if err != nil {
+		return nil, fmt.Errorf("upload WhatsApp sticker: %w", err)
+	}
+	return &waE2E.Message{StickerMessage: &waE2E.StickerMessage{
+		Mimetype:      optionalProtoString(mimeType),
+		IsAnimated:    proto.Bool(attachment.GetAnimated()),
+		URL:           &uploaded.URL,
+		DirectPath:    &uploaded.DirectPath,
+		MediaKey:      uploaded.MediaKey,
+		FileEncSHA256: uploaded.FileEncSHA256,
+		FileSHA256:    uploaded.FileSHA256,
+		FileLength:    &uploaded.FileLength,
+	}}, nil
+}
+
+// documentMessage uploads bytes as a WhatsApp document, the generic file form
+// used both for plain files and as the fallback for media that cannot be sent in
+// a richer kind.
+func (s Sender) documentMessage(
+	ctx context.Context,
+	data []byte,
+	mimeType, fileName, caption string,
+) (*waE2E.Message, error) {
+	uploaded, err := s.client.Upload(ctx, data, whatsmeow.MediaDocument)
+	if err != nil {
+		return nil, fmt.Errorf("upload WhatsApp file: %w", err)
+	}
+	return &waE2E.Message{DocumentMessage: &waE2E.DocumentMessage{
+		Caption:       optionalProtoString(caption),
+		Mimetype:      optionalProtoString(mimeType),
+		FileName:      optionalProtoString(fileName),
+		URL:           &uploaded.URL,
+		DirectPath:    &uploaded.DirectPath,
+		MediaKey:      uploaded.MediaKey,
+		FileEncSHA256: uploaded.FileEncSHA256,
+		FileSHA256:    uploaded.FileSHA256,
+		FileLength:    &uploaded.FileLength,
+	}}, nil
+}
+
+// stickerSourceExt picks the container extension for a sticker's bytes so the
+// transcoder can demux it, derived from the mime type with a filename fallback.
+func stickerSourceExt(attachment *wuphfpb.Attachment) string {
+	switch attachment.GetMimeType() {
+	case "video/webm":
+		return ".webm"
+	case "application/x-tgsticker":
+		return ".tgs"
+	}
+	if ext := path.Ext(attachment.GetFileName()); ext != "" {
+		return ext
+	}
+	return ".bin"
+}
+
+// stickerFileName names the fallback document for a sticker that could not be
+// converted, preserving any source name.
+func stickerFileName(attachment *wuphfpb.Attachment) string {
+	if name := attachment.GetFileName(); name != "" {
+		return name
+	}
+	return "sticker" + stickerSourceExt(attachment)
 }
 
 func textMessage(text string) *waE2E.Message {
