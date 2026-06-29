@@ -22,3 +22,10 @@ supports_topic_create = false
 
 # Log verbosity: trace, debug, info, warn, error (WUPHF_LOG_LEVEL overrides).
 log_level = "info"
+
+# Replay the inbox snapshot on connect so messages exchanged while the connector
+# was down are bridged (the Instagram counterpart to WhatsApp's offline history
+# sync). The core dedups by native id, so a restart re-bridges only newly-missed
+# messages; on a fresh install the recent inbox is bridged once. Defaults to
+# true when unset; set to false to skip the replay.
+# backfill_on_start = true

@@ -26,6 +26,19 @@ type File struct {
 	// LogLevel sets log verbosity (trace, debug, info, warn, error). Empty
 	// means info; the WUPHF_LOG_LEVEL environment variable overrides it.
 	LogLevel string `toml:"log_level"`
+	// BackfillOnStart replays the inbox snapshot on connect so messages that
+	// arrived while the connector was down are bridged, the same offline-sync
+	// behaviour WhatsApp gets from history sync. The core dedups by native id
+	// (persisted), so a restart re-bridges only newly-missed messages. Nil means
+	// enabled; set it to false to skip the replay (e.g. to avoid bridging the
+	// recent inbox on a fresh install).
+	BackfillOnStart *bool `toml:"backfill_on_start"`
+}
+
+// ShouldBackfill reports whether the inbox snapshot is replayed on connect,
+// defaulting to true when the option is unset.
+func (c File) ShouldBackfill() bool {
+	return c.BackfillOnStart == nil || *c.BackfillOnStart
 }
 
 func Load(path string) (File, error) {

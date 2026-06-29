@@ -58,11 +58,11 @@ func (c Connector) Run(ctx context.Context) error {
 		}
 	})
 
-	// Authenticate and load the account. The backlog messages are not replayed
-	// (a restart must not re-bridge history), but the page's thread and contact
-	// rows are primed into the title cache: incremental message deltas do not
+	// Authenticate and load the account. The page's thread and contact rows are
+	// primed into the title cache up front: incremental message deltas do not
 	// carry thread names, so without this seed live events would have no
-	// chat_title and mirror threads would never be named.
+	// chat_title and mirror threads would never be named. The inbox's messages
+	// are replayed separately below when backfill is enabled.
 	_, initial, err := client.LoadMessagesPage(ctx)
 	if err != nil {
 		return fmt.Errorf("load Instagram account: %w", err)
@@ -85,6 +85,23 @@ func (c Connector) Run(ctx context.Context) error {
 	go func() {
 		runResult <- coreclient.New(c.cfg, logger).Run(ctx, NewSender(client), inputs)
 	}()
+
+	// Replay the inbox snapshot so messages exchanged while the connector was
+	// down reach the mirror, the Instagram counterpart to WhatsApp's offline
+	// history sync. The core dedups by native id (persisted in seen_events), so
+	// already-bridged messages are dropped and only newly-missed ones are
+	// mirrored; on a fresh install the recent inbox is bridged once. It runs
+	// after the core consumer is started (so a large inbox does not block on the
+	// input channel) and in the background (so a slow replay, e.g. media
+	// downloads, does not delay live events). Live events dedup against it.
+	if initial != nil && c.cfg.ShouldBackfill() {
+		go func() {
+			logger.Info().Msg("replaying Instagram inbox backlog")
+			if err := normalizer.Handle(ctx, initial); err != nil {
+				logger.Err(err).Msg("failed to replay Instagram inbox backlog")
+			}
+		}()
+	}
 	select {
 	case <-ctx.Done():
 		return ctx.Err()
