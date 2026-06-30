@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 
 	"github.com/akshettrj/wuphf/connectors/whatsapp/internal/config"
 )
@@ -71,18 +72,23 @@ func writeStickerMetadata(ctx context.Context, webp []byte, meta config.StickerM
 // stickerExif builds the EXIF payload WhatsApp parses for sticker-pack metadata.
 // The layout is a minimal little-endian TIFF header carrying a single private
 // tag (0x5741, "AW") whose value is a JSON document with the pack fields; this is
-// the format WhatsApp's clients expect. The project link is set as both store
-// links so it surfaces regardless of the recipient's platform.
+// the format WhatsApp's clients expect.
+//
+// WhatsApp only renders four keys for a received sticker — pack id, name,
+// publisher, and emojis — and has no link field (store-link fields exist only in
+// the installable-pack API, not in chat stickers). So the project link is folded
+// into the publisher text to make it visible (it is not clickable; that is a
+// WhatsApp limitation).
 func stickerExif(meta config.StickerMetadata) ([]byte, error) {
+	publisher := meta.AuthorName
+	if meta.Link != "" {
+		publisher = strings.TrimSpace(meta.AuthorName + " · " + meta.Link)
+	}
 	payload := map[string]any{
 		"sticker-pack-id":        stickerPackID,
 		"sticker-pack-name":      meta.PackName,
-		"sticker-pack-publisher": meta.AuthorName,
+		"sticker-pack-publisher": publisher,
 		"emojis":                 []string{"🐶"},
-	}
-	if meta.Link != "" {
-		payload["android-app-store-link"] = meta.Link
-		payload["ios-app-store-link"] = meta.Link
 	}
 	jsonBytes, err := json.Marshal(payload)
 	if err != nil {

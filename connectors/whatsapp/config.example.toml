@@ -17,9 +17,9 @@ log_level = "info"
 
 # Sticker-pack metadata embedded in stickers bridged to WhatsApp, shown in
 # WhatsApp's sticker info. Any field left blank falls back to the defaults shown
-# here. The link is surfaced as the pack's store link so recipients can find the
-# project. Requires webpmux (libwebp) on PATH; without it stickers still send,
-# just without metadata.
+# here. WhatsApp has no link field for received stickers, so the link is appended
+# to the publisher text (visible, not clickable). Requires webpmux (libwebp) on
+# PATH; without it stickers still send, just without metadata.
 [sticker_metadata]
 pack_name = "wuphf"
 author_name = "wuphf-ai"

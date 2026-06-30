@@ -11,8 +11,9 @@ import (
 	"github.com/akshettrj/wuphf/connectors/whatsapp/internal/config"
 )
 
-// TestStickerExifContainsPackFields checks the EXIF payload carries the
-// configured pack metadata and the project link as both store links.
+// TestStickerExifContainsPackFields checks the EXIF payload carries the pack
+// name and folds the project link into the publisher (WhatsApp has no link field
+// for received stickers, so the URL rides along as publisher text).
 func TestStickerExifContainsPackFields(t *testing.T) {
 	t.Parallel()
 	exif, err := stickerExif(config.StickerMetadata{
@@ -25,9 +26,7 @@ func TestStickerExifContainsPackFields(t *testing.T) {
 	}
 	for _, want := range []string{
 		`"sticker-pack-name":"wuphf"`,
-		`"sticker-pack-publisher":"wuphf-ai"`,
-		`"android-app-store-link":"https://github.com/wuphf/wuphf-ai"`,
-		`"ios-app-store-link":"https://github.com/wuphf/wuphf-ai"`,
+		`"sticker-pack-publisher":"wuphf-ai · https://github.com/wuphf/wuphf-ai"`,
 	} {
 		if !bytes.Contains(exif, []byte(want)) {
 			t.Fatalf("exif missing %s\ngot: %s", want, exif)
@@ -38,16 +37,16 @@ func TestStickerExifContainsPackFields(t *testing.T) {
 	}
 }
 
-// TestStickerExifOmitsLinkWhenBlank keeps the store links out when no link is
-// configured, so WhatsApp shows no dangling link.
-func TestStickerExifOmitsLinkWhenBlank(t *testing.T) {
+// TestStickerExifPublisherWithoutLink leaves the publisher as the bare author
+// when no link is configured, so there is no dangling separator.
+func TestStickerExifPublisherWithoutLink(t *testing.T) {
 	t.Parallel()
 	exif, err := stickerExif(config.StickerMetadata{PackName: "p", AuthorName: "a"})
 	if err != nil {
 		t.Fatalf("stickerExif() error = %v", err)
 	}
-	if bytes.Contains(exif, []byte("app-store-link")) {
-		t.Fatalf("exif should omit store links when link is blank: %s", exif)
+	if !bytes.Contains(exif, []byte(`"sticker-pack-publisher":"a"`)) {
+		t.Fatalf("publisher should be the bare author when no link: %s", exif)
 	}
 }
 
