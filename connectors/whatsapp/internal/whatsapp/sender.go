@@ -277,7 +277,7 @@ func (s Sender) stickerMessage(
 	mimeType string,
 ) (*waE2E.Message, error) {
 	if attachment.GetAnimated() && mimeType != "image/webp" {
-		converted, err := mediaconv.ToAnimatedWebP(ctx, data, stickerSourceExt(attachment))
+		converted, err := animatedStickerWebP(ctx, attachment, data, mimeType)
 		if err != nil {
 			return s.documentMessage(ctx, data, mimeType, stickerFileName(attachment), "")
 		}
@@ -297,6 +297,22 @@ func (s Sender) stickerMessage(
 		FileSHA256:    uploaded.FileSHA256,
 		FileLength:    &uploaded.FileLength,
 	}}, nil
+}
+
+// animatedStickerWebP converts an animated sticker from another platform into the
+// animated WebP a WhatsApp sticker needs, dispatching on the source format: a
+// Telegram Lottie sticker (.tgs) is rasterized by a vector renderer, while any
+// video sticker (chiefly a Telegram WebM) is transcoded by ffmpeg.
+func animatedStickerWebP(
+	ctx context.Context,
+	attachment *wuphfpb.Attachment,
+	data []byte,
+	mimeType string,
+) ([]byte, error) {
+	if mimeType == "application/x-tgsticker" || stickerSourceExt(attachment) == ".tgs" {
+		return tgsToAnimatedWebP(data)
+	}
+	return mediaconv.ToAnimatedWebP(ctx, data, stickerSourceExt(attachment))
 }
 
 // documentMessage uploads bytes as a WhatsApp document, the generic file form
