@@ -2,6 +2,7 @@ package whatsappconnector
 
 import (
 	"go.mau.fi/whatsmeow/proto/waCompanionReg"
+	"go.mau.fi/whatsmeow/proto/waWa6"
 	"go.mau.fi/whatsmeow/store"
 	"google.golang.org/protobuf/proto"
 )
@@ -9,18 +10,22 @@ import (
 // androidDeviceOS is the OS label WhatsApp shows for this linked device.
 const androidDeviceOS = "Android"
 
-// useAndroidDeviceProps makes the whatsmeow session present as an Android phone
-// in WhatsApp's linked-devices list instead of the default "whatsmeow" web
-// companion. It changes only the companion metadata WhatsApp displays
-// (DeviceProps); the underlying client payload stays a web multidevice
-// companion, which is the only protocol whatsmeow implements, so the pairing
-// handshake is unchanged.
+// useAndroidClientIdentity makes the whatsmeow session register as an Android
+// client instead of the default web companion. WhatsApp does not reliably
+// deliver view-once media (and some other content) to a web companion, so the
+// session announces the Android platform the way the Baileys library does
+// (WhiskeySockets/Baileys#2201): set the client payload's user-agent platform to
+// ANDROID, drop the web-only WebInfo, and mark the linked device as an Android
+// phone.
 //
-// whatsmeow reads these package-level globals when it builds the registration
-// payload, so this must run before the client connects to pair a new session.
-// It is a no-op for an already-paired session (the props are sent only at
-// registration), but is safe to call every start.
-func useAndroidDeviceProps() {
+// This is experimental: it changes the protocol identity WhatsApp sees, not just
+// the displayed device label. whatsmeow reads these package-level globals when it
+// builds the registration payload, so this must run before the client connects to
+// pair a new session. It is a no-op for an already-paired session (the identity
+// is sent only at registration), but is safe to call every start.
+func useAndroidClientIdentity() {
+	store.BaseClientPayload.UserAgent.Platform = waWa6.ClientPayload_UserAgent_ANDROID.Enum()
+	store.BaseClientPayload.WebInfo = nil
 	store.DeviceProps.PlatformType = waCompanionReg.DeviceProps_ANDROID_PHONE.Enum()
 	store.DeviceProps.Os = proto.String(androidDeviceOS)
 }
