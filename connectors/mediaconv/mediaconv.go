@@ -32,8 +32,10 @@ import (
 const (
 	stickerMaxEdge    = 512
 	stickerMaxSeconds = 3
-	// stickerMaxBitrate keeps a 3s WebM well under Telegram's 256KB sticker cap.
-	stickerMaxBitrate = "500k"
+	// stickerMaxBitrate caps the average rate so a 3s WebM stays under Telegram's
+	// 256KB sticker limit (600k * 3s ~= 225KB) while leaving enough headroom over
+	// the old 500k to avoid the low-bitrate banding VP9 produced on busy stickers.
+	stickerMaxBitrate = "600k"
 )
 
 // MissingToolError reports that a required external binary is not on PATH, so a
@@ -66,8 +68,16 @@ func AnimatedWebPToWebM(ctx context.Context, src []byte) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
+	// -coalesce flattens an animated WebP's frame disposal: WhatsApp stickers
+	// store each frame as a sub-rectangle patch over the previous one, and
+	// without coalescing those partial frames composite wrong (smearing and
+	// banding). -define png:color-type=6 forces an RGBA APNG so transparency is
+	// carried through; ImageMagick otherwise writes an opaque RGB APNG, dropping
+	// the sticker's alpha.
 	apng := filepath.Join(dir, "frames.apng")
-	if _, err := run(ctx, magick, input, apng); err != nil {
+	if _, err := run(ctx, magick,
+		input, "-coalesce", "-define", "png:color-type=6", apng,
+	); err != nil {
 		return nil, err
 	}
 
@@ -77,12 +87,17 @@ func AnimatedWebPToWebM(ctx context.Context, src []byte) ([]byte, error) {
 		"-f", "apng", "-i", apng,
 		"-an",
 		"-c:v", "libvpx-vp9", "-pix_fmt", "yuva420p",
+		// libvpx-vp9 encodes the alpha plane as a second stream; alt-ref and
+		// look-ahead frames desync it from the color stream, which shows up as
+		// the sweeping vertical bands seen on the mirror. Disabling both keeps
+		// the planes frame-aligned.
+		"-auto-alt-ref", "0", "-lag-in-frames", "0",
 		"-vf", stickerScaleFilter,
 		"-t", strconv.Itoa(stickerMaxSeconds),
 		// Telegram rejects a video sticker over 256KB, so cap the bitrate
 		// (VP9 constrained quality): -crf governs quality, -b:v bounds the
 		// average rate so a short sticker stays well under the limit.
-		"-crf", "35", "-b:v", stickerMaxBitrate,
+		"-crf", "30", "-b:v", stickerMaxBitrate,
 		output,
 	); err != nil {
 		return nil, err
@@ -138,8 +153,11 @@ func ToAnimatedWebP(ctx context.Context, src []byte, srcExt string) ([]byte, err
 // stickerScaleFilter fits the media inside the platform sticker box without
 // upscaling or distorting it: it shrinks the longest edge to stickerMaxEdge only
 // when larger, preserving aspect ratio (the other edge stays free).
+// force_divisible_by=2 rounds both edges to even numbers, which yuv420p chroma
+// subsampling requires; an odd edge otherwise yields a half-filled chroma plane
+// that renders as banding.
 var stickerScaleFilter = fmt.Sprintf(
-	"scale='min(%d,iw)':'min(%d,ih)':force_original_aspect_ratio=decrease",
+	"scale='min(%d,iw)':'min(%d,ih)':force_original_aspect_ratio=decrease:force_divisible_by=2",
 	stickerMaxEdge, stickerMaxEdge,
 )
 
