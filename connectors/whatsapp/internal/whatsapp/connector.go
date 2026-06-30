@@ -34,6 +34,9 @@ func (c Connector) Run(ctx context.Context) error {
 		return fmt.Errorf("open WhatsApp session database: %w", err)
 	}
 	defer container.Close()
+	// Present the session as an Android phone in WhatsApp's linked devices;
+	// must be set before pairing, which connect() may trigger below.
+	useAndroidDeviceProps()
 	device, err := container.GetFirstDevice(ctx)
 	if err != nil {
 		return fmt.Errorf("load WhatsApp device: %w", err)
