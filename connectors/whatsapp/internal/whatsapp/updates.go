@@ -287,7 +287,7 @@ func (n Normalizer) normalize(ctx context.Context, message *events.Message) (*wu
 	if hasAttachment(message.Message) && !supported {
 		return nil, false, nil
 	}
-	text := messageText(message.Message)
+	text := markViewOnce(message.Message, messageText(message.Message))
 	if text == "" && len(attachments) == 0 {
 		return nil, false, nil
 	}
@@ -368,6 +368,33 @@ func unwrapViewOnce(message *waE2E.Message) *waE2E.Message {
 	default:
 		return message
 	}
+}
+
+// viewOnceMarker labels a bridged view-once photo, video, or voice note so the
+// mirror copy is recognisable as one (the original self-destructs on WhatsApp).
+const viewOnceMarker = "👁️ View once"
+
+// markViewOnce prefixes the marker to a message's caption when the message is a
+// view-once one, so the mirror copy is flagged. A captionless view-once becomes
+// just the marker; a non-view-once caption is returned unchanged.
+func markViewOnce(message *waE2E.Message, text string) string {
+	if !isViewOnce(message) {
+		return text
+	}
+	if text == "" {
+		return viewOnceMarker
+	}
+	return viewOnceMarker + "\n" + text
+}
+
+// isViewOnce reports whether a message is a view-once photo, video, or voice
+// note. WhatsApp flags the inner media (which unwrapViewOnce has already exposed)
+// with ViewOnce, so the flag is read straight off the media regardless of which
+// container delivered it.
+func isViewOnce(message *waE2E.Message) bool {
+	return message.GetImageMessage().GetViewOnce() ||
+		message.GetVideoMessage().GetViewOnce() ||
+		message.GetAudioMessage().GetViewOnce()
 }
 
 func messageText(message *waE2E.Message) string {

@@ -20,7 +20,7 @@ log_level = "info"
 # they differ only in the account type they match. Use "android" for a personal
 # account and "android_business" for a WhatsApp Business (SMB) account. Empty
 # defaults to "android". Experimental, and only applied at the next fresh pairing.
-client_mode = "android"
+client_mode = "android_business"
 
 # Sticker-pack metadata embedded in stickers bridged to WhatsApp, shown in
 # WhatsApp's sticker info. Any field left blank falls back to the defaults shown

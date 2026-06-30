@@ -470,3 +470,23 @@ func TestUnwrapViewOncePassesThroughPlainMessage(t *testing.T) {
 		t.Fatal("unwrapViewOnce(nil) should return nil")
 	}
 }
+
+func TestMarkViewOncePrefixesCaption(t *testing.T) {
+	t.Parallel()
+	img := func(caption string) *waE2E.Message {
+		return &waE2E.Message{ImageMessage: &waE2E.ImageMessage{
+			ViewOnce: proto.Bool(true),
+			Caption:  proto.String(caption),
+		}}
+	}
+	if got := markViewOnce(img(""), ""); got != viewOnceMarker {
+		t.Fatalf("captionless view-once = %q, want %q", got, viewOnceMarker)
+	}
+	if got := markViewOnce(img("hi"), "hi"); got != viewOnceMarker+"\nhi" {
+		t.Fatalf("captioned view-once = %q", got)
+	}
+	plain := &waE2E.Message{ImageMessage: &waE2E.ImageMessage{Caption: proto.String("hi")}}
+	if got := markViewOnce(plain, "hi"); got != "hi" {
+		t.Fatalf("non-view-once caption changed: %q", got)
+	}
+}
