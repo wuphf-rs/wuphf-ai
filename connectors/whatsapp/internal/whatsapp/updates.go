@@ -59,6 +59,9 @@ func (n Normalizer) Handle(ctx context.Context, message *events.Message) error {
 	// creates, edits, and deletes for one peer always carry the same chat id no
 	// matter which address form WhatsApp used for this particular message.
 	chat := n.canonical(ctx, message.Info.Chat)
+	// View-once photos and videos arrive wrapped in a container; unwrap to the
+	// inner media so they bridge as the ordinary attachment they hold.
+	message.Message = unwrapViewOnce(message.Message)
 	// Any phone/LID migration must be reported before the message so the core
 	// can bind both addresses to one conversation before resolving this event.
 	for _, migration := range n.migrationsFor(message, chat) {
@@ -343,6 +346,27 @@ func identityMigration(message *events.Message) *wuphfpb.IdentityMigrated {
 	return &wuphfpb.IdentityMigrated{
 		OldChatId: oldJID.String(),
 		NewChatId: newJID.String(),
+	}
+}
+
+// unwrapViewOnce returns the inner message of a view-once container so a
+// view-once photo or video is bridged as the ordinary media it wraps. WhatsApp
+// delivers view-once content inside one of three container variants, each
+// holding a normal ImageMessage/VideoMessage (flagged ViewOnce) that downloads
+// like any other media. A message that is not a view-once container is returned
+// unchanged.
+func unwrapViewOnce(message *waE2E.Message) *waE2E.Message {
+	switch {
+	case message == nil:
+		return message
+	case message.GetViewOnceMessage().GetMessage() != nil:
+		return message.GetViewOnceMessage().GetMessage()
+	case message.GetViewOnceMessageV2().GetMessage() != nil:
+		return message.GetViewOnceMessageV2().GetMessage()
+	case message.GetViewOnceMessageV2Extension().GetMessage() != nil:
+		return message.GetViewOnceMessageV2Extension().GetMessage()
+	default:
+		return message
 	}
 }
 

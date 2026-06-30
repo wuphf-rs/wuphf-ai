@@ -435,3 +435,38 @@ func TestIdentityMigrationIgnoresGroupAndAbsentAlt(t *testing.T) {
 		t.Fatal("identityMigration() reported migration without a recipient alt")
 	}
 }
+
+func TestUnwrapViewOnceExposesInnerMedia(t *testing.T) {
+	t.Parallel()
+	inner := &waE2E.Message{ImageMessage: &waE2E.ImageMessage{
+		Mimetype: proto.String("image/jpeg"),
+		ViewOnce: proto.Bool(true),
+	}}
+	cases := []struct {
+		name    string
+		wrapped *waE2E.Message
+	}{
+		{"v1", &waE2E.Message{ViewOnceMessage: &waE2E.FutureProofMessage{Message: inner}}},
+		{"v2", &waE2E.Message{ViewOnceMessageV2: &waE2E.FutureProofMessage{Message: inner}}},
+		{"v2ext", &waE2E.Message{ViewOnceMessageV2Extension: &waE2E.FutureProofMessage{Message: inner}}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := unwrapViewOnce(tc.wrapped)
+			if got.GetImageMessage() == nil {
+				t.Fatalf("unwrapViewOnce(%s) did not expose the inner image", tc.name)
+			}
+		})
+	}
+}
+
+func TestUnwrapViewOncePassesThroughPlainMessage(t *testing.T) {
+	t.Parallel()
+	plain := &waE2E.Message{Conversation: proto.String("hi")}
+	if got := unwrapViewOnce(plain); got != plain {
+		t.Fatal("unwrapViewOnce changed a non-view-once message")
+	}
+	if unwrapViewOnce(nil) != nil {
+		t.Fatal("unwrapViewOnce(nil) should return nil")
+	}
+}
