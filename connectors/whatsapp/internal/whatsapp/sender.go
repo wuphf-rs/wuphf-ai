@@ -8,6 +8,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/akshettrj/wuphf/connectors/mediaconv"
+	"github.com/akshettrj/wuphf/connectors/whatsapp/internal/config"
 	coreclient "github.com/akshettrj/wuphf/connectors/whatsapp/internal/core"
 	wuphfpb "github.com/akshettrj/wuphf/proto/go/connector/v1"
 	"go.mau.fi/whatsmeow"
@@ -24,13 +25,14 @@ type SendClient interface {
 }
 
 type Sender struct {
-	client SendClient
-	media  MediaBroker
-	ownJID types.JID
+	client      SendClient
+	media       MediaBroker
+	ownJID      types.JID
+	stickerMeta config.StickerMetadata
 }
 
-func NewSender(client SendClient, media MediaBroker, ownJID types.JID) Sender {
-	return Sender{client: client, media: media, ownJID: ownJID}
+func NewSender(client SendClient, media MediaBroker, ownJID types.JID, stickerMeta config.StickerMetadata) Sender {
+	return Sender{client: client, media: media, ownJID: ownJID, stickerMeta: stickerMeta}
 }
 
 // SendMessage delivers a dispatch to the target WhatsApp chat. WhatsApp has no
@@ -282,6 +284,9 @@ func (s Sender) stickerMessage(
 			return s.documentMessage(ctx, data, mimeType, stickerFileName(attachment), "")
 		}
 		data, mimeType = converted, "image/webp"
+	}
+	if mimeType == "image/webp" {
+		data = applyStickerMetadata(ctx, data, s.stickerMeta)
 	}
 	uploaded, err := s.client.Upload(ctx, data, whatsmeow.MediaImage)
 	if err != nil {

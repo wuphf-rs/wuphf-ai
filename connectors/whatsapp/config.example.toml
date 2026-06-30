@@ -14,3 +14,13 @@ supports_topic_create = false
 
 # Log verbosity: trace, debug, info, warn, error (WUPHF_LOG_LEVEL overrides).
 log_level = "info"
+
+# Sticker-pack metadata embedded in stickers bridged to WhatsApp, shown in
+# WhatsApp's sticker info. Any field left blank falls back to the defaults shown
+# here. The link is surfaced as the pack's store link so recipients can find the
+# project. Requires webpmux (libwebp) on PATH; without it stickers still send,
+# just without metadata.
+[sticker_metadata]
+pack_name = "wuphf"
+author_name = "wuphf-ai"
+link = "https://github.com/wuphf/wuphf-ai"

@@ -75,7 +75,7 @@ func (c Connector) Run(ctx context.Context) error {
 	c.logger.Info().Str("jid", ownJID.String()).Msg("WhatsApp session connected")
 	runResult := make(chan error, 1)
 	go func() {
-		runResult <- coreclient.New(c.cfg, c.logger).Run(ctx, NewSender(client, media, ownJID), inputs)
+		runResult <- coreclient.New(c.cfg, c.logger).Run(ctx, NewSender(client, media, ownJID, c.cfg.StickerMetadata()), inputs)
 	}()
 	select {
 	case <-ctx.Done():

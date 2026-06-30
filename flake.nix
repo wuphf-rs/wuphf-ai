@@ -44,6 +44,9 @@
             # sticker transcoder to turn WhatsApp animated stickers into a form
             # ffmpeg can re-encode to a Telegram WebM video sticker.
             imagemagick
+            # libwebp provides webpmux, used to embed WhatsApp sticker-pack
+            # metadata (pack name, author, project link) into bridged stickers.
+            libwebp
           ];
 
           env.RUST_BACKTRACE = "1";

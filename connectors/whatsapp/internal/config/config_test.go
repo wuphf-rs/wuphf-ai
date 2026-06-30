@@ -2,6 +2,25 @@ package config
 
 import "testing"
 
+func TestStickerMetadataFillsDefaults(t *testing.T) {
+	t.Parallel()
+	meta := File{}.StickerMetadata()
+	if meta.PackName != "wuphf" || meta.AuthorName != "wuphf-ai" || meta.Link != "https://github.com/wuphf/wuphf-ai" {
+		t.Fatalf("defaults = %#v", meta)
+	}
+}
+
+func TestStickerMetadataKeepsConfigured(t *testing.T) {
+	t.Parallel()
+	meta := File{Stickers: StickerMetadata{PackName: "custom", AuthorName: "me"}}.StickerMetadata()
+	if meta.PackName != "custom" || meta.AuthorName != "me" {
+		t.Fatalf("configured fields overridden: %#v", meta)
+	}
+	if meta.Link != "https://github.com/wuphf/wuphf-ai" {
+		t.Fatalf("blank link should fall back to default, got %q", meta.Link)
+	}
+}
+
 func TestValidateRequiresCoreIdentity(t *testing.T) {
 	t.Parallel()
 	cfg := File{CoreAddress: "127.0.0.1:50051", ConnectorID: "whatsapp-main"}
