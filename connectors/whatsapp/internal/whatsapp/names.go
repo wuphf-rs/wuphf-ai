@@ -101,7 +101,13 @@ func (n *chatNamer) contactName(ctx context.Context, chat types.JID) string {
 // LID-addressed person is mapped to its phone JID first, where the address-book
 // contact and the real number live; without that step a saved contact would be
 // shown as its raw LID id.
+//
+// The device is stripped first: a message from a contact's linked device carries
+// a per-device address (e.g. 1234:5@...), but contacts and LID mappings are keyed
+// by the device-less JID, so without this the saved name would be missed and the
+// sender shown as a bare number.
 func (n *chatNamer) PersonName(ctx context.Context, jid types.JID, pushHint string) string {
+	jid = jid.ToNonAD()
 	number := jid
 	if jid.Server == types.HiddenUserServer {
 		if pn, err := n.client.Store.LIDs.GetPNForLID(ctx, jid); err == nil && !pn.IsEmpty() {
