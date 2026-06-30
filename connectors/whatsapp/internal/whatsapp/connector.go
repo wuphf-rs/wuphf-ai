@@ -36,9 +36,11 @@ func (c Connector) Run(ctx context.Context) error {
 	defer container.Close()
 	// Register as an Android client (experimental) so WhatsApp delivers
 	// view-once media to this companion; must be set before pairing, which
-	// connect() may trigger below.
-	c.logger.Warn().Msg("registering WhatsApp session as an Android client (experimental)")
-	useAndroidClientIdentity()
+	// connect() may trigger below. A WhatsApp Business account pairs as the SMB
+	// Android client instead.
+	mode := c.cfg.ResolvedClientMode()
+	c.logger.Warn().Str("client_mode", mode).Msg("registering WhatsApp session as an Android client (experimental)")
+	useAndroidClientIdentity(mode == config.ClientModeAndroidBusiness)
 	device, err := container.GetFirstDevice(ctx)
 	if err != nil {
 		return fmt.Errorf("load WhatsApp device: %w", err)

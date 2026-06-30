@@ -15,6 +15,13 @@ supports_topic_create = false
 # Log verbosity: trace, debug, info, warn, error (WUPHF_LOG_LEVEL overrides).
 log_level = "info"
 
+# Which WhatsApp client the session registers as. Both pair as an Android client
+# (so WhatsApp delivers view-once media, which it withholds from a web companion);
+# they differ only in the account type they match. Use "android" for a personal
+# account and "android_business" for a WhatsApp Business (SMB) account. Empty
+# defaults to "android". Experimental, and only applied at the next fresh pairing.
+client_mode = "android"
+
 # Sticker-pack metadata embedded in stickers bridged to WhatsApp, shown in
 # WhatsApp's sticker info. Any field left blank falls back to the defaults shown
 # here. WhatsApp has no link field for received stickers, so the link is appended

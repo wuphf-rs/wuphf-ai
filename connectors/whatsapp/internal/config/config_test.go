@@ -21,6 +21,42 @@ func TestStickerMetadataKeepsConfigured(t *testing.T) {
 	}
 }
 
+func TestResolvedClientModeDefaultsToAndroid(t *testing.T) {
+	t.Parallel()
+	if got := (File{}).ResolvedClientMode(); got != ClientModeAndroid {
+		t.Fatalf("ResolvedClientMode() = %q, want %q", got, ClientModeAndroid)
+	}
+	if got := (File{ClientMode: ClientModeAndroidBusiness}).ResolvedClientMode(); got != ClientModeAndroidBusiness {
+		t.Fatalf("ResolvedClientMode() = %q, want %q", got, ClientModeAndroidBusiness)
+	}
+}
+
+func TestValidateRejectsUnknownClientMode(t *testing.T) {
+	t.Parallel()
+	cfg := File{
+		CoreAddress:     "127.0.0.1:50051",
+		ConnectorID:     "whatsapp-main",
+		SessionDatabase: "file:wa.db",
+		ClientMode:      "iphone",
+	}
+	if err := cfg.Validate(); err == nil {
+		t.Fatal("Validate() accepted an unknown client_mode")
+	}
+}
+
+func TestValidateAcceptsBusinessClientMode(t *testing.T) {
+	t.Parallel()
+	cfg := File{
+		CoreAddress:     "127.0.0.1:50051",
+		ConnectorID:     "whatsapp-main",
+		SessionDatabase: "file:wa.db",
+		ClientMode:      ClientModeAndroidBusiness,
+	}
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("Validate() rejected business client_mode: %v", err)
+	}
+}
+
 func TestValidateRequiresCoreIdentity(t *testing.T) {
 	t.Parallel()
 	cfg := File{CoreAddress: "127.0.0.1:50051", ConnectorID: "whatsapp-main"}

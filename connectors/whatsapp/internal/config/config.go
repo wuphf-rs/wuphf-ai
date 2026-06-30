@@ -19,6 +19,9 @@ type File struct {
 	// LogLevel sets log verbosity (trace, debug, info, warn, error). Empty
 	// means info; the WUPHF_LOG_LEVEL environment variable overrides it.
 	LogLevel string `toml:"log_level"`
+	// ClientMode selects which WhatsApp client identity the session registers
+	// as. Empty defaults to ClientModeAndroid; see ClientMode for the choices.
+	ClientMode string `toml:"client_mode"`
 	// Stickers carries the pack metadata embedded in stickers bridged to
 	// WhatsApp; empty fields fall back to defaults (see StickerMetadata).
 	Stickers StickerMetadata `toml:"sticker_metadata"`
@@ -57,6 +60,24 @@ func (c File) StickerMetadata() StickerMetadata {
 	return meta
 }
 
+// WhatsApp client identities the session can register as. Both pair as an
+// Android client (so WhatsApp delivers view-once media, unlike a web companion);
+// they differ only in whether the account is a personal or a WhatsApp Business
+// (SMB) one, which the registration must match.
+const (
+	ClientModeAndroid         = "android"
+	ClientModeAndroidBusiness = "android_business"
+)
+
+// ResolvedClientMode returns the configured client mode, defaulting to the
+// personal Android identity when unset.
+func (c File) ResolvedClientMode() string {
+	if c.ClientMode == "" {
+		return ClientModeAndroid
+	}
+	return c.ClientMode
+}
+
 func Load(path string) (File, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -78,6 +99,11 @@ func (c File) Validate() error {
 	}
 	if c.SupportsTopicCreate && !c.SupportsThreads {
 		return errors.New("supports_topic_create requires supports_threads")
+	}
+	switch c.ClientMode {
+	case "", ClientModeAndroid, ClientModeAndroidBusiness:
+	default:
+		return fmt.Errorf("client_mode must be %q or %q", ClientModeAndroid, ClientModeAndroidBusiness)
 	}
 	return nil
 }

@@ -16,15 +16,20 @@ const androidDeviceOS = "Android"
 // session announces the Android platform the way the Baileys library does
 // (WhiskeySockets/Baileys#2201): set the client payload's user-agent platform to
 // ANDROID, drop the web-only WebInfo, and mark the linked device as an Android
-// phone.
+// phone. When business is true it registers as the WhatsApp Business (SMB)
+// Android client, which an SMB account requires; both are otherwise identical.
 //
 // This is experimental: it changes the protocol identity WhatsApp sees, not just
 // the displayed device label. whatsmeow reads these package-level globals when it
 // builds the registration payload, so this must run before the client connects to
 // pair a new session. It is a no-op for an already-paired session (the identity
 // is sent only at registration), but is safe to call every start.
-func useAndroidClientIdentity() {
-	store.BaseClientPayload.UserAgent.Platform = waWa6.ClientPayload_UserAgent_ANDROID.Enum()
+func useAndroidClientIdentity(business bool) {
+	platform := waWa6.ClientPayload_UserAgent_ANDROID
+	if business {
+		platform = waWa6.ClientPayload_UserAgent_SMB_ANDROID
+	}
+	store.BaseClientPayload.UserAgent.Platform = platform.Enum()
 	store.BaseClientPayload.WebInfo = nil
 	store.DeviceProps.PlatformType = waCompanionReg.DeviceProps_ANDROID_PHONE.Enum()
 	store.DeviceProps.Os = proto.String(androidDeviceOS)

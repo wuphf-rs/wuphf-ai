@@ -8,22 +8,34 @@ import (
 	"go.mau.fi/whatsmeow/store"
 )
 
-// TestUseAndroidClientIdentity verifies the session registers as an Android
-// client: the user-agent platform is ANDROID, the web-only WebInfo is dropped,
-// and the linked device is marked an Android phone, so WhatsApp delivers
-// view-once media to it.
+// TestUseAndroidClientIdentity verifies each mode registers as the right Android
+// client: personal uses the ANDROID platform, business uses SMB_ANDROID. Both
+// drop the web-only WebInfo and mark the device an Android phone, so WhatsApp
+// delivers view-once media to the companion.
 func TestUseAndroidClientIdentity(t *testing.T) {
-	useAndroidClientIdentity()
-	if got := store.BaseClientPayload.GetUserAgent().GetPlatform(); got != waWa6.ClientPayload_UserAgent_ANDROID {
-		t.Fatalf("UserAgent.Platform = %v, want ANDROID", got)
+	cases := []struct {
+		name     string
+		business bool
+		want     waWa6.ClientPayload_UserAgent_Platform
+	}{
+		{"personal", false, waWa6.ClientPayload_UserAgent_ANDROID},
+		{"business", true, waWa6.ClientPayload_UserAgent_SMB_ANDROID},
 	}
-	if store.BaseClientPayload.GetWebInfo() != nil {
-		t.Fatal("WebInfo should be dropped for an Android client")
-	}
-	if got := store.DeviceProps.GetPlatformType(); got != waCompanionReg.DeviceProps_ANDROID_PHONE {
-		t.Fatalf("PlatformType = %v, want ANDROID_PHONE", got)
-	}
-	if got := store.DeviceProps.GetOs(); got != androidDeviceOS {
-		t.Fatalf("Os = %q, want %q", got, androidDeviceOS)
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			useAndroidClientIdentity(tc.business)
+			if got := store.BaseClientPayload.GetUserAgent().GetPlatform(); got != tc.want {
+				t.Fatalf("UserAgent.Platform = %v, want %v", got, tc.want)
+			}
+			if store.BaseClientPayload.GetWebInfo() != nil {
+				t.Fatal("WebInfo should be dropped for an Android client")
+			}
+			if got := store.DeviceProps.GetPlatformType(); got != waCompanionReg.DeviceProps_ANDROID_PHONE {
+				t.Fatalf("PlatformType = %v, want ANDROID_PHONE", got)
+			}
+			if got := store.DeviceProps.GetOs(); got != androidDeviceOS {
+				t.Fatalf("Os = %q, want %q", got, androidDeviceOS)
+			}
+		})
 	}
 }
