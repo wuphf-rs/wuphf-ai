@@ -30,10 +30,12 @@ mod connector;
 mod dispatch;
 mod ids;
 mod message;
+mod observation;
 mod routing;
 
 pub use connector::*;
 pub use dispatch::*;
 pub use ids::*;
 pub use message::*;
+pub use observation::*;
 pub use routing::*;

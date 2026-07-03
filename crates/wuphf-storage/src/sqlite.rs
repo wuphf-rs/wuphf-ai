@@ -10,8 +10,8 @@ use std::str::FromStr;
 use wuphf_model::{
     Alias, ChatSettings, ConnectorId, Contact, Conversation, ConversationId, DedupKey,
     DispatchCommand, DispatchId, DispatchState, Endpoint, EndpointId, MediaBlob, MediaId, Message,
-    MessageCopy, MessageId, PlatformAddress, ReplicaSet, ReplicaSetId, StoredDispatch,
-    ThreadMapping,
+    MessageCopy, MessageId, ObservedChat, ObservedMessage, PlatformAddress, ReplicaSet,
+    ReplicaSetId, StoredDispatch, ThreadMapping,
 };
 
 pub struct SqliteStorage {
@@ -562,6 +562,191 @@ impl Storage for SqliteStorage {
             .await?;
         Ok(())
     }
+
+    async fn log_observed(
+        &self,
+        observed: ObservedMessage,
+        chat_title: Option<String>,
+    ) -> StorageResult<()> {
+        let mut transaction = self.pool.begin().await?;
+        sqlx::query(
+            "INSERT INTO observed_messages
+               (connector_id, chat_id, platform_message_id, timestamp_ms, payload)
+             VALUES (?, ?, ?, ?, ?)
+             ON CONFLICT(connector_id, chat_id, platform_message_id) DO UPDATE SET
+               timestamp_ms = excluded.timestamp_ms,
+               payload = excluded.payload",
+        )
+        .bind(observed.connector_id.to_string())
+        .bind(&observed.chat_id)
+        .bind(&observed.platform_message_id)
+        .bind(observed.timestamp_ms)
+        .bind(serde_json::to_string(&observed)?)
+        .execute(&mut *transaction)
+        .await?;
+
+        // Fold the message into the chat summary. The title updates only when the
+        // message carried one (COALESCE keeps the stored title otherwise); the
+        // preview and timestamp advance only when this message is at least as
+        // recent as the stored one, so an out-of-order replay of an older message
+        // does not rewind the summary.
+        let summary = ObservedChat {
+            connector_id: observed.connector_id.clone(),
+            platform: observed.platform.clone(),
+            chat_id: observed.chat_id.clone(),
+            title: chat_title.clone(),
+            last_message_ts: observed.timestamp_ms,
+            last_message_preview: observed.preview(),
+        };
+        let existing = sqlx::query(
+            "SELECT payload FROM observed_chats WHERE connector_id = ? AND chat_id = ?",
+        )
+        .bind(observed.connector_id.to_string())
+        .bind(&observed.chat_id)
+        .fetch_optional(&mut *transaction)
+        .await?;
+        let merged = match existing {
+            Some(row) => {
+                let mut stored: ObservedChat = serde_json::from_str(row.get("payload"))?;
+                if chat_title.is_some() {
+                    stored.title = chat_title;
+                }
+                if summary.last_message_ts >= stored.last_message_ts {
+                    stored.last_message_ts = summary.last_message_ts;
+                    stored.last_message_preview = summary.last_message_preview;
+                }
+                stored
+            }
+            None => summary,
+        };
+        sqlx::query(
+            "INSERT INTO observed_chats (connector_id, chat_id, last_message_ts, payload)
+             VALUES (?, ?, ?, ?)
+             ON CONFLICT(connector_id, chat_id) DO UPDATE SET
+               last_message_ts = excluded.last_message_ts,
+               payload = excluded.payload",
+        )
+        .bind(merged.connector_id.to_string())
+        .bind(&merged.chat_id)
+        .bind(merged.last_message_ts)
+        .bind(serde_json::to_string(&merged)?)
+        .execute(&mut *transaction)
+        .await?;
+        transaction.commit().await?;
+        Ok(())
+    }
+
+    async fn mark_observed_deleted(
+        &self,
+        connector_id: &ConnectorId,
+        chat_id: &str,
+        platform_message_id: &str,
+    ) -> StorageResult<Option<ObservedMessage>> {
+        update_observed(
+            &self.pool,
+            connector_id,
+            chat_id,
+            platform_message_id,
+            |observed| {
+                observed.deleted = true;
+            },
+        )
+        .await
+    }
+
+    async fn mark_observed_edited(
+        &self,
+        connector_id: &ConnectorId,
+        chat_id: &str,
+        platform_message_id: &str,
+        text: Option<String>,
+    ) -> StorageResult<Option<ObservedMessage>> {
+        update_observed(
+            &self.pool,
+            connector_id,
+            chat_id,
+            platform_message_id,
+            |observed| {
+                observed.text = text;
+                observed.edited = true;
+            },
+        )
+        .await
+    }
+
+    async fn list_observed_chats(&self) -> StorageResult<Vec<ObservedChat>> {
+        let rows = sqlx::query("SELECT payload FROM observed_chats ORDER BY last_message_ts DESC")
+            .fetch_all(&self.pool)
+            .await?;
+        rows.into_iter()
+            .map(|row| serde_json::from_str(row.get("payload")).map_err(Into::into))
+            .collect()
+    }
+
+    async fn observed_messages(
+        &self,
+        connector_id: &ConnectorId,
+        chat_id: &str,
+        before_ms: Option<i64>,
+        limit: u32,
+    ) -> StorageResult<Vec<ObservedMessage>> {
+        let rows = sqlx::query(
+            "SELECT payload FROM observed_messages
+             WHERE connector_id = ? AND chat_id = ? AND (? IS NULL OR timestamp_ms < ?)
+             ORDER BY timestamp_ms DESC
+             LIMIT ?",
+        )
+        .bind(connector_id.to_string())
+        .bind(chat_id)
+        .bind(before_ms)
+        .bind(before_ms)
+        .bind(i64::from(limit))
+        .fetch_all(&self.pool)
+        .await?;
+        rows.into_iter()
+            .map(|row| serde_json::from_str(row.get("payload")).map_err(Into::into))
+            .collect()
+    }
+}
+
+/// Load one observed message, apply a mutation, and persist it, returning the
+/// updated row. A `None` result means the message was never observed. Used by the
+/// edit/delete markers so their read-modify-write stays atomic in one place.
+async fn update_observed(
+    pool: &SqlitePool,
+    connector_id: &ConnectorId,
+    chat_id: &str,
+    platform_message_id: &str,
+    mutate: impl FnOnce(&mut ObservedMessage),
+) -> StorageResult<Option<ObservedMessage>> {
+    let mut transaction = pool.begin().await?;
+    let row = sqlx::query(
+        "SELECT payload FROM observed_messages
+         WHERE connector_id = ? AND chat_id = ? AND platform_message_id = ?",
+    )
+    .bind(connector_id.to_string())
+    .bind(chat_id)
+    .bind(platform_message_id)
+    .fetch_optional(&mut *transaction)
+    .await?;
+    let Some(row) = row else {
+        transaction.commit().await?;
+        return Ok(None);
+    };
+    let mut observed: ObservedMessage = serde_json::from_str(row.get("payload"))?;
+    mutate(&mut observed);
+    sqlx::query(
+        "UPDATE observed_messages SET payload = ?
+         WHERE connector_id = ? AND chat_id = ? AND platform_message_id = ?",
+    )
+    .bind(serde_json::to_string(&observed)?)
+    .bind(connector_id.to_string())
+    .bind(chat_id)
+    .bind(platform_message_id)
+    .execute(&mut *transaction)
+    .await?;
+    transaction.commit().await?;
+    Ok(Some(observed))
 }
 
 fn thread_key(address: &PlatformAddress) -> String {

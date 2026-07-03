@@ -9,8 +9,8 @@ use tokio::sync::RwLock;
 use wuphf_model::{
     Alias, ChatSettings, ConnectorId, Contact, Conversation, ConversationId, DedupKey,
     DispatchCommand, DispatchId, DispatchState, Endpoint, EndpointId, MediaBlob, MediaId, Message,
-    MessageCopy, MessageId, PlatformAddress, ReplicaSet, ReplicaSetId, StoredDispatch,
-    ThreadMapping,
+    MessageCopy, MessageId, ObservedChat, ObservedMessage, PlatformAddress, ReplicaSet,
+    ReplicaSetId, StoredDispatch, ThreadMapping,
 };
 
 #[derive(Default)]
@@ -34,6 +34,8 @@ struct State {
     chat_settings: HashMap<EndpointId, ChatSettings>,
     media: HashMap<MediaId, StoredMedia>,
     dispatches: HashMap<DispatchId, StoredDispatch>,
+    observed_messages: HashMap<(ConnectorId, String, String), ObservedMessage>,
+    observed_chats: HashMap<(ConnectorId, String), ObservedChat>,
 }
 
 struct StoredMedia {
@@ -475,6 +477,122 @@ impl Storage for InMemoryStorage {
             .ok_or(StorageError::DispatchNotFound(dispatch_id))?;
         dispatch.state = DispatchState::Failed { reason };
         Ok(())
+    }
+
+    async fn log_observed(
+        &self,
+        observed: ObservedMessage,
+        chat_title: Option<String>,
+    ) -> StorageResult<()> {
+        let mut state = self.state.write().await;
+        let chat_key = (observed.connector_id.clone(), observed.chat_id.clone());
+        // Fold the message into the chat summary: keep the stored title unless
+        // this message carried one, and advance the preview/timestamp only when
+        // this message is at least as recent, so an older replayed message does
+        // not rewind the summary.
+        let summary = state
+            .observed_chats
+            .entry(chat_key)
+            .or_insert_with(|| ObservedChat {
+                connector_id: observed.connector_id.clone(),
+                platform: observed.platform.clone(),
+                chat_id: observed.chat_id.clone(),
+                title: None,
+                last_message_ts: i64::MIN,
+                last_message_preview: String::new(),
+            });
+        if chat_title.is_some() {
+            summary.title = chat_title;
+        }
+        if observed.timestamp_ms >= summary.last_message_ts {
+            summary.last_message_ts = observed.timestamp_ms;
+            summary.last_message_preview = observed.preview();
+        }
+        state.observed_messages.insert(
+            (
+                observed.connector_id.clone(),
+                observed.chat_id.clone(),
+                observed.platform_message_id.clone(),
+            ),
+            observed,
+        );
+        Ok(())
+    }
+
+    async fn mark_observed_deleted(
+        &self,
+        connector_id: &ConnectorId,
+        chat_id: &str,
+        platform_message_id: &str,
+    ) -> StorageResult<Option<ObservedMessage>> {
+        let mut state = self.state.write().await;
+        let observed = state.observed_messages.get_mut(&(
+            connector_id.clone(),
+            chat_id.to_owned(),
+            platform_message_id.to_owned(),
+        ));
+        Ok(observed.map(|observed| {
+            observed.deleted = true;
+            observed.clone()
+        }))
+    }
+
+    async fn mark_observed_edited(
+        &self,
+        connector_id: &ConnectorId,
+        chat_id: &str,
+        platform_message_id: &str,
+        text: Option<String>,
+    ) -> StorageResult<Option<ObservedMessage>> {
+        let mut state = self.state.write().await;
+        let observed = state.observed_messages.get_mut(&(
+            connector_id.clone(),
+            chat_id.to_owned(),
+            platform_message_id.to_owned(),
+        ));
+        Ok(observed.map(|observed| {
+            observed.text = text;
+            observed.edited = true;
+            observed.clone()
+        }))
+    }
+
+    async fn list_observed_chats(&self) -> StorageResult<Vec<ObservedChat>> {
+        let mut chats: Vec<ObservedChat> = self
+            .state
+            .read()
+            .await
+            .observed_chats
+            .values()
+            .cloned()
+            .collect();
+        chats.sort_by_key(|chat| std::cmp::Reverse(chat.last_message_ts));
+        Ok(chats)
+    }
+
+    async fn observed_messages(
+        &self,
+        connector_id: &ConnectorId,
+        chat_id: &str,
+        before_ms: Option<i64>,
+        limit: u32,
+    ) -> StorageResult<Vec<ObservedMessage>> {
+        let mut messages: Vec<ObservedMessage> = self
+            .state
+            .read()
+            .await
+            .observed_messages
+            .values()
+            .filter(|observed| {
+                observed.connector_id == *connector_id
+                    && observed.chat_id == chat_id
+                    && before_ms.is_none_or(|before| observed.timestamp_ms < before)
+            })
+            .cloned()
+            .collect();
+        messages.sort_by_key(|observed| std::cmp::Reverse(observed.timestamp_ms));
+        messages.truncate(limit as usize);
+        Ok(messages)
     }
 }
 

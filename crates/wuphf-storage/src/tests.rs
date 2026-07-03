@@ -1,5 +1,8 @@
 use super::*;
-use wuphf_model::{Attachment, AttachmentKind, DispatchPayload, MediaBlob, MediaId, Platform};
+use wuphf_model::{
+    Attachment, AttachmentKind, DispatchPayload, MediaBlob, MediaId, ObservedDirection,
+    ObservedMessage, Platform,
+};
 
 #[tokio::test]
 async fn sqlite_persists_copy_state_and_releases_blocked_reply() {
@@ -151,6 +154,135 @@ fn message(message_id: MessageId) -> Message {
         reply_to: None,
         timestamp_ms: 0,
         deleted: false,
+    }
+}
+
+#[tokio::test]
+async fn memory_observation_log_roundtrips() {
+    observation_log_roundtrips(InMemoryStorage::default()).await;
+}
+
+#[tokio::test]
+async fn sqlite_observation_log_roundtrips() {
+    let path = std::env::temp_dir().join(format!("wuphf-observed-{}.sqlite", DispatchId::new()));
+    let url = format!("sqlite://{}", path.display());
+    observation_log_roundtrips(SqliteStorage::connect(&url).await.unwrap()).await;
+}
+
+/// Both backends must agree on the observation log: chats ordered by recency,
+/// messages paged newest-first, titles retained across a title-less message, and
+/// edit/delete markers mutating in place and reporting the updated row.
+async fn observation_log_roundtrips<S: Storage>(storage: S) {
+    let whatsapp = ConnectorId("whatsapp".into());
+    // Two chats: "alice" gets messages at t=100 then t=200; "bob" at t=150.
+    storage
+        .log_observed(
+            observed(&whatsapp, "alice", "a1", 100, Some("first")),
+            Some("Alice".into()),
+        )
+        .await
+        .unwrap();
+    storage
+        .log_observed(
+            observed(&whatsapp, "bob", "b1", 150, Some("hey")),
+            Some("Bob".into()),
+        )
+        .await
+        .unwrap();
+    // A later message without a title must not clear the stored title, and must
+    // advance the chat's preview/timestamp.
+    storage
+        .log_observed(
+            observed(&whatsapp, "alice", "a2", 200, Some("second")),
+            None,
+        )
+        .await
+        .unwrap();
+
+    let chats = storage.list_observed_chats().await.unwrap();
+    assert_eq!(chats.len(), 2);
+    assert_eq!(chats[0].chat_id, "alice"); // most recent (t=200) first
+    assert_eq!(chats[0].title.as_deref(), Some("Alice")); // retained
+    assert_eq!(chats[0].last_message_ts, 200);
+    assert_eq!(chats[0].last_message_preview, "second");
+    assert_eq!(chats[1].chat_id, "bob");
+
+    let page = storage
+        .observed_messages(&whatsapp, "alice", None, 10)
+        .await
+        .unwrap();
+    assert_eq!(
+        page.iter()
+            .map(|m| m.platform_message_id.as_str())
+            .collect::<Vec<_>>(),
+        ["a2", "a1"], // newest first
+    );
+
+    let older = storage
+        .observed_messages(&whatsapp, "alice", Some(200), 10)
+        .await
+        .unwrap();
+    assert_eq!(older.len(), 1);
+    assert_eq!(older[0].platform_message_id, "a1");
+
+    let edited = storage
+        .mark_observed_edited(&whatsapp, "alice", "a1", Some("first (edited)".into()))
+        .await
+        .unwrap()
+        .expect("message exists");
+    assert!(edited.edited);
+    assert_eq!(edited.text.as_deref(), Some("first (edited)"));
+
+    let deleted = storage
+        .mark_observed_deleted(&whatsapp, "alice", "a2")
+        .await
+        .unwrap()
+        .expect("message exists");
+    assert!(deleted.deleted);
+
+    // Markers on an unknown message report nothing.
+    assert!(
+        storage
+            .mark_observed_deleted(&whatsapp, "alice", "missing")
+            .await
+            .unwrap()
+            .is_none()
+    );
+
+    // Mutations persist.
+    let page = storage
+        .observed_messages(&whatsapp, "alice", None, 10)
+        .await
+        .unwrap();
+    let a1 = page.iter().find(|m| m.platform_message_id == "a1").unwrap();
+    assert!(a1.edited && a1.text.as_deref() == Some("first (edited)"));
+    let a2 = page.iter().find(|m| m.platform_message_id == "a2").unwrap();
+    assert!(a2.deleted);
+}
+
+fn observed(
+    connector_id: &ConnectorId,
+    chat_id: &str,
+    platform_message_id: &str,
+    timestamp_ms: i64,
+    text: Option<&str>,
+) -> ObservedMessage {
+    ObservedMessage {
+        connector_id: connector_id.clone(),
+        platform: Platform::WhatsApp,
+        chat_id: chat_id.into(),
+        thread_id: None,
+        platform_message_id: platform_message_id.into(),
+        sender: "sender".into(),
+        sender_name: None,
+        participant: None,
+        text: text.map(Into::into),
+        attachments: vec![],
+        reply_to_platform_message_id: None,
+        direction: ObservedDirection::Incoming,
+        timestamp_ms,
+        deleted: false,
+        edited: false,
     }
 }
 

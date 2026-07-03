@@ -14,7 +14,8 @@ use thiserror::Error;
 use wuphf_model::{
     Alias, ChatSettings, ConnectorId, Contact, Conversation, ConversationId, DedupKey,
     DispatchCommand, DispatchId, Endpoint, EndpointId, MediaBlob, MediaId, Message, MessageCopy,
-    MessageId, PlatformAddress, ReplicaSet, ReplicaSetId, StoredDispatch, ThreadMapping,
+    MessageId, ObservedChat, ObservedMessage, PlatformAddress, ReplicaSet, ReplicaSetId,
+    StoredDispatch, ThreadMapping,
 };
 
 #[derive(Debug, Error)]
@@ -136,6 +137,44 @@ pub trait Storage: Send + Sync + 'static {
     /// Mark a dispatch as permanently failed so it leaves the pending queue and
     /// is never redelivered. Unlike acknowledgement, it records no sent copy.
     async fn fail_dispatch(&self, dispatch_id: DispatchId, reason: String) -> StorageResult<()>;
+
+    /// Record a message in the observation log, upserting both the message row
+    /// and its chat summary. Idempotent on the message's native coordinates. A
+    /// `chat_title` refreshes the chat's title; `None` keeps the stored one, so a
+    /// later message that omits a title does not clear it.
+    async fn log_observed(
+        &self,
+        observed: ObservedMessage,
+        chat_title: Option<String>,
+    ) -> StorageResult<()>;
+    /// Flag an observed message deleted, returning the updated row, or `None`
+    /// when the message was never observed.
+    async fn mark_observed_deleted(
+        &self,
+        connector_id: &ConnectorId,
+        chat_id: &str,
+        platform_message_id: &str,
+    ) -> StorageResult<Option<ObservedMessage>>;
+    /// Replace an observed message's text and flag it edited, returning the
+    /// updated row, or `None` when the message was never observed.
+    async fn mark_observed_edited(
+        &self,
+        connector_id: &ConnectorId,
+        chat_id: &str,
+        platform_message_id: &str,
+        text: Option<String>,
+    ) -> StorageResult<Option<ObservedMessage>>;
+    /// Every chat the observation log has seen, most recently active first.
+    async fn list_observed_chats(&self) -> StorageResult<Vec<ObservedChat>>;
+    /// A page of a chat's observed messages, newest first, older than `before_ms`
+    /// when set (for scrollback), capped at `limit`.
+    async fn observed_messages(
+        &self,
+        connector_id: &ConnectorId,
+        chat_id: &str,
+        before_ms: Option<i64>,
+        limit: u32,
+    ) -> StorageResult<Vec<ObservedMessage>>;
 }
 
 #[cfg(test)]
