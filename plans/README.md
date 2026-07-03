@@ -29,6 +29,7 @@ Baseline at planning time: `cargo test --workspace` = 25 tests passing;
 | 015 | SPIKE: reactions end-to-end design | P2 | M | — | TODO |
 | 016 | SPIKE: media blob lifecycle policy | P2 | S-M | — | TODO |
 | 017 | SPIKE: per-side replication direction (one-way mirrors) | P3 | S | — | TODO |
+| 018 | Observation log + multi-platform TUI (phased) | P2 | L | — | IN PROGRESS (ph 1–2) |
 
 Status values: TODO | IN PROGRESS | DONE | BLOCKED (with one-line reason) |
 REJECTED (with one-line rationale).
