@@ -9,8 +9,13 @@ use wuphf_model::{
 };
 use wuphf_proto::connector::connector_transport_server::ConnectorTransportServer;
 use wuphf_proto::connector::media_transport_server::MediaTransportServer;
+use wuphf_proto::connector::observer_transport_server::ObserverTransportServer;
 use wuphf_runtime::{
-    Runtime, connector::ConnectorHub, grpc::GrpcConnectorService, media::GrpcMediaService,
+    Runtime,
+    connector::ConnectorHub,
+    grpc::GrpcConnectorService,
+    media::GrpcMediaService,
+    observer_service::{GrpcObserverService, bearer_auth},
 };
 use wuphf_storage::SqliteStorage;
 
@@ -37,6 +42,10 @@ struct Configuration {
     max_media_bytes: usize,
     #[serde(default = "default_orphan_media_retention_seconds")]
     orphan_media_retention_seconds: u64,
+    /// Bearer token required by the observer service (the TUI read surface). When
+    /// unset the observer is unauthenticated — only safe on a local-only bind.
+    #[serde(default)]
+    observer_token: Option<String>,
     #[serde(default)]
     connectors: Vec<ConnectorConfiguration>,
     #[serde(default)]
@@ -121,8 +130,15 @@ async fn serve(path: PathBuf) -> Result<()> {
         configuration.max_media_bytes,
         Duration::from_secs(configuration.orphan_media_retention_seconds),
     );
-    let (runtime, channels, _observer) =
+    let (runtime, channels, observer) =
         Runtime::channelled(Arc::new(Core::new(storage, config)), 128);
+    let observer_service = ObserverTransportServer::with_interceptor(
+        GrpcObserverService::new(observer),
+        bearer_auth(configuration.observer_token.clone()),
+    );
+    if configuration.observer_token.is_none() {
+        tracing::warn!("observer service has no token set; bind it to a local address only");
+    }
     let (hub, handle) = ConnectorHub::new(channels, allowed);
     let runtime_task = tokio::spawn(runtime.run());
     let hub_task = tokio::spawn(hub.run());
@@ -132,6 +148,7 @@ async fn serve(path: PathBuf) -> Result<()> {
             handle,
         )))
         .add_service(MediaTransportServer::new(media_service))
+        .add_service(observer_service)
         .serve(configuration.listen);
     tokio::select! {
         result = server => result?,

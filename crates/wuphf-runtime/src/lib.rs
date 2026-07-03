@@ -14,6 +14,7 @@ pub mod connector;
 pub mod grpc;
 pub mod media;
 pub mod observation;
+pub mod observer_service;
 
 pub use observation::Observer;
 

@@ -10,6 +10,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 "client.proto",
                 "server.proto",
                 "connector.proto",
+                "observer.proto",
             ],
             &["."],
         )?;

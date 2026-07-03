@@ -3,6 +3,12 @@ database_url = "sqlite://wuphf.sqlite"
 max_media_bytes = 33554432
 orphan_media_retention_seconds = 86400
 
+# Token the observer service (the TUI read surface) requires as
+# `authorization: Bearer <token>`. Leave unset only when `listen` is bound to a
+# local address — without it the observer, which can read every captured chat,
+# is unauthenticated.
+# observer_token = "change-me"
+
 # Connectors are thin pipes. The core only trusts a session whose registration
 # matches an entry here. `supports_threads` / `supports_topic_create` gate which
 # rule sides a connector may serve (a `mirror` side needs both).

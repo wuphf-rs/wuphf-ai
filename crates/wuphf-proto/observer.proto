@@ -1,0 +1,98 @@
+syntax = "proto3";
+
+package wuphf.connector.v1;
+
+option go_package = "github.com/akshettrj/wuphf/proto/go/connector/v1;wuphfpb";
+
+import "common.proto";
+
+// Read-only view over the observation log for a viewer (e.g. a TUI): list the
+// chats seen across every platform, page a chat's history, and subscribe to new
+// activity. SendMessage is reserved for two-way support and is not implemented
+// yet. This surface exposes every captured chat, so bind it locally and set a
+// token.
+service ObserverTransport {
+  rpc ListChats(ListChatsRequest) returns (ListChatsResponse);
+  rpc GetMessages(GetMessagesRequest) returns (GetMessagesResponse);
+  rpc SubscribeMessages(SubscribeMessagesRequest) returns (stream ObservedMessage);
+  rpc SendMessage(SendMessageRequest) returns (SendMessageResponse);
+}
+
+// Whether an observed message arrived from the platform or was sent out through
+// the bridge on the owner's behalf.
+enum ObservedDirection {
+  OBSERVED_DIRECTION_UNSPECIFIED = 0;
+  OBSERVED_DIRECTION_INCOMING = 1;
+  OBSERVED_DIRECTION_OUTGOING = 2;
+}
+
+// A chat the observation log has seen, summarised for a chat list.
+message ObservedChat {
+  string connector_id = 1;
+  Platform platform = 2;
+  string chat_id = 3;
+  optional string title = 4;
+  int64 last_message_ts = 5;
+  string last_message_preview = 6;
+}
+
+// One message captured in the observation log. Attachments are metadata only;
+// bytes are fetched separately through MediaTransport by media_id.
+message ObservedMessage {
+  string connector_id = 1;
+  Platform platform = 2;
+  string chat_id = 3;
+  optional string thread_id = 4;
+  string platform_message_id = 5;
+  string sender = 6;
+  optional string sender_name = 7;
+  optional string participant = 8;
+  optional string text = 9;
+  repeated Attachment attachments = 10;
+  optional string reply_to_platform_message_id = 11;
+  ObservedDirection direction = 12;
+  int64 timestamp_ms = 13;
+  bool deleted = 14;
+  bool edited = 15;
+}
+
+message ListChatsRequest {}
+
+message ListChatsResponse {
+  // Most recently active first.
+  repeated ObservedChat chats = 1;
+}
+
+message GetMessagesRequest {
+  string connector_id = 1;
+  string chat_id = 2;
+  // Scrollback cursor: return messages strictly older than this timestamp when
+  // set; omit for the newest page.
+  optional int64 before_ms = 3;
+  uint32 limit = 4;
+}
+
+message GetMessagesResponse {
+  // Newest first.
+  repeated ObservedMessage messages = 1;
+}
+
+message SubscribeMessagesRequest {
+  // Optional filter: restrict the live stream to one chat. Omit both to receive
+  // every chat's activity.
+  optional string connector_id = 1;
+  optional string chat_id = 2;
+}
+
+message SendMessageRequest {
+  string connector_id = 1;
+  string chat_id = 2;
+  optional string thread_id = 3;
+  string text = 4;
+  optional string reply_to_platform_message_id = 5;
+}
+
+message SendMessageResponse {
+  // Native id of the sent message. Populated once two-way support lands.
+  string platform_message_id = 1;
+}

@@ -14,7 +14,7 @@
 - **Category**: feature
 - **Planned at**: commit `beed586`, 2026-07-01
 
-Phase status: 1 DONE · 2 DONE · 3 TODO · 4 TODO · 5 TODO · 6 TODO
+Phase status: 1 DONE · 2 DONE · 3 DONE · 4 TODO · 5 TODO · 6 TODO
 
 ## Why this matters
 
@@ -86,14 +86,19 @@ in `wuphf-runtime` (a runtime concern), touches persistence only through the
 - **Verify**: `cargo test -p wuphf-runtime` (Observer unit tests: capture +
   broadcast, edit/delete update).
 
-### Phase 3 — observer gRPC read service (TODO)
+### Phase 3 — observer gRPC read service (DONE, commit pending)
 
-- `observer.proto`: `ListChats`, `GetMessages(chat, before_ts, limit)`,
-  `Subscribe(filter) -> stream`, `SendMessage(...)` (stub until phase 5).
-- Implement over `Observer::storage()` + `Observer::subscribe()`; add the
-  service in `wuphf-cli/src/main.rs`. Bind local-only + token — it reads all
-  chats and (phase 5) can send. Reuse the existing media service for bytes.
-- **Verify**: `cargo test` + manual gRPC probe.
+- `observer.proto`: `ListChats`, `GetMessages(chat, before_ms, limit)`,
+  `SubscribeMessages(filter) -> stream`, `SendMessage(...)` (returns
+  `unimplemented` until phase 5). Registered in the proto build.
+- `GrpcObserverService` over `Observer::storage()` + `Observer::subscribe()`;
+  added to the same gRPC server in `wuphf-cli/src/main.rs`. Guarded by
+  `bearer_auth` (config `observer_token`; unset = allow, with a bind-local
+  warning). Media bytes reuse the existing `MediaTransport`.
+- Go bindings intentionally not regenerated — no Go connector consumes the
+  observer; the phase 4 client is Rust.
+- **Verified**: `cargo test -p wuphf-runtime` (4 service tests: list/page,
+  arg validation, filtered live stream, send unimplemented).
 
 ### Phase 4 — read-only TUI (TODO)
 
