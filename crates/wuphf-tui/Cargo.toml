@@ -1,0 +1,15 @@
+[package]
+name = "wuphf-tui"
+edition.workspace = true
+license.workspace = true
+version.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+clap.workspace = true
+crossterm.workspace = true
+ratatui.workspace = true
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "sync"] }
+tokio-stream.workspace = true
+tonic.workspace = true
+wuphf-proto.workspace = true

@@ -14,7 +14,7 @@
 - **Category**: feature
 - **Planned at**: commit `beed586`, 2026-07-01
 
-Phase status: 1 DONE · 2 DONE · 3 DONE · 4 TODO · 5 TODO · 6 TODO
+Phase status: 1 DONE · 2 DONE · 3 DONE · 4 DONE · 5 TODO · 6 TODO
 
 ## Why this matters
 
@@ -100,12 +100,17 @@ in `wuphf-runtime` (a runtime concern), touches persistence only through the
 - **Verified**: `cargo test -p wuphf-runtime` (4 service tests: list/page,
   arg validation, filtered live stream, send unimplemented).
 
-### Phase 4 — read-only TUI (TODO)
+### Phase 4 — read-only TUI (DONE, commit pending)
 
-- New `wuphf-tui` crate (ratatui + tonic client). Chat-list / timeline / input
-  panes. `ListChats` on start, `GetMessages` + scrollback, `Subscribe` live
-  upsert by `(connector, chat, platform_message_id)` honoring deleted/edited.
-- **Milestone**: usable read-only multi-platform viewer.
+- New `wuphf-tui` crate (ratatui + crossterm + tonic client): chat-list /
+  timeline / input panes + status bar. `ListChats` on start, `GetMessages` on
+  select, `PgUp`-at-top scrollback, `SubscribeMessages` live upsert by
+  `(connector, chat, platform_message_id)` honoring deleted/edited; the chat
+  list re-sorts on activity. `--server` / `--token` args.
+- State (`app.rs`) is pure and unit-tested (key→`Action`, live upsert, chat
+  re-pin); rendering (`ui.rs`) and I/O (`client.rs`) are separate. Input box is
+  a read-only placeholder until phase 6.
+- **Milestone reached**: usable read-only multi-platform viewer.
 
 ### Phase 5 — outbound SendRaw (TODO)
 
