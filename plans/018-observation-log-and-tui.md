@@ -14,7 +14,7 @@
 - **Category**: feature
 - **Planned at**: commit `beed586`, 2026-07-01
 
-Phase status: 1 IN PROGRESS · 2 IN PROGRESS · 3 TODO · 4 TODO · 5 TODO · 6 TODO
+Phase status: 1 DONE · 2 DONE · 3 TODO · 4 TODO · 5 TODO · 6 TODO
 
 ## Why this matters
 
@@ -55,7 +55,7 @@ in `wuphf-runtime` (a runtime concern), touches persistence only through the
 
 ## Phases
 
-### Phase 1 — observation log storage (IN PROGRESS)
+### Phase 1 — observation log storage (DONE, commit `22e7984`)
 
 - `crates/wuphf-model/src/observation.rs`: `ObservedMessage`, `ObservedChat`,
   `ObservedDirection`, `ObservedMessage::preview()`. Re-export from `lib.rs`.
@@ -72,7 +72,7 @@ in `wuphf-runtime` (a runtime concern), touches persistence only through the
 - Parity tests in `crates/wuphf-storage/src/tests.rs` (SQLite + InMemory).
 - **Verify**: `cargo test -p wuphf-storage -p wuphf-model`.
 
-### Phase 2 — ingest tap + live broadcast (IN PROGRESS)
+### Phase 2 — ingest tap + live broadcast (DONE, commit `8a7df54`)
 
 - `Core::storage()` and `Core::connector_platform(&ConnectorId)` accessors.
 - `crates/wuphf-runtime/src/observation.rs`: `Observer<S>` holding `Arc<S>` +
