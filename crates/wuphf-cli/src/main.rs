@@ -121,7 +121,8 @@ async fn serve(path: PathBuf) -> Result<()> {
         configuration.max_media_bytes,
         Duration::from_secs(configuration.orphan_media_retention_seconds),
     );
-    let (runtime, channels) = Runtime::channelled(Arc::new(Core::new(storage, config)), 128);
+    let (runtime, channels, _observer) =
+        Runtime::channelled(Arc::new(Core::new(storage, config)), 128);
     let (hub, handle) = ConnectorHub::new(channels, allowed);
     let runtime_task = tokio::spawn(runtime.run());
     let hub_task = tokio::spawn(hub.run());

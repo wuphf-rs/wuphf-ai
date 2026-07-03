@@ -3,7 +3,7 @@ use std::sync::{Arc, Mutex};
 use thiserror::Error;
 use wuphf_model::{
     ConnectorId, DispatchId, EndpointId, EventPayload, MediaId, Message, MessageId,
-    NormalizedEvent, ReplicaSetId, Rule, SideKind, StoredDispatch,
+    NormalizedEvent, Platform, ReplicaSetId, Rule, SideKind, StoredDispatch,
 };
 use wuphf_router::{Router, RouterError, RoutingOutcome};
 use wuphf_storage::{Storage, StorageError};
@@ -52,6 +52,21 @@ where
             storage,
             provisioning: Mutex::new(HashMap::new()),
         }
+    }
+
+    /// Shared handle to the backing storage, for read-only consumers (e.g. the
+    /// observation tap and observer service) that query alongside the core.
+    pub fn storage(&self) -> Arc<S> {
+        Arc::clone(&self.storage)
+    }
+
+    /// The platform a connector bridges, from static registration config. `None`
+    /// when the connector is not configured (an event from an unknown connector);
+    /// the caller falls back to a connector-derived label.
+    pub fn connector_platform(&self, connector_id: &ConnectorId) -> Option<Platform> {
+        self.config
+            .connector(connector_id)
+            .map(|info| info.platform.clone())
     }
 
     pub async fn ingest(&self, event: NormalizedEvent) -> Result<IngestOutcome, CoreError> {

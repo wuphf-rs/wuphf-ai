@@ -94,7 +94,7 @@ fn core() -> Arc<Core<InMemoryStorage>> {
 
 #[tokio::test]
 async fn transports_ready_dispatches_over_tokio_channels() {
-    let (runtime, mut channels) = Runtime::channelled(core(), 4);
+    let (runtime, mut channels, _observer) = Runtime::channelled(core(), 4);
     let task = tokio::spawn(runtime.run());
     send_event(&channels, wa_event("wa-1", None)).await;
     let dispatch = channels.dispatches.recv().await.unwrap();
@@ -110,7 +110,7 @@ async fn interleaved_connectors_route_through_independent_workers() {
     // intake, must each be demuxed to their own ingest worker and routed to the
     // opposite side. A demux bug funnelling everything to one worker would drop
     // or misroute one of the two dispatches.
-    let (runtime, mut channels) = Runtime::channelled(core(), 8);
+    let (runtime, mut channels, _observer) = Runtime::channelled(core(), 8);
     let task = tokio::spawn(runtime.run());
     send_event(&channels, wa_event("wa-1", None)).await;
     send_event(&channels, tg_event("tg-1", None)).await;
@@ -140,7 +140,7 @@ async fn migration_before_event_is_applied_first_on_one_connector() {
     // so the migration's alias is written before the message resolves: the
     // message under the migrated-to address routes to the existing endpoint
     // instead of being ignored as an unknown chat.
-    let (runtime, mut channels) = Runtime::channelled(core(), 8);
+    let (runtime, mut channels, _observer) = Runtime::channelled(core(), 8);
     let task = tokio::spawn(runtime.run());
     // First sighting on the rule's WhatsApp chat mints its endpoint + alias.
     send_event(&channels, wa_event("wa-1", None)).await;
@@ -178,7 +178,7 @@ async fn migration_before_event_is_applied_first_on_one_connector() {
 
 #[tokio::test]
 async fn acknowledgement_releases_reply_with_target_native_parent_id() {
-    let (runtime, mut channels) = Runtime::channelled(core(), 8);
+    let (runtime, mut channels, _observer) = Runtime::channelled(core(), 8);
     let task = tokio::spawn(runtime.run());
     send_event(&channels, wa_event("wa-parent", None)).await;
     let parent_dispatch = channels.dispatches.recv().await.unwrap();
@@ -208,7 +208,7 @@ async fn acknowledgement_releases_reply_with_target_native_parent_id() {
 
 #[tokio::test]
 async fn connector_sessions_route_dispatches_and_authorize_inputs() {
-    let (runtime, runtime_channels) = Runtime::channelled(core(), 8);
+    let (runtime, runtime_channels, _observer) = Runtime::channelled(core(), 8);
     let (hub, handle) = ConnectorHub::new(runtime_channels, registrations());
     let runtime_task = tokio::spawn(runtime.run());
     let hub_task = tokio::spawn(hub.run());
@@ -388,7 +388,7 @@ async fn media_transport_stores_downloadable_bytes_prunes_orphans_and_enforces_l
 
 #[tokio::test]
 async fn grpc_transport_delivers_dispatch_to_registered_connector() {
-    let (runtime, runtime_channels) = Runtime::channelled(core(), 8);
+    let (runtime, runtime_channels, _observer) = Runtime::channelled(core(), 8);
     let (hub, handle) = ConnectorHub::new(runtime_channels, registrations());
     let runtime_task = tokio::spawn(runtime.run());
     let hub_task = tokio::spawn(hub.run());

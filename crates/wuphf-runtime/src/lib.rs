@@ -5,7 +5,7 @@ use tokio::sync::mpsc;
 use tracing::{debug, info, warn};
 use wuphf_core::{Core, CoreError, IngestOutcome};
 use wuphf_model::{
-    ConnectorId, DispatchAcknowledgement, DispatchId, EventPayload, NormalizedEvent,
+    ConnectorId, DispatchAcknowledgement, DispatchId, EventPayload, NormalizedEvent, Platform,
     PlatformAddress, ReceiptKind, StoredDispatch,
 };
 use wuphf_storage::Storage;
@@ -13,6 +13,9 @@ use wuphf_storage::Storage;
 pub mod connector;
 pub mod grpc;
 pub mod media;
+pub mod observation;
+
+pub use observation::Observer;
 
 /// A terminal dispatch failure reported by a connector: `(dispatch, reason)`.
 pub type DispatchFailure = (DispatchId, String);
@@ -42,6 +45,7 @@ impl InboundWork {
 
 pub struct Runtime<S> {
     core: Arc<Core<S>>,
+    observer: Arc<Observer<S>>,
     inbound_rx: mpsc::Receiver<InboundWork>,
     acknowledgement_rx: mpsc::Receiver<DispatchAcknowledgement>,
     failure_rx: mpsc::Receiver<DispatchFailure>,
@@ -63,14 +67,23 @@ impl<S> Runtime<S>
 where
     S: Storage,
 {
-    pub fn channelled(core: Arc<Core<S>>, capacity: usize) -> (Self, RuntimeChannels) {
+    /// Build the runtime and its wiring. The returned [`Observer`] handle backs
+    /// read-only consumers (the observer service, a TUI): it shares the same
+    /// storage and receives every captured message live. It is returned here so a
+    /// caller can wire consumers before [`Runtime::run`] consumes the runtime.
+    pub fn channelled(
+        core: Arc<Core<S>>,
+        capacity: usize,
+    ) -> (Self, RuntimeChannels, Arc<Observer<S>>) {
         let (inbound_tx, inbound_rx) = mpsc::channel(capacity);
         let (acknowledgement_tx, acknowledgement_rx) = mpsc::channel(capacity);
         let (failure_tx, failure_rx) = mpsc::channel(capacity);
         let (dispatch_tx, dispatch_rx) = mpsc::channel(capacity);
+        let observer = Arc::new(Observer::new(core.storage()));
         (
             Self {
                 core,
+                observer: Arc::clone(&observer),
                 inbound_rx,
                 acknowledgement_rx,
                 failure_rx,
@@ -83,6 +96,7 @@ where
                 failures: failure_tx,
                 dispatches: dispatch_rx,
             },
+            observer,
         )
     }
 
@@ -117,6 +131,7 @@ where
                         let worker = workers.entry(connector_id).or_insert_with(|| {
                             spawn_ingest_worker(
                                 self.core.clone(),
+                                self.observer.clone(),
                                 self.dispatch_tx.clone(),
                                 worker_error_tx.clone(),
                                 self.worker_capacity,
@@ -166,6 +181,7 @@ where
 /// cause and stops, which closes its queue and ends the runtime.
 fn spawn_ingest_worker<S>(
     core: Arc<Core<S>>,
+    observer: Arc<Observer<S>>,
     dispatch_tx: mpsc::Sender<StoredDispatch>,
     error_tx: mpsc::Sender<RuntimeError>,
     capacity: usize,
@@ -176,7 +192,7 @@ where
     let (work_tx, mut work_rx) = mpsc::channel::<InboundWork>(capacity);
     tokio::spawn(async move {
         while let Some(work) = work_rx.recv().await {
-            let dispatches = match process_work(core.as_ref(), work).await {
+            let dispatches = match process_work(core.as_ref(), observer.as_ref(), work).await {
                 Ok(dispatches) => dispatches,
                 Err(error) => {
                     let _ = error_tx.send(error).await;
@@ -201,13 +217,17 @@ where
 /// the connector sent them.
 async fn process_work<S>(
     core: &Core<S>,
+    observer: &Observer<S>,
     work: InboundWork,
 ) -> Result<Vec<StoredDispatch>, RuntimeError>
 where
     S: Storage,
 {
     match work {
-        InboundWork::Event(event) => Ok(ingest_event(core, event).await?.dispatches().to_vec()),
+        InboundWork::Event(event) => Ok(ingest_event(core, observer, event)
+            .await?
+            .dispatches()
+            .to_vec()),
         InboundWork::Migration {
             connector_id,
             old,
@@ -230,6 +250,7 @@ where
 /// communicates through [`IngestOutcome`].
 async fn ingest_event<S>(
     core: &Core<S>,
+    observer: &Observer<S>,
     event: NormalizedEvent,
 ) -> Result<IngestOutcome, RuntimeError>
 where
@@ -251,6 +272,15 @@ where
             ..
         } => "read_receipt",
     };
+    // Capture into the observation log before routing decides anything, so a chat
+    // that matches no rule is still recorded. Observation is a side concern: a
+    // failure is logged but never fails ingest.
+    let platform = core
+        .connector_platform(&event.source.connector_id)
+        .unwrap_or_else(|| Platform::Other(event.source.connector_id.0.clone()));
+    if let Err(error) = observer.observe(&event, platform).await {
+        warn!(connector, chat, kind, %error, "failed to record observation");
+    }
     let outcome = core.ingest(event).await?;
     match &outcome {
         IngestOutcome::Routed {
