@@ -133,7 +133,7 @@ async fn serve(path: PathBuf) -> Result<()> {
     let (runtime, channels, observer) =
         Runtime::channelled(Arc::new(Core::new(storage, config)), 128);
     let observer_service = ObserverTransportServer::with_interceptor(
-        GrpcObserverService::new(observer),
+        GrpcObserverService::new(observer).with_sender(runtime.raw_sender()),
         bearer_auth(configuration.observer_token.clone()),
     );
     if configuration.observer_token.is_none() {

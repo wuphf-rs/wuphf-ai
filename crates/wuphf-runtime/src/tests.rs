@@ -530,3 +530,118 @@ fn source_event(
         }),
     }
 }
+
+fn raw_outbound(chat_id: &str, text: &str) -> wuphf_core::RawOutbound {
+    wuphf_core::RawOutbound {
+        connector_id: ConnectorId(WA.into()),
+        chat_id: chat_id.into(),
+        thread_id: None,
+        text: text.into(),
+        reply_to_platform_message_id: None,
+        timestamp_ms: 42,
+    }
+}
+
+#[tokio::test]
+async fn raw_send_travels_the_dispatch_loop_and_settles_an_outgoing_observation() {
+    let (runtime, mut channels, observer) = Runtime::channelled(core(), 8);
+    let sender = runtime.raw_sender();
+    let task = tokio::spawn(runtime.run());
+    let mut live = observer.subscribe();
+
+    let settled = sender
+        .send(raw_outbound("wa-chat", "from the tui"))
+        .await
+        .unwrap();
+
+    // The direct WhatsApp delivery plus the routed mirror copy for telegram.
+    let first = channels.dispatches.recv().await.unwrap();
+    let second = channels.dispatches.recv().await.unwrap();
+    let direct = [&first, &second]
+        .into_iter()
+        .find(|dispatch| dispatch.command.target_connector == ConnectorId(WA.into()))
+        .expect("the raw send dispatches to its own connector");
+    assert!(
+        [&first, &second]
+            .into_iter()
+            .any(|dispatch| dispatch.command.target_connector == ConnectorId(TG.into())),
+        "a raw send into a routed chat also feeds the mirror",
+    );
+
+    channels
+        .acknowledgements
+        .send(DispatchAcknowledgement {
+            dispatch_id: direct.id,
+            platform_message_id: "wa-raw-1".into(),
+            thread_id: None,
+        })
+        .await
+        .unwrap();
+
+    // The acknowledgement settles the observation: waiter, live feed, and log
+    // all carry the outgoing row stamped with the native id.
+    let observed = settled.await.unwrap();
+    assert_eq!(observed.platform_message_id, "wa-raw-1");
+    assert_eq!(observed.direction, wuphf_model::ObservedDirection::Outgoing);
+    let broadcast = live.recv().await.unwrap();
+    assert_eq!(broadcast.platform_message_id, "wa-raw-1");
+    let page = observer
+        .storage()
+        .observed_messages(&ConnectorId(WA.into()), "wa-chat", None, 10)
+        .await
+        .unwrap();
+    assert_eq!(page.len(), 1);
+    assert_eq!(page[0].direction, wuphf_model::ObservedDirection::Outgoing);
+
+    drop(channels.inbound);
+    task.await.unwrap().unwrap();
+}
+
+#[tokio::test]
+async fn observer_service_send_message_returns_the_acknowledged_native_id() {
+    use crate::observer_service::GrpcObserverService;
+    use wuphf_proto::connector::observer_transport_server::ObserverTransport;
+
+    let (runtime, channels, observer) = Runtime::channelled(core(), 8);
+    let service = GrpcObserverService::new(Arc::clone(&observer)).with_sender(runtime.raw_sender());
+    let task = tokio::spawn(runtime.run());
+
+    // Stand in for the WhatsApp connector: acknowledge its dispatch on arrival.
+    let RuntimeChannels {
+        inbound,
+        acknowledgements,
+        failures: _failures,
+        mut dispatches,
+    } = channels;
+    let acker = tokio::spawn(async move {
+        while let Some(dispatch) = dispatches.recv().await {
+            if dispatch.command.target_connector == ConnectorId(WA.into()) {
+                acknowledgements
+                    .send(DispatchAcknowledgement {
+                        dispatch_id: dispatch.id,
+                        platform_message_id: "wa-raw-9".into(),
+                        thread_id: None,
+                    })
+                    .await
+                    .unwrap();
+            }
+        }
+    });
+
+    let response = service
+        .send_message(tonic::Request::new(pb::SendMessageRequest {
+            connector_id: WA.into(),
+            chat_id: "wa-chat".into(),
+            thread_id: None,
+            text: "hello from the tui".into(),
+            reply_to_platform_message_id: None,
+        }))
+        .await
+        .unwrap()
+        .into_inner();
+    assert_eq!(response.platform_message_id, "wa-raw-9");
+
+    drop(inbound);
+    task.await.unwrap().unwrap();
+    acker.abort();
+}

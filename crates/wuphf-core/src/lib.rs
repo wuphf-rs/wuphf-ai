@@ -13,6 +13,9 @@ pub use wuphf_router::{ConnectorInfo, RoutingConfig};
 mod acknowledge;
 mod ingest;
 mod resolve;
+mod send;
+
+pub use send::{RAW_SENDER, RawOutbound, RawSendOutcome};
 
 pub struct Core<S> {
     storage: Arc<S>,

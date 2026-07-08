@@ -9,8 +9,8 @@ use tokio::sync::RwLock;
 use wuphf_model::{
     Alias, ChatSettings, ConnectorId, Contact, Conversation, ConversationId, DedupKey,
     DispatchCommand, DispatchId, DispatchState, Endpoint, EndpointId, MediaBlob, MediaId, Message,
-    MessageCopy, MessageId, ObservedChat, ObservedMessage, PlatformAddress, ReplicaSet,
-    ReplicaSetId, StoredDispatch, ThreadMapping,
+    MessageCopy, MessageId, ObservedChat, ObservedDirection, ObservedMessage, PlatformAddress,
+    ReplicaSet, ReplicaSetId, StoredDispatch, ThreadMapping,
 };
 
 #[derive(Default)]
@@ -481,10 +481,24 @@ impl Storage for InMemoryStorage {
 
     async fn log_observed(
         &self,
-        observed: ObservedMessage,
+        mut observed: ObservedMessage,
         chat_title: Option<String>,
-    ) -> StorageResult<()> {
+    ) -> StorageResult<ObservedMessage> {
         let mut state = self.state.write().await;
+        let message_key = (
+            observed.connector_id.clone(),
+            observed.chat_id.clone(),
+            observed.platform_message_id.clone(),
+        );
+        // A row already recorded as outgoing stays outgoing: the platform
+        // reporting our own send back must not relabel it as incoming.
+        if state
+            .observed_messages
+            .get(&message_key)
+            .is_some_and(|existing| existing.direction == ObservedDirection::Outgoing)
+        {
+            observed.direction = ObservedDirection::Outgoing;
+        }
         let chat_key = (observed.connector_id.clone(), observed.chat_id.clone());
         // Fold the message into the chat summary: keep the stored title unless
         // this message carried one, and advance the preview/timestamp only when
@@ -508,15 +522,10 @@ impl Storage for InMemoryStorage {
             summary.last_message_ts = observed.timestamp_ms;
             summary.last_message_preview = observed.preview();
         }
-        state.observed_messages.insert(
-            (
-                observed.connector_id.clone(),
-                observed.chat_id.clone(),
-                observed.platform_message_id.clone(),
-            ),
-            observed,
-        );
-        Ok(())
+        state
+            .observed_messages
+            .insert(message_key, observed.clone());
+        Ok(observed)
     }
 
     async fn mark_observed_deleted(

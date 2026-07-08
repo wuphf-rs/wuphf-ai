@@ -10,8 +10,8 @@ use std::str::FromStr;
 use wuphf_model::{
     Alias, ChatSettings, ConnectorId, Contact, Conversation, ConversationId, DedupKey,
     DispatchCommand, DispatchId, DispatchState, Endpoint, EndpointId, MediaBlob, MediaId, Message,
-    MessageCopy, MessageId, ObservedChat, ObservedMessage, PlatformAddress, ReplicaSet,
-    ReplicaSetId, StoredDispatch, ThreadMapping,
+    MessageCopy, MessageId, ObservedChat, ObservedDirection, ObservedMessage, PlatformAddress,
+    ReplicaSet, ReplicaSetId, StoredDispatch, ThreadMapping,
 };
 
 pub struct SqliteStorage {
@@ -565,10 +565,27 @@ impl Storage for SqliteStorage {
 
     async fn log_observed(
         &self,
-        observed: ObservedMessage,
+        mut observed: ObservedMessage,
         chat_title: Option<String>,
-    ) -> StorageResult<()> {
+    ) -> StorageResult<ObservedMessage> {
         let mut transaction = self.pool.begin().await?;
+        // A row already recorded as outgoing stays outgoing: the platform
+        // reporting our own send back must not relabel it as incoming.
+        let existing_message = sqlx::query(
+            "SELECT payload FROM observed_messages
+             WHERE connector_id = ? AND chat_id = ? AND platform_message_id = ?",
+        )
+        .bind(observed.connector_id.to_string())
+        .bind(&observed.chat_id)
+        .bind(&observed.platform_message_id)
+        .fetch_optional(&mut *transaction)
+        .await?;
+        if let Some(row) = existing_message {
+            let stored: ObservedMessage = serde_json::from_str(row.get("payload"))?;
+            if stored.direction == ObservedDirection::Outgoing {
+                observed.direction = ObservedDirection::Outgoing;
+            }
+        }
         sqlx::query(
             "INSERT INTO observed_messages
                (connector_id, chat_id, platform_message_id, timestamp_ms, payload)
@@ -633,7 +650,7 @@ impl Storage for SqliteStorage {
         .execute(&mut *transaction)
         .await?;
         transaction.commit().await?;
-        Ok(())
+        Ok(observed)
     }
 
     async fn mark_observed_deleted(

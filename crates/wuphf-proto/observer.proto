@@ -6,11 +6,10 @@ option go_package = "github.com/akshettrj/wuphf/proto/go/connector/v1;wuphfpb";
 
 import "common.proto";
 
-// Read-only view over the observation log for a viewer (e.g. a TUI): list the
-// chats seen across every platform, page a chat's history, and subscribe to new
-// activity. SendMessage is reserved for two-way support and is not implemented
-// yet. This surface exposes every captured chat, so bind it locally and set a
-// token.
+// View over the observation log for a viewer (e.g. a TUI): list the chats seen
+// across every platform, page a chat's history, subscribe to new activity, and
+// send owner-authored messages into a chat. This surface exposes (and can send
+// into) every captured chat, so bind it locally and set a token.
 service ObserverTransport {
   rpc ListChats(ListChatsRequest) returns (ListChatsResponse);
   rpc GetMessages(GetMessagesRequest) returns (GetMessagesResponse);
@@ -93,6 +92,9 @@ message SendMessageRequest {
 }
 
 message SendMessageResponse {
-  // Native id of the sent message. Populated once two-way support lands.
+  // Native id of the sent message, from the connector's acknowledgement. Empty
+  // when the acknowledgement did not arrive within the server's wait window;
+  // the send still proceeds and the outgoing message reaches subscribers once
+  // it is acknowledged.
   string platform_message_id = 1;
 }

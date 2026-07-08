@@ -4,9 +4,12 @@
 //! subscribe to the broadcast for new activity. The tap never consults routing,
 //! so it captures every chat a connector reports, not only the bridged ones.
 
-use std::sync::Arc;
-use tokio::sync::broadcast;
-use wuphf_model::{EventPayload, NormalizedEvent, ObservedDirection, ObservedMessage, Platform};
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
+use tokio::sync::{broadcast, oneshot};
+use wuphf_model::{
+    DispatchId, EventPayload, NormalizedEvent, ObservedDirection, ObservedMessage, Platform,
+};
 use wuphf_storage::{Storage, StorageError};
 
 /// How many recent observed messages the live broadcast retains for a lagging
@@ -21,6 +24,18 @@ const BROADCAST_CAPACITY: usize = 1024;
 pub struct Observer<S> {
     storage: Arc<S>,
     events: broadcast::Sender<ObservedMessage>,
+    /// Raw sends in flight, keyed by their direct dispatch. The observed row is
+    /// held here until the connector's acknowledgement supplies the native
+    /// message id, at which point it is logged as outgoing and broadcast. The
+    /// lock is never held across an await.
+    pending_outbound: Mutex<HashMap<DispatchId, PendingOutbound>>,
+}
+
+/// One raw send awaiting its acknowledgement: the observed row missing only its
+/// native id, and the waiter (if any) to notify with the settled row.
+struct PendingOutbound {
+    observed: ObservedMessage,
+    notify: Option<oneshot::Sender<ObservedMessage>>,
 }
 
 impl<S> Observer<S>
@@ -29,7 +44,11 @@ where
 {
     pub fn new(storage: Arc<S>) -> Self {
         let (events, _) = broadcast::channel(BROADCAST_CAPACITY);
-        Self { storage, events }
+        Self {
+            storage,
+            events,
+            pending_outbound: Mutex::new(HashMap::new()),
+        }
     }
 
     /// Storage handle for read-only consumers to query observation history.
@@ -79,10 +98,14 @@ where
                     deleted: false,
                     edited: false,
                 };
-                self.storage
-                    .log_observed(observed.clone(), event.source.chat_title.clone())
-                    .await?;
-                Some(observed)
+                // Broadcast the row as stored, not as constructed: an echo of
+                // our own raw send keeps its outgoing direction in storage, and
+                // live subscribers must see the same row.
+                Some(
+                    self.storage
+                        .log_observed(observed, event.source.chat_title.clone())
+                        .await?,
+                )
             }
             EventPayload::MessageEdit {
                 platform_message_id,
@@ -107,6 +130,54 @@ where
             let _ = self.events.send(observed);
         }
         Ok(())
+    }
+
+    /// Register a raw send awaiting acknowledgement. The observed row (its
+    /// `platform_message_id` still unknown) is held until
+    /// [`settle_outbound`](Self::settle_outbound) fills it in from the
+    /// connector's acknowledgement. The returned receiver resolves with the
+    /// settled row; dropping it is fine — the row is logged either way.
+    pub fn track_outbound(
+        &self,
+        dispatch_id: DispatchId,
+        observed: ObservedMessage,
+    ) -> oneshot::Receiver<ObservedMessage> {
+        let (notify, receiver) = oneshot::channel();
+        self.pending_outbound.lock().unwrap().insert(
+            dispatch_id,
+            PendingOutbound {
+                observed,
+                notify: Some(notify),
+            },
+        );
+        receiver
+    }
+
+    /// Settle a tracked raw send with the native id its acknowledgement
+    /// carried: log the row as outgoing, broadcast it live, and notify the
+    /// waiter. A dispatch that was never tracked (every ordinary bridge
+    /// dispatch) is a no-op.
+    pub async fn settle_outbound(
+        &self,
+        dispatch_id: DispatchId,
+        platform_message_id: &str,
+    ) -> Result<(), StorageError> {
+        let Some(mut pending) = self.pending_outbound.lock().unwrap().remove(&dispatch_id) else {
+            return Ok(());
+        };
+        pending.observed.platform_message_id = platform_message_id.to_owned();
+        let stored = self.storage.log_observed(pending.observed, None).await?;
+        if let Some(notify) = pending.notify.take() {
+            let _ = notify.send(stored.clone());
+        }
+        let _ = self.events.send(stored);
+        Ok(())
+    }
+
+    /// Drop a tracked raw send whose dispatch failed permanently; nothing was
+    /// delivered, so nothing is logged. Untracked dispatches are a no-op.
+    pub fn discard_outbound(&self, dispatch_id: DispatchId) {
+        self.pending_outbound.lock().unwrap().remove(&dispatch_id);
     }
 }
 
@@ -208,6 +279,59 @@ mod tests {
             .await
             .unwrap();
         assert!(page[0].deleted);
+    }
+
+    #[tokio::test]
+    async fn settle_outbound_logs_and_notifies_only_tracked_dispatches() {
+        let observer = Observer::new(Arc::new(InMemoryStorage::default()));
+        let dispatch_id = wuphf_model::DispatchId::new();
+        // An untracked dispatch (every ordinary bridge dispatch) is a no-op.
+        observer.settle_outbound(dispatch_id, "tg-1").await.unwrap();
+        assert!(
+            observer
+                .storage()
+                .list_observed_chats()
+                .await
+                .unwrap()
+                .is_empty()
+        );
+
+        let template = ObservedMessage {
+            connector_id: ConnectorId("whatsapp".into()),
+            platform: Platform::WhatsApp,
+            chat_id: "alice".into(),
+            thread_id: None,
+            platform_message_id: String::new(),
+            sender: "me".into(),
+            sender_name: None,
+            participant: None,
+            text: Some("mine".into()),
+            attachments: vec![],
+            reply_to_platform_message_id: None,
+            direction: ObservedDirection::Outgoing,
+            timestamp_ms: 42,
+            deleted: false,
+            edited: false,
+        };
+        let mut live = observer.subscribe();
+        let settled = observer.track_outbound(dispatch_id, template.clone());
+        observer.settle_outbound(dispatch_id, "wa-1").await.unwrap();
+        let row = settled.await.unwrap();
+        assert_eq!(row.platform_message_id, "wa-1");
+        assert_eq!(row.direction, ObservedDirection::Outgoing);
+        assert_eq!(live.try_recv().unwrap().platform_message_id, "wa-1");
+        let page = observer
+            .storage()
+            .observed_messages(&ConnectorId("whatsapp".into()), "alice", None, 10)
+            .await
+            .unwrap();
+        assert_eq!(page.len(), 1);
+
+        // A discarded (failed) send drops the waiter and logs nothing.
+        let failed_id = wuphf_model::DispatchId::new();
+        let waiter = observer.track_outbound(failed_id, template);
+        observer.discard_outbound(failed_id);
+        assert!(waiter.await.is_err());
     }
 
     #[tokio::test]

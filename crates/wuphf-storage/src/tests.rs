@@ -301,3 +301,39 @@ fn command(message_id: MessageId, endpoint_id: EndpointId) -> DispatchCommand {
         },
     }
 }
+
+#[tokio::test]
+async fn memory_outgoing_direction_survives_the_platform_echo() {
+    outgoing_direction_survives_the_platform_echo(InMemoryStorage::default()).await;
+}
+
+#[tokio::test]
+async fn sqlite_outgoing_direction_survives_the_platform_echo() {
+    let path = std::env::temp_dir().join(format!("wuphf-outgoing-{}.sqlite", DispatchId::new()));
+    let url = format!("sqlite://{}", path.display());
+    outgoing_direction_survives_the_platform_echo(SqliteStorage::connect(&url).await.unwrap())
+        .await;
+}
+
+/// A row logged as outgoing (a raw send) must stay outgoing when the platform
+/// reports the same message back as an inbound event: both backends return and
+/// store the merged row with the original direction.
+async fn outgoing_direction_survives_the_platform_echo<S: Storage>(storage: S) {
+    let whatsapp = ConnectorId("whatsapp".into());
+    let mut sent = observed(&whatsapp, "alice", "raw-1", 100, Some("mine"));
+    sent.direction = ObservedDirection::Outgoing;
+    let stored = storage.log_observed(sent, None).await.unwrap();
+    assert_eq!(stored.direction, ObservedDirection::Outgoing);
+
+    // The echo arrives as an ordinary incoming create for the same native id.
+    let echo = observed(&whatsapp, "alice", "raw-1", 100, Some("mine"));
+    let stored = storage.log_observed(echo, None).await.unwrap();
+    assert_eq!(stored.direction, ObservedDirection::Outgoing);
+
+    let page = storage
+        .observed_messages(&whatsapp, "alice", None, 10)
+        .await
+        .unwrap();
+    assert_eq!(page.len(), 1);
+    assert_eq!(page[0].direction, ObservedDirection::Outgoing);
+}

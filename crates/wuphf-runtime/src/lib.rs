@@ -15,8 +15,10 @@ pub mod grpc;
 pub mod media;
 pub mod observation;
 pub mod observer_service;
+pub mod raw_send;
 
 pub use observation::Observer;
+pub use raw_send::{RawMessageSender, RawSendError};
 
 /// A terminal dispatch failure reported by a connector: `(dispatch, reason)`.
 pub type DispatchFailure = (DispatchId, String);
@@ -101,6 +103,17 @@ where
         )
     }
 
+    /// A handle that accepts owner-authored raw sends and feeds them into this
+    /// runtime's delivery loop. Take clones before calling [`Runtime::run`],
+    /// which consumes the runtime.
+    pub fn raw_sender(&self) -> RawMessageSender<S> {
+        RawMessageSender::new(
+            Arc::clone(&self.core),
+            Arc::clone(&self.observer),
+            self.dispatch_tx.clone(),
+        )
+    }
+
     pub async fn run(mut self) -> Result<(), RuntimeError> {
         let pending = self.core.pending_dispatches().await?;
         if !pending.is_empty() {
@@ -149,14 +162,29 @@ where
                 acknowledgement = self.acknowledgement_rx.recv() => {
                     if let Some(acknowledgement) = acknowledgement {
                         debug!(dispatch_id = %acknowledgement.dispatch_id, "dispatch acknowledged");
+                        let (dispatch_id, platform_message_id) = (
+                            acknowledgement.dispatch_id,
+                            acknowledgement.platform_message_id.clone(),
+                        );
                         for dispatch in self.core.acknowledge_dispatch(acknowledgement).await? {
                             self.send(dispatch).await?;
+                        }
+                        // A raw send settles its outgoing observation here; every
+                        // other dispatch is a no-op. A failure only loses the
+                        // observation row, never the delivery, so warn and go on.
+                        if let Err(error) = self
+                            .observer
+                            .settle_outbound(dispatch_id, &platform_message_id)
+                            .await
+                        {
+                            warn!(dispatch_id = %dispatch_id, %error, "failed to record outgoing observation");
                         }
                     }
                 }
                 failure = self.failure_rx.recv() => {
                     if let Some((dispatch_id, reason)) = failure {
                         warn!(dispatch_id = %dispatch_id, reason, "dispatch failed permanently, dead-lettering");
+                        self.observer.discard_outbound(dispatch_id);
                         for dispatch in self.core.fail_dispatch(dispatch_id, reason).await? {
                             self.send(dispatch).await?;
                         }

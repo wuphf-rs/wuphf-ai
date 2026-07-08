@@ -14,7 +14,7 @@
 - **Category**: feature
 - **Planned at**: commit `beed586`, 2026-07-01
 
-Phase status: 1 DONE · 2 DONE · 3 DONE · 4 DONE · 5 TODO · 6 TODO
+Phase status: 1 DONE · 2 DONE · 3 DONE · 4 DONE · 5 DONE · 6 TODO
 
 ## Why this matters
 
@@ -86,7 +86,7 @@ in `wuphf-runtime` (a runtime concern), touches persistence only through the
 - **Verify**: `cargo test -p wuphf-runtime` (Observer unit tests: capture +
   broadcast, edit/delete update).
 
-### Phase 3 — observer gRPC read service (DONE, commit pending)
+### Phase 3 — observer gRPC read service (DONE, commit `18f37dc`)
 
 - `observer.proto`: `ListChats`, `GetMessages(chat, before_ms, limit)`,
   `SubscribeMessages(filter) -> stream`, `SendMessage(...)` (returns
@@ -100,7 +100,7 @@ in `wuphf-runtime` (a runtime concern), touches persistence only through the
 - **Verified**: `cargo test -p wuphf-runtime` (4 service tests: list/page,
   arg validation, filtered live stream, send unimplemented).
 
-### Phase 4 — read-only TUI (DONE, commit pending)
+### Phase 4 — read-only TUI (DONE, commit `52c5084`)
 
 - New `wuphf-tui` crate (ratatui + crossterm + tonic client): chat-list /
   timeline / input panes + status bar. `ListChats` on start, `GetMessages` on
@@ -112,14 +112,32 @@ in `wuphf-runtime` (a runtime concern), touches persistence only through the
   a read-only placeholder until phase 6.
 - **Milestone reached**: usable read-only multi-platform viewer.
 
-### Phase 5 — outbound SendRaw (TODO)
+### Phase 5 — outbound raw send (DONE, commit pending)
 
-- `SendRaw { chat_id, thread_id?, text, reply_to? }` connector command; WA/IG
-  gain native send. Core records a sent copy so the existing
-  `SentMessageEcho` / `is_sent_copy` path suppresses the echo. Log the send as
-  `ObservedDirection::Outgoing`.
-- **STOP** if suppressing the outbound echo is not provable in a test — a send
-  loop must not be shipped.
+- Scope shrank at implementation time: WA/IG connectors **already** handle
+  `MessageCreateDispatch` (`whatsapp/sender.go`, `instagram/sender.go`) and the
+  `SendMessage` RPC shape already existed in `observer.proto`, so no Go or proto
+  command changes were needed. A raw send is an ordinary `MessageCreate`
+  dispatch enqueued outside routing.
+- `Core::send_raw(RawOutbound) -> RawSendOutcome` (`wuphf-core/src/send.rs`):
+  resolves the target through `resolve_origin` (a rule-matched chat mints its
+  full topology; an unrouted chat gets a standalone endpoint + solo replica
+  set), best-effort reply quoting, and — deliberately — **fans out to the
+  chat's mirrors** via `route_and_record`, because the platform echo that would
+  normally replicate the message is suppressed.
+- Echo suppression is free: the acknowledgement records a sent copy, so the
+  platform's echo hits `is_sent_copy` → `Ignored(SentMessageEcho)`. Proven by
+  `raw_send_echo_is_suppressed_after_acknowledgement` (the STOP gate).
+- Observation: `Observer::track_outbound/settle_outbound/discard_outbound` —
+  the ack settles an `ObservedDirection::Outgoing` row (logged + broadcast +
+  oneshot to the RPC waiter). `Storage::log_observed` now returns the stored
+  row and keeps `Outgoing` on upsert, so an echoed own-send never flips to
+  incoming (parity-tested in both backends).
+- `RawMessageSender` (runtime handle) + `GrpcObserverService::with_sender`
+  implement the `SendMessage` RPC: waits up to 10s for the ack's native id,
+  returns empty id on timeout (send still proceeds), `Aborted` on permanent
+  dispatch failure. `wuphf-cli` wires it; a service built without a sender
+  stays read-only (`Unimplemented`).
 
 ### Phase 6 — TUI send/reply (TODO)
 

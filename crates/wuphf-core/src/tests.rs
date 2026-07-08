@@ -1044,3 +1044,150 @@ async fn edit_for_unknown_message_is_ignored() {
         IngestOutcome::Ignored(IgnoreReason::Unmatched)
     );
 }
+
+fn raw(chat_id: &str, text: &str, reply_to: Option<&str>) -> RawOutbound {
+    RawOutbound {
+        connector_id: ConnectorId(WHATSAPP.into()),
+        chat_id: chat_id.into(),
+        thread_id: None,
+        text: text.into(),
+        reply_to_platform_message_id: reply_to.map(str::to_owned),
+        timestamp_ms: 5,
+    }
+}
+
+// The phase-5 STOP gate: a raw send must never loop. The acknowledgement
+// records a sent copy, so the platform reporting our own message back as an
+// inbound event is dropped as an echo instead of being ingested again.
+#[tokio::test]
+async fn raw_send_echo_is_suppressed_after_acknowledgement() {
+    // No rules: the raw send mints the chat's topology itself.
+    let core = core(vec![]);
+    let outcome = core
+        .send_raw(raw("999@s.whatsapp.net", "hi there", None))
+        .await
+        .unwrap();
+    assert!(outcome.mirrored.is_empty());
+    core.acknowledge_dispatch(DispatchAcknowledgement {
+        dispatch_id: outcome.direct.id,
+        platform_message_id: "wa-raw-1".into(),
+        thread_id: None,
+    })
+    .await
+    .unwrap();
+    assert_eq!(
+        core.ingest(event(WHATSAPP, "999@s.whatsapp.net", "wa-raw-1", None))
+            .await
+            .unwrap(),
+        IngestOutcome::Ignored(IgnoreReason::SentMessageEcho)
+    );
+}
+
+#[tokio::test]
+async fn raw_send_to_a_routed_chat_fans_out_to_the_other_side() {
+    let core = core(vec![direct_rule()]);
+    let outcome = core
+        .send_raw(raw("12345@s.whatsapp.net", "from the tui", None))
+        .await
+        .unwrap();
+    assert_eq!(
+        outcome.direct.command.target_connector,
+        ConnectorId(WHATSAPP.into())
+    );
+    assert_eq!(outcome.mirrored.len(), 1);
+    let mirror = &outcome.mirrored[0].command;
+    assert_eq!(mirror.target_connector, ConnectorId(TELEGRAM.into()));
+    assert_eq!(mirror.target.address.chat_id, "-100123");
+
+    // The echo stays suppressed on the routed path too.
+    core.acknowledge_dispatch(DispatchAcknowledgement {
+        dispatch_id: outcome.direct.id,
+        platform_message_id: "wa-raw-2".into(),
+        thread_id: None,
+    })
+    .await
+    .unwrap();
+    assert_eq!(
+        core.ingest(event(WHATSAPP, "12345@s.whatsapp.net", "wa-raw-2", None))
+            .await
+            .unwrap(),
+        IngestOutcome::Ignored(IgnoreReason::SentMessageEcho)
+    );
+}
+
+#[tokio::test]
+async fn raw_send_to_an_unrouted_chat_keeps_later_inbound_ingestible() {
+    let core = core(vec![direct_rule()]);
+    let outcome = core
+        .send_raw(raw("unrouted@s.whatsapp.net", "hello", None))
+        .await
+        .unwrap();
+    assert!(outcome.mirrored.is_empty());
+    // A later peer message in the standalone chat resolves cleanly and fans
+    // out to nobody instead of erroring on a missing replica set.
+    match core
+        .ingest(event(WHATSAPP, "unrouted@s.whatsapp.net", "wa-5", None))
+        .await
+        .unwrap()
+    {
+        IngestOutcome::Routed { dispatches, .. } => assert!(dispatches.is_empty()),
+        other => panic!("inbound after a raw send should ingest, got {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn raw_send_reply_quotes_the_stored_parent_and_degrades_to_plain() {
+    let core = core(vec![direct_rule()]);
+    core.ingest(event(WHATSAPP, "12345@s.whatsapp.net", "wa-parent", None))
+        .await
+        .unwrap();
+    let outcome = core
+        .send_raw(raw("12345@s.whatsapp.net", "replying", Some("wa-parent")))
+        .await
+        .unwrap();
+    let DispatchPayload::MessageCreate {
+        message,
+        reply_context,
+        ..
+    } = &outcome.direct.command.payload
+    else {
+        panic!("raw send dispatches a message create");
+    };
+    assert!(message.reply_to.is_some());
+    assert_eq!(message.sender, RAW_SENDER);
+    let context = reply_context.as_ref().expect("stored parent quotes");
+    assert_eq!(context.platform_message_id, "wa-parent");
+    assert_eq!(context.sender, "alice");
+
+    // A parent the bridge never stored degrades to a plain send.
+    let outcome = core
+        .send_raw(raw("12345@s.whatsapp.net", "plain", Some("ghost")))
+        .await
+        .unwrap();
+    let DispatchPayload::MessageCreate {
+        message,
+        reply_context,
+        ..
+    } = &outcome.direct.command.payload
+    else {
+        panic!("raw send dispatches a message create");
+    };
+    assert!(message.reply_to.is_none() && reply_context.is_none());
+}
+
+#[tokio::test]
+async fn raw_send_to_an_unknown_connector_is_rejected() {
+    let core = core(vec![]);
+    let error = core
+        .send_raw(RawOutbound {
+            connector_id: ConnectorId("unregistered".into()),
+            chat_id: "somewhere".into(),
+            thread_id: None,
+            text: "hi".into(),
+            reply_to_platform_message_id: None,
+            timestamp_ms: 5,
+        })
+        .await
+        .unwrap_err();
+    assert!(matches!(error, CoreError::UnknownConnector(_)));
+}

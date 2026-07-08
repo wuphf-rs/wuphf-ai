@@ -1,35 +1,55 @@
-//! gRPC read surface over the observation log for a viewer (e.g. a TUI): list
-//! chats, page a chat's history, and subscribe to new activity. Sending is
-//! reserved for two-way support and reports `unimplemented` for now. The service
-//! reads every captured chat, so it is guarded by an optional bearer token
-//! ([`bearer_auth`]) and should be bound locally.
+//! gRPC surface over the observation log for a viewer (e.g. a TUI): list
+//! chats, page a chat's history, subscribe to new activity, and — when built
+//! with a [`RawMessageSender`] — send owner-authored messages. The service
+//! reads (and can write into) every captured chat, so it is guarded by an
+//! optional bearer token ([`bearer_auth`]) and should be bound locally.
 
 use std::pin::Pin;
 use std::sync::Arc;
+use std::time::Duration;
 
 use tokio::sync::{broadcast, mpsc};
 use tokio_stream::{Stream, wrappers::ReceiverStream};
 use tonic::{Request, Response, Status};
+use wuphf_core::RawOutbound;
 use wuphf_model::{ConnectorId, ObservedChat, ObservedDirection, ObservedMessage, Platform};
 use wuphf_proto::connector as pb;
 use wuphf_proto::connector::observer_transport_server::ObserverTransport;
 use wuphf_storage::Storage;
 
-use crate::Observer;
 use crate::grpc::attachment_to_proto;
+use crate::raw_send::{self, RawMessageSender};
+use crate::{Observer, RawSendError};
 
 /// Depth of the per-subscriber forwarding queue between the shared broadcast and
 /// one client's stream. Small: a client that cannot keep up should fall behind
 /// and re-query rather than have the server buffer without bound.
 const SUBSCRIBE_QUEUE: usize = 64;
 
+/// How long `SendMessage` waits for the connector's acknowledgement before
+/// giving up on returning the native id. The send itself is not cancelled — it
+/// stays queued and its outgoing row still arrives on the live stream.
+const SEND_ACK_TIMEOUT: Duration = Duration::from_secs(10);
+
 pub struct GrpcObserverService<S> {
     observer: Arc<Observer<S>>,
+    /// Send path into the running delivery loop; absent in read-only builds,
+    /// where `SendMessage` reports unimplemented.
+    sender: Option<RawMessageSender<S>>,
 }
 
 impl<S> GrpcObserverService<S> {
     pub fn new(observer: Arc<Observer<S>>) -> Self {
-        Self { observer }
+        Self {
+            observer,
+            sender: None,
+        }
+    }
+
+    /// Enable sending through this service.
+    pub fn with_sender(mut self, sender: RawMessageSender<S>) -> Self {
+        self.sender = Some(sender);
+        self
     }
 }
 
@@ -122,11 +142,49 @@ where
 
     async fn send_message(
         &self,
-        _request: Request<pb::SendMessageRequest>,
+        request: Request<pb::SendMessageRequest>,
     ) -> Result<Response<pb::SendMessageResponse>, Status> {
-        Err(Status::unimplemented(
-            "sending from the observer is not supported yet",
-        ))
+        let Some(sender) = &self.sender else {
+            return Err(Status::unimplemented(
+                "this observer service is read-only; sending is not enabled",
+            ));
+        };
+        let request = request.into_inner();
+        if request.connector_id.is_empty() || request.chat_id.is_empty() {
+            return Err(Status::invalid_argument(
+                "connector_id and chat_id are required",
+            ));
+        }
+        if request.text.trim().is_empty() {
+            return Err(Status::invalid_argument("text must not be empty"));
+        }
+        let settled = sender
+            .send(RawOutbound {
+                connector_id: ConnectorId(request.connector_id),
+                chat_id: request.chat_id,
+                thread_id: request.thread_id,
+                text: request.text,
+                reply_to_platform_message_id: request.reply_to_platform_message_id,
+                timestamp_ms: raw_send::now_ms(),
+            })
+            .await
+            .map_err(|error| match error {
+                RawSendError::Core(error) => Status::failed_precondition(error.to_string()),
+                RawSendError::RuntimeStopped => Status::unavailable(error.to_string()),
+            })?;
+        // The dispatch is queued; wait (bounded) for the connector to report
+        // the native id. On timeout the send still proceeds — the outgoing row
+        // reaches subscribers whenever the acknowledgement lands.
+        match tokio::time::timeout(SEND_ACK_TIMEOUT, settled).await {
+            Ok(Ok(observed)) => Ok(Response::new(pb::SendMessageResponse {
+                platform_message_id: observed.platform_message_id,
+            })),
+            // The runtime dropped the tracker: the dispatch failed permanently.
+            Ok(Err(_)) => Err(Status::aborted("the connector rejected the send")),
+            Err(_) => Ok(Response::new(pb::SendMessageResponse {
+                platform_message_id: String::new(),
+            })),
+        }
     }
 }
 
@@ -340,7 +398,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn send_message_is_unimplemented() {
+    async fn send_message_without_a_sender_is_unimplemented() {
         let status = service()
             .send_message(Request::new(pb::SendMessageRequest {
                 connector_id: "whatsapp".into(),

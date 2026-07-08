@@ -139,14 +139,17 @@ pub trait Storage: Send + Sync + 'static {
     async fn fail_dispatch(&self, dispatch_id: DispatchId, reason: String) -> StorageResult<()>;
 
     /// Record a message in the observation log, upserting both the message row
-    /// and its chat summary. Idempotent on the message's native coordinates. A
-    /// `chat_title` refreshes the chat's title; `None` keeps the stored one, so a
-    /// later message that omits a title does not clear it.
+    /// and its chat summary, and return the row as stored. Idempotent on the
+    /// message's native coordinates. A `chat_title` refreshes the chat's title;
+    /// `None` keeps the stored one, so a later message that omits a title does
+    /// not clear it. A row already recorded as outgoing keeps that direction:
+    /// the platform reporting the bridge's own send back as an inbound event
+    /// must not relabel it as incoming.
     async fn log_observed(
         &self,
         observed: ObservedMessage,
         chat_title: Option<String>,
-    ) -> StorageResult<()>;
+    ) -> StorageResult<ObservedMessage>;
     /// Flag an observed message deleted, returning the updated row, or `None`
     /// when the message was never observed.
     async fn mark_observed_deleted(
