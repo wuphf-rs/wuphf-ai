@@ -35,7 +35,7 @@ pub fn draw(frame: &mut Frame, app: &App) -> Geometry {
 
     draw_chats(frame, columns[0], app);
     let geometry = draw_timeline(frame, right[0], app);
-    draw_input(frame, right[1]);
+    draw_input(frame, right[1], app);
     draw_status(frame, root[1], app);
     geometry
 }
@@ -85,16 +85,33 @@ fn draw_timeline(frame: &mut Frame, area: Rect, app: &App) -> Geometry {
     let inner_height = area.height.saturating_sub(2);
 
     let mut lines: Vec<Line> = Vec::new();
-    for message in &app.messages {
-        render_message(message, inner_width, &mut lines);
+    // First rendered line of each message, for scrolling the cursor into view.
+    let mut message_starts: Vec<u16> = Vec::with_capacity(app.messages.len());
+    for (index, message) in app.messages.iter().enumerate() {
+        message_starts.push(lines.len() as u16);
+        let selected = app.cursor == Some(index);
+        render_message(message, inner_width, selected, &mut lines);
     }
     let total = lines.len() as u16;
     let max_scroll = total.saturating_sub(inner_height);
-    let effective = if app.follow {
+    let mut effective = if app.follow {
         max_scroll
     } else {
         app.scroll.min(max_scroll)
     };
+    // Keep the cursored message visible: scroll up to its first line, or down
+    // until its block (bounded by the next message's start) fits.
+    if let Some(cursor) = app.cursor
+        && cursor < message_starts.len()
+    {
+        let start = message_starts[cursor];
+        let end = message_starts.get(cursor + 1).copied().unwrap_or(total);
+        if start < effective {
+            effective = start;
+        } else if end > effective + inner_height {
+            effective = end.saturating_sub(inner_height).min(start);
+        }
+    }
 
     let paragraph = Paragraph::new(lines)
         .block(bordered(&title, app.focus == Focus::Timeline))
@@ -107,19 +124,37 @@ fn draw_timeline(frame: &mut Frame, area: Rect, app: &App) -> Geometry {
     }
 }
 
-fn draw_input(frame: &mut Frame, area: Rect) {
-    let paragraph = Paragraph::new(Span::styled(
-        "read-only — sending arrives in a later phase",
-        Style::default().fg(Color::DarkGray),
-    ))
-    .block(Block::default().borders(Borders::ALL).title("Message"));
+fn draw_input(frame: &mut Frame, area: Rect, app: &App) {
+    let title = match &app.reply_to {
+        Some(target) => format!("Reply to: {}", truncate(&target.preview, 40)),
+        None => "Message".to_owned(),
+    };
+    let focused = app.focus == Focus::Input;
+    let content: Span<'_> = if app.input.is_empty() && !focused {
+        Span::styled(
+            "press i to write, r to reply, Enter to send",
+            Style::default().fg(Color::DarkGray),
+        )
+    } else {
+        // Show the tail when the text overflows, with a plain block cursor.
+        let visible_width = area.width.saturating_sub(3) as usize;
+        let tail: String = tail_chars(&app.input, visible_width);
+        Span::raw(format!("{tail}▏"))
+    };
+    let paragraph = Paragraph::new(content).block(bordered(&title, focused));
     frame.render_widget(paragraph, area);
+}
+
+/// The last `max_chars` characters of `text` (all of it when it fits).
+fn tail_chars(text: &str, max_chars: usize) -> String {
+    let count = text.chars().count();
+    text.chars().skip(count.saturating_sub(max_chars)).collect()
 }
 
 fn draw_status(frame: &mut Frame, area: Rect, app: &App) {
     let follow = if app.follow { "live" } else { "scrolled" };
     let text = format!(
-        " {status}  ·  {follow}  ·  ↑/↓ select · Tab pane · PgUp/PgDn scroll · q quit ",
+        " {status}  ·  {follow}  ·  ↑/↓ select · Tab pane · i write · r reply · q quit ",
         status = app.status,
     );
     let paragraph = Paragraph::new(text).style(Style::default().bg(Color::Blue).fg(Color::White));
@@ -127,33 +162,39 @@ fn draw_status(frame: &mut Frame, area: Rect, app: &App) {
 }
 
 /// Append the rendered lines for one message: a header (author, time, markers)
-/// then its wrapped body and any attachment labels.
-fn render_message(message: &pb::ObservedMessage, width: u16, lines: &mut Vec<Line>) {
+/// then its wrapped body and any attachment labels. A selected (cursored)
+/// message renders its header reversed so the reply target is visible.
+fn render_message(
+    message: &pb::ObservedMessage,
+    width: u16,
+    selected: bool,
+    lines: &mut Vec<Line>,
+) {
     let author = message
         .sender_name
         .clone()
         .unwrap_or_else(|| message.sender.clone());
+    let selection = if selected {
+        Style::default().add_modifier(Modifier::REVERSED)
+    } else {
+        Style::default()
+    };
     let mut header = vec![
         Span::styled(
             format_time(message.timestamp_ms),
-            Style::default().fg(Color::DarkGray),
+            selection.fg(Color::DarkGray),
         ),
-        Span::raw(" "),
+        Span::styled(" ", selection),
         Span::styled(
             author,
-            Style::default()
-                .fg(Color::Cyan)
-                .add_modifier(Modifier::BOLD),
+            selection.fg(Color::Cyan).add_modifier(Modifier::BOLD),
         ),
     ];
     if message.direction == pb::ObservedDirection::Outgoing as i32 {
-        header.insert(0, Span::styled("→ ", Style::default().fg(Color::Green)));
+        header.insert(0, Span::styled("→ ", selection.fg(Color::Green)));
     }
     if message.edited {
-        header.push(Span::styled(
-            " (edited)",
-            Style::default().fg(Color::DarkGray),
-        ));
+        header.push(Span::styled(" (edited)", selection.fg(Color::DarkGray)));
     }
     lines.push(Line::from(header));
 

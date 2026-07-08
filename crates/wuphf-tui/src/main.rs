@@ -1,6 +1,7 @@
-//! A read-only terminal viewer over the wuphf observation log. Connects to the
-//! core's observer gRPC service, lists the chats seen across every platform,
-//! shows a selected chat's history, and follows new activity live.
+//! A terminal client over the wuphf observation log. Connects to the core's
+//! observer gRPC service, lists the chats seen across every platform, shows a
+//! selected chat's history, follows new activity live, and sends owner-authored
+//! messages (plain or as replies) back into a chat.
 
 mod app;
 mod client;
@@ -66,8 +67,20 @@ async fn main() -> Result<()> {
         }
     });
 
+    // Send results come back from spawned tasks so a slow acknowledgement never
+    // freezes the event loop.
+    let (status_tx, mut status_rx) = mpsc::channel::<String>(16);
+
     let mut terminal = setup_terminal()?;
-    let result = run(&mut terminal, &mut client, &mut app, &mut live_rx).await;
+    let result = run(
+        &mut terminal,
+        &mut client,
+        &mut app,
+        &mut live_rx,
+        status_tx,
+        &mut status_rx,
+    )
+    .await;
     restore_terminal(&mut terminal)?;
     result
 }
@@ -77,6 +90,8 @@ async fn run(
     client: &mut ObserverClient,
     app: &mut App,
     live_rx: &mut mpsc::Receiver<pb::ObservedMessage>,
+    status_tx: mpsc::Sender<String>,
+    status_rx: &mut mpsc::Receiver<String>,
 ) -> Result<()> {
     let mut events = EventStream::new();
     loop {
@@ -98,6 +113,9 @@ async fn run(
                         Some(Action::Quit) => app.should_quit = true,
                         Some(Action::LoadChat) => load_chat(client, app).await,
                         Some(Action::LoadOlder) => load_older(client, app).await,
+                        Some(Action::Send { text, reply_to_platform_message_id }) => {
+                            send_message(client, app, &status_tx, text, reply_to_platform_message_id);
+                        }
                         None => {}
                     }
                 }
@@ -106,11 +124,60 @@ async fn run(
             },
             message = live_rx.recv() => {
                 if let Some(message) = message {
-                    app.on_live(message);
+                    // A message from a chat not in the list yet arrives without
+                    // its title; refresh the list so the placeholder gets one.
+                    if app.on_live(message)
+                        && let Ok(chats) = client.list_chats().await
+                    {
+                        app.set_chats(chats);
+                    }
+                }
+            }
+            status = status_rx.recv() => {
+                if let Some(status) = status {
+                    app.status = status;
                 }
             }
         }
     }
+}
+
+/// Fire a send on its own task: the server may wait up to its acknowledgement
+/// window before responding, and the UI must keep drawing meanwhile. The result
+/// lands in the status bar; the sent message itself arrives over the live
+/// subscription once the connector acknowledges it.
+fn send_message(
+    client: &ObserverClient,
+    app: &mut App,
+    status_tx: &mpsc::Sender<String>,
+    text: String,
+    reply_to_platform_message_id: Option<String>,
+) {
+    let Some(chat) = app.selected_chat() else {
+        app.status = "no chat selected".into();
+        return;
+    };
+    let (connector_id, chat_id) = (chat.connector_id.clone(), chat.chat_id.clone());
+    app.status = "sending…".into();
+    let mut client = client.clone();
+    let status_tx = status_tx.clone();
+    tokio::spawn(async move {
+        let status = match client
+            .send_message(
+                connector_id,
+                chat_id,
+                None,
+                text,
+                reply_to_platform_message_id,
+            )
+            .await
+        {
+            Ok(id) if id.is_empty() => "sent (awaiting acknowledgement)".to_owned(),
+            Ok(id) => format!("sent ({id})"),
+            Err(error) => format!("send failed: {error}"),
+        };
+        let _ = status_tx.send(status).await;
+    });
 }
 
 /// Load the newest page for the selected chat, replacing the timeline.

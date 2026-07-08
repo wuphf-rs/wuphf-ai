@@ -35,7 +35,7 @@ code).
 | 015 | SPIKE: reactions end-to-end design | P2 | M | — | TODO |
 | 016 | SPIKE: media blob lifecycle policy | P2 | S-M | — | TODO |
 | 017 | SPIKE: per-side replication direction (one-way mirrors) | P3 | S | — | TODO |
-| 018 | Observation log + multi-platform TUI (phased) | P2 | L | — | IN PROGRESS (ph 1–5 DONE) |
+| 018 | Observation log + multi-platform TUI (phased) | P2 | L | — | DONE (all 6 phases) |
 | 019 | Single-source dispatch settlement across storage backends | P1 | M | — (004 helps) | TODO |
 | 020 | Deduplicate per-operation fan-out in router + core | P2 | M | — | TODO |
 | 021 | Split Storage god-trait into role traits | P3 | M | 019 (soft) | TODO |

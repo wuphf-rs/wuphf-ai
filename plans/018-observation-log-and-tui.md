@@ -14,7 +14,7 @@
 - **Category**: feature
 - **Planned at**: commit `beed586`, 2026-07-01
 
-Phase status: 1 DONE · 2 DONE · 3 DONE · 4 DONE · 5 DONE · 6 TODO
+Phase status: 1 DONE · 2 DONE · 3 DONE · 4 DONE · 5 DONE · 6 DONE
 
 ## Why this matters
 
@@ -139,10 +139,21 @@ in `wuphf-runtime` (a runtime concern), touches persistence only through the
   dispatch failure. `wuphf-cli` wires it; a service built without a sender
   stays read-only (`Unimplemented`).
 
-### Phase 6 — TUI send/reply (TODO)
+### Phase 6 — TUI send/reply (DONE, commit pending)
 
-- Wire the input box + reply to the observer `SendMessage` RPC.
-- **Milestone**: two-way TUI.
+- Input box wired to the `SendMessage` RPC: `i` (or Tab) to compose, Enter
+  sends, `q` types instead of quitting while composing, Ctrl-C always quits.
+  Sends run on a spawned task (the server may wait up to 10s for the ack) with
+  the result reported in the status bar; the sent message itself arrives as an
+  outgoing row over the live subscription.
+- Replies via a timeline message cursor: ↑/↓ (or j/k) select a message
+  (auto-scrolled into view, header rendered reversed), `r` targets it (`r`
+  with no cursor targets the newest), Esc cancels the reply. Cursor at the top
+  pulls older history; PgUp/PgDn manual scroll releases the cursor.
+- Also fixed alongside: a live message from a chat not yet in the list created
+  a placeholder row with no title that never got one — `App::on_live` now
+  reports the unseen chat and the event loop refreshes `ListChats`.
+- **Milestone reached**: two-way TUI.
 
 ## STOP conditions
 

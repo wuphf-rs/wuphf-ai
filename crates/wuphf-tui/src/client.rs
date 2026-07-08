@@ -66,6 +66,33 @@ impl ObserverClient {
             .messages)
     }
 
+    /// Send an owner-authored text into a chat. Returns the native message id
+    /// from the connector's acknowledgement, or an empty string when the server
+    /// timed out waiting for it (the send still proceeds and the message
+    /// arrives on the live stream once acknowledged).
+    pub async fn send_message(
+        &mut self,
+        connector_id: String,
+        chat_id: String,
+        thread_id: Option<String>,
+        text: String,
+        reply_to_platform_message_id: Option<String>,
+    ) -> Result<String> {
+        let request = self.authed(pb::SendMessageRequest {
+            connector_id,
+            chat_id,
+            thread_id,
+            text,
+            reply_to_platform_message_id,
+        })?;
+        Ok(self
+            .inner
+            .send_message(request)
+            .await?
+            .into_inner()
+            .platform_message_id)
+    }
+
     pub async fn subscribe(&mut self) -> Result<tonic::Streaming<pb::ObservedMessage>> {
         let request = self.authed(pb::SubscribeMessagesRequest {
             connector_id: None,
