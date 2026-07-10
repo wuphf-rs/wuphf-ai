@@ -40,7 +40,6 @@ where
                 .resolve_target(&endpoint, conversation.as_ref(), provision_title)
                 .await?;
             let target_connector = endpoint.connector_id.clone();
-            let delivery = self.config.delivery(&target_connector);
 
             let reply_context = match message.reply_to {
                 Some(parent_id) => {
@@ -66,7 +65,6 @@ where
                                     payload: DispatchPayload::MessageCreate {
                                         message: message.clone(),
                                         reply_context: None,
-                                        delivery,
                                     },
                                 },
                                 waiting_for_message: parent_id,
@@ -85,7 +83,6 @@ where
                 payload: DispatchPayload::MessageCreate {
                     message: message.clone(),
                     reply_context,
-                    delivery,
                 },
             });
         }
@@ -102,11 +99,10 @@ where
         message: &Message,
         origin_endpoint: EndpointId,
     ) -> Result<RoutingOutcome, RouterError> {
-        self.fan_out_to_copies(message, origin_endpoint, |connector, native_id| {
+        self.fan_out_to_copies(message, origin_endpoint, |_connector, native_id| {
             DispatchPayload::MessageEdit {
                 message: message.clone(),
                 target_platform_message_id: native_id,
-                mode: self.config.delivery(connector).edit_mode,
             }
         })
         .await
@@ -117,11 +113,10 @@ where
         message: &Message,
         origin_endpoint: EndpointId,
     ) -> Result<RoutingOutcome, RouterError> {
-        self.fan_out_to_copies(message, origin_endpoint, |connector, native_id| {
+        self.fan_out_to_copies(message, origin_endpoint, |_connector, native_id| {
             DispatchPayload::MessageDelete {
                 message: message.clone(),
                 target_platform_message_id: native_id,
-                mode: self.config.delivery(connector).delete_mode,
             }
         })
         .await

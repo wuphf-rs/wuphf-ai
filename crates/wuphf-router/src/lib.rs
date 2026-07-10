@@ -2,8 +2,8 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use thiserror::Error;
 use wuphf_model::{
-    ConnectorCapabilities, ConnectorId, DeliveryOptions, DispatchCommand, EndpointId, MessageId,
-    Platform, PlatformAddress, RoutingRule, RoutingRuleFlow, RuleEnd, RuleId,
+    ConnectorCapabilities, ConnectorId, DispatchCommand, EndpointId, MessageId, Platform,
+    PlatformAddress, RoutingRule, RoutingRuleFlow, RuleEnd, RuleId,
 };
 use wuphf_storage::{Storage, StorageError};
 
@@ -15,9 +15,6 @@ mod routing;
 pub struct ConnectorInfo {
     pub platform: Platform,
     pub capabilities: ConnectorCapabilities,
-    /// Server-owned policy for how this connector renders replicated
-    /// operations on its platform (e.g. edit/delete rendering).
-    pub delivery: DeliveryOptions,
 }
 
 /// The rule set plus connector metadata that drives address resolution and
@@ -44,14 +41,6 @@ impl RoutingConfig {
 
     pub fn connector(&self, id: &ConnectorId) -> Option<&ConnectorInfo> {
         self.connectors.get(id)
-    }
-
-    /// The delivery policy configured for a connector, or the default when the
-    /// connector is unknown or left unconfigured.
-    pub fn delivery(&self, id: &ConnectorId) -> DeliveryOptions {
-        self.connector(id)
-            .map(|info| info.delivery)
-            .unwrap_or_default()
     }
 
     /// The first rule end whose connector and selector accept this address.

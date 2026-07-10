@@ -56,7 +56,7 @@ dedup, reply mapping, loop prevention, or address mapping.
 |-------|----------------|
 | `wuphf-model` | Shared domain types, grouped into `ids` / `routing` / `connector` / `message` / `dispatch`. |
 | `wuphf-storage` | The `Storage` trait plus two backends: `memory` (tests) and `sqlite` (durable). |
-| `wuphf-router` | Evaluates rules; resolves or lazily provisions endpoints/conversations/threads; computes dispatch targets; resolves per-target delivery policy. |
+| `wuphf-router` | Evaluates rules; resolves or lazily provisions endpoints/conversations/threads; computes dispatch targets. |
 | `wuphf-core` | Owns logical identity, dedup, echo suppression, reply resolution, identity migration; queues routing work. |
 | `wuphf-runtime` | Tokio event bus + dispatch pipeline; connector session hub; bounded media broker; gRPC transport adapter. |
 | `wuphf-proto` | Canonical protobuf contract and Tonic bindings. |
@@ -65,18 +65,17 @@ dedup, reply mapping, loop prevention, or address mapping.
 
 ## Replicated Operations
 
-- **Create** — fanned out to every other endpoint in the replica set, carrying
-  the target's resolved `DeliveryOptions` so the connector renders attachments
-  and over-length text per policy.
+- **Create** — fanned out to every other endpoint in the replica set. The
+  dispatch carries content only; how a copy is rendered (attachments-as-files,
+  over-length text spillover) is each connector's own `[rendering]`
+  configuration.
 - **Edit / Delete** — resolved to the original copies and fanned out. How each
-  target renders them is governed by per-connector **`DeliveryOptions`**:
-  `edit_mode` (`in_place` | `repost`), `delete_mode` (`revoke` | `tombstone`),
-  `attachments_as_files` (send every attachment as a generic file), and
-  `max_message_length` (spill over-length text into a plain-text file). Options
-  are configured on each connector and resolved against the *target* connector at
-  routing time, so policy is connector-specific and directional — never a
-  symmetric property of a replica set.
-- **Reactions** are modelled but not yet executed.
+  target renders them (`edit_mode`: `in_place` | `repost`; `delete_mode`:
+  `revoke` | `tombstone`) is likewise the target connector's own `[rendering]`
+  configuration, so policy stays connector-specific and directional without the
+  core shipping it.
+- **Reactions** — fanned out like edits, carrying the reactor and emoji
+  (empty = cleared); the target connector decides how to display them.
 
 ## Media
 

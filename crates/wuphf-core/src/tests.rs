@@ -17,7 +17,6 @@ fn connectors() -> HashMap<ConnectorId, ConnectorInfo> {
             ConnectorInfo {
                 platform: Platform::WhatsApp,
                 capabilities: ConnectorCapabilities::default(),
-                delivery: Default::default(),
             },
         ),
         (
@@ -28,7 +27,6 @@ fn connectors() -> HashMap<ConnectorId, ConnectorInfo> {
                     supports_threads: true,
                     supports_topic_create: true,
                 },
-                delivery: Default::default(),
             },
         ),
     ])

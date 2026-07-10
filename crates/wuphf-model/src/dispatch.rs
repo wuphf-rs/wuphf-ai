@@ -7,14 +7,12 @@ use serde::{Deserialize, Serialize};
 /// The content of an outbound dispatch.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum DispatchPayload {
+    /// Deliver a new copy. How the copy is rendered (attachments-as-files,
+    /// text spillover, and the like) is the target connector's own
+    /// configuration, so the dispatch carries only content.
     MessageCreate {
         message: Message,
         reply_context: Option<ReplyContext>,
-        /// The target connector's delivery policy, resolved at routing time, that
-        /// governs how this copy is rendered (e.g. attachments-as-files, text
-        /// length spillover). Carried whole so new create-time knobs are additive.
-        #[serde(default)]
-        delivery: DeliveryOptions,
     },
     /// Revise an already-delivered copy. `target_platform_message_id` is the
     /// native id of the copy to edit at the target endpoint; it is empty while
@@ -23,10 +21,6 @@ pub enum DispatchPayload {
     MessageEdit {
         message: Message,
         target_platform_message_id: String,
-        /// How the target connector should render the edit, resolved from the
-        /// target connector's delivery options at routing time.
-        #[serde(default)]
-        mode: EditMode,
     },
     /// Revoke an already-delivered copy. `target_platform_message_id` is the
     /// native id of the copy to delete at the target endpoint; it is empty while
@@ -35,10 +29,6 @@ pub enum DispatchPayload {
     MessageDelete {
         message: Message,
         target_platform_message_id: String,
-        /// How the target connector should render the delete, resolved from the
-        /// target connector's delivery options at routing time.
-        #[serde(default)]
-        mode: DeleteMode,
     },
     /// Rename an already-provisioned mirror thread when its source
     /// conversation's title changes. Carries no message because a retitle is a

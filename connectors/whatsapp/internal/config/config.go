@@ -25,6 +25,20 @@ type File struct {
 	// Stickers carries the pack metadata embedded in stickers bridged to
 	// WhatsApp; empty fields fall back to defaults (see StickerMetadata).
 	Stickers StickerMetadata `toml:"sticker_metadata"`
+	// Rendering governs how replicated copies are rendered on WhatsApp. It is
+	// this connector's own policy; the core dispatches content only.
+	Rendering RenderingOptions `toml:"rendering"`
+}
+
+// RenderingOptions are the connector-owned knobs for how mirrored copies are
+// rendered on the platform.
+type RenderingOptions struct {
+	// Send every attachment using the generic file/document method, regardless
+	// of its origin kind (image/video/audio/sticker).
+	AttachmentsAsFiles bool `toml:"attachments_as_files"`
+	// Maximum text length, in characters, to carry inline in one message; text
+	// over the limit is sent as a plain-text file instead. Zero is unbounded.
+	MaxMessageLength uint32 `toml:"max_message_length"`
 }
 
 // StickerMetadata is the sticker-pack information WhatsApp displays for a bridged

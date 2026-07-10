@@ -56,7 +56,7 @@ func (s *stubBroker) Download(context.Context, string) ([]byte, error) {
 func TestSendFileDispatch(t *testing.T) {
 	t.Parallel()
 	client := &stubSendClient{}
-	sender := NewSender(client, &stubBroker{bytes: []byte("data")}, types.JID{}, config.StickerMetadata{})
+	sender := NewSender(client, &stubBroker{bytes: []byte("data")}, types.JID{}, config.StickerMetadata{}, config.RenderingOptions{})
 	text := "caption"
 	fileName := "receipt.pdf"
 	mime := "application/pdf"
@@ -85,7 +85,7 @@ func TestSendFileDispatch(t *testing.T) {
 func TestSendAttachmentsAsFilesForcesDocument(t *testing.T) {
 	t.Parallel()
 	client := &stubSendClient{}
-	sender := NewSender(client, &stubBroker{bytes: []byte("data")}, types.JID{}, config.StickerMetadata{})
+	sender := NewSender(client, &stubBroker{bytes: []byte("data")}, types.JID{}, config.StickerMetadata{}, config.RenderingOptions{AttachmentsAsFiles: true})
 	mime := "image/jpeg"
 	_, _, err := sender.SendMessage(context.Background(), &wuphfpb.MessageCreateDispatch{
 		TargetChatId: "123@s.whatsapp.net",
@@ -94,7 +94,6 @@ func TestSendAttachmentsAsFilesForcesDocument(t *testing.T) {
 			Kind:     wuphfpb.Attachment_KIND_IMAGE,
 			MimeType: &mime,
 		}},
-		Delivery: &wuphfpb.DeliveryOptions{AttachmentsAsFiles: true},
 	})
 	if err != nil {
 		t.Fatalf("SendMessage() error = %v", err)
@@ -110,13 +109,11 @@ func TestSendAttachmentsAsFilesForcesDocument(t *testing.T) {
 func TestSendOverLengthTextAsFile(t *testing.T) {
 	t.Parallel()
 	client := &stubSendClient{}
-	sender := NewSender(client, &stubBroker{}, types.JID{}, config.StickerMetadata{})
+	sender := NewSender(client, &stubBroker{}, types.JID{}, config.StickerMetadata{}, config.RenderingOptions{MaxMessageLength: 5})
 	text := "hello world"
-	limit := uint32(5)
 	_, _, err := sender.SendMessage(context.Background(), &wuphfpb.MessageCreateDispatch{
 		TargetChatId: "123@s.whatsapp.net",
 		Text:         &text,
-		Delivery:     &wuphfpb.DeliveryOptions{MaxMessageLength: &limit},
 	})
 	if err != nil {
 		t.Fatalf("SendMessage() error = %v", err)
@@ -133,13 +130,11 @@ func TestSendOverLengthTextAsFile(t *testing.T) {
 func TestSendWithinLengthLimitStaysInline(t *testing.T) {
 	t.Parallel()
 	client := &stubSendClient{}
-	sender := NewSender(client, &stubBroker{}, types.JID{}, config.StickerMetadata{})
+	sender := NewSender(client, &stubBroker{}, types.JID{}, config.StickerMetadata{}, config.RenderingOptions{MaxMessageLength: 5})
 	text := "hi"
-	limit := uint32(5)
 	_, _, err := sender.SendMessage(context.Background(), &wuphfpb.MessageCreateDispatch{
 		TargetChatId: "123@s.whatsapp.net",
 		Text:         &text,
-		Delivery:     &wuphfpb.DeliveryOptions{MaxMessageLength: &limit},
 	})
 	if err != nil {
 		t.Fatalf("SendMessage() error = %v", err)
@@ -176,7 +171,7 @@ func TestSendOutboundReplyBuildsQuotedContext(t *testing.T) {
 	t.Parallel()
 	client := &stubSendClient{}
 	ownJID := types.NewJID("15550001111", types.DefaultUserServer)
-	sender := NewSender(client, &stubBroker{}, ownJID, config.StickerMetadata{})
+	sender := NewSender(client, &stubBroker{}, ownJID, config.StickerMetadata{}, config.RenderingOptions{})
 	text := "child reply"
 	parentText := "parent body"
 	parentID := "parent-stanza-id"
@@ -214,7 +209,7 @@ func TestSendOutboundReplyQuotesMediaParent(t *testing.T) {
 	t.Parallel()
 	client := &stubSendClient{}
 	ownJID := types.NewJID("15550001111", types.DefaultUserServer)
-	sender := NewSender(client, &stubBroker{}, ownJID, config.StickerMetadata{})
+	sender := NewSender(client, &stubBroker{}, ownJID, config.StickerMetadata{}, config.RenderingOptions{})
 	text := "look at this"
 	parentCaption := "parent photo"
 	mime := "image/jpeg"
@@ -251,7 +246,7 @@ func TestSendOutboundReplyQuotesMediaParent(t *testing.T) {
 func TestSendDeliversToCanonicalLIDTarget(t *testing.T) {
 	t.Parallel()
 	client := &stubSendClient{}
-	sender := NewSender(client, &stubBroker{}, types.JID{}, config.StickerMetadata{})
+	sender := NewSender(client, &stubBroker{}, types.JID{}, config.StickerMetadata{}, config.RenderingOptions{})
 	lid := types.NewJID("88887777", types.HiddenUserServer)
 	text := "reply to lid chat"
 	messageID, _, err := sender.SendMessage(context.Background(), &wuphfpb.MessageCreateDispatch{
@@ -272,7 +267,7 @@ func TestSendDeliversToCanonicalLIDTarget(t *testing.T) {
 func TestEditMessageRevisesTargetInPlace(t *testing.T) {
 	t.Parallel()
 	client := &stubSendClient{}
-	sender := NewSender(client, &stubBroker{}, types.JID{}, config.StickerMetadata{})
+	sender := NewSender(client, &stubBroker{}, types.JID{}, config.StickerMetadata{}, config.RenderingOptions{})
 	text := "revised text"
 	messageID, err := sender.EditMessage(context.Background(), &wuphfpb.MessageEditDispatch{
 		TargetChatId:            "123@s.whatsapp.net",
@@ -296,7 +291,7 @@ func TestEditMessageRevisesTargetInPlace(t *testing.T) {
 func TestSendRejectsLegacyReplyWithoutContext(t *testing.T) {
 	t.Parallel()
 	client := &stubSendClient{}
-	sender := NewSender(client, &stubBroker{}, types.JID{}, config.StickerMetadata{})
+	sender := NewSender(client, &stubBroker{}, types.JID{}, config.StickerMetadata{}, config.RenderingOptions{})
 	reply := "parent-id"
 	_, _, err := sender.SendMessage(context.Background(), &wuphfpb.MessageCreateDispatch{
 		TargetChatId:             "123@s.whatsapp.net",

@@ -297,7 +297,6 @@ fn command(message_id: MessageId, endpoint_id: EndpointId) -> DispatchCommand {
         payload: DispatchPayload::MessageCreate {
             message: message(message_id),
             reply_context: None,
-            delivery: Default::default(),
         },
     }
 }

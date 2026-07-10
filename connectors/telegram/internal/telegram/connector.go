@@ -63,7 +63,7 @@ func (c Connector) Run(ctx context.Context) error {
 			}
 		}
 		c.logger.Info().Msg("Telegram session connected")
-		sender := NewSender(client.API(), peers, media)
+		sender := NewSender(client.API(), peers, media, c.cfg.Rendering)
 		return coreclient.New(c.cfg, c.logger).Run(ctx, sender, inputs)
 	})
 }

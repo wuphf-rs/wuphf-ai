@@ -11,7 +11,10 @@ orphan_media_retention_seconds = 86400
 
 # Connectors are thin pipes. The core only trusts a session whose registration
 # matches an entry here. `supports_threads` / `supports_topic_create` gate which
-# rule sides a connector may serve (a `mirror` side needs both).
+# rule ends a connector may serve (a many-to-one destination needs both). How a
+# connector renders replicated copies (attachments-as-files, text spillover,
+# edit/delete rendering) is configured in each connector's own config file
+# under `[rendering]`, not here.
 [[connectors]]
 id = "whatsapp-main"
 platform = "whatsapp"
@@ -25,20 +28,6 @@ id = "telegram-main"
 platform = "telegram"
 supports_threads = true
 supports_topic_create = true
-
-# Per-connector delivery policy. Applied to messages this connector *receives*,
-# so it is directional: a replica set may render operations differently on each
-# side. `edit_mode`: "in_place" (default) edits the existing copy, "repost"
-# sends a fresh message. `delete_mode`: "revoke" (default) removes the copy,
-# "tombstone" leaves a deletion marker. `attachments_as_files`: when true, send
-# every attachment as a generic file/document instead of its origin media type.
-# `max_message_length`: when set, text longer than this many characters is sent
-# as a plain-text file instead of an inline message (omit for unbounded).
-[connectors.delivery]
-edit_mode = "in_place"
-delete_mode = "revoke"
-attachments_as_files = false
-# max_message_length = 4096
 
 # Rules declare a flow between a source and a destination. The source end owns
 # conversation identity; replication itself is two-way.

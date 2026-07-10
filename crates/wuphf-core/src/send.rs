@@ -102,7 +102,6 @@ where
                     payload: DispatchPayload::MessageCreate {
                         message: message.clone(),
                         reply_context,
-                        delivery: self.config.delivery(&outbound.connector_id),
                     },
                 },
                 None,

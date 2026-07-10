@@ -7,9 +7,9 @@ use tonic::{Request, Response, Status};
 use uuid::Uuid;
 use wuphf_model::{
     Attachment, AttachmentKind, ConnectorCapabilities, ConnectorId, ConnectorInput,
-    ConnectorOutput, ConnectorRegistration, DeleteMode, DeliveryOptions, DispatchAcknowledgement,
-    DispatchPayload, EditMode, EventPayload, InboundMessage, MediaId, NormalizedEvent, Platform,
-    PlatformAddress, ProvisionThread, ReceiptKind, ReplyContext, SourceAddress,
+    ConnectorOutput, ConnectorRegistration, DispatchAcknowledgement, DispatchPayload, EventPayload,
+    InboundMessage, MediaId, NormalizedEvent, Platform, PlatformAddress, ProvisionThread,
+    ReceiptKind, ReplyContext, SourceAddress,
 };
 use wuphf_proto::connector as pb;
 use wuphf_proto::connector::connector_transport_server::ConnectorTransport;
@@ -282,7 +282,6 @@ fn output_to_proto(output: ConnectorOutput) -> pb::ServerFrame {
                 DispatchPayload::MessageCreate {
                     message,
                     reply_context,
-                    delivery,
                 } => {
                     let reply_to_platform_message_id = reply_context
                         .as_ref()
@@ -304,13 +303,11 @@ fn output_to_proto(output: ConnectorOutput) -> pb::ServerFrame {
                         timestamp_ms: message.timestamp_ms,
                         reply_context: reply_context.map(reply_context_to_proto),
                         sender_name: message.sender_name,
-                        delivery: Some(delivery_options_to_proto(delivery)),
                     }))
                 }
                 DispatchPayload::MessageEdit {
                     message,
                     target_platform_message_id,
-                    mode,
                 } => pb::server_frame::Body::MessageEdit(pb::MessageEditDispatch {
                     dispatch_id,
                     target_chat_id: target.address.chat_id,
@@ -319,18 +316,15 @@ fn output_to_proto(output: ConnectorOutput) -> pb::ServerFrame {
                     text: message.text,
                     sender_name: message.sender_name,
                     participant: message.participant,
-                    edit_mode: edit_mode_to_proto(mode) as i32,
                 }),
                 DispatchPayload::MessageDelete {
                     target_platform_message_id,
-                    mode,
                     ..
                 } => pb::server_frame::Body::MessageDelete(pb::MessageDeleteDispatch {
                     dispatch_id,
                     target_chat_id: target.address.chat_id,
                     target_thread_id: target.address.thread_id,
                     target_platform_message_id,
-                    delete_mode: delete_mode_to_proto(mode) as i32,
                 }),
                 DispatchPayload::RetitleThread { title, .. } => {
                     pb::server_frame::Body::MessageRetitle(pb::MessageRetitleDispatch {
@@ -380,27 +374,6 @@ fn output_to_proto(output: ConnectorOutput) -> pb::ServerFrame {
         }
     };
     pb::ServerFrame { body: Some(body) }
-}
-
-fn delivery_options_to_proto(delivery: DeliveryOptions) -> pb::DeliveryOptions {
-    pb::DeliveryOptions {
-        attachments_as_files: delivery.attachments_as_files,
-        max_message_length: delivery.max_message_length,
-    }
-}
-
-fn edit_mode_to_proto(mode: EditMode) -> pb::EditMode {
-    match mode {
-        EditMode::InPlace => pb::EditMode::InPlace,
-        EditMode::Repost => pb::EditMode::Repost,
-    }
-}
-
-fn delete_mode_to_proto(mode: DeleteMode) -> pb::DeleteMode {
-    match mode {
-        DeleteMode::Revoke => pb::DeleteMode::Revoke,
-        DeleteMode::Tombstone => pb::DeleteMode::Tombstone,
-    }
 }
 
 fn provision_thread_to_proto(provision: ProvisionThread) -> pb::ProvisionThread {

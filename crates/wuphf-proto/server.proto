@@ -23,20 +23,9 @@ message ProvisionThread {
   string title = 2;
 }
 
-// Per-dispatch delivery policy, resolved by the server from the target
-// connector's delivery options, that governs how a connector renders a created
-// copy on its platform. Each field is independent; a connector applies the
-// knobs its platform supports and ignores the rest.
-message DeliveryOptions {
-  // Send every attachment using the platform's generic file/document method,
-  // regardless of its origin kind.
-  bool attachments_as_files = 1;
-  // Maximum text length, in characters, to carry in a single message. When the
-  // text exceeds it, the connector sends the text as a plain-text file instead.
-  // Absent means unbounded.
-  optional uint32 max_message_length = 2;
-}
-
+// How a copy is rendered on the target platform (attachments-as-files, text
+// length spillover, edit/delete rendering) is the connector's own policy,
+// configured connector-side; dispatches carry no delivery options.
 message MessageCreateDispatch {
   string dispatch_id = 1;
   string target_chat_id = 2;
@@ -50,21 +39,6 @@ message MessageCreateDispatch {
   int64 timestamp_ms = 10;
   optional ReplyContext reply_context = 11;
   optional string sender_name = 12;
-  DeliveryOptions delivery = 13;
-}
-
-// How a connector should render a replicated edit, resolved by the server from
-// the target connector's delivery options.
-enum EditMode {
-  EDIT_MODE_IN_PLACE = 0;
-  EDIT_MODE_REPOST = 1;
-}
-
-// How a connector should render a replicated delete, resolved by the server from
-// the target connector's delivery options.
-enum DeleteMode {
-  DELETE_MODE_REVOKE = 0;
-  DELETE_MODE_TOMBSTONE = 1;
 }
 
 // Instruction to revise an already-delivered copy. `target_platform_message_id`
@@ -77,7 +51,6 @@ message MessageEditDispatch {
   optional string text = 5;
   optional string sender_name = 6;
   optional string participant = 7;
-  EditMode edit_mode = 8;
 }
 
 // Instruction to revoke an already-delivered copy. `target_platform_message_id`
@@ -87,7 +60,6 @@ message MessageDeleteDispatch {
   string target_chat_id = 2;
   optional string target_thread_id = 3;
   string target_platform_message_id = 4;
-  DeleteMode delete_mode = 5;
 }
 
 // Instruction to rename an already-provisioned mirror thread when its source

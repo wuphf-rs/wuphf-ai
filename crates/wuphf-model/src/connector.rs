@@ -1,6 +1,7 @@
-//! Connector-facing types: advertised capabilities, server-owned delivery
-//! policy, registration, and the frames exchanged between a connector and the
-//! core.
+//! Connector-facing types: advertised capabilities, registration, and the
+//! frames exchanged between a connector and the core. How a connector renders
+//! replicated operations (attachments-as-files, text spillover, edit/delete
+//! rendering) is the connector's own configuration, not a core concern.
 
 use crate::*;
 use serde::{Deserialize, Serialize};
@@ -11,53 +12,6 @@ use serde::{Deserialize, Serialize};
 pub struct ConnectorCapabilities {
     pub supports_threads: bool,
     pub supports_topic_create: bool,
-}
-
-/// How a connector renders a replicated edit onto an already-delivered copy.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum EditMode {
-    /// Revise the original copy in place.
-    #[default]
-    InPlace,
-    /// Leave the original copy untouched and post the revision as a reply
-    /// marked as an edit. For platforms where editing is undesirable or where
-    /// an edit notification is wanted.
-    Repost,
-}
-
-/// How a connector renders a replicated delete onto an already-delivered copy.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum DeleteMode {
-    /// Delete the mirrored copy.
-    #[default]
-    Revoke,
-    /// Leave the copy in place and post a notice replying to it.
-    Tombstone,
-}
-
-/// Per-connector delivery policy: server-owned options that govern how a
-/// connector renders replicated operations on its platform. Configured on each
-/// connector and resolved against the *target* connector when routing, so policy
-/// is connector-specific and directional (per delivery destination) rather than
-/// a symmetric property of a replica set. Each option is independent and
-/// defaulted, so a connector applies the knobs its platform supports and ignores
-/// the rest; new options are added here as additive fields.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(default)]
-pub struct DeliveryOptions {
-    pub edit_mode: EditMode,
-    pub delete_mode: DeleteMode,
-    /// Mirror every attachment using the platform's generic file/document send
-    /// method, regardless of its origin kind (image/video/audio/sticker). For
-    /// platforms where preserving the original media type is undesirable.
-    pub attachments_as_files: bool,
-    /// Maximum text length, in characters, the target platform should carry in a
-    /// single message. When a mirrored message's text exceeds it, the text is
-    /// sent as a plain-text file attachment instead. `None` leaves text
-    /// unbounded. The connector counts in whatever unit its platform enforces.
-    pub max_message_length: Option<u32>,
 }
 
 /// A connector declared in core configuration. Endpoints are no longer

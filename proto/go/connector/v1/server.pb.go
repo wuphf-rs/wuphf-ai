@@ -21,102 +21,6 @@ const (
 	_ = protoimpl.EnforceVersion(protoimpl.MaxVersion - 20)
 )
 
-// How a connector should render a replicated edit, resolved by the server from
-// the target connector's delivery options.
-type EditMode int32
-
-const (
-	EditMode_EDIT_MODE_IN_PLACE EditMode = 0
-	EditMode_EDIT_MODE_REPOST   EditMode = 1
-)
-
-// Enum value maps for EditMode.
-var (
-	EditMode_name = map[int32]string{
-		0: "EDIT_MODE_IN_PLACE",
-		1: "EDIT_MODE_REPOST",
-	}
-	EditMode_value = map[string]int32{
-		"EDIT_MODE_IN_PLACE": 0,
-		"EDIT_MODE_REPOST":   1,
-	}
-)
-
-func (x EditMode) Enum() *EditMode {
-	p := new(EditMode)
-	*p = x
-	return p
-}
-
-func (x EditMode) String() string {
-	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
-}
-
-func (EditMode) Descriptor() protoreflect.EnumDescriptor {
-	return file_server_proto_enumTypes[0].Descriptor()
-}
-
-func (EditMode) Type() protoreflect.EnumType {
-	return &file_server_proto_enumTypes[0]
-}
-
-func (x EditMode) Number() protoreflect.EnumNumber {
-	return protoreflect.EnumNumber(x)
-}
-
-// Deprecated: Use EditMode.Descriptor instead.
-func (EditMode) EnumDescriptor() ([]byte, []int) {
-	return file_server_proto_rawDescGZIP(), []int{0}
-}
-
-// How a connector should render a replicated delete, resolved by the server from
-// the target connector's delivery options.
-type DeleteMode int32
-
-const (
-	DeleteMode_DELETE_MODE_REVOKE    DeleteMode = 0
-	DeleteMode_DELETE_MODE_TOMBSTONE DeleteMode = 1
-)
-
-// Enum value maps for DeleteMode.
-var (
-	DeleteMode_name = map[int32]string{
-		0: "DELETE_MODE_REVOKE",
-		1: "DELETE_MODE_TOMBSTONE",
-	}
-	DeleteMode_value = map[string]int32{
-		"DELETE_MODE_REVOKE":    0,
-		"DELETE_MODE_TOMBSTONE": 1,
-	}
-)
-
-func (x DeleteMode) Enum() *DeleteMode {
-	p := new(DeleteMode)
-	*p = x
-	return p
-}
-
-func (x DeleteMode) String() string {
-	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
-}
-
-func (DeleteMode) Descriptor() protoreflect.EnumDescriptor {
-	return file_server_proto_enumTypes[1].Descriptor()
-}
-
-func (DeleteMode) Type() protoreflect.EnumType {
-	return &file_server_proto_enumTypes[1]
-}
-
-func (x DeleteMode) Number() protoreflect.EnumNumber {
-	return protoreflect.EnumNumber(x)
-}
-
-// Deprecated: Use DeleteMode.Descriptor instead.
-func (DeleteMode) EnumDescriptor() ([]byte, []int) {
-	return file_server_proto_rawDescGZIP(), []int{1}
-}
-
 type ReplyContext struct {
 	state             protoimpl.MessageState `protogen:"open.v1"`
 	LogicalMessageId  string                 `protobuf:"bytes,1,opt,name=logical_message_id,json=logicalMessageId,proto3" json:"logical_message_id,omitempty"`
@@ -256,67 +160,9 @@ func (x *ProvisionThread) GetTitle() string {
 	return ""
 }
 
-// Per-dispatch delivery policy, resolved by the server from the target
-// connector's delivery options, that governs how a connector renders a created
-// copy on its platform. Each field is independent; a connector applies the
-// knobs its platform supports and ignores the rest.
-type DeliveryOptions struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// Send every attachment using the platform's generic file/document method,
-	// regardless of its origin kind.
-	AttachmentsAsFiles bool `protobuf:"varint,1,opt,name=attachments_as_files,json=attachmentsAsFiles,proto3" json:"attachments_as_files,omitempty"`
-	// Maximum text length, in characters, to carry in a single message. When the
-	// text exceeds it, the connector sends the text as a plain-text file instead.
-	// Absent means unbounded.
-	MaxMessageLength *uint32 `protobuf:"varint,2,opt,name=max_message_length,json=maxMessageLength,proto3,oneof" json:"max_message_length,omitempty"`
-	unknownFields    protoimpl.UnknownFields
-	sizeCache        protoimpl.SizeCache
-}
-
-func (x *DeliveryOptions) Reset() {
-	*x = DeliveryOptions{}
-	mi := &file_server_proto_msgTypes[2]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *DeliveryOptions) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*DeliveryOptions) ProtoMessage() {}
-
-func (x *DeliveryOptions) ProtoReflect() protoreflect.Message {
-	mi := &file_server_proto_msgTypes[2]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use DeliveryOptions.ProtoReflect.Descriptor instead.
-func (*DeliveryOptions) Descriptor() ([]byte, []int) {
-	return file_server_proto_rawDescGZIP(), []int{2}
-}
-
-func (x *DeliveryOptions) GetAttachmentsAsFiles() bool {
-	if x != nil {
-		return x.AttachmentsAsFiles
-	}
-	return false
-}
-
-func (x *DeliveryOptions) GetMaxMessageLength() uint32 {
-	if x != nil && x.MaxMessageLength != nil {
-		return *x.MaxMessageLength
-	}
-	return 0
-}
-
+// How a copy is rendered on the target platform (attachments-as-files, text
+// length spillover, edit/delete rendering) is the connector's own policy,
+// configured connector-side; dispatches carry no delivery options.
 type MessageCreateDispatch struct {
 	state                    protoimpl.MessageState `protogen:"open.v1"`
 	DispatchId               string                 `protobuf:"bytes,1,opt,name=dispatch_id,json=dispatchId,proto3" json:"dispatch_id,omitempty"`
@@ -331,14 +177,13 @@ type MessageCreateDispatch struct {
 	TimestampMs              int64                  `protobuf:"varint,10,opt,name=timestamp_ms,json=timestampMs,proto3" json:"timestamp_ms,omitempty"`
 	ReplyContext             *ReplyContext          `protobuf:"bytes,11,opt,name=reply_context,json=replyContext,proto3,oneof" json:"reply_context,omitempty"`
 	SenderName               *string                `protobuf:"bytes,12,opt,name=sender_name,json=senderName,proto3,oneof" json:"sender_name,omitempty"`
-	Delivery                 *DeliveryOptions       `protobuf:"bytes,13,opt,name=delivery,proto3" json:"delivery,omitempty"`
 	unknownFields            protoimpl.UnknownFields
 	sizeCache                protoimpl.SizeCache
 }
 
 func (x *MessageCreateDispatch) Reset() {
 	*x = MessageCreateDispatch{}
-	mi := &file_server_proto_msgTypes[3]
+	mi := &file_server_proto_msgTypes[2]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -350,7 +195,7 @@ func (x *MessageCreateDispatch) String() string {
 func (*MessageCreateDispatch) ProtoMessage() {}
 
 func (x *MessageCreateDispatch) ProtoReflect() protoreflect.Message {
-	mi := &file_server_proto_msgTypes[3]
+	mi := &file_server_proto_msgTypes[2]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -363,7 +208,7 @@ func (x *MessageCreateDispatch) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MessageCreateDispatch.ProtoReflect.Descriptor instead.
 func (*MessageCreateDispatch) Descriptor() ([]byte, []int) {
-	return file_server_proto_rawDescGZIP(), []int{3}
+	return file_server_proto_rawDescGZIP(), []int{2}
 }
 
 func (x *MessageCreateDispatch) GetDispatchId() string {
@@ -450,13 +295,6 @@ func (x *MessageCreateDispatch) GetSenderName() string {
 	return ""
 }
 
-func (x *MessageCreateDispatch) GetDelivery() *DeliveryOptions {
-	if x != nil {
-		return x.Delivery
-	}
-	return nil
-}
-
 // Instruction to revise an already-delivered copy. `target_platform_message_id`
 // is the native id of the message to edit at this endpoint.
 type MessageEditDispatch struct {
@@ -468,14 +306,13 @@ type MessageEditDispatch struct {
 	Text                    *string                `protobuf:"bytes,5,opt,name=text,proto3,oneof" json:"text,omitempty"`
 	SenderName              *string                `protobuf:"bytes,6,opt,name=sender_name,json=senderName,proto3,oneof" json:"sender_name,omitempty"`
 	Participant             *string                `protobuf:"bytes,7,opt,name=participant,proto3,oneof" json:"participant,omitempty"`
-	EditMode                EditMode               `protobuf:"varint,8,opt,name=edit_mode,json=editMode,proto3,enum=wuphf.connector.v1.EditMode" json:"edit_mode,omitempty"`
 	unknownFields           protoimpl.UnknownFields
 	sizeCache               protoimpl.SizeCache
 }
 
 func (x *MessageEditDispatch) Reset() {
 	*x = MessageEditDispatch{}
-	mi := &file_server_proto_msgTypes[4]
+	mi := &file_server_proto_msgTypes[3]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -487,7 +324,7 @@ func (x *MessageEditDispatch) String() string {
 func (*MessageEditDispatch) ProtoMessage() {}
 
 func (x *MessageEditDispatch) ProtoReflect() protoreflect.Message {
-	mi := &file_server_proto_msgTypes[4]
+	mi := &file_server_proto_msgTypes[3]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -500,7 +337,7 @@ func (x *MessageEditDispatch) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MessageEditDispatch.ProtoReflect.Descriptor instead.
 func (*MessageEditDispatch) Descriptor() ([]byte, []int) {
-	return file_server_proto_rawDescGZIP(), []int{4}
+	return file_server_proto_rawDescGZIP(), []int{3}
 }
 
 func (x *MessageEditDispatch) GetDispatchId() string {
@@ -552,13 +389,6 @@ func (x *MessageEditDispatch) GetParticipant() string {
 	return ""
 }
 
-func (x *MessageEditDispatch) GetEditMode() EditMode {
-	if x != nil {
-		return x.EditMode
-	}
-	return EditMode_EDIT_MODE_IN_PLACE
-}
-
 // Instruction to revoke an already-delivered copy. `target_platform_message_id`
 // is the native id of the message to delete at this endpoint.
 type MessageDeleteDispatch struct {
@@ -567,14 +397,13 @@ type MessageDeleteDispatch struct {
 	TargetChatId            string                 `protobuf:"bytes,2,opt,name=target_chat_id,json=targetChatId,proto3" json:"target_chat_id,omitempty"`
 	TargetThreadId          *string                `protobuf:"bytes,3,opt,name=target_thread_id,json=targetThreadId,proto3,oneof" json:"target_thread_id,omitempty"`
 	TargetPlatformMessageId string                 `protobuf:"bytes,4,opt,name=target_platform_message_id,json=targetPlatformMessageId,proto3" json:"target_platform_message_id,omitempty"`
-	DeleteMode              DeleteMode             `protobuf:"varint,5,opt,name=delete_mode,json=deleteMode,proto3,enum=wuphf.connector.v1.DeleteMode" json:"delete_mode,omitempty"`
 	unknownFields           protoimpl.UnknownFields
 	sizeCache               protoimpl.SizeCache
 }
 
 func (x *MessageDeleteDispatch) Reset() {
 	*x = MessageDeleteDispatch{}
-	mi := &file_server_proto_msgTypes[5]
+	mi := &file_server_proto_msgTypes[4]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -586,7 +415,7 @@ func (x *MessageDeleteDispatch) String() string {
 func (*MessageDeleteDispatch) ProtoMessage() {}
 
 func (x *MessageDeleteDispatch) ProtoReflect() protoreflect.Message {
-	mi := &file_server_proto_msgTypes[5]
+	mi := &file_server_proto_msgTypes[4]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -599,7 +428,7 @@ func (x *MessageDeleteDispatch) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MessageDeleteDispatch.ProtoReflect.Descriptor instead.
 func (*MessageDeleteDispatch) Descriptor() ([]byte, []int) {
-	return file_server_proto_rawDescGZIP(), []int{5}
+	return file_server_proto_rawDescGZIP(), []int{4}
 }
 
 func (x *MessageDeleteDispatch) GetDispatchId() string {
@@ -630,13 +459,6 @@ func (x *MessageDeleteDispatch) GetTargetPlatformMessageId() string {
 	return ""
 }
 
-func (x *MessageDeleteDispatch) GetDeleteMode() DeleteMode {
-	if x != nil {
-		return x.DeleteMode
-	}
-	return DeleteMode_DELETE_MODE_REVOKE
-}
-
 // Instruction to rename an already-provisioned mirror thread when its source
 // conversation's title changes. Addresses the thread by its container and
 // thread id; carries no message because a retitle is a conversation property,
@@ -653,7 +475,7 @@ type MessageRetitleDispatch struct {
 
 func (x *MessageRetitleDispatch) Reset() {
 	*x = MessageRetitleDispatch{}
-	mi := &file_server_proto_msgTypes[6]
+	mi := &file_server_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -665,7 +487,7 @@ func (x *MessageRetitleDispatch) String() string {
 func (*MessageRetitleDispatch) ProtoMessage() {}
 
 func (x *MessageRetitleDispatch) ProtoReflect() protoreflect.Message {
-	mi := &file_server_proto_msgTypes[6]
+	mi := &file_server_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -678,7 +500,7 @@ func (x *MessageRetitleDispatch) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MessageRetitleDispatch.ProtoReflect.Descriptor instead.
 func (*MessageRetitleDispatch) Descriptor() ([]byte, []int) {
-	return file_server_proto_rawDescGZIP(), []int{6}
+	return file_server_proto_rawDescGZIP(), []int{5}
 }
 
 func (x *MessageRetitleDispatch) GetDispatchId() string {
@@ -730,7 +552,7 @@ type ReactionDispatch struct {
 
 func (x *ReactionDispatch) Reset() {
 	*x = ReactionDispatch{}
-	mi := &file_server_proto_msgTypes[7]
+	mi := &file_server_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -742,7 +564,7 @@ func (x *ReactionDispatch) String() string {
 func (*ReactionDispatch) ProtoMessage() {}
 
 func (x *ReactionDispatch) ProtoReflect() protoreflect.Message {
-	mi := &file_server_proto_msgTypes[7]
+	mi := &file_server_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -755,7 +577,7 @@ func (x *ReactionDispatch) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ReactionDispatch.ProtoReflect.Descriptor instead.
 func (*ReactionDispatch) Descriptor() ([]byte, []int) {
-	return file_server_proto_rawDescGZIP(), []int{7}
+	return file_server_proto_rawDescGZIP(), []int{6}
 }
 
 func (x *ReactionDispatch) GetDispatchId() string {
@@ -823,7 +645,7 @@ type DeliveryAckDispatch struct {
 
 func (x *DeliveryAckDispatch) Reset() {
 	*x = DeliveryAckDispatch{}
-	mi := &file_server_proto_msgTypes[8]
+	mi := &file_server_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -835,7 +657,7 @@ func (x *DeliveryAckDispatch) String() string {
 func (*DeliveryAckDispatch) ProtoMessage() {}
 
 func (x *DeliveryAckDispatch) ProtoReflect() protoreflect.Message {
-	mi := &file_server_proto_msgTypes[8]
+	mi := &file_server_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -848,7 +670,7 @@ func (x *DeliveryAckDispatch) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DeliveryAckDispatch.ProtoReflect.Descriptor instead.
 func (*DeliveryAckDispatch) Descriptor() ([]byte, []int) {
-	return file_server_proto_rawDescGZIP(), []int{8}
+	return file_server_proto_rawDescGZIP(), []int{7}
 }
 
 func (x *DeliveryAckDispatch) GetDispatchId() string {
@@ -894,7 +716,7 @@ type SeenReceiptDispatch struct {
 
 func (x *SeenReceiptDispatch) Reset() {
 	*x = SeenReceiptDispatch{}
-	mi := &file_server_proto_msgTypes[9]
+	mi := &file_server_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -906,7 +728,7 @@ func (x *SeenReceiptDispatch) String() string {
 func (*SeenReceiptDispatch) ProtoMessage() {}
 
 func (x *SeenReceiptDispatch) ProtoReflect() protoreflect.Message {
-	mi := &file_server_proto_msgTypes[9]
+	mi := &file_server_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -919,7 +741,7 @@ func (x *SeenReceiptDispatch) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SeenReceiptDispatch.ProtoReflect.Descriptor instead.
 func (*SeenReceiptDispatch) Descriptor() ([]byte, []int) {
-	return file_server_proto_rawDescGZIP(), []int{9}
+	return file_server_proto_rawDescGZIP(), []int{8}
 }
 
 func (x *SeenReceiptDispatch) GetDispatchId() string {
@@ -959,7 +781,7 @@ type Rejected struct {
 
 func (x *Rejected) Reset() {
 	*x = Rejected{}
-	mi := &file_server_proto_msgTypes[10]
+	mi := &file_server_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -971,7 +793,7 @@ func (x *Rejected) String() string {
 func (*Rejected) ProtoMessage() {}
 
 func (x *Rejected) ProtoReflect() protoreflect.Message {
-	mi := &file_server_proto_msgTypes[10]
+	mi := &file_server_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -984,7 +806,7 @@ func (x *Rejected) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Rejected.ProtoReflect.Descriptor instead.
 func (*Rejected) Descriptor() ([]byte, []int) {
-	return file_server_proto_rawDescGZIP(), []int{10}
+	return file_server_proto_rawDescGZIP(), []int{9}
 }
 
 func (x *Rejected) GetReason() string {
@@ -1013,7 +835,7 @@ type ServerFrame struct {
 
 func (x *ServerFrame) Reset() {
 	*x = ServerFrame{}
-	mi := &file_server_proto_msgTypes[11]
+	mi := &file_server_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1025,7 +847,7 @@ func (x *ServerFrame) String() string {
 func (*ServerFrame) ProtoMessage() {}
 
 func (x *ServerFrame) ProtoReflect() protoreflect.Message {
-	mi := &file_server_proto_msgTypes[11]
+	mi := &file_server_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1038,7 +860,7 @@ func (x *ServerFrame) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ServerFrame.ProtoReflect.Descriptor instead.
 func (*ServerFrame) Descriptor() ([]byte, []int) {
-	return file_server_proto_rawDescGZIP(), []int{11}
+	return file_server_proto_rawDescGZIP(), []int{10}
 }
 
 func (x *ServerFrame) GetBody() isServerFrame_Body {
@@ -1188,11 +1010,7 @@ const file_server_proto_rawDesc = "" +
 	"\x05_text\"E\n" +
 	"\x0fProvisionThread\x12\x1c\n" +
 	"\tcontainer\x18\x01 \x01(\tR\tcontainer\x12\x14\n" +
-	"\x05title\x18\x02 \x01(\tR\x05title\"\x8d\x01\n" +
-	"\x0fDeliveryOptions\x120\n" +
-	"\x14attachments_as_files\x18\x01 \x01(\bR\x12attachmentsAsFiles\x121\n" +
-	"\x12max_message_length\x18\x02 \x01(\rH\x00R\x10maxMessageLength\x88\x01\x01B\x15\n" +
-	"\x13_max_message_length\"\x9d\x06\n" +
+	"\x05title\x18\x02 \x01(\tR\x05title\"\xdc\x05\n" +
 	"\x15MessageCreateDispatch\x12\x1f\n" +
 	"\vdispatch_id\x18\x01 \x01(\tR\n" +
 	"dispatchId\x12$\n" +
@@ -1208,15 +1026,14 @@ const file_server_proto_rawDesc = "" +
 	" \x01(\x03R\vtimestampMs\x12J\n" +
 	"\rreply_context\x18\v \x01(\v2 .wuphf.connector.v1.ReplyContextH\x05R\freplyContext\x88\x01\x01\x12$\n" +
 	"\vsender_name\x18\f \x01(\tH\x06R\n" +
-	"senderName\x88\x01\x01\x12?\n" +
-	"\bdelivery\x18\r \x01(\v2#.wuphf.connector.v1.DeliveryOptionsR\bdeliveryB\x13\n" +
+	"senderName\x88\x01\x01B\x13\n" +
 	"\x11_target_thread_idB\x13\n" +
 	"\x11_provision_threadB\x0e\n" +
 	"\f_participantB\a\n" +
 	"\x05_textB\x1f\n" +
 	"\x1d_reply_to_platform_message_idB\x10\n" +
 	"\x0e_reply_contextB\x0e\n" +
-	"\f_sender_name\"\xa7\x03\n" +
+	"\f_sender_name\"\xec\x02\n" +
 	"\x13MessageEditDispatch\x12\x1f\n" +
 	"\vdispatch_id\x18\x01 \x01(\tR\n" +
 	"dispatchId\x12$\n" +
@@ -1226,20 +1043,17 @@ const file_server_proto_rawDesc = "" +
 	"\x04text\x18\x05 \x01(\tH\x01R\x04text\x88\x01\x01\x12$\n" +
 	"\vsender_name\x18\x06 \x01(\tH\x02R\n" +
 	"senderName\x88\x01\x01\x12%\n" +
-	"\vparticipant\x18\a \x01(\tH\x03R\vparticipant\x88\x01\x01\x129\n" +
-	"\tedit_mode\x18\b \x01(\x0e2\x1c.wuphf.connector.v1.EditModeR\beditModeB\x13\n" +
+	"\vparticipant\x18\a \x01(\tH\x03R\vparticipant\x88\x01\x01B\x13\n" +
 	"\x11_target_thread_idB\a\n" +
 	"\x05_textB\x0e\n" +
 	"\f_sender_nameB\x0e\n" +
-	"\f_participant\"\xa0\x02\n" +
+	"\f_participant\"\xdf\x01\n" +
 	"\x15MessageDeleteDispatch\x12\x1f\n" +
 	"\vdispatch_id\x18\x01 \x01(\tR\n" +
 	"dispatchId\x12$\n" +
 	"\x0etarget_chat_id\x18\x02 \x01(\tR\ftargetChatId\x12-\n" +
 	"\x10target_thread_id\x18\x03 \x01(\tH\x00R\x0etargetThreadId\x88\x01\x01\x12;\n" +
-	"\x1atarget_platform_message_id\x18\x04 \x01(\tR\x17targetPlatformMessageId\x12?\n" +
-	"\vdelete_mode\x18\x05 \x01(\x0e2\x1e.wuphf.connector.v1.DeleteModeR\n" +
-	"deleteModeB\x13\n" +
+	"\x1atarget_platform_message_id\x18\x04 \x01(\tR\x17targetPlatformMessageIdB\x13\n" +
 	"\x11_target_thread_id\"\x9f\x01\n" +
 	"\x16MessageRetitleDispatch\x12\x1f\n" +
 	"\vdispatch_id\x18\x01 \x01(\tR\n" +
@@ -1283,14 +1097,7 @@ const file_server_proto_rawDesc = "" +
 	"\breaction\x18\x06 \x01(\v2$.wuphf.connector.v1.ReactionDispatchH\x00R\breaction\x12L\n" +
 	"\fdelivery_ack\x18\a \x01(\v2'.wuphf.connector.v1.DeliveryAckDispatchH\x00R\vdeliveryAck\x12L\n" +
 	"\fseen_receipt\x18\b \x01(\v2'.wuphf.connector.v1.SeenReceiptDispatchH\x00R\vseenReceiptB\x06\n" +
-	"\x04body*8\n" +
-	"\bEditMode\x12\x16\n" +
-	"\x12EDIT_MODE_IN_PLACE\x10\x00\x12\x14\n" +
-	"\x10EDIT_MODE_REPOST\x10\x01*?\n" +
-	"\n" +
-	"DeleteMode\x12\x16\n" +
-	"\x12DELETE_MODE_REVOKE\x10\x00\x12\x19\n" +
-	"\x15DELETE_MODE_TOMBSTONE\x10\x01B:Z8github.com/akshettrj/wuphf/proto/go/connector/v1;wuphfpbb\x06proto3"
+	"\x04bodyB:Z8github.com/akshettrj/wuphf/proto/go/connector/v1;wuphfpbb\x06proto3"
 
 var (
 	file_server_proto_rawDescOnce sync.Once
@@ -1304,46 +1111,39 @@ func file_server_proto_rawDescGZIP() []byte {
 	return file_server_proto_rawDescData
 }
 
-var file_server_proto_enumTypes = make([]protoimpl.EnumInfo, 2)
-var file_server_proto_msgTypes = make([]protoimpl.MessageInfo, 12)
+var file_server_proto_msgTypes = make([]protoimpl.MessageInfo, 11)
 var file_server_proto_goTypes = []any{
-	(EditMode)(0),                  // 0: wuphf.connector.v1.EditMode
-	(DeleteMode)(0),                // 1: wuphf.connector.v1.DeleteMode
-	(*ReplyContext)(nil),           // 2: wuphf.connector.v1.ReplyContext
-	(*ProvisionThread)(nil),        // 3: wuphf.connector.v1.ProvisionThread
-	(*DeliveryOptions)(nil),        // 4: wuphf.connector.v1.DeliveryOptions
-	(*MessageCreateDispatch)(nil),  // 5: wuphf.connector.v1.MessageCreateDispatch
-	(*MessageEditDispatch)(nil),    // 6: wuphf.connector.v1.MessageEditDispatch
-	(*MessageDeleteDispatch)(nil),  // 7: wuphf.connector.v1.MessageDeleteDispatch
-	(*MessageRetitleDispatch)(nil), // 8: wuphf.connector.v1.MessageRetitleDispatch
-	(*ReactionDispatch)(nil),       // 9: wuphf.connector.v1.ReactionDispatch
-	(*DeliveryAckDispatch)(nil),    // 10: wuphf.connector.v1.DeliveryAckDispatch
-	(*SeenReceiptDispatch)(nil),    // 11: wuphf.connector.v1.SeenReceiptDispatch
-	(*Rejected)(nil),               // 12: wuphf.connector.v1.Rejected
-	(*ServerFrame)(nil),            // 13: wuphf.connector.v1.ServerFrame
-	(*Attachment)(nil),             // 14: wuphf.connector.v1.Attachment
+	(*ReplyContext)(nil),           // 0: wuphf.connector.v1.ReplyContext
+	(*ProvisionThread)(nil),        // 1: wuphf.connector.v1.ProvisionThread
+	(*MessageCreateDispatch)(nil),  // 2: wuphf.connector.v1.MessageCreateDispatch
+	(*MessageEditDispatch)(nil),    // 3: wuphf.connector.v1.MessageEditDispatch
+	(*MessageDeleteDispatch)(nil),  // 4: wuphf.connector.v1.MessageDeleteDispatch
+	(*MessageRetitleDispatch)(nil), // 5: wuphf.connector.v1.MessageRetitleDispatch
+	(*ReactionDispatch)(nil),       // 6: wuphf.connector.v1.ReactionDispatch
+	(*DeliveryAckDispatch)(nil),    // 7: wuphf.connector.v1.DeliveryAckDispatch
+	(*SeenReceiptDispatch)(nil),    // 8: wuphf.connector.v1.SeenReceiptDispatch
+	(*Rejected)(nil),               // 9: wuphf.connector.v1.Rejected
+	(*ServerFrame)(nil),            // 10: wuphf.connector.v1.ServerFrame
+	(*Attachment)(nil),             // 11: wuphf.connector.v1.Attachment
 }
 var file_server_proto_depIdxs = []int32{
-	14, // 0: wuphf.connector.v1.ReplyContext.attachments:type_name -> wuphf.connector.v1.Attachment
-	3,  // 1: wuphf.connector.v1.MessageCreateDispatch.provision_thread:type_name -> wuphf.connector.v1.ProvisionThread
-	14, // 2: wuphf.connector.v1.MessageCreateDispatch.attachments:type_name -> wuphf.connector.v1.Attachment
-	2,  // 3: wuphf.connector.v1.MessageCreateDispatch.reply_context:type_name -> wuphf.connector.v1.ReplyContext
-	4,  // 4: wuphf.connector.v1.MessageCreateDispatch.delivery:type_name -> wuphf.connector.v1.DeliveryOptions
-	0,  // 5: wuphf.connector.v1.MessageEditDispatch.edit_mode:type_name -> wuphf.connector.v1.EditMode
-	1,  // 6: wuphf.connector.v1.MessageDeleteDispatch.delete_mode:type_name -> wuphf.connector.v1.DeleteMode
-	5,  // 7: wuphf.connector.v1.ServerFrame.message_create:type_name -> wuphf.connector.v1.MessageCreateDispatch
-	12, // 8: wuphf.connector.v1.ServerFrame.rejected:type_name -> wuphf.connector.v1.Rejected
-	6,  // 9: wuphf.connector.v1.ServerFrame.message_edit:type_name -> wuphf.connector.v1.MessageEditDispatch
-	7,  // 10: wuphf.connector.v1.ServerFrame.message_delete:type_name -> wuphf.connector.v1.MessageDeleteDispatch
-	8,  // 11: wuphf.connector.v1.ServerFrame.message_retitle:type_name -> wuphf.connector.v1.MessageRetitleDispatch
-	9,  // 12: wuphf.connector.v1.ServerFrame.reaction:type_name -> wuphf.connector.v1.ReactionDispatch
-	10, // 13: wuphf.connector.v1.ServerFrame.delivery_ack:type_name -> wuphf.connector.v1.DeliveryAckDispatch
-	11, // 14: wuphf.connector.v1.ServerFrame.seen_receipt:type_name -> wuphf.connector.v1.SeenReceiptDispatch
-	15, // [15:15] is the sub-list for method output_type
-	15, // [15:15] is the sub-list for method input_type
-	15, // [15:15] is the sub-list for extension type_name
-	15, // [15:15] is the sub-list for extension extendee
-	0,  // [0:15] is the sub-list for field type_name
+	11, // 0: wuphf.connector.v1.ReplyContext.attachments:type_name -> wuphf.connector.v1.Attachment
+	1,  // 1: wuphf.connector.v1.MessageCreateDispatch.provision_thread:type_name -> wuphf.connector.v1.ProvisionThread
+	11, // 2: wuphf.connector.v1.MessageCreateDispatch.attachments:type_name -> wuphf.connector.v1.Attachment
+	0,  // 3: wuphf.connector.v1.MessageCreateDispatch.reply_context:type_name -> wuphf.connector.v1.ReplyContext
+	2,  // 4: wuphf.connector.v1.ServerFrame.message_create:type_name -> wuphf.connector.v1.MessageCreateDispatch
+	9,  // 5: wuphf.connector.v1.ServerFrame.rejected:type_name -> wuphf.connector.v1.Rejected
+	3,  // 6: wuphf.connector.v1.ServerFrame.message_edit:type_name -> wuphf.connector.v1.MessageEditDispatch
+	4,  // 7: wuphf.connector.v1.ServerFrame.message_delete:type_name -> wuphf.connector.v1.MessageDeleteDispatch
+	5,  // 8: wuphf.connector.v1.ServerFrame.message_retitle:type_name -> wuphf.connector.v1.MessageRetitleDispatch
+	6,  // 9: wuphf.connector.v1.ServerFrame.reaction:type_name -> wuphf.connector.v1.ReactionDispatch
+	7,  // 10: wuphf.connector.v1.ServerFrame.delivery_ack:type_name -> wuphf.connector.v1.DeliveryAckDispatch
+	8,  // 11: wuphf.connector.v1.ServerFrame.seen_receipt:type_name -> wuphf.connector.v1.SeenReceiptDispatch
+	12, // [12:12] is the sub-list for method output_type
+	12, // [12:12] is the sub-list for method input_type
+	12, // [12:12] is the sub-list for extension type_name
+	12, // [12:12] is the sub-list for extension extendee
+	0,  // [0:12] is the sub-list for field type_name
 }
 
 func init() { file_server_proto_init() }
@@ -1356,11 +1156,10 @@ func file_server_proto_init() {
 	file_server_proto_msgTypes[2].OneofWrappers = []any{}
 	file_server_proto_msgTypes[3].OneofWrappers = []any{}
 	file_server_proto_msgTypes[4].OneofWrappers = []any{}
-	file_server_proto_msgTypes[5].OneofWrappers = []any{}
+	file_server_proto_msgTypes[6].OneofWrappers = []any{}
 	file_server_proto_msgTypes[7].OneofWrappers = []any{}
 	file_server_proto_msgTypes[8].OneofWrappers = []any{}
-	file_server_proto_msgTypes[9].OneofWrappers = []any{}
-	file_server_proto_msgTypes[11].OneofWrappers = []any{
+	file_server_proto_msgTypes[10].OneofWrappers = []any{
 		(*ServerFrame_MessageCreate)(nil),
 		(*ServerFrame_Rejected)(nil),
 		(*ServerFrame_MessageEdit)(nil),
@@ -1375,14 +1174,13 @@ func file_server_proto_init() {
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_server_proto_rawDesc), len(file_server_proto_rawDesc)),
-			NumEnums:      2,
-			NumMessages:   12,
+			NumEnums:      0,
+			NumMessages:   11,
 			NumExtensions: 0,
 			NumServices:   0,
 		},
 		GoTypes:           file_server_proto_goTypes,
 		DependencyIndexes: file_server_proto_depIdxs,
-		EnumInfos:         file_server_proto_enumTypes,
 		MessageInfos:      file_server_proto_msgTypes,
 	}.Build()
 	File_server_proto = out.File

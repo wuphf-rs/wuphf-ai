@@ -19,3 +19,18 @@ supports_topic_create = true
 
 # Log verbosity: trace, debug, info, warn, error (WUPHF_LOG_LEVEL overrides).
 log_level = "info"
+
+# How replicated copies are rendered on Telegram. This connector's own policy;
+# the core dispatches content only.
+[rendering]
+# Send every attachment as a generic file/document instead of its origin kind.
+attachments_as_files = false
+# Text longer than this many characters is sent as a plain-text file instead of
+# an inline message. 0 (or omitted) leaves text unbounded.
+# max_message_length = 4096
+# "in_place" (default) revises the mirrored copy; "repost" leaves it untouched
+# and posts the revision as a reply marked as an edit.
+edit_mode = "in_place"
+# "revoke" (default) deletes the mirrored copy; "tombstone" leaves it and posts
+# a deletion notice replying to it.
+delete_mode = "revoke"

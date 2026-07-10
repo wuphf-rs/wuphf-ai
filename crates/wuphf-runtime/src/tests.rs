@@ -54,7 +54,6 @@ fn connector_infos() -> HashMap<ConnectorId, ConnectorInfo> {
             ConnectorInfo {
                 platform: Platform::WhatsApp,
                 capabilities: ConnectorCapabilities::default(),
-                delivery: Default::default(),
             },
         ),
         (
@@ -62,7 +61,6 @@ fn connector_infos() -> HashMap<ConnectorId, ConnectorInfo> {
             ConnectorInfo {
                 platform: Platform::Telegram,
                 capabilities: telegram_capabilities(),
-                delivery: Default::default(),
             },
         ),
     ])

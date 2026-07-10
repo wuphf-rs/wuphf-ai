@@ -29,10 +29,13 @@ type Sender struct {
 	media       MediaBroker
 	ownJID      types.JID
 	stickerMeta config.StickerMetadata
+	// rendering is this connector's own policy for how mirrored copies are
+	// rendered; the core dispatches content only.
+	rendering config.RenderingOptions
 }
 
-func NewSender(client SendClient, media MediaBroker, ownJID types.JID, stickerMeta config.StickerMetadata) Sender {
-	return Sender{client: client, media: media, ownJID: ownJID, stickerMeta: stickerMeta}
+func NewSender(client SendClient, media MediaBroker, ownJID types.JID, stickerMeta config.StickerMetadata, rendering config.RenderingOptions) Sender {
+	return Sender{client: client, media: media, ownJID: ownJID, stickerMeta: stickerMeta, rendering: rendering}
 }
 
 // SendMessage delivers a dispatch to the target WhatsApp chat. WhatsApp has no
@@ -50,15 +53,14 @@ func (s Sender) SendMessage(ctx context.Context, dispatch *wuphfpb.MessageCreate
 	if err != nil {
 		return "", "", err
 	}
-	delivery := dispatch.GetDelivery()
 	var message *waE2E.Message
 	switch {
 	case len(dispatch.Attachments) > 0:
-		message, err = s.attachmentMessage(ctx, dispatch.Attachments[0], dispatch.GetText(), delivery.GetAttachmentsAsFiles())
+		message, err = s.attachmentMessage(ctx, dispatch.Attachments[0], dispatch.GetText(), s.rendering.AttachmentsAsFiles)
 		if err != nil {
 			return "", "", err
 		}
-	case textExceedsLimit(dispatch.GetText(), delivery.GetMaxMessageLength()):
+	case textExceedsLimit(dispatch.GetText(), s.rendering.MaxMessageLength):
 		message, err = s.textFileMessage(ctx, dispatch.GetText())
 		if err != nil {
 			return "", "", err

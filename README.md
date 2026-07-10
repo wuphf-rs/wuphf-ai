@@ -14,9 +14,10 @@ For a human-friendly tour, open [`docs/index.html`](docs/index.html).
   through an alias table; conversations, replica sets, and mirror threads are
   minted lazily and reused. Identity migrations (e.g. WhatsApp phone-to-LID)
   keep both addresses resolvable.
-- Message **create, edit, and delete** replication with per-connector,
-  directional delivery policy (in-place vs repost edits; revoke vs tombstone
-  deletes). Internal reply identity is resolved to native ids per target.
+- Message **create, edit, and delete** replication. Rendering (in-place vs
+  repost edits; revoke vs tombstone deletes; attachments-as-files; over-length
+  text spillover) is each connector's own `[rendering]` config. Internal reply
+  identity is resolved to native ids per target.
 - Durable dispatch state (pending / blocked / acknowledged / dead-lettered) that
   survives restart and redelivers unacknowledged work on reconnect.
 - Core-owned media broker with bounded streaming upload/download, SQLite blob
@@ -36,7 +37,7 @@ crates/
   wuphf-model/     Shared domain types (ids, routing, connector, message, dispatch)
   wuphf-proto/     Canonical protobuf contract and Tonic bindings
   wuphf-storage/   Storage trait, in-memory + SQLite backends
-  wuphf-router/    Rule evaluation, target resolution, delivery policy
+  wuphf-router/    Rule evaluation and target resolution
   wuphf-core/      Identity orchestration and event ingestion
   wuphf-runtime/   Tokio event bus, dispatch pipeline, media broker, gRPC
   wuphf-cli/       Server executable

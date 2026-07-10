@@ -11,6 +11,7 @@ import (
 	"unicode/utf16"
 
 	"github.com/akshettrj/wuphf/connectors/mediaconv"
+	"github.com/akshettrj/wuphf/connectors/telegram/internal/config"
 	coreclient "github.com/akshettrj/wuphf/connectors/telegram/internal/core"
 	"github.com/akshettrj/wuphf/proto/go/connector/v1"
 	"github.com/gotd/td/telegram/message"
@@ -23,14 +24,18 @@ type Sender struct {
 	sender *message.Sender
 	peers  *PeerCache
 	media  MediaBroker
+	// rendering is this connector's own policy for how mirrored copies are
+	// rendered; the core dispatches content only.
+	rendering config.RenderingOptions
 }
 
-func NewSender(api *tg.Client, peers *PeerCache, media MediaBroker) Sender {
+func NewSender(api *tg.Client, peers *PeerCache, media MediaBroker, rendering config.RenderingOptions) Sender {
 	return Sender{
-		api:    api,
-		sender: message.NewSender(api),
-		peers:  peers,
-		media:  media,
+		api:       api,
+		sender:    message.NewSender(api),
+		peers:     peers,
+		media:     media,
+		rendering: rendering,
 	}
 }
 
@@ -69,13 +74,12 @@ func (s Sender) SendMessage(ctx context.Context, dispatch *wuphfpb.MessageCreate
 		builder = builder.Reply(topicRoot)
 	}
 
-	delivery := dispatch.GetDelivery()
 	body := attributedText(dispatch.GetSenderName(), dispatch.GetParticipant(), dispatch.GetText())
 	var updates tg.UpdatesClass
 	switch {
 	case len(dispatch.Attachments) > 0:
-		updates, err = s.sendAttachment(ctx, builder, dispatch.Attachments[0], body, delivery.GetAttachmentsAsFiles())
-	case textExceedsLimit(dispatch.GetText(), delivery.GetMaxMessageLength()):
+		updates, err = s.sendAttachment(ctx, builder, dispatch.Attachments[0], body, s.rendering.AttachmentsAsFiles)
+	case textExceedsLimit(dispatch.GetText(), s.rendering.MaxMessageLength):
 		updates, err = s.sendTextAsFile(ctx, builder, dispatch.GetSenderName(), dispatch.GetParticipant(), dispatch.GetText())
 	default:
 		updates, err = builder.StyledText(ctx, body...)
@@ -105,7 +109,7 @@ func (s Sender) EditMessage(ctx context.Context, dispatch *wuphfpb.MessageEditDi
 		return "", coreclient.Permanent(fmt.Errorf("invalid Telegram target message id %q: %w", dispatch.TargetPlatformMessageId, err))
 	}
 	body := attributedText(dispatch.GetSenderName(), dispatch.GetParticipant(), dispatch.GetText())
-	if dispatch.GetEditMode() == wuphfpb.EditMode_EDIT_MODE_REPOST {
+	if s.rendering.EditMode == config.EditModeRepost {
 		body = append(body, styling.Italic("\n(edited)"))
 		if _, err := s.sender.To(peer).CloneBuilder().Reply(messageID).StyledText(ctx, body...); err != nil {
 			return "", fmt.Errorf("repost Telegram edit: %w", err)
@@ -131,7 +135,7 @@ func (s Sender) DeleteMessage(ctx context.Context, dispatch *wuphfpb.MessageDele
 	if err != nil {
 		return "", coreclient.Permanent(fmt.Errorf("invalid Telegram target message id %q: %w", dispatch.TargetPlatformMessageId, err))
 	}
-	if dispatch.GetDeleteMode() == wuphfpb.DeleteMode_DELETE_MODE_TOMBSTONE {
+	if s.rendering.DeleteMode == config.DeleteModeTombstone {
 		if _, err := s.sender.To(peer).CloneBuilder().Reply(messageID).StyledText(ctx, styling.Italic("🗑 message deleted")); err != nil {
 			return "", fmt.Errorf("post Telegram tombstone: %w", err)
 		}
