@@ -7,9 +7,7 @@
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use tokio::sync::{broadcast, oneshot};
-use wuphf_model::{
-    DispatchId, EventPayload, NormalizedEvent, ObservedDirection, ObservedMessage, Platform,
-};
+use wuphf_model::{DispatchId, EventPayload, NormalizedEvent, ObservedMessage, Platform};
 use wuphf_storage::{Storage, StorageError};
 
 /// How many recent observed messages the live broadcast retains for a lagging
@@ -81,23 +79,7 @@ where
         let chat_id = &event.source.address.chat_id;
         let captured = match &event.payload {
             EventPayload::MessageCreate(inbound) => {
-                let observed = ObservedMessage {
-                    connector_id: connector_id.clone(),
-                    platform,
-                    chat_id: chat_id.clone(),
-                    thread_id: event.source.address.thread_id.clone(),
-                    platform_message_id: inbound.platform_message_id.clone(),
-                    sender: inbound.sender.clone(),
-                    sender_name: inbound.sender_name.clone(),
-                    participant: inbound.participant.clone(),
-                    text: inbound.text.clone(),
-                    attachments: inbound.attachments.clone(),
-                    reply_to_platform_message_id: inbound.reply_to_platform_message_id.clone(),
-                    direction: ObservedDirection::Incoming,
-                    timestamp_ms: inbound.timestamp_ms,
-                    deleted: false,
-                    edited: false,
-                };
+                let observed = ObservedMessage::incoming(&event.source, platform, inbound);
                 // Broadcast the row as stored, not as constructed: an echo of
                 // our own raw send keeps its outgoing direction in storage, and
                 // live subscribers must see the same row.
@@ -184,7 +166,9 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use wuphf_model::{ConnectorId, InboundMessage, PlatformAddress, SourceAddress};
+    use wuphf_model::{
+        ConnectorId, InboundMessage, ObservedDirection, PlatformAddress, SourceAddress,
+    };
     use wuphf_storage::InMemoryStorage;
 
     fn create_event(chat: &str, id: &str, text: &str, title: Option<&str>) -> NormalizedEvent {

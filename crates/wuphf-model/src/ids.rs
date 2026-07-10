@@ -56,23 +56,47 @@ uuid_id!(
     "Id of a [`Conversation`] — the unit a [`Rule`] pairs across its sides."
 );
 
-/// User-chosen id of a routing [`Rule`], taken verbatim from configuration.
-#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub struct RuleId(pub String);
+// User-chosen string ids have no `new()`/`Default`: they come from config or a
+// connector registration, never minted at runtime.
+macro_rules! string_id {
+    ($name:ident, $doc:expr) => {
+        #[doc = $doc]
+        #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+        pub struct $name(pub String);
 
-impl fmt::Display for RuleId {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.0.fmt(formatter)
-    }
+        impl fmt::Display for $name {
+            fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+                self.0.fmt(formatter)
+            }
+        }
+    };
 }
 
-/// Stable id of a connector, matching a `[[connector]]` entry in core config and
-/// the registration a connector sends on connect.
-#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub struct ConnectorId(pub String);
+string_id!(
+    RuleId,
+    "User-chosen id of a routing [`Rule`], taken verbatim from configuration."
+);
+string_id!(
+    ConnectorId,
+    "Stable id of a connector, matching a `[[connector]]` entry in core config and the registration a connector sends on connect."
+);
 
-impl fmt::Display for ConnectorId {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.0.fmt(formatter)
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Both string ids are persisted inside JSON payloads (sqlite) — they must
+    /// keep serializing as bare strings.
+    #[test]
+    fn string_ids_serde_as_bare_json_strings() {
+        let connector = ConnectorId("whatsapp".into());
+        let rule = RuleId("family".into());
+        assert_eq!(serde_json::to_string(&connector).unwrap(), r#""whatsapp""#);
+        assert_eq!(serde_json::to_string(&rule).unwrap(), r#""family""#);
+        assert_eq!(
+            serde_json::from_str::<ConnectorId>(r#""whatsapp""#).unwrap(),
+            connector
+        );
+        assert_eq!(serde_json::from_str::<RuleId>(r#""family""#).unwrap(), rule);
     }
 }

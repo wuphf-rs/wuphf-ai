@@ -94,20 +94,36 @@ impl App {
         self.chats.get(self.selected)
     }
 
+    /// Index of the chat with this identity, when present. A chat is identified
+    /// by `(connector_id, chat_id)` everywhere in the list.
+    fn chat_position(&self, connector_id: &str, chat_id: &str) -> Option<usize> {
+        self.chats
+            .iter()
+            .position(|chat| chat.connector_id == connector_id && chat.chat_id == chat_id)
+    }
+
+    /// The selected chat's identity, captured before a list mutation so the
+    /// selection can be re-pinned afterwards.
+    fn selected_key(&self) -> Option<(String, String)> {
+        self.selected_chat()
+            .map(|chat| (chat.connector_id.clone(), chat.chat_id.clone()))
+    }
+
+    /// Whether a live message belongs to the chat open in the timeline.
+    fn is_open_chat(&self, message: &pb::ObservedMessage) -> bool {
+        self.selected_chat().is_some_and(|chat| {
+            chat.connector_id == message.connector_id && chat.chat_id == message.chat_id
+        })
+    }
+
     /// Replace the chat list, keeping the current selection pinned to the same
     /// chat when it is still present so a background refresh does not jump the
     /// cursor.
     pub fn set_chats(&mut self, chats: Vec<pb::ObservedChat>) {
-        let current = self
-            .selected_chat()
-            .map(|chat| (chat.connector_id.clone(), chat.chat_id.clone()));
+        let current = self.selected_key();
         self.chats = chats;
         self.selected = current
-            .and_then(|(connector_id, chat_id)| {
-                self.chats
-                    .iter()
-                    .position(|chat| chat.connector_id == connector_id && chat.chat_id == chat_id)
-            })
+            .and_then(|(connector_id, chat_id)| self.chat_position(&connector_id, &chat_id))
             .unwrap_or(0)
             .min(self.chats.len().saturating_sub(1));
     }
@@ -154,9 +170,7 @@ impl App {
     /// creates has no title, so the caller should refresh the chat list.
     pub fn on_live(&mut self, message: pb::ObservedMessage) -> bool {
         let unseen_chat = self.touch_chat(&message);
-        if self.selected_chat().is_some_and(|chat| {
-            chat.connector_id == message.connector_id && chat.chat_id == message.chat_id
-        }) {
+        if self.is_open_chat(&message) {
             match self
                 .messages
                 .iter_mut()
@@ -174,13 +188,9 @@ impl App {
     /// if the chat has not been seen in the list yet. Returns `true` when the
     /// chat was not in the list.
     fn touch_chat(&mut self, message: &pb::ObservedMessage) -> bool {
-        let position = self.chats.iter().position(|chat| {
-            chat.connector_id == message.connector_id && chat.chat_id == message.chat_id
-        });
+        let position = self.chat_position(&message.connector_id, &message.chat_id);
         let unseen_chat = position.is_none();
-        let selected_key = self
-            .selected_chat()
-            .map(|chat| (chat.connector_id.clone(), chat.chat_id.clone()));
+        let selected_key = self.selected_key();
         let preview = message_preview(message);
         match position {
             Some(index) => {
@@ -201,10 +211,7 @@ impl App {
             .sort_by_key(|chat| std::cmp::Reverse(chat.last_message_ts));
         // Re-pin the selection to the same chat after the reorder.
         if let Some((connector_id, chat_id)) = selected_key
-            && let Some(index) = self
-                .chats
-                .iter()
-                .position(|chat| chat.connector_id == connector_id && chat.chat_id == chat_id)
+            && let Some(index) = self.chat_position(&connector_id, &chat_id)
         {
             self.selected = index;
         }

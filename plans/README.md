@@ -37,9 +37,10 @@ code).
 | 017 | SPIKE: per-side replication direction (one-way mirrors) | P3 | S | — | TODO |
 | 018 | Observation log + multi-platform TUI (phased) | P2 | L | — | DONE (all 6 phases) |
 | 019 | Single-source dispatch settlement across storage backends | P1 | M | — (004 helps) | TODO |
-| 020 | Deduplicate per-operation fan-out in router + core | P2 | M | — | TODO |
+| 020 | Deduplicate per-operation fan-out in router + core | P2 | M | — | DONE |
 | 021 | Split Storage god-trait into role traits | P3 | M | 019 (soft) | TODO |
 | 022 | Move Platform name mapping into wuphf-model | P3 | S | — | TODO |
+| 023 | Consolidate similar model types behind shared constructors | P3 | S-M | — (020 soft) | DONE |
 
 Status values: TODO | IN PROGRESS | DONE | BLOCKED (with one-line reason) |
 REJECTED (with one-line rationale).
@@ -74,6 +75,11 @@ REJECTED (with one-line rationale).
   proposes. Refresh 014's line counts before executing it.
 - 020 is independent of 019/021 (touches only `wuphf-router`/`wuphf-core`);
   022 is independent of everything.
+- **023 vs 020**: both edit `wuphf-core/src/ingest.rs` but different
+  functions (020: the `ingest_edit`/`ingest_delete`/`ingest_reaction`/
+  `ingest_receipt` tails; 023: `ingest_create` only). Either order works;
+  whoever goes second rebases trivially. 023 was added 2026-07-10 at
+  `f3bff96` and deliberately excludes the fan-out duplication 020 owns.
 
 ## Findings considered and rejected
 

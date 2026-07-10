@@ -183,14 +183,7 @@ where
         let Some(parent) = self.storage.message(parent_id).await? else {
             return Ok((None, None));
         };
-        let context = ReplyContext {
-            message_id: parent_id,
-            platform_message_id: platform_message_id.to_owned(),
-            sender: parent.sender,
-            participant: parent.participant,
-            text: parent.text,
-            attachments: parent.attachments,
-        };
+        let context = ReplyContext::quoting(parent, platform_message_id.to_owned());
         Ok((Some(parent_id), Some(context)))
     }
 

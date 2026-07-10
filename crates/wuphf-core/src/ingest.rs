@@ -62,24 +62,16 @@ where
             return Ok(IngestOutcome::Ignored(IgnoreReason::DuplicateEvent));
         }
 
-        let message = Message {
-            id: MessageId::new(),
-            replica_set_id,
-            sender: inbound.sender,
-            participant: inbound.participant,
-            sender_name: inbound.sender_name,
-            text: inbound.text,
-            attachments: inbound.attachments,
-            reply_to,
-            timestamp_ms: inbound.timestamp_ms,
-            deleted: false,
-        };
+        // The native id outlives the inbound form: the message drops it on
+        // promotion, but the received copy is keyed by it.
+        let platform_message_id = inbound.platform_message_id.clone();
+        let message = Message::from_inbound(inbound, replica_set_id, reply_to);
         self.storage.put_message(message.clone()).await?;
         self.storage
             .put_received_copy(MessageCopy {
                 message_id: message.id,
                 endpoint_id: origin_endpoint,
-                platform_message_id: inbound.platform_message_id,
+                platform_message_id,
             })
             .await?;
 
@@ -163,9 +155,49 @@ where
         conversation.title = Some(new_title.to_owned());
         self.storage.put_conversation(conversation.clone()).await?;
         let routing = self.router.route_retitle(&conversation, new_title).await?;
+        self.enqueue_outcome(&routing).await
+    }
+
+    /// Resolve the copy an inbound edit/delete/reaction/receipt targets to its
+    /// logical message. `Ok(None)` means the copy is unknown (the caller drops
+    /// the event as `Unmatched`); a copy that maps to a message that is somehow
+    /// no longer stored is the per-operation `missing` error.
+    async fn message_for_copy(
+        &self,
+        endpoint: EndpointId,
+        platform_message_id: &str,
+        missing: fn(MessageId) -> CoreError,
+    ) -> Result<Option<(MessageId, Message)>, CoreError> {
+        let Some(message_id) = self
+            .storage
+            .message_id_for_copy(endpoint, platform_message_id)
+            .await?
+        else {
+            return Ok(None);
+        };
+        let message = self
+            .storage
+            .message(message_id)
+            .await?
+            .ok_or_else(|| missing(message_id))?;
+        Ok(Some((message_id, message)))
+    }
+
+    /// Persist a routing outcome: enqueue the sendable dispatches and park the
+    /// blocked ones on the message they wait for. Returns only the sendable
+    /// dispatches — blocked ones surface later, when their parent is acknowledged.
+    async fn enqueue_outcome(
+        &self,
+        routing: &RoutingOutcome,
+    ) -> Result<Vec<StoredDispatch>, CoreError> {
         let mut dispatches = Vec::new();
         for command in routing.dispatches.iter().cloned() {
             dispatches.push(self.storage.enqueue_dispatch(command, None).await?);
+        }
+        for blocked in routing.blocked.iter().cloned() {
+            self.storage
+                .enqueue_dispatch(blocked.command, Some(blocked.waiting_for_message))
+                .await?;
         }
         Ok(dispatches)
     }
@@ -221,18 +253,16 @@ where
         platform_message_id: String,
         text: Option<String>,
     ) -> Result<IngestOutcome, CoreError> {
-        let Some(message_id) = self
-            .storage
-            .message_id_for_copy(origin_endpoint, &platform_message_id)
+        let Some((message_id, mut message)) = self
+            .message_for_copy(
+                origin_endpoint,
+                &platform_message_id,
+                CoreError::EditTargetNotStored,
+            )
             .await?
         else {
             return Ok(IngestOutcome::Ignored(IgnoreReason::Unmatched));
         };
-        let mut message = self
-            .storage
-            .message(message_id)
-            .await?
-            .ok_or(CoreError::EditTargetNotStored(message_id))?;
         if message.text == text {
             return Ok(IngestOutcome::Ignored(IgnoreReason::RedundantEdit));
         }
@@ -240,15 +270,7 @@ where
         self.storage.put_message(message.clone()).await?;
 
         let routing = self.router.route_edit(&message, origin_endpoint).await?;
-        let mut dispatches = Vec::new();
-        for command in routing.dispatches.iter().cloned() {
-            dispatches.push(self.storage.enqueue_dispatch(command, None).await?);
-        }
-        for blocked in routing.blocked.iter().cloned() {
-            self.storage
-                .enqueue_dispatch(blocked.command, Some(blocked.waiting_for_message))
-                .await?;
-        }
+        let dispatches = self.enqueue_outcome(&routing).await?;
         Ok(IngestOutcome::Routed {
             message_id,
             routing,
@@ -265,18 +287,16 @@ where
         origin_endpoint: EndpointId,
         platform_message_id: String,
     ) -> Result<IngestOutcome, CoreError> {
-        let Some(message_id) = self
-            .storage
-            .message_id_for_copy(origin_endpoint, &platform_message_id)
+        let Some((message_id, mut message)) = self
+            .message_for_copy(
+                origin_endpoint,
+                &platform_message_id,
+                CoreError::DeleteTargetNotStored,
+            )
             .await?
         else {
             return Ok(IngestOutcome::Ignored(IgnoreReason::Unmatched));
         };
-        let mut message = self
-            .storage
-            .message(message_id)
-            .await?
-            .ok_or(CoreError::DeleteTargetNotStored(message_id))?;
         if message.deleted {
             return Ok(IngestOutcome::Ignored(IgnoreReason::RedundantDelete));
         }
@@ -284,15 +304,7 @@ where
         self.storage.put_message(message.clone()).await?;
 
         let routing = self.router.route_delete(&message, origin_endpoint).await?;
-        let mut dispatches = Vec::new();
-        for command in routing.dispatches.iter().cloned() {
-            dispatches.push(self.storage.enqueue_dispatch(command, None).await?);
-        }
-        for blocked in routing.blocked.iter().cloned() {
-            self.storage
-                .enqueue_dispatch(blocked.command, Some(blocked.waiting_for_message))
-                .await?;
-        }
+        let dispatches = self.enqueue_outcome(&routing).await?;
         Ok(IngestOutcome::Routed {
             message_id,
             routing,
@@ -314,32 +326,22 @@ where
         reactor_name: Option<String>,
         emoji: Option<String>,
     ) -> Result<IngestOutcome, CoreError> {
-        let Some(message_id) = self
-            .storage
-            .message_id_for_copy(origin_endpoint, &platform_message_id)
+        let Some((message_id, message)) = self
+            .message_for_copy(
+                origin_endpoint,
+                &platform_message_id,
+                CoreError::ReactionTargetNotStored,
+            )
             .await?
         else {
             return Ok(IngestOutcome::Ignored(IgnoreReason::Unmatched));
         };
-        let message = self
-            .storage
-            .message(message_id)
-            .await?
-            .ok_or(CoreError::ReactionTargetNotStored(message_id))?;
 
         let routing = self
             .router
             .route_reaction(&message, origin_endpoint, reactor, reactor_name, emoji)
             .await?;
-        let mut dispatches = Vec::new();
-        for command in routing.dispatches.iter().cloned() {
-            dispatches.push(self.storage.enqueue_dispatch(command, None).await?);
-        }
-        for blocked in routing.blocked.iter().cloned() {
-            self.storage
-                .enqueue_dispatch(blocked.command, Some(blocked.waiting_for_message))
-                .await?;
-        }
+        let dispatches = self.enqueue_outcome(&routing).await?;
         Ok(IngestOutcome::Routed {
             message_id,
             routing,
@@ -368,32 +370,22 @@ where
         if from_me {
             return Ok(IngestOutcome::Ignored(IgnoreReason::Unmatched));
         }
-        let Some(message_id) = self
-            .storage
-            .message_id_for_copy(observer_endpoint, &platform_message_id)
+        let Some((message_id, message)) = self
+            .message_for_copy(
+                observer_endpoint,
+                &platform_message_id,
+                CoreError::ReceiptTargetNotStored,
+            )
             .await?
         else {
             return Ok(IngestOutcome::Ignored(IgnoreReason::Unmatched));
         };
-        let message = self
-            .storage
-            .message(message_id)
-            .await?
-            .ok_or(CoreError::ReceiptTargetNotStored(message_id))?;
 
         let routing = self
             .router
             .route_receipt(&message, observer_endpoint, kind)
             .await?;
-        let mut dispatches = Vec::new();
-        for command in routing.dispatches.iter().cloned() {
-            dispatches.push(self.storage.enqueue_dispatch(command, None).await?);
-        }
-        for blocked in routing.blocked.iter().cloned() {
-            self.storage
-                .enqueue_dispatch(blocked.command, Some(blocked.waiting_for_message))
-                .await?;
-        }
+        let dispatches = self.enqueue_outcome(&routing).await?;
         Ok(IngestOutcome::Routed {
             message_id,
             routing,

@@ -3,10 +3,10 @@
 //! provisioning and blocking dispatches whose reply parent or target copy does
 //! not yet exist.
 
-use crate::{BlockedDispatch, Router, RouterError, RoutingOutcome, is_mirror_side, reply_context};
+use crate::{BlockedDispatch, Router, RouterError, RoutingOutcome, is_mirror_side};
 use wuphf_model::{
-    Conversation, DispatchCommand, DispatchPayload, Endpoint, EndpointId, Message, PlatformAddress,
-    ProvisionThread, ReceiptKind, TargetAddress,
+    ConnectorId, Conversation, DispatchCommand, DispatchPayload, Endpoint, EndpointId, Message,
+    PlatformAddress, ProvisionThread, ReceiptKind, ReplyContext, TargetAddress,
 };
 use wuphf_storage::Storage;
 
@@ -55,7 +55,7 @@ where
                                 .message(parent_id)
                                 .await?
                                 .ok_or(RouterError::MessageNotFound(parent_id))?;
-                            Some(reply_context(parent, copy.platform_message_id))
+                            Some(ReplyContext::quoting(parent, copy.platform_message_id))
                         }
                         None => {
                             outcome.blocked.push(BlockedDispatch {
@@ -102,55 +102,14 @@ where
         message: &Message,
         origin_endpoint: EndpointId,
     ) -> Result<RoutingOutcome, RouterError> {
-        let replica_set = self.storage.replica_set(message.replica_set_id).await?;
-        if !replica_set.endpoints.contains(&origin_endpoint) {
-            return Err(RouterError::OriginOutsideReplicaSet(origin_endpoint));
-        }
-
-        let mut outcome = RoutingOutcome::default();
-        for endpoint_id in replica_set
-            .endpoints
-            .into_iter()
-            .filter(|endpoint_id| *endpoint_id != origin_endpoint)
-        {
-            let endpoint = self.storage.endpoint(endpoint_id).await?;
-            let target = TargetAddress {
-                address: endpoint.address(),
-                provision_thread: None,
-            };
-            let target_connector = endpoint.connector_id.clone();
-            let mode = self.config.delivery(&target_connector).edit_mode;
-            match self
-                .storage
-                .copy_at_endpoint(message.id, endpoint_id)
-                .await?
-            {
-                Some(copy) => outcome.dispatches.push(DispatchCommand {
-                    target_endpoint: endpoint_id,
-                    target_connector,
-                    target,
-                    payload: DispatchPayload::MessageEdit {
-                        message: message.clone(),
-                        target_platform_message_id: copy.platform_message_id,
-                        mode,
-                    },
-                }),
-                None => outcome.blocked.push(BlockedDispatch {
-                    command: DispatchCommand {
-                        target_endpoint: endpoint_id,
-                        target_connector,
-                        target,
-                        payload: DispatchPayload::MessageEdit {
-                            message: message.clone(),
-                            target_platform_message_id: String::new(),
-                            mode,
-                        },
-                    },
-                    waiting_for_message: message.id,
-                }),
+        self.fan_out_to_copies(message, origin_endpoint, |connector, native_id| {
+            DispatchPayload::MessageEdit {
+                message: message.clone(),
+                target_platform_message_id: native_id,
+                mode: self.config.delivery(connector).edit_mode,
             }
-        }
-        Ok(outcome)
+        })
+        .await
     }
 
     pub async fn route_delete(
@@ -158,55 +117,14 @@ where
         message: &Message,
         origin_endpoint: EndpointId,
     ) -> Result<RoutingOutcome, RouterError> {
-        let replica_set = self.storage.replica_set(message.replica_set_id).await?;
-        if !replica_set.endpoints.contains(&origin_endpoint) {
-            return Err(RouterError::OriginOutsideReplicaSet(origin_endpoint));
-        }
-
-        let mut outcome = RoutingOutcome::default();
-        for endpoint_id in replica_set
-            .endpoints
-            .into_iter()
-            .filter(|endpoint_id| *endpoint_id != origin_endpoint)
-        {
-            let endpoint = self.storage.endpoint(endpoint_id).await?;
-            let target = TargetAddress {
-                address: endpoint.address(),
-                provision_thread: None,
-            };
-            let target_connector = endpoint.connector_id.clone();
-            let mode = self.config.delivery(&target_connector).delete_mode;
-            match self
-                .storage
-                .copy_at_endpoint(message.id, endpoint_id)
-                .await?
-            {
-                Some(copy) => outcome.dispatches.push(DispatchCommand {
-                    target_endpoint: endpoint_id,
-                    target_connector,
-                    target,
-                    payload: DispatchPayload::MessageDelete {
-                        message: message.clone(),
-                        target_platform_message_id: copy.platform_message_id,
-                        mode,
-                    },
-                }),
-                None => outcome.blocked.push(BlockedDispatch {
-                    command: DispatchCommand {
-                        target_endpoint: endpoint_id,
-                        target_connector,
-                        target,
-                        payload: DispatchPayload::MessageDelete {
-                            message: message.clone(),
-                            target_platform_message_id: String::new(),
-                            mode,
-                        },
-                    },
-                    waiting_for_message: message.id,
-                }),
+        self.fan_out_to_copies(message, origin_endpoint, |connector, native_id| {
+            DispatchPayload::MessageDelete {
+                message: message.clone(),
+                target_platform_message_id: native_id,
+                mode: self.config.delivery(connector).delete_mode,
             }
-        }
-        Ok(outcome)
+        })
+        .await
     }
 
     /// Fan a reaction change out to the other endpoints. Like an edit, each
@@ -221,54 +139,17 @@ where
         reactor_name: Option<String>,
         emoji: Option<String>,
     ) -> Result<RoutingOutcome, RouterError> {
-        let replica_set = self.storage.replica_set(message.replica_set_id).await?;
-        if !replica_set.endpoints.contains(&origin_endpoint) {
-            return Err(RouterError::OriginOutsideReplicaSet(origin_endpoint));
-        }
-
-        let mut outcome = RoutingOutcome::default();
-        for endpoint_id in replica_set
-            .endpoints
-            .into_iter()
-            .filter(|endpoint_id| *endpoint_id != origin_endpoint)
-        {
-            let endpoint = self.storage.endpoint(endpoint_id).await?;
-            let target = TargetAddress {
-                address: endpoint.address(),
-                provision_thread: None,
-            };
-            let target_connector = endpoint.connector_id.clone();
-            let reaction = |target_platform_message_id| DispatchPayload::Reaction {
+        self.fan_out_to_copies(message, origin_endpoint, |_connector, native_id| {
+            DispatchPayload::Reaction {
                 message_id: message.id,
                 replica_set_id: message.replica_set_id,
-                target_platform_message_id,
+                target_platform_message_id: native_id,
                 reactor: reactor.clone(),
                 reactor_name: reactor_name.clone(),
                 emoji: emoji.clone(),
-            };
-            match self
-                .storage
-                .copy_at_endpoint(message.id, endpoint_id)
-                .await?
-            {
-                Some(copy) => outcome.dispatches.push(DispatchCommand {
-                    target_endpoint: endpoint_id,
-                    target_connector,
-                    target,
-                    payload: reaction(copy.platform_message_id),
-                }),
-                None => outcome.blocked.push(BlockedDispatch {
-                    command: DispatchCommand {
-                        target_endpoint: endpoint_id,
-                        target_connector,
-                        target,
-                        payload: reaction(String::new()),
-                    },
-                    waiting_for_message: message.id,
-                }),
             }
-        }
-        Ok(outcome)
+        })
+        .await
     }
 
     /// Fan a delivery/read receipt out to every other endpoint that holds a
@@ -285,16 +166,42 @@ where
         observer_endpoint: EndpointId,
         kind: ReceiptKind,
     ) -> Result<RoutingOutcome, RouterError> {
+        self.fan_out_to_copies(message, observer_endpoint, |_connector, native_id| match kind {
+            ReceiptKind::Delivered => DispatchPayload::DeliveryAck {
+                message_id: message.id,
+                replica_set_id: message.replica_set_id,
+                target_platform_message_id: native_id,
+            },
+            ReceiptKind::Read => DispatchPayload::SeenReceipt {
+                message_id: message.id,
+                replica_set_id: message.replica_set_id,
+                target_platform_message_id: native_id,
+            },
+        })
+        .await
+    }
+
+    /// Fan an operation on an existing message out to every other endpoint in
+    /// the replica set. Each target either carries the native id of its copy or
+    /// is blocked on the message until that copy is delivered. `payload_for`
+    /// builds the per-target payload from (target connector, native id) — the
+    /// native id is empty while blocked and bound on release.
+    async fn fan_out_to_copies(
+        &self,
+        message: &Message,
+        origin_endpoint: EndpointId,
+        payload_for: impl Fn(&ConnectorId, String) -> DispatchPayload,
+    ) -> Result<RoutingOutcome, RouterError> {
         let replica_set = self.storage.replica_set(message.replica_set_id).await?;
-        if !replica_set.endpoints.contains(&observer_endpoint) {
-            return Err(RouterError::OriginOutsideReplicaSet(observer_endpoint));
+        if !replica_set.endpoints.contains(&origin_endpoint) {
+            return Err(RouterError::OriginOutsideReplicaSet(origin_endpoint));
         }
 
         let mut outcome = RoutingOutcome::default();
         for endpoint_id in replica_set
             .endpoints
             .into_iter()
-            .filter(|endpoint_id| *endpoint_id != observer_endpoint)
+            .filter(|endpoint_id| *endpoint_id != origin_endpoint)
         {
             let endpoint = self.storage.endpoint(endpoint_id).await?;
             let target = TargetAddress {
@@ -302,18 +209,6 @@ where
                 provision_thread: None,
             };
             let target_connector = endpoint.connector_id.clone();
-            let receipt = |target_platform_message_id| match kind {
-                ReceiptKind::Delivered => DispatchPayload::DeliveryAck {
-                    message_id: message.id,
-                    replica_set_id: message.replica_set_id,
-                    target_platform_message_id,
-                },
-                ReceiptKind::Read => DispatchPayload::SeenReceipt {
-                    message_id: message.id,
-                    replica_set_id: message.replica_set_id,
-                    target_platform_message_id,
-                },
-            };
             match self
                 .storage
                 .copy_at_endpoint(message.id, endpoint_id)
@@ -321,16 +216,16 @@ where
             {
                 Some(copy) => outcome.dispatches.push(DispatchCommand {
                     target_endpoint: endpoint_id,
+                    payload: payload_for(&target_connector, copy.platform_message_id),
                     target_connector,
                     target,
-                    payload: receipt(copy.platform_message_id),
                 }),
                 None => outcome.blocked.push(BlockedDispatch {
                     command: DispatchCommand {
                         target_endpoint: endpoint_id,
+                        payload: payload_for(&target_connector, String::new()),
                         target_connector,
                         target,
-                        payload: receipt(String::new()),
                     },
                     waiting_for_message: message.id,
                 }),

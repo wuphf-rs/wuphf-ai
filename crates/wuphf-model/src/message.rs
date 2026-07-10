@@ -66,6 +66,31 @@ pub struct Message {
     pub deleted: bool,
 }
 
+impl Message {
+    /// Promote a resolved inbound message to the canonical logical form,
+    /// minting its internal id. `reply_to` is the already-resolved parent;
+    /// native addressing (`platform_message_id`) stays behind in the copy
+    /// tables.
+    pub fn from_inbound(
+        inbound: InboundMessage,
+        replica_set_id: ReplicaSetId,
+        reply_to: Option<MessageId>,
+    ) -> Self {
+        Self {
+            id: MessageId::new(),
+            replica_set_id,
+            sender: inbound.sender,
+            participant: inbound.participant,
+            sender_name: inbound.sender_name,
+            text: inbound.text,
+            attachments: inbound.attachments,
+            reply_to,
+            timestamp_ms: inbound.timestamp_ms,
+            deleted: false,
+        }
+    }
+}
+
 /// Records the native id under which a [`Message`] was delivered to one
 /// endpoint. Maps internal message identity to per-platform message ids, which
 /// powers reply resolution and dedup.
@@ -87,6 +112,21 @@ pub struct ReplyContext {
     pub participant: Option<String>,
     pub text: Option<String>,
     pub attachments: Vec<Attachment>,
+}
+
+impl ReplyContext {
+    /// Quote a stored parent message under the native id its copy carries at
+    /// the target endpoint.
+    pub fn quoting(parent: Message, platform_message_id: String) -> Self {
+        Self {
+            message_id: parent.id,
+            platform_message_id,
+            sender: parent.sender,
+            participant: parent.participant,
+            text: parent.text,
+            attachments: parent.attachments,
+        }
+    }
 }
 
 /// Identifies an inbound platform event so the same message seen twice (e.g. on

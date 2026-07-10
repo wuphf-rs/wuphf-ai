@@ -2,8 +2,8 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use thiserror::Error;
 use wuphf_model::{
-    ConnectorCapabilities, ConnectorId, DeliveryOptions, DispatchCommand, EndpointId, Message,
-    MessageId, Platform, PlatformAddress, ReplyContext, Rule, RuleId, SideKind,
+    ConnectorCapabilities, ConnectorId, DeliveryOptions, DispatchCommand, EndpointId, MessageId,
+    Platform, PlatformAddress, Rule, RuleId, SideKind,
 };
 use wuphf_storage::{Storage, StorageError};
 
@@ -110,17 +110,6 @@ fn is_mirror_side(rule: &Rule, connector: &ConnectorId, container: &str) -> bool
         side.connector == *connector
             && matches!(&side.kind, SideKind::Mirror { container: c } if c == container)
     })
-}
-
-fn reply_context(message: Message, platform_message_id: String) -> ReplyContext {
-    ReplyContext {
-        message_id: message.id,
-        platform_message_id,
-        sender: message.sender,
-        participant: message.participant,
-        text: message.text,
-        attachments: message.attachments,
-    }
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]

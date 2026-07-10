@@ -48,6 +48,29 @@ pub struct ObservedMessage {
 const PREVIEW_MAX_CHARS: usize = 80;
 
 impl ObservedMessage {
+    /// Capture an inbound create as an observation-log row: incoming, not yet
+    /// edited or deleted. Borrows because the ingest path still owns the event
+    /// afterwards.
+    pub fn incoming(source: &SourceAddress, platform: Platform, inbound: &InboundMessage) -> Self {
+        Self {
+            connector_id: source.connector_id.clone(),
+            platform,
+            chat_id: source.address.chat_id.clone(),
+            thread_id: source.address.thread_id.clone(),
+            platform_message_id: inbound.platform_message_id.clone(),
+            sender: inbound.sender.clone(),
+            sender_name: inbound.sender_name.clone(),
+            participant: inbound.participant.clone(),
+            text: inbound.text.clone(),
+            attachments: inbound.attachments.clone(),
+            reply_to_platform_message_id: inbound.reply_to_platform_message_id.clone(),
+            direction: ObservedDirection::Incoming,
+            timestamp_ms: inbound.timestamp_ms,
+            deleted: false,
+            edited: false,
+        }
+    }
+
     /// A short one-line summary of this message for a chat list: the trimmed text
     /// (truncated), or a bracketed label for the first attachment when there is
     /// no text, or empty when the message carries neither.
