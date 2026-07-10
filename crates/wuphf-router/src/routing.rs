@@ -166,18 +166,22 @@ where
         observer_endpoint: EndpointId,
         kind: ReceiptKind,
     ) -> Result<RoutingOutcome, RouterError> {
-        self.fan_out_to_copies(message, observer_endpoint, |_connector, native_id| match kind {
-            ReceiptKind::Delivered => DispatchPayload::DeliveryAck {
-                message_id: message.id,
-                replica_set_id: message.replica_set_id,
-                target_platform_message_id: native_id,
+        self.fan_out_to_copies(
+            message,
+            observer_endpoint,
+            |_connector, native_id| match kind {
+                ReceiptKind::Delivered => DispatchPayload::DeliveryAck {
+                    message_id: message.id,
+                    replica_set_id: message.replica_set_id,
+                    target_platform_message_id: native_id,
+                },
+                ReceiptKind::Read => DispatchPayload::SeenReceipt {
+                    message_id: message.id,
+                    replica_set_id: message.replica_set_id,
+                    target_platform_message_id: native_id,
+                },
             },
-            ReceiptKind::Read => DispatchPayload::SeenReceipt {
-                message_id: message.id,
-                replica_set_id: message.replica_set_id,
-                target_platform_message_id: native_id,
-            },
-        })
+        )
         .await
     }
 

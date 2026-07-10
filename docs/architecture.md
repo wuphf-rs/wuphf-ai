@@ -18,25 +18,26 @@ are thin pipes.
 - **Replica set** — the set of endpoints that mirror each other. A message
   delivered to one member is dispatched to all the others, never back to the
   origin.
-- **Conversation** — the abstract unit a rule pairs across sides (one per source
-  chat), backed by one replica set.
+- **Conversation** — the abstract unit a rule pairs across its two ends (one
+  per source chat), backed by one replica set.
 
 ## Routing Rules
 
 Rules are the only routing input a user writes; conversations, endpoints, and
-replica sets are derived lazily at runtime. A `Rule` pairs two or more
-`RuleSide`s, each naming a connector and a `SideKind`:
+replica sets are derived lazily at runtime. A `RoutingRule` declares a flow
+between a source end and a destination end. The source end owns conversation
+identity; replication itself is two-way.
 
-- `single` — one fixed chat, optionally one thread.
-- `source` — every real chat on the connector, filtered by explicit
-  include/exclude id lists. Owns conversation identity.
-- `mirror` — one threaded container; the core provisions one thread per source
-  conversation on demand. Legal only on a connector that advertises both
-  `supports_threads` and `supports_topic_create`.
+- `one-to-one` — one fixed source chat mirrored into one fixed destination
+  chat (optionally a thread within it).
+- `many-to-one` — every chat on the source connector that passes the
+  `source_chats_filter` (`all` by default, or an `only` allowlist / `not`
+  blocklist of chats), each mirrored into its own thread provisioned on demand
+  inside the destination container chat. Legal only when the destination
+  connector advertises both `supports_threads` and `supports_topic_create`.
 
-The canonical topology is **source → mirror** (e.g. every WhatsApp chat mirrored
-into its own Telegram forum topic). A `source` paired only with `single` is
-rejected because it would collapse chats without separation.
+The canonical topology is **many-to-one** (e.g. every WhatsApp chat mirrored
+into its own Telegram forum topic).
 
 ## Data Flow
 

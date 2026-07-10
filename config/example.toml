@@ -40,46 +40,44 @@ delete_mode = "revoke"
 attachments_as_files = false
 # max_message_length = 4096
 
-#                       # One fixed WhatsApp chat mirrored one-to-one into one fixed Telegram topic.
-#                       [[rules]]
-#                       id = "direct-pair"
+# Rules declare a flow between a source and a destination. The source end owns
+# conversation identity; replication itself is two-way.
 #
-#                       [[rules.sides]]
-#                       connector = "whatsapp-main"
-#                       kind = "single"
-#                       chat_id = "12345@s.whatsapp.net"
+# `kind = "one-to-one"`: one fixed source chat mirrored into one fixed
+# destination chat (optionally a thread within it):
 #
-#                       [[rules.sides]]
-#                       connector = "telegram-main"
-#                       kind = "single"
-#                       chat_id = "-100123"
-#                       thread_id = "12"
+# [[rules]]
+# id = "direct-pair"
+#
+# [rules.flow]
+# kind = "one-to-one"
+# source_connector = "whatsapp-main"
+# source_chat = { chat_id = "12345@s.whatsapp.net" }
+# destination_connector = "telegram-main"
+# destination_chat = { chat_id = "-100123", thread_id = "12" }
 
-# Every WhatsApp chat (the identity source) fanned into one Telegram supergroup,
-# with one topic auto-created per source conversation. `include`/`exclude` are
-# explicit chat-id lists; an empty `include` means "all chats".
+# `kind = "many-to-one"`: every chat on the source connector that passes the
+# filter, each mirrored into its own topic auto-created inside the destination
+# container chat. `source_chats_filter` defaults to every chat; restrict it
+# with kind = "only" (allowlist) or kind = "not" (blocklist):
+#
+# [rules.flow.source_chats_filter]
+# kind = "not"
+# chats = [{ chat_id = "12345@s.whatsapp.net" }]
 [[rules]]
 id = "wa-to-telegram-mirror"
 
-[[rules.sides]]
-connector = "whatsapp-main"
-kind = "source"
-exclude = []
-
-[[rules.sides]]
-connector = "telegram-main"
-kind = "mirror"
-container = "telegram:channel:2060340733"
+[rules.flow]
+kind = "many-to-one"
+source_connector = "whatsapp-main"
+destination_connector = "telegram-main"
+destination_chat = { chat_id = "telegram:channel:2060340733" }
 
 [[rules]]
 id = "ig-to-telegram-mirror"
 
-[[rules.sides]]
-connector = "instagram-main"
-kind = "source"
-exclude = []
-
-[[rules.sides]]
-connector = "telegram-main"
-kind = "mirror"
-container = "telegram:channel:2060340733"
+[rules.flow]
+kind = "many-to-one"
+source_connector = "instagram-main"
+destination_connector = "telegram-main"
+destination_chat = { chat_id = "telegram:channel:2060340733" }

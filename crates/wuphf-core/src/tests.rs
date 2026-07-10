@@ -2,8 +2,8 @@ use super::*;
 use std::collections::HashMap;
 use wuphf_model::{
     Attachment, AttachmentKind, ConnectorCapabilities, DispatchAcknowledgement, DispatchPayload,
-    InboundMessage, MediaBlob, MediaId, Platform, PlatformAddress, ReceiptKind, Rule, RuleId,
-    RuleSide, SourceAddress,
+    InboundMessage, MediaBlob, MediaId, Platform, PlatformAddress, ReceiptKind, RoutingRule,
+    RoutingRuleFlow, RuleChat, RuleChatsFilter, RuleId, SourceAddress,
 };
 use wuphf_storage::InMemoryStorage;
 
@@ -34,50 +34,45 @@ fn connectors() -> HashMap<ConnectorId, ConnectorInfo> {
     ])
 }
 
-fn direct_rule() -> Rule {
-    Rule {
+fn direct_rule() -> RoutingRule {
+    RoutingRule {
         id: RuleId("direct".into()),
-        sides: vec![
-            RuleSide {
-                connector: ConnectorId(WHATSAPP.into()),
-                kind: SideKind::Single {
-                    chat_id: "12345@s.whatsapp.net".into(),
-                    thread_id: None,
-                },
+        flow: RoutingRuleFlow::OneToOne {
+            source_connector: ConnectorId(WHATSAPP.into()),
+            source_chat: RuleChat {
+                chat_id: "12345@s.whatsapp.net".into(),
+                thread_id: None,
             },
-            RuleSide {
-                connector: ConnectorId(TELEGRAM.into()),
-                kind: SideKind::Single {
-                    chat_id: "-100123".into(),
-                    thread_id: Some("12".into()),
-                },
+            destination_connector: ConnectorId(TELEGRAM.into()),
+            destination_chat: RuleChat {
+                chat_id: "-100123".into(),
+                thread_id: Some("12".into()),
             },
-        ],
+        },
     }
 }
 
-fn mirror_rule() -> Rule {
-    Rule {
+fn mirror_rule() -> RoutingRule {
+    RoutingRule {
         id: RuleId("wa-mirror".into()),
-        sides: vec![
-            RuleSide {
-                connector: ConnectorId(WHATSAPP.into()),
-                kind: SideKind::Source {
-                    include: vec!["111@g.us".into()],
-                    exclude: vec![],
-                },
+        flow: RoutingRuleFlow::ManyToOne {
+            source_connector: ConnectorId(WHATSAPP.into()),
+            source_chats_filter: RuleChatsFilter::Only {
+                chats: vec![RuleChat {
+                    chat_id: "111@g.us".into(),
+                    thread_id: None,
+                }],
             },
-            RuleSide {
-                connector: ConnectorId(TELEGRAM.into()),
-                kind: SideKind::Mirror {
-                    container: "-1001234567".into(),
-                },
+            destination_connector: ConnectorId(TELEGRAM.into()),
+            destination_chat: RuleChat {
+                chat_id: "-1001234567".into(),
+                thread_id: None,
             },
-        ],
+        },
     }
 }
 
-fn core(rules: Vec<Rule>) -> Core<InMemoryStorage> {
+fn core(rules: Vec<RoutingRule>) -> Core<InMemoryStorage> {
     let storage = Arc::new(InMemoryStorage::default());
     let config = Arc::new(RoutingConfig::new(rules, connectors()));
     Core::new(storage, config)

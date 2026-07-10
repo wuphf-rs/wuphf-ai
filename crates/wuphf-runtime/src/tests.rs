@@ -9,7 +9,8 @@ use tonic::transport::Server;
 use wuphf_core::{ConnectorInfo, RoutingConfig};
 use wuphf_model::{
     ConnectorCapabilities, ConnectorId, ConnectorInput, ConnectorOutput, ConnectorRegistration,
-    DispatchPayload, EventPayload, InboundMessage, Platform, Rule, RuleId, RuleSide, SideKind,
+    DispatchPayload, EventPayload, InboundMessage, Platform, RoutingRule, RoutingRuleFlow,
+    RuleChat, RuleId,
 };
 use wuphf_proto::connector as pb;
 use wuphf_proto::connector::connector_transport_client::ConnectorTransportClient;
@@ -21,25 +22,21 @@ use wuphf_storage::InMemoryStorage;
 const WA: &str = "whatsapp-main";
 const TG: &str = "telegram-main";
 
-fn rules() -> Vec<Rule> {
-    vec![Rule {
+fn rules() -> Vec<RoutingRule> {
+    vec![RoutingRule {
         id: RuleId("direct".into()),
-        sides: vec![
-            RuleSide {
-                connector: ConnectorId(WA.into()),
-                kind: SideKind::Single {
-                    chat_id: "wa-chat".into(),
-                    thread_id: None,
-                },
+        flow: RoutingRuleFlow::OneToOne {
+            source_connector: ConnectorId(WA.into()),
+            source_chat: RuleChat {
+                chat_id: "wa-chat".into(),
+                thread_id: None,
             },
-            RuleSide {
-                connector: ConnectorId(TG.into()),
-                kind: SideKind::Single {
-                    chat_id: "tg-chat".into(),
-                    thread_id: Some("topic".into()),
-                },
+            destination_connector: ConnectorId(TG.into()),
+            destination_chat: RuleChat {
+                chat_id: "tg-chat".into(),
+                thread_id: Some("topic".into()),
             },
-        ],
+        },
     }]
 }
 

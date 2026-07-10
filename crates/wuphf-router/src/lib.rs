@@ -3,7 +3,7 @@ use std::sync::Arc;
 use thiserror::Error;
 use wuphf_model::{
     ConnectorCapabilities, ConnectorId, DeliveryOptions, DispatchCommand, EndpointId, MessageId,
-    Platform, PlatformAddress, Rule, RuleId, SideKind,
+    Platform, PlatformAddress, RoutingRule, RoutingRuleFlow, RuleEnd, RuleId,
 };
 use wuphf_storage::{Storage, StorageError};
 
@@ -23,22 +23,22 @@ pub struct ConnectorInfo {
 /// The rule set plus connector metadata that drives address resolution and
 /// thread provisioning. Shared by the core and the router.
 pub struct RoutingConfig {
-    rules: Vec<Rule>,
+    rules: Vec<RoutingRule>,
     connectors: HashMap<ConnectorId, ConnectorInfo>,
 }
 
-/// The side of a rule that an inbound address matched.
-pub struct MatchedSide<'a> {
-    pub rule: &'a Rule,
-    pub origin_side: usize,
+/// The end of a rule that an inbound address matched.
+pub struct MatchedRule<'a> {
+    pub rule: &'a RoutingRule,
+    pub origin: RuleEnd,
 }
 
 impl RoutingConfig {
-    pub fn new(rules: Vec<Rule>, connectors: HashMap<ConnectorId, ConnectorInfo>) -> Self {
+    pub fn new(rules: Vec<RoutingRule>, connectors: HashMap<ConnectorId, ConnectorInfo>) -> Self {
         Self { rules, connectors }
     }
 
-    pub fn rule(&self, id: &RuleId) -> Option<&Rule> {
+    pub fn rule(&self, id: &RuleId) -> Option<&RoutingRule> {
         self.rules.iter().find(|rule| rule.id == *id)
     }
 
@@ -54,40 +54,20 @@ impl RoutingConfig {
             .unwrap_or_default()
     }
 
-    /// The first rule side whose connector and selector accept this address.
+    /// The first rule end whose connector and selector accept this address.
     pub fn match_source(
         &self,
         connector: &ConnectorId,
         address: &PlatformAddress,
-    ) -> Option<MatchedSide<'_>> {
+    ) -> Option<MatchedRule<'_>> {
         for rule in &self.rules {
-            for (index, side) in rule.sides.iter().enumerate() {
-                if side.connector != *connector {
-                    continue;
-                }
-                if side_accepts(&side.kind, address) {
-                    return Some(MatchedSide {
-                        rule,
-                        origin_side: index,
-                    });
+            for end in [RuleEnd::Source, RuleEnd::Destination] {
+                if rule.flow.end_accepts(end, connector, address) {
+                    return Some(MatchedRule { rule, origin: end });
                 }
             }
         }
         None
-    }
-}
-
-/// Whether a side's selector accepts a platform address.
-pub fn side_accepts(kind: &SideKind, address: &PlatformAddress) -> bool {
-    match kind {
-        SideKind::Single { chat_id, thread_id } => {
-            address.chat_id == *chat_id && address.thread_id == *thread_id
-        }
-        SideKind::Source { include, exclude } => {
-            (include.is_empty() || include.contains(&address.chat_id))
-                && !exclude.contains(&address.chat_id)
-        }
-        SideKind::Mirror { container } => address.chat_id == *container,
     }
 }
 
@@ -105,11 +85,15 @@ where
     }
 }
 
-fn is_mirror_side(rule: &Rule, connector: &ConnectorId, container: &str) -> bool {
-    rule.sides.iter().any(|side| {
-        side.connector == *connector
-            && matches!(&side.kind, SideKind::Mirror { container: c } if c == container)
-    })
+fn is_mirror_side(rule: &RoutingRule, connector: &ConnectorId, container: &str) -> bool {
+    match &rule.flow {
+        RoutingRuleFlow::OneToOne { .. } => false,
+        RoutingRuleFlow::ManyToOne {
+            destination_connector,
+            destination_chat,
+            ..
+        } => destination_connector == connector && destination_chat.chat_id == container,
+    }
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]

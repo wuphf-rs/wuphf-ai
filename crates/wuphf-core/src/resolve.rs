@@ -2,10 +2,10 @@
 //! minting the endpoint, conversation, and replica set on first sighting when a
 //! rule matches.
 
-use crate::{Core, CoreError, identity_side_index};
+use crate::{Core, CoreError};
 use wuphf_model::{
     Alias, ConnectorId, Conversation, ConversationId, Endpoint, EndpointId, PlatformAddress,
-    ReplicaSet, ReplicaSetId, Rule, SideKind, SourceAddress,
+    ReplicaSet, ReplicaSetId, RoutingRuleFlow, RuleEnd, RuleId, SourceAddress,
 };
 use wuphf_storage::Storage;
 
@@ -14,9 +14,10 @@ where
     S: Storage,
 {
     /// Resolve a raw inbound address to its endpoint, lazily minting the
-    /// endpoint, conversation, and replica set on first sighting when a
-    /// rule matches. Returns `None` when the address matches no rule, or matches
-    /// only a mirror side with no provisioned thread (an unmapped topic).
+    /// endpoint, conversation, and replica set on first sighting when a rule
+    /// matches. Returns `None` when the address matches no rule, or matches
+    /// only a many-to-one destination with no provisioned thread (an unmapped
+    /// topic in the container).
     pub(crate) async fn resolve_origin(
         &self,
         source: &SourceAddress,
@@ -36,32 +37,35 @@ where
             return Ok(None);
         };
         let rule = matched.rule.clone();
-        if matches!(
-            rule.sides[matched.origin_side].kind,
-            SideKind::Mirror { .. }
-        ) {
+        let origin_end = matched.origin;
+        // A first sighting arriving on a many-to-one destination is a message
+        // in a thread no conversation has claimed yet: conversations are minted
+        // from the source end, so there is nothing to bind it to.
+        if origin_end == RuleEnd::Destination
+            && matches!(rule.flow, RoutingRuleFlow::ManyToOne { .. })
+        {
             return Ok(None);
         }
 
-        let identity_side = identity_side_index(&rule);
-        let identity_address = match &rule.sides[identity_side].kind {
-            SideKind::Single { chat_id, thread_id } => {
-                PlatformAddress::new(chat_id.clone(), thread_id.clone())
-            }
-            SideKind::Source { .. } => source.address.clone(),
-            SideKind::Mirror { .. } => unreachable!("identity side is never a mirror"),
+        // The source end owns conversation identity: a one-to-one rule is keyed
+        // by its fixed source chat, a many-to-one rule by the actual source
+        // chat this event arrived on.
+        let identity_address = match &rule.flow {
+            RoutingRuleFlow::OneToOne { source_chat, .. } => source_chat.address(),
+            RoutingRuleFlow::ManyToOne { .. } => source.address.clone(),
         };
+        let identity_connector = rule.flow.connector(RuleEnd::Source).clone();
 
         let conversation = self
-            .ensure_conversation(&rule, identity_side, &identity_address)
+            .ensure_conversation(&rule.id, identity_connector, &identity_address)
             .await?;
 
         let mut origin = None;
-        for index in 0..rule.sides.len() {
+        for end in [RuleEnd::Source, RuleEnd::Destination] {
             let endpoint = self
-                .ensure_side_endpoint(&conversation, &rule, index, &identity_address)
+                .ensure_end_endpoint(&conversation, &rule.flow, end, &identity_address)
                 .await?;
-            if index == matched.origin_side {
+            if end == origin_end {
                 origin = Some(endpoint);
             }
         }
@@ -72,14 +76,13 @@ where
     /// (with an empty replica set) on first sighting.
     async fn ensure_conversation(
         &self,
-        rule: &Rule,
-        identity_side: usize,
+        rule_id: &RuleId,
+        identity_connector: ConnectorId,
         identity_address: &PlatformAddress,
     ) -> Result<Conversation, CoreError> {
-        let identity_connector = rule.sides[identity_side].connector.clone();
         if let Some(existing) = self
             .storage
-            .conversation_for_source(&rule.id, &identity_connector, identity_address)
+            .conversation_for_source(rule_id, &identity_connector, identity_address)
             .await?
         {
             return Ok(existing);
@@ -93,7 +96,7 @@ where
             .await?;
         let conversation = Conversation {
             id: ConversationId::new(),
-            rule_id: rule.id.clone(),
+            rule_id: rule_id.clone(),
             replica_set_id,
             source_connector: identity_connector,
             source_address: identity_address.clone(),
@@ -103,38 +106,48 @@ where
         Ok(conversation)
     }
 
-    /// Get or mint the endpoint for one rule side, joining it to the
-    /// conversation's replica set. Single and source sides record a canonical alias;
-    /// a mirror side gets no alias until its thread is provisioned.
-    async fn ensure_side_endpoint(
+    /// Get or mint the endpoint for one end of a rule's flow, joining it to the
+    /// conversation's replica set. Fixed chats and many-to-one sources record a
+    /// canonical alias; a many-to-one destination gets no alias until its
+    /// thread is provisioned, so it is found through the replica set instead.
+    async fn ensure_end_endpoint(
         &self,
         conversation: &Conversation,
-        rule: &Rule,
-        side_index: usize,
+        flow: &RoutingRuleFlow,
+        end: RuleEnd,
         identity_address: &PlatformAddress,
     ) -> Result<EndpointId, CoreError> {
-        let side = &rule.sides[side_index];
-        let (address, with_alias) = match &side.kind {
-            SideKind::Single { chat_id, thread_id } => (
-                PlatformAddress::new(chat_id.clone(), thread_id.clone()),
-                true,
-            ),
-            SideKind::Source { .. } => (identity_address.clone(), true),
-            SideKind::Mirror { container } => {
-                (PlatformAddress::new(container.clone(), None), false)
+        let connector = flow.connector(end).clone();
+        let (address, with_alias) = match (flow, end) {
+            (RoutingRuleFlow::OneToOne { source_chat, .. }, RuleEnd::Source) => {
+                (source_chat.address(), true)
             }
+            (
+                RoutingRuleFlow::OneToOne {
+                    destination_chat, ..
+                },
+                RuleEnd::Destination,
+            ) => (destination_chat.address(), true),
+            (RoutingRuleFlow::ManyToOne { .. }, RuleEnd::Source) => {
+                (identity_address.clone(), true)
+            }
+            (
+                RoutingRuleFlow::ManyToOne {
+                    destination_chat, ..
+                },
+                RuleEnd::Destination,
+            ) => (
+                PlatformAddress::new(destination_chat.chat_id.clone(), None),
+                false,
+            ),
         };
 
         if with_alias {
-            if let Some(endpoint) = self
-                .storage
-                .resolve_endpoint(&side.connector, &address)
-                .await?
-            {
+            if let Some(endpoint) = self.storage.resolve_endpoint(&connector, &address).await? {
                 return Ok(endpoint);
             }
         } else if let Some(endpoint) = self
-            .endpoint_in_replica_set(conversation.replica_set_id, &side.connector)
+            .endpoint_in_replica_set(conversation.replica_set_id, &connector)
             .await?
         {
             return Ok(endpoint);
@@ -142,11 +155,11 @@ where
 
         let info = self
             .config
-            .connector(&side.connector)
-            .ok_or_else(|| CoreError::UnknownConnector(side.connector.clone()))?;
+            .connector(&connector)
+            .ok_or_else(|| CoreError::UnknownConnector(connector.clone()))?;
         let endpoint = Endpoint {
             id: EndpointId::new(),
-            connector_id: side.connector.clone(),
+            connector_id: connector.clone(),
             platform: info.platform.clone(),
             chat_id: address.chat_id.clone(),
             thread_id: address.thread_id.clone(),
@@ -155,7 +168,7 @@ where
         if with_alias {
             self.storage
                 .put_alias(Alias {
-                    connector_id: side.connector.clone(),
+                    connector_id: connector,
                     address,
                     endpoint_id: endpoint.id,
                     is_canonical: true,

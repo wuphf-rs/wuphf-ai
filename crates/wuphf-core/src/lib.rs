@@ -3,7 +3,7 @@ use std::sync::{Arc, Mutex};
 use thiserror::Error;
 use wuphf_model::{
     ConnectorId, DispatchId, EndpointId, EventPayload, MediaId, Message, MessageId,
-    NormalizedEvent, Platform, ReplicaSetId, Rule, SideKind, StoredDispatch,
+    NormalizedEvent, Platform, ReplicaSetId, StoredDispatch,
 };
 use wuphf_router::{Router, RouterError, RoutingOutcome};
 use wuphf_storage::{Storage, StorageError};
@@ -132,20 +132,6 @@ where
             }
         }
     }
-}
-
-/// The identity-owning side of a rule: the source side if one exists, otherwise
-/// the first single side. Used to key the conversation deterministically.
-fn identity_side_index(rule: &Rule) -> usize {
-    rule.sides
-        .iter()
-        .position(|side| matches!(side.kind, SideKind::Source { .. }))
-        .or_else(|| {
-            rule.sides
-                .iter()
-                .position(|side| matches!(side.kind, SideKind::Single { .. }))
-        })
-        .expect("a rule has at least one single or source side")
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

@@ -5,7 +5,8 @@ use std::{collections::HashMap, net::SocketAddr, path::PathBuf, sync::Arc, time:
 use tonic::transport::Server;
 use wuphf_core::{ConnectorInfo, Core, RoutingConfig};
 use wuphf_model::{
-    ConnectorCapabilities, ConnectorId, ConnectorRegistration, DeliveryOptions, Platform, Rule,
+    ConnectorCapabilities, ConnectorId, ConnectorRegistration, DeliveryOptions, Platform,
+    RoutingRule,
 };
 use wuphf_proto::connector::connector_transport_server::ConnectorTransportServer;
 use wuphf_proto::connector::media_transport_server::MediaTransportServer;
@@ -49,7 +50,7 @@ struct Configuration {
     #[serde(default)]
     connectors: Vec<ConnectorConfiguration>,
     #[serde(default)]
-    rules: Vec<Rule>,
+    rules: Vec<RoutingRule>,
 }
 
 fn default_max_media_bytes() -> usize {
@@ -169,5 +170,81 @@ fn platform(name: &str) -> Result<Platform> {
         "instagram" => Ok(Platform::Instagram),
         _ if name.starts_with("other:") => Ok(Platform::Other(name[6..].to_owned())),
         _ => bail!("unsupported platform {name}"),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use wuphf_model::{RoutingRuleFlow, RuleChatsFilter};
+
+    /// The shipped example config is the reference for the rule format; it must
+    /// always parse, and its flows must land in the expected variants.
+    #[test]
+    fn example_configuration_parses() {
+        let configuration: Configuration =
+            toml::from_str(include_str!("../../../config/example.toml")).unwrap();
+        assert_eq!(configuration.rules.len(), 2);
+        for rule in &configuration.rules {
+            let RoutingRuleFlow::ManyToOne {
+                source_chats_filter,
+                destination_chat,
+                ..
+            } = &rule.flow
+            else {
+                panic!("example rules are many-to-one mirrors");
+            };
+            assert_eq!(*source_chats_filter, RuleChatsFilter::All);
+            assert_eq!(destination_chat.chat_id, "telegram:channel:2060340733");
+        }
+    }
+
+    #[test]
+    fn one_to_one_rule_and_filters_parse() {
+        let configuration: Configuration = toml::from_str(
+            r#"
+            listen = "127.0.0.1:50051"
+            database_url = "sqlite://test.sqlite"
+
+            [[rules]]
+            id = "direct"
+            [rules.flow]
+            kind = "one-to-one"
+            source_connector = "whatsapp-main"
+            source_chat = { chat_id = "123@s.whatsapp.net" }
+            destination_connector = "telegram-main"
+            destination_chat = { chat_id = "-100123", thread_id = "12" }
+
+            [[rules]]
+            id = "filtered-mirror"
+            [rules.flow]
+            kind = "many-to-one"
+            source_connector = "whatsapp-main"
+            destination_connector = "telegram-main"
+            destination_chat = { chat_id = "-100999" }
+            [rules.flow.source_chats_filter]
+            kind = "not"
+            chats = [{ chat_id = "spam@g.us" }]
+            "#,
+        )
+        .unwrap();
+        let RoutingRuleFlow::OneToOne {
+            source_chat,
+            destination_chat,
+            ..
+        } = &configuration.rules[0].flow
+        else {
+            panic!("first rule is one-to-one");
+        };
+        assert_eq!(source_chat.chat_id, "123@s.whatsapp.net");
+        assert_eq!(destination_chat.thread_id.as_deref(), Some("12"));
+        let RoutingRuleFlow::ManyToOne {
+            source_chats_filter: RuleChatsFilter::Not { chats },
+            ..
+        } = &configuration.rules[1].flow
+        else {
+            panic!("second rule is a filtered mirror");
+        };
+        assert_eq!(chats[0].chat_id, "spam@g.us");
     }
 }
