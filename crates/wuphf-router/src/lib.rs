@@ -2,20 +2,12 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use thiserror::Error;
 use wuphf_model::{
-    ConnectorCapabilities, ConnectorId, DispatchCommand, EndpointId, MessageId, Platform,
-    PlatformAddress, RoutingRule, RoutingRuleFlow, RuleEnd, RuleId,
+    ConnectorId, ConnectorInfo, EndpointId, MessageId, PlatformAddress, RoutingRule,
+    RoutingRuleFlow, RuleEnd, RuleId,
 };
 use wuphf_storage::{Storage, StorageError};
 
 mod routing;
-
-/// Static per-connector facts the core learns at registration: the platform it
-/// speaks and the capabilities it advertises (used to gate mirror sides).
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct ConnectorInfo {
-    pub platform: Platform,
-    pub capabilities: ConnectorCapabilities,
-}
 
 /// The rule set plus connector metadata that drives address resolution and
 /// thread provisioning. Shared by the core and the router.
@@ -83,18 +75,6 @@ fn is_mirror_side(rule: &RoutingRule, connector: &ConnectorId, container: &str) 
             ..
         } => destination_connector == connector && destination_chat.chat_id == container,
     }
-}
-
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub struct RoutingOutcome {
-    pub dispatches: Vec<DispatchCommand>,
-    pub blocked: Vec<BlockedDispatch>,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct BlockedDispatch {
-    pub command: DispatchCommand,
-    pub waiting_for_message: MessageId,
 }
 
 #[derive(Debug, Error)]

@@ -174,3 +174,88 @@ pub struct DispatchAcknowledgement {
     #[serde(default)]
     pub thread_id: Option<String>,
 }
+
+/// The dispatch commands one routing pass produced: the sendable ones plus the
+/// ones blocked behind a message that has not been delivered yet.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct RoutingOutcome {
+    pub dispatches: Vec<DispatchCommand>,
+    pub blocked: Vec<BlockedDispatch>,
+}
+
+/// A dispatch command held until another message is delivered (its reply
+/// parent, or the copy an edit/delete/reaction must address by native id).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct BlockedDispatch {
+    pub command: DispatchCommand,
+    pub waiting_for_message: MessageId,
+}
+
+/// The core's verdict on one ingested connector event.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum IngestOutcome {
+    Routed {
+        message_id: MessageId,
+        routing: RoutingOutcome,
+        dispatches: Vec<StoredDispatch>,
+    },
+    /// Held because the conversation's mirror thread is still being
+    /// provisioned; the message is replayed once the thread exists.
+    Deferred {
+        message_id: MessageId,
+    },
+    Ignored(IgnoreReason),
+}
+
+impl IngestOutcome {
+    pub fn dispatches(&self) -> &[StoredDispatch] {
+        match self {
+            Self::Routed { dispatches, .. } => dispatches,
+            Self::Deferred { .. } | Self::Ignored(_) => &[],
+        }
+    }
+}
+
+/// Why an ingested event produced no dispatches.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum IgnoreReason {
+    DuplicateEvent,
+    SentMessageEcho,
+    Unmatched,
+    /// An edit that leaves the stored text unchanged: a redundant report or our
+    /// own mirrored edit echoed back by the platform.
+    RedundantEdit,
+    /// A delete of an already-revoked message: a redundant report or our own
+    /// mirrored delete echoed back by the platform.
+    RedundantDelete,
+}
+
+/// The sender identity stamped on owner-authored raw sends. Platforms deliver
+/// the message from the owner's own account, so this label only surfaces in the
+/// bridge's own records and mirror renderings.
+pub const RAW_SENDER: &str = "me";
+
+/// An owner-authored outbound text addressed by raw platform coordinates.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RawOutbound {
+    pub connector_id: ConnectorId,
+    pub chat_id: String,
+    pub thread_id: Option<String>,
+    pub text: String,
+    /// Native id of the message this send replies to, when known. Resolved
+    /// best-effort: a reply to a message the bridge never stored sends as a
+    /// plain message rather than failing.
+    pub reply_to_platform_message_id: Option<String>,
+    /// Send time in epoch milliseconds, supplied by the caller so the core
+    /// stays clock-free.
+    pub timestamp_ms: i64,
+}
+
+/// The dispatches a raw send produced: the direct delivery to the addressed
+/// chat, plus any mirror copies routing fanned out (empty for unrouted chats
+/// and for sends deferred behind mirror-thread provisioning).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RawSendOutcome {
+    pub direct: StoredDispatch,
+    pub mirrored: Vec<StoredDispatch>,
+}

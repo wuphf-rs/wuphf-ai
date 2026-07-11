@@ -11,8 +11,9 @@ use std::time::Duration;
 use tokio::sync::{broadcast, mpsc};
 use tokio_stream::{Stream, wrappers::ReceiverStream};
 use tonic::{Request, Response, Status};
-use wuphf_core::RawOutbound;
-use wuphf_model::{ConnectorId, ObservedChat, ObservedDirection, ObservedMessage, Platform};
+use wuphf_model::{
+    ConnectorId, ObservedChat, ObservedDirection, ObservedMessage, Platform, RawOutbound,
+};
 use wuphf_proto::connector as pb;
 use wuphf_proto::connector::observer_transport_server::ObserverTransport;
 use wuphf_storage::Storage;

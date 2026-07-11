@@ -3,9 +3,9 @@ use clap::{Parser, Subcommand};
 use serde::Deserialize;
 use std::{collections::HashMap, net::SocketAddr, path::PathBuf, sync::Arc, time::Duration};
 use tonic::transport::Server;
-use wuphf_core::{ConnectorInfo, Core, RoutingConfig};
+use wuphf_core::{Core, RoutingConfig};
 use wuphf_model::{
-    ConnectorCapabilities, ConnectorId, ConnectorRegistration, Platform, RoutingRule,
+    ConnectorCapabilities, ConnectorId, ConnectorInfo, ConnectorRegistration, Platform, RoutingRule,
 };
 use wuphf_proto::connector::connector_transport_server::ConnectorTransportServer;
 use wuphf_proto::connector::media_transport_server::MediaTransportServer;

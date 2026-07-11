@@ -6,12 +6,47 @@
 use crate::*;
 use serde::{Deserialize, Serialize};
 
-/// Capabilities a connector advertises at registration. A `Mirror` side is only
-/// legal on a connector that supports both.
+/// Capabilities a connector advertises at registration. A many-to-one
+/// destination is only legal on a connector that supports both.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ConnectorCapabilities {
     pub supports_threads: bool,
     pub supports_topic_create: bool,
+}
+
+/// Static per-connector facts the core learns at registration: the platform it
+/// speaks and the capabilities it advertises (used to gate rule ends).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ConnectorInfo {
+    pub platform: Platform,
+    pub capabilities: ConnectorCapabilities,
+}
+
+/// A terminal dispatch failure reported by a connector: `(dispatch, reason)`.
+pub type DispatchFailure = (DispatchId, String);
+
+/// Ordered inbound work from one connector: a normalized event or an identity
+/// migration. Both travel one per-connector path so the connector's frame order
+/// is preserved end to end. A migration that precedes a message is applied
+/// before that message is ingested, so the message cannot mint a fresh endpoint
+/// under an address the migration was meant to rebind.
+pub enum InboundWork {
+    Event(NormalizedEvent),
+    Migration {
+        connector_id: ConnectorId,
+        old: PlatformAddress,
+        new: PlatformAddress,
+    },
+}
+
+impl InboundWork {
+    /// The connector this work arrived from, keying its ordered worker queue.
+    pub fn connector_id(&self) -> &ConnectorId {
+        match self {
+            InboundWork::Event(event) => &event.source.connector_id,
+            InboundWork::Migration { connector_id, .. } => connector_id,
+        }
+    }
 }
 
 /// A connector declared in core configuration. Endpoints are no longer

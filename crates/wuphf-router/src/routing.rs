@@ -3,10 +3,11 @@
 //! provisioning and blocking dispatches whose reply parent or target copy does
 //! not yet exist.
 
-use crate::{BlockedDispatch, Router, RouterError, RoutingOutcome, is_mirror_side};
+use crate::{Router, RouterError, is_mirror_side};
 use wuphf_model::{
-    ConnectorId, Conversation, DispatchCommand, DispatchPayload, Endpoint, EndpointId, Message,
-    PlatformAddress, ProvisionThread, ReceiptKind, ReplyContext, TargetAddress,
+    BlockedDispatch, ConnectorId, Conversation, DispatchCommand, DispatchPayload, Endpoint,
+    EndpointId, Message, PlatformAddress, ProvisionThread, ReceiptKind, ReplyContext,
+    RoutingOutcome, TargetAddress,
 };
 use wuphf_storage::Storage;
 

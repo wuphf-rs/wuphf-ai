@@ -2,20 +2,18 @@ use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
 use thiserror::Error;
 use wuphf_model::{
-    ConnectorId, DispatchId, EndpointId, EventPayload, MediaId, Message, MessageId,
-    NormalizedEvent, Platform, ReplicaSetId, StoredDispatch,
+    ConnectorId, DispatchId, EndpointId, EventPayload, IgnoreReason, IngestOutcome, MediaId,
+    Message, MessageId, NormalizedEvent, Platform, ReplicaSetId,
 };
-use wuphf_router::{Router, RouterError, RoutingOutcome};
+use wuphf_router::{Router, RouterError};
 use wuphf_storage::{Storage, StorageError};
 
-pub use wuphf_router::{ConnectorInfo, RoutingConfig};
+pub use wuphf_router::RoutingConfig;
 
 mod acknowledge;
 mod ingest;
 mod resolve;
 mod send;
-
-pub use send::{RAW_SENDER, RawOutbound, RawSendOutcome};
 
 pub struct Core<S> {
     storage: Arc<S>,
@@ -132,43 +130,6 @@ where
             }
         }
     }
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum IngestOutcome {
-    Routed {
-        message_id: MessageId,
-        routing: RoutingOutcome,
-        dispatches: Vec<StoredDispatch>,
-    },
-    /// Held because the conversation's mirror thread is still being
-    /// provisioned; the message is replayed once the thread exists.
-    Deferred {
-        message_id: MessageId,
-    },
-    Ignored(IgnoreReason),
-}
-
-impl IngestOutcome {
-    pub fn dispatches(&self) -> &[StoredDispatch] {
-        match self {
-            Self::Routed { dispatches, .. } => dispatches,
-            Self::Deferred { .. } | Self::Ignored(_) => &[],
-        }
-    }
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum IgnoreReason {
-    DuplicateEvent,
-    SentMessageEcho,
-    Unmatched,
-    /// An edit that leaves the stored text unchanged: a redundant report or our
-    /// own mirrored edit echoed back by the platform.
-    RedundantEdit,
-    /// A delete of an already-revoked message: a redundant report or our own
-    /// mirrored delete echoed back by the platform.
-    RedundantDelete,
 }
 
 #[derive(Debug, Error)]

@@ -1,9 +1,10 @@
 use super::*;
 use std::collections::HashMap;
 use wuphf_model::{
-    Attachment, AttachmentKind, ConnectorCapabilities, DispatchAcknowledgement, DispatchPayload,
-    InboundMessage, MediaBlob, MediaId, Platform, PlatformAddress, ReceiptKind, RoutingRule,
-    RoutingRuleFlow, RuleChat, RuleChatsFilter, RuleId, SourceAddress,
+    Attachment, AttachmentKind, ConnectorCapabilities, ConnectorInfo, DispatchAcknowledgement,
+    DispatchPayload, InboundMessage, MediaBlob, MediaId, Platform, PlatformAddress, RAW_SENDER,
+    RawOutbound, ReceiptKind, RoutingRule, RoutingRuleFlow, RuleChat, RuleChatsFilter, RuleId,
+    SourceAddress,
 };
 use wuphf_storage::InMemoryStorage;
 

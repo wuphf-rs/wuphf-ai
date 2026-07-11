@@ -9,8 +9,10 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use thiserror::Error;
 use tokio::sync::{mpsc, oneshot};
-use wuphf_core::{Core, CoreError, RAW_SENDER, RawOutbound};
-use wuphf_model::{ObservedDirection, ObservedMessage, Platform, StoredDispatch};
+use wuphf_core::{Core, CoreError};
+use wuphf_model::{
+    ObservedDirection, ObservedMessage, Platform, RAW_SENDER, RawOutbound, StoredDispatch,
+};
 use wuphf_storage::Storage;
 
 use crate::Observer;

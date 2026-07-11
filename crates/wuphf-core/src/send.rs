@@ -15,40 +15,10 @@
 use crate::{Core, CoreError, StashedMessage};
 use wuphf_model::{
     Alias, ConnectorId, DispatchCommand, DispatchPayload, Endpoint, EndpointId, Message, MessageId,
-    PlatformAddress, ReplicaSet, ReplicaSetId, ReplyContext, SourceAddress, StoredDispatch,
-    TargetAddress,
+    PlatformAddress, RAW_SENDER, RawOutbound, RawSendOutcome, ReplicaSet, ReplicaSetId,
+    ReplyContext, SourceAddress, StoredDispatch, TargetAddress,
 };
 use wuphf_storage::Storage;
-
-/// The sender identity stamped on owner-authored raw sends. Platforms deliver
-/// the message from the owner's own account, so this label only surfaces in the
-/// bridge's own records and mirror renderings.
-pub const RAW_SENDER: &str = "me";
-
-/// An owner-authored outbound text addressed by raw platform coordinates.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct RawOutbound {
-    pub connector_id: ConnectorId,
-    pub chat_id: String,
-    pub thread_id: Option<String>,
-    pub text: String,
-    /// Native id of the message this send replies to, when known. Resolved
-    /// best-effort: a reply to a message the bridge never stored sends as a
-    /// plain message rather than failing.
-    pub reply_to_platform_message_id: Option<String>,
-    /// Send time in epoch milliseconds, supplied by the caller so the core
-    /// stays clock-free.
-    pub timestamp_ms: i64,
-}
-
-/// The dispatches a raw send produced: the direct delivery to the addressed
-/// chat, plus any mirror copies routing fanned out (empty for unrouted chats
-/// and for sends deferred behind mirror-thread provisioning).
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct RawSendOutcome {
-    pub direct: StoredDispatch,
-    pub mirrored: Vec<StoredDispatch>,
-}
 
 impl<S> Core<S>
 where

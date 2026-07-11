@@ -2,12 +2,11 @@
 //! logical message and the dispatches that fan it out, including mirror-thread
 //! provisioning and source-rename retitling.
 
-use crate::{Core, CoreError, IgnoreReason, IngestOutcome, StashedMessage};
+use crate::{Core, CoreError, StashedMessage};
 use wuphf_model::{
-    DedupKey, Endpoint, EndpointId, Message, MessageCopy, MessageId, ReplicaSetId, SourceAddress,
-    StoredDispatch,
+    DedupKey, Endpoint, EndpointId, IgnoreReason, IngestOutcome, Message, MessageCopy, MessageId,
+    ReplicaSetId, RoutingOutcome, SourceAddress, StoredDispatch,
 };
-use wuphf_router::RoutingOutcome;
 use wuphf_storage::Storage;
 
 impl<S> Core<S>

@@ -6,11 +6,11 @@ use std::collections::HashMap;
 use tokio::net::TcpListener;
 use tokio_stream::wrappers::{ReceiverStream, TcpListenerStream};
 use tonic::transport::Server;
-use wuphf_core::{ConnectorInfo, RoutingConfig};
+use wuphf_core::RoutingConfig;
 use wuphf_model::{
-    ConnectorCapabilities, ConnectorId, ConnectorInput, ConnectorOutput, ConnectorRegistration,
-    DispatchPayload, EventPayload, InboundMessage, Platform, RoutingRule, RoutingRuleFlow,
-    RuleChat, RuleId,
+    ConnectorCapabilities, ConnectorId, ConnectorInfo, ConnectorInput, ConnectorOutput,
+    ConnectorRegistration, DispatchPayload, EventPayload, InboundMessage, Platform,
+    PlatformAddress, RoutingRule, RoutingRuleFlow, RuleChat, RuleId,
 };
 use wuphf_proto::connector as pb;
 use wuphf_proto::connector::connector_transport_client::ConnectorTransportClient;
@@ -526,8 +526,8 @@ fn source_event(
     }
 }
 
-fn raw_outbound(chat_id: &str, text: &str) -> wuphf_core::RawOutbound {
-    wuphf_core::RawOutbound {
+fn raw_outbound(chat_id: &str, text: &str) -> wuphf_model::RawOutbound {
+    wuphf_model::RawOutbound {
         connector_id: ConnectorId(WA.into()),
         chat_id: chat_id.into(),
         thread_id: None,

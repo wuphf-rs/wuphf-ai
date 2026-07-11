@@ -3,16 +3,15 @@
 //! wuphf replicates messages between chat platforms. The model is built around
 //! a few ideas, from configured intent down to a single delivery:
 //!
-//! - [`Rule`] — a user-declared mapping between two or more [`RuleSide`]s. Rules
+//! - [`RoutingRule`] — a user-declared flow between a source end and a
+//!   destination end ([`RoutingRuleFlow`]: one-to-one or many-to-one). Rules
 //!   are the only routing input a user writes; everything below is derived.
-//! - [`SideKind`] — how one side selects chats: a fixed `Single` chat, a
-//!   `Source` set of real chats, or a threaded `Mirror` container.
 //! - [`Endpoint`] — a concrete destination (a chat, optionally a thread) on one
 //!   connector, identified internally by an [`EndpointId`]. Platform addresses
 //!   resolve to it through an [`Alias`], never by equality, so an address can
 //!   migrate without changing identity.
-//! - [`Conversation`] — the abstract unit a rule pairs across sides (one per
-//!   source chat). Backed by one [`ReplicaSet`].
+//! - [`Conversation`] — the abstract unit a rule pairs across its two ends (one
+//!   per source chat). Backed by one [`ReplicaSet`].
 //! - [`ReplicaSet`] — the set of endpoints that mirror each other; a
 //!   [`Message`] delivered to one is dispatched to all the others.
 //! - [`Message`] — the normalized, platform-agnostic form copied out to every

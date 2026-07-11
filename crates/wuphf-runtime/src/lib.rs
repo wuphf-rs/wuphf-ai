@@ -3,10 +3,10 @@ use std::sync::Arc;
 use thiserror::Error;
 use tokio::sync::mpsc;
 use tracing::{debug, info, warn};
-use wuphf_core::{Core, CoreError, IngestOutcome};
+use wuphf_core::{Core, CoreError};
 use wuphf_model::{
-    ConnectorId, DispatchAcknowledgement, DispatchId, EventPayload, NormalizedEvent, Platform,
-    PlatformAddress, ReceiptKind, StoredDispatch,
+    ConnectorId, DispatchAcknowledgement, DispatchFailure, EventPayload, InboundWork,
+    IngestOutcome, NormalizedEvent, Platform, ReceiptKind, StoredDispatch,
 };
 use wuphf_storage::Storage;
 
@@ -19,32 +19,6 @@ pub mod raw_send;
 
 pub use observation::Observer;
 pub use raw_send::{RawMessageSender, RawSendError};
-
-/// A terminal dispatch failure reported by a connector: `(dispatch, reason)`.
-pub type DispatchFailure = (DispatchId, String);
-
-/// Ordered inbound work from one connector: a normalized event or an identity
-/// migration. Both travel one per-connector path so the connector's frame order
-/// is preserved end to end. A migration that precedes a message is applied
-/// before that message is ingested, so the message cannot mint a fresh endpoint
-/// under an address the migration was meant to rebind.
-pub enum InboundWork {
-    Event(NormalizedEvent),
-    Migration {
-        connector_id: ConnectorId,
-        old: PlatformAddress,
-        new: PlatformAddress,
-    },
-}
-
-impl InboundWork {
-    fn connector_id(&self) -> &ConnectorId {
-        match self {
-            InboundWork::Event(event) => &event.source.connector_id,
-            InboundWork::Migration { connector_id, .. } => connector_id,
-        }
-    }
-}
 
 pub struct Runtime<S> {
     core: Arc<Core<S>>,

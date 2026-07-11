@@ -1,7 +1,8 @@
-use crate::{InboundWork, RuntimeChannels};
+use crate::RuntimeChannels;
 use std::collections::HashMap;
 use tokio::sync::{mpsc, oneshot};
 use tracing::{debug, info, warn};
+use wuphf_model::InboundWork;
 use wuphf_model::{
     ConnectorId, ConnectorInput, ConnectorOutput, ConnectorRegistration, DispatchId, StoredDispatch,
 };
