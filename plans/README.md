@@ -21,12 +21,12 @@ code).
 | 001 | CI pipeline running all verification commands | P1 | S | — | TODO |
 | 002 | Sync README (Instagram connector, retitling) | P3 | S | — | TODO |
 | 003 | Validate routing rules at startup (no panic) | P2 | S | — | TODO |
-| 004 | Storage backend parity tests (SQLite + InMemory) | P2 | S | — | TODO |
+| 004 | Storage backend parity tests (SQLite + InMemory) | P2 | S | — | DONE |
 | 005 | Indexed replica-set-for-endpoint lookup | P2 | S-M | 004 | TODO |
 | 006 | Metadata-only attachment validation at ingest | P2 | S | 004 | TODO |
 | 007 | Delete-replication tests + router unit tests | P1 | M | — | TODO |
-| 008 | Dispatch failure / dead-letter path tests | P1 | S | — | TODO |
-| 009 | Durable provisioning stash (crash-safe deferral) | P1 | M | 004, 008 | TODO |
+| 008 | Dispatch failure / dead-letter path tests | P1 | S | — | DONE |
+| 009 | Durable provisioning stash (crash-safe deferral) | P1 | M | 004, 008 | DONE |
 | 010 | Storage hardening trio (ORDER BY, poison locks, SQL allowlist) | P3 | S | 009 | TODO |
 | 011 | Instagram CDN download size cap | P2 | S | — | TODO |
 | 012 | Bound Instagram message→thread cache | P3 | S-M | — | TODO |
@@ -56,6 +56,16 @@ REJECTED (with one-line rationale).
   `ingest.rs`/`acknowledge.rs`); doing 010 first would conflict.
 - **014 requires 013**: the three near-identical Go clients get merged; the
   Instagram tests must exist first so the merge is provably behavior-neutral.
+- **004/008/009 done 2026-07-11**: executed as a chain. Drift handled vs the
+  `15aa85f` plans: 004's storage `tests.rs` already used the dual-backend
+  generic pattern (from 018/023), so the three sqlite tests were extracted into
+  it and the five parity cases added — both backends agreed (no divergence
+  finding). 009's stash also had a second call site added since planning
+  (`wuphf-core/src/send.rs` `fan_out_to_mirrors`, the raw-send path); it was
+  converted to the durable stash identically via a shared `stash_deferred`
+  helper. The stash migration is `0009` (`0008` is the observation log). The
+  runtime run loop snapshots `pending_dispatches()` before `recover_provisioning`
+  replays orphaned stashes, so recovered replays are not double-sent.
 - **001 first overall**: every later plan's done criteria assume a runnable
   verification baseline; CI makes that continuous. 014 must add
   `connectors/shared` to the CI matrix if 001 has landed.
