@@ -82,7 +82,12 @@ fn registrations() -> Vec<ConnectorRegistration> {
 }
 
 fn core() -> Arc<Core<InMemoryStorage>> {
-    let storage = Arc::new(InMemoryStorage::default());
+    core_over(Arc::new(InMemoryStorage::default()))
+}
+
+/// Build a core over caller-owned storage, so a test can construct a second
+/// core/runtime over the same storage to simulate a process restart.
+fn core_over(storage: Arc<InMemoryStorage>) -> Arc<Core<InMemoryStorage>> {
     let config = Arc::new(RoutingConfig::new(rules(), connector_infos()));
     Arc::new(Core::new(storage, config))
 }
@@ -199,6 +204,127 @@ async fn acknowledgement_releases_reply_with_target_native_parent_id() {
     assert_eq!(reply_context.platform_message_id, "tg-parent");
     drop(channels.inbound);
     task.await.unwrap().unwrap();
+}
+
+#[tokio::test]
+async fn failed_dispatch_is_dead_lettered_and_not_redelivered() {
+    let storage = Arc::new(InMemoryStorage::default());
+    let (runtime, mut channels, _observer) =
+        Runtime::channelled(core_over(Arc::clone(&storage)), 8);
+    let task = tokio::spawn(runtime.run());
+    send_event(&channels, wa_event("wa-1", None)).await;
+    let dispatch = channels.dispatches.recv().await.unwrap();
+
+    channels
+        .failures
+        .send((dispatch.id, "invalid target".to_string()))
+        .await
+        .unwrap();
+
+    // A dead-lettered dispatch is never redelivered.
+    assert!(
+        tokio::time::timeout(
+            std::time::Duration::from_millis(100),
+            channels.dispatches.recv(),
+        )
+        .await
+        .is_err(),
+        "failed dispatch must not be redelivered",
+    );
+
+    drop(channels.inbound);
+    task.await.unwrap().unwrap();
+
+    // Restart over the same storage: the failed dispatch is gone from the pending
+    // set, so startup redelivery sends nothing.
+    let (runtime, mut channels, _observer) = Runtime::channelled(core_over(storage), 8);
+    let task = tokio::spawn(runtime.run());
+    assert!(
+        tokio::time::timeout(
+            std::time::Duration::from_millis(100),
+            channels.dispatches.recv(),
+        )
+        .await
+        .is_err(),
+        "restart must not redeliver a dead-lettered dispatch",
+    );
+    drop(channels.inbound);
+    task.await.unwrap().unwrap();
+}
+
+#[tokio::test]
+async fn only_the_assigned_session_may_fail_a_dispatch() {
+    let (runtime, runtime_channels, _observer) = Runtime::channelled(core(), 8);
+    let (hub, handle) = ConnectorHub::new(runtime_channels, registrations());
+    let runtime_task = tokio::spawn(runtime.run());
+    let hub_task = tokio::spawn(hub.run());
+    let mut whatsapp = handle.connect(registrations()[0].clone()).await.unwrap();
+    let mut telegram = handle.connect(registrations()[1].clone()).await.unwrap();
+
+    whatsapp
+        .input
+        .send(ConnectorInput::Event(wa_event("wa-1", None)))
+        .await
+        .unwrap();
+    let ConnectorOutput::Dispatch(dispatch) = telegram.output.recv().await.unwrap() else {
+        panic!("Telegram should receive the dispatch");
+    };
+
+    // A session that was not assigned the dispatch cannot fail it.
+    whatsapp
+        .input
+        .send(ConnectorInput::DispatchFailed {
+            dispatch_id: dispatch.id,
+            reason: "not mine".into(),
+        })
+        .await
+        .unwrap();
+    assert!(matches!(
+        whatsapp.output.recv().await.unwrap(),
+        ConnectorOutput::Rejected { .. }
+    ));
+
+    // The assigned session dead-letters it: accepted without rejection, and a
+    // fresh session after reconnect receives no redelivery.
+    telegram
+        .input
+        .send(ConnectorInput::DispatchFailed {
+            dispatch_id: dispatch.id,
+            reason: "cannot deliver".into(),
+        })
+        .await
+        .unwrap();
+    // Flush the ordered input pipeline: a follow-up input on the same session is
+    // processed after the DispatchFailed, so receiving its rejection proves the
+    // dead-lettering (assignment removal) happened before we reconnect — no sleep
+    // needed to observe it.
+    telegram
+        .input
+        .send(ConnectorInput::Acknowledgement(DispatchAcknowledgement {
+            dispatch_id: wuphf_model::DispatchId::new(),
+            platform_message_id: "ghost".into(),
+            thread_id: None,
+        }))
+        .await
+        .unwrap();
+    assert!(matches!(
+        telegram.output.recv().await.unwrap(),
+        ConnectorOutput::Rejected { .. }
+    ));
+    drop(telegram);
+    let mut telegram = handle.connect(registrations()[1].clone()).await.unwrap();
+    assert!(
+        tokio::time::timeout(
+            std::time::Duration::from_millis(100),
+            telegram.output.recv()
+        )
+        .await
+        .is_err(),
+        "a dead-lettered dispatch is not redelivered after reconnect",
+    );
+
+    hub_task.abort();
+    runtime_task.abort();
 }
 
 #[tokio::test]

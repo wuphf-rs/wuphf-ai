@@ -332,6 +332,62 @@ async fn concurrent_messages_provision_one_thread_and_replay_the_rest() {
 }
 
 #[tokio::test]
+async fn failed_provisioning_releases_stashed_messages() {
+    let core = core(vec![mirror_rule()]);
+
+    // The first source message provisions the mirror topic.
+    let first = core
+        .ingest(event(WHATSAPP, "111@g.us", "wa-1", None))
+        .await
+        .unwrap();
+    let IngestOutcome::Routed { dispatches, .. } = first else {
+        panic!("first message routes");
+    };
+    assert!(dispatches[0].command.target.provision_thread.is_some());
+    let provisioning_id = dispatches[0].id;
+
+    // A second message is deferred (stashed) behind the in-flight provision.
+    let second = core
+        .ingest(event(WHATSAPP, "111@g.us", "wa-2", None))
+        .await
+        .unwrap();
+    let IngestOutcome::Deferred { .. } = second else {
+        panic!("second message is deferred while provisioning");
+    };
+
+    // Failing the provisioning dispatch must release the stash rather than strand
+    // the conversation: the stashed message replays and re-attempts provisioning
+    // (a fresh create still carrying a provision_thread, since no thread exists).
+    let released = core
+        .fail_dispatch(provisioning_id, "cannot create topic".into())
+        .await
+        .unwrap();
+    let replay = released
+        .iter()
+        .find(|dispatch| {
+            matches!(
+                dispatch.command.payload,
+                DispatchPayload::MessageCreate { .. }
+            )
+        })
+        .expect("the stashed message replays when provisioning fails");
+    assert!(
+        replay.command.target.provision_thread.is_some(),
+        "replay re-attempts provisioning",
+    );
+
+    // The failed provisioning dispatch is dead-lettered, not pending.
+    assert!(
+        core.pending_dispatches()
+            .await
+            .unwrap()
+            .iter()
+            .all(|dispatch| dispatch.id != provisioning_id),
+        "a failed dispatch leaves the pending queue",
+    );
+}
+
+#[tokio::test]
 async fn ignores_echoes_of_dispatched_copies() {
     let core = core(vec![direct_rule()]);
     let outcome = core
