@@ -1,28 +1,44 @@
 use super::*;
 use wuphf_model::{
-    Attachment, AttachmentKind, DispatchPayload, MediaBlob, MediaId, ObservedDirection,
-    ObservedMessage, Platform,
+    Attachment, AttachmentKind, DedupKey, DispatchPayload, DispatchState, MediaBlob, MediaId,
+    MessageCopy, ObservedDirection, ObservedMessage, Platform,
 };
+
+#[tokio::test]
+async fn memory_persists_copy_state_and_releases_blocked_reply() {
+    copy_state_and_blocked_reply_released(InMemoryStorage::default()).await;
+}
 
 #[tokio::test]
 async fn sqlite_persists_copy_state_and_releases_blocked_reply() {
     let path = std::env::temp_dir().join(format!("wuphf-{}.sqlite", DispatchId::new()));
     let url = format!("sqlite://{}", path.display());
+    let storage = SqliteStorage::connect(&url).await.unwrap();
+    let (released, endpoint_id) = copy_state_and_blocked_reply_released(storage).await;
+
+    // sqlite-only: the released state and recorded copy survive a reopen.
+    let reopened = SqliteStorage::connect(&url).await.unwrap();
+    assert_eq!(reopened.pending_dispatches().await.unwrap(), released);
+    assert!(
+        reopened
+            .is_sent_copy(endpoint_id, "telegram-parent")
+            .await
+            .unwrap()
+    );
+}
+
+/// Acknowledging a create releases the reply blocked behind it with the parent's
+/// native id bound as reply context, and records the create as a sent copy.
+/// Returns the released dispatches and the endpoint so a persistence-capable
+/// backend can assert they survive a reopen.
+async fn copy_state_and_blocked_reply_released<S: Storage>(
+    storage: S,
+) -> (Vec<StoredDispatch>, EndpointId) {
     let parent_id = MessageId::new();
     let reply_id = MessageId::new();
     let endpoint_id = EndpointId::new();
 
-    let storage = SqliteStorage::connect(&url).await.unwrap();
-    storage
-        .put_endpoint(Endpoint {
-            id: endpoint_id,
-            connector_id: ConnectorId("telegram".into()),
-            platform: Platform::Telegram,
-            chat_id: "-100".into(),
-            thread_id: Some("7".into()),
-        })
-        .await
-        .unwrap();
+    storage.put_endpoint(endpoint(endpoint_id)).await.unwrap();
     storage.put_message(message(parent_id)).await.unwrap();
     let parent = storage
         .enqueue_dispatch(command(parent_id, endpoint_id), None)
@@ -45,22 +61,38 @@ async fn sqlite_persists_copy_state_and_releases_blocked_reply() {
         .expect("reply context set on release");
     assert_eq!(reply_context.message_id, parent_id);
     assert_eq!(reply_context.platform_message_id, "telegram-parent");
-    drop(storage);
-
-    let reopened = SqliteStorage::connect(&url).await.unwrap();
-    assert_eq!(reopened.pending_dispatches().await.unwrap(), released);
     assert!(
-        reopened
+        storage
             .is_sent_copy(endpoint_id, "telegram-parent")
             .await
             .unwrap()
     );
+    (released, endpoint_id)
+}
+
+#[tokio::test]
+async fn memory_persists_media_blobs() {
+    persists_media_blobs(InMemoryStorage::default()).await;
 }
 
 #[tokio::test]
 async fn sqlite_persists_media_blobs() {
     let path = std::env::temp_dir().join(format!("wuphf-media-{}.sqlite", MediaId::new()));
     let url = format!("sqlite://{}", path.display());
+    let storage = SqliteStorage::connect(&url).await.unwrap();
+    let stored = persists_media_blobs(storage).await;
+
+    // sqlite-only: the blob survives a reopen.
+    let reopened = SqliteStorage::connect(&url).await.unwrap();
+    let media = reopened.media(stored.media_id).await.unwrap().unwrap();
+    assert_eq!(media.attachment, stored);
+    assert_eq!(media.bytes, b"hello");
+}
+
+/// Storing a media blob makes it readable back with its attachment metadata and
+/// bytes intact. Returns the attachment so a persistence-capable backend can
+/// assert it survives a reopen.
+async fn persists_media_blobs<S: Storage>(storage: S) -> Attachment {
     let attachment = Attachment {
         media_id: MediaId::new(),
         kind: AttachmentKind::Image,
@@ -69,7 +101,6 @@ async fn sqlite_persists_media_blobs() {
         size_bytes: Some(5),
         animated: false,
     };
-    let storage = SqliteStorage::connect(&url).await.unwrap();
     storage
         .put_media(
             MediaBlob {
@@ -80,19 +111,27 @@ async fn sqlite_persists_media_blobs() {
         )
         .await
         .unwrap();
-    drop(storage);
-
-    let reopened = SqliteStorage::connect(&url).await.unwrap();
-    let media = reopened.media(attachment.media_id).await.unwrap().unwrap();
+    let media = storage.media(attachment.media_id).await.unwrap().unwrap();
     assert_eq!(media.attachment, attachment);
     assert_eq!(media.bytes, b"hello");
+    attachment
+}
+
+#[tokio::test]
+async fn memory_prunes_only_expired_unreferenced_media() {
+    prunes_only_expired_unreferenced_media(InMemoryStorage::default()).await;
 }
 
 #[tokio::test]
 async fn sqlite_prunes_only_expired_unreferenced_media() {
     let path = std::env::temp_dir().join(format!("wuphf-prune-{}.sqlite", MediaId::new()));
     let url = format!("sqlite://{}", path.display());
-    let storage = SqliteStorage::connect(&url).await.unwrap();
+    prunes_only_expired_unreferenced_media(SqliteStorage::connect(&url).await.unwrap()).await;
+}
+
+/// Pruning drops only media that is both past the cutoff and unreferenced by any
+/// stored message; a referenced blob is kept.
+async fn prunes_only_expired_unreferenced_media<S: Storage>(storage: S) {
     let referenced = attachment();
     let orphan = attachment();
     for attachment in [&referenced, &orphan] {
@@ -131,6 +170,211 @@ async fn sqlite_prunes_only_expired_unreferenced_media() {
     assert!(storage.media(orphan.media_id).await.unwrap().is_none());
 }
 
+#[tokio::test]
+async fn memory_claim_event_dedups_repeat_events() {
+    claim_event_dedups_repeat_events(InMemoryStorage::default()).await;
+}
+
+#[tokio::test]
+async fn sqlite_claim_event_dedups_repeat_events() {
+    let path = std::env::temp_dir().join(format!("wuphf-dedup-{}.sqlite", DispatchId::new()));
+    let url = format!("sqlite://{}", path.display());
+    claim_event_dedups_repeat_events(SqliteStorage::connect(&url).await.unwrap()).await;
+}
+
+/// The first claim of an event key wins; every later claim of the same key is
+/// rejected. This is the loop-prevention primitive, so both backends must agree.
+async fn claim_event_dedups_repeat_events<S: Storage>(storage: S) {
+    let key = DedupKey {
+        platform: Platform::WhatsApp,
+        chat_id: "chat".into(),
+        platform_message_id: "m-1".into(),
+    };
+    assert!(storage.claim_event(key.clone()).await.unwrap());
+    assert!(!storage.claim_event(key.clone()).await.unwrap());
+    // A different key is unaffected.
+    let other = DedupKey {
+        platform: Platform::WhatsApp,
+        chat_id: "chat".into(),
+        platform_message_id: "m-2".into(),
+    };
+    assert!(storage.claim_event(other).await.unwrap());
+}
+
+#[tokio::test]
+async fn memory_sent_copy_detection_and_reverse_lookup() {
+    sent_copy_detection_and_reverse_lookup(InMemoryStorage::default()).await;
+}
+
+#[tokio::test]
+async fn sqlite_sent_copy_detection_and_reverse_lookup() {
+    let path = std::env::temp_dir().join(format!("wuphf-copy-{}.sqlite", DispatchId::new()));
+    let url = format!("sqlite://{}", path.display());
+    sent_copy_detection_and_reverse_lookup(SqliteStorage::connect(&url).await.unwrap()).await;
+}
+
+/// A recorded sent copy is detectable as our own echo and resolves back to its
+/// message id; an unknown native id matches neither.
+async fn sent_copy_detection_and_reverse_lookup<S: Storage>(storage: S) {
+    let message_id = MessageId::new();
+    let endpoint_id = EndpointId::new();
+    storage.put_endpoint(endpoint(endpoint_id)).await.unwrap();
+    storage.put_message(message(message_id)).await.unwrap();
+    storage
+        .record_sent_copy(MessageCopy {
+            message_id,
+            endpoint_id,
+            platform_message_id: "native-1".into(),
+        })
+        .await
+        .unwrap();
+
+    assert!(storage.is_sent_copy(endpoint_id, "native-1").await.unwrap());
+    assert!(!storage.is_sent_copy(endpoint_id, "other").await.unwrap());
+    assert_eq!(
+        storage
+            .message_id_for_copy(endpoint_id, "native-1")
+            .await
+            .unwrap(),
+        Some(message_id)
+    );
+    assert_eq!(
+        storage
+            .message_id_for_copy(endpoint_id, "other")
+            .await
+            .unwrap(),
+        None
+    );
+}
+
+#[tokio::test]
+async fn memory_acknowledging_create_binds_blocked_edit() {
+    acknowledging_create_binds_blocked_edit(InMemoryStorage::default()).await;
+}
+
+#[tokio::test]
+async fn sqlite_acknowledging_create_binds_blocked_edit() {
+    let path = std::env::temp_dir().join(format!("wuphf-edit-{}.sqlite", DispatchId::new()));
+    let url = format!("sqlite://{}", path.display());
+    acknowledging_create_binds_blocked_edit(SqliteStorage::connect(&url).await.unwrap()).await;
+}
+
+/// An edit blocked behind its message's create is released when that create is
+/// acknowledged, with the create's native id bound as the edit's target — the
+/// edit-side of `bind_native_parent`.
+async fn acknowledging_create_binds_blocked_edit<S: Storage>(storage: S) {
+    let message_id = MessageId::new();
+    let endpoint_id = EndpointId::new();
+    storage.put_endpoint(endpoint(endpoint_id)).await.unwrap();
+    storage.put_message(message(message_id)).await.unwrap();
+    let create = storage
+        .enqueue_dispatch(command(message_id, endpoint_id), None)
+        .await
+        .unwrap();
+    storage
+        .enqueue_dispatch(edit_command(message_id, endpoint_id), Some(message_id))
+        .await
+        .unwrap();
+
+    let released = storage
+        .acknowledge_dispatch(create.id, "native-1".into())
+        .await
+        .unwrap();
+    assert_eq!(released.len(), 1);
+    let DispatchPayload::MessageEdit {
+        target_platform_message_id,
+        ..
+    } = &released[0].command.payload
+    else {
+        panic!("released dispatch should be an edit");
+    };
+    assert_eq!(target_platform_message_id, "native-1");
+}
+
+#[tokio::test]
+async fn memory_fail_dispatch_removes_from_pending() {
+    fail_dispatch_removes_from_pending(InMemoryStorage::default()).await;
+}
+
+#[tokio::test]
+async fn sqlite_fail_dispatch_removes_from_pending() {
+    let path = std::env::temp_dir().join(format!("wuphf-fail-{}.sqlite", DispatchId::new()));
+    let url = format!("sqlite://{}", path.display());
+    fail_dispatch_removes_from_pending(SqliteStorage::connect(&url).await.unwrap()).await;
+}
+
+/// A failed dispatch leaves the pending queue for good — a second
+/// `pending_dispatches` does not resurrect it — and its state is `Failed`.
+async fn fail_dispatch_removes_from_pending<S: Storage>(storage: S) {
+    let message_id = MessageId::new();
+    let endpoint_id = EndpointId::new();
+    storage.put_endpoint(endpoint(endpoint_id)).await.unwrap();
+    storage.put_message(message(message_id)).await.unwrap();
+    let dispatch = storage
+        .enqueue_dispatch(command(message_id, endpoint_id), None)
+        .await
+        .unwrap();
+    assert_eq!(storage.pending_dispatches().await.unwrap().len(), 1);
+
+    storage
+        .fail_dispatch(dispatch.id, "invalid target".into())
+        .await
+        .unwrap();
+    assert!(storage.pending_dispatches().await.unwrap().is_empty());
+    assert!(storage.pending_dispatches().await.unwrap().is_empty());
+
+    let stored = storage.dispatch(dispatch.id).await.unwrap().unwrap();
+    let DispatchState::Failed { reason } = stored.state else {
+        panic!("failed dispatch should be in the Failed state");
+    };
+    assert_eq!(reason, "invalid target");
+}
+
+#[tokio::test]
+async fn memory_replica_set_for_endpoint_resolves_membership() {
+    replica_set_for_endpoint_resolves_membership(InMemoryStorage::default()).await;
+}
+
+#[tokio::test]
+async fn sqlite_replica_set_for_endpoint_resolves_membership() {
+    let path = std::env::temp_dir().join(format!("wuphf-set-{}.sqlite", DispatchId::new()));
+    let url = format!("sqlite://{}", path.display());
+    replica_set_for_endpoint_resolves_membership(SqliteStorage::connect(&url).await.unwrap()).await;
+}
+
+/// `replica_set_for_endpoint` returns the set that contains an endpoint and
+/// `None` for an endpoint in no set.
+async fn replica_set_for_endpoint_resolves_membership<S: Storage>(storage: S) {
+    let endpoint_a = EndpointId::new();
+    let endpoint_b = EndpointId::new();
+    let set_id = ReplicaSetId::new();
+    storage.put_endpoint(endpoint(endpoint_a)).await.unwrap();
+    storage.put_endpoint(endpoint(endpoint_b)).await.unwrap();
+    storage
+        .put_replica_set(ReplicaSet {
+            id: set_id,
+            endpoints: vec![endpoint_a, endpoint_b],
+        })
+        .await
+        .unwrap();
+
+    assert_eq!(
+        storage.replica_set_for_endpoint(endpoint_a).await.unwrap(),
+        Some(set_id)
+    );
+    assert_eq!(
+        storage.replica_set_for_endpoint(endpoint_b).await.unwrap(),
+        Some(set_id)
+    );
+    assert_eq!(
+        storage
+            .replica_set_for_endpoint(EndpointId::new())
+            .await
+            .unwrap(),
+        None
+    );
+}
+
 fn attachment() -> Attachment {
     Attachment {
         media_id: MediaId::new(),
@@ -139,6 +383,16 @@ fn attachment() -> Attachment {
         mime_type: None,
         size_bytes: Some(3),
         animated: false,
+    }
+}
+
+fn endpoint(endpoint_id: EndpointId) -> Endpoint {
+    Endpoint {
+        id: endpoint_id,
+        connector_id: ConnectorId("telegram".into()),
+        platform: Platform::Telegram,
+        chat_id: "-100".into(),
+        thread_id: Some("7".into()),
     }
 }
 
@@ -297,6 +551,21 @@ fn command(message_id: MessageId, endpoint_id: EndpointId) -> DispatchCommand {
         payload: DispatchPayload::MessageCreate {
             message: message(message_id),
             reply_context: None,
+        },
+    }
+}
+
+fn edit_command(message_id: MessageId, endpoint_id: EndpointId) -> DispatchCommand {
+    DispatchCommand {
+        target_endpoint: endpoint_id,
+        target_connector: ConnectorId("telegram".into()),
+        target: wuphf_model::TargetAddress {
+            address: wuphf_model::PlatformAddress::new("-100", Some("7".into())),
+            provision_thread: None,
+        },
+        payload: DispatchPayload::MessageEdit {
+            message: message(message_id),
+            target_platform_message_id: String::new(),
         },
     }
 }
