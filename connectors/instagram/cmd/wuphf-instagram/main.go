@@ -9,7 +9,7 @@ import (
 
 	"github.com/akshettrj/wuphf/connectors/instagram/internal/config"
 	instagramconnector "github.com/akshettrj/wuphf/connectors/instagram/internal/instagram"
-	"github.com/akshettrj/wuphf/connectors/instagram/internal/logging"
+	"github.com/akshettrj/wuphf/connectors/shared/logging"
 )
 
 func main() {

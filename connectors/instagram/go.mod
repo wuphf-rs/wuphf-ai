@@ -4,12 +4,14 @@ go 1.25.0
 
 replace github.com/akshettrj/wuphf/proto/go => ../../proto/go
 
+replace github.com/akshettrj/wuphf/connectors/shared => ../shared
+
 require (
+	github.com/akshettrj/wuphf/connectors/shared v0.0.0-00010101000000-000000000000
 	github.com/akshettrj/wuphf/proto/go v0.0.0-00010101000000-000000000000
 	github.com/pelletier/go-toml/v2 v2.3.1
 	github.com/rs/zerolog v1.35.1
 	go.mau.fi/mautrix-meta v0.2605.1
-	google.golang.org/grpc v1.81.1
 )
 
 require (
@@ -43,6 +45,7 @@ require (
 	golang.org/x/sys v0.44.0 // indirect
 	golang.org/x/text v0.37.0 // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20260226221140-a57be14db171 // indirect
+	google.golang.org/grpc v1.81.1 // indirect
 	google.golang.org/protobuf v1.36.11 // indirect
 	gopkg.in/natefinch/lumberjack.v2 v2.2.1 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect

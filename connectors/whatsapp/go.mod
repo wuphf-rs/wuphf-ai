@@ -6,8 +6,11 @@ replace github.com/akshettrj/wuphf/proto/go => ../../proto/go
 
 replace github.com/akshettrj/wuphf/connectors/mediaconv => ../mediaconv
 
+replace github.com/akshettrj/wuphf/connectors/shared => ../shared
+
 require (
 	github.com/akshettrj/wuphf/connectors/mediaconv v0.0.0-00010101000000-000000000000
+	github.com/akshettrj/wuphf/connectors/shared v0.0.0-00010101000000-000000000000
 	github.com/akshettrj/wuphf/proto/go v0.0.0-00010101000000-000000000000
 	github.com/mattn/go-sqlite3 v1.14.44
 	github.com/mdp/qrterminal/v3 v3.2.1
@@ -15,7 +18,6 @@ require (
 	github.com/rs/zerolog v1.35.1
 	github.com/watgbridge/tgsconverter v0.0.0-20240710075117-d1c05581b842
 	go.mau.fi/whatsmeow v0.0.0-20260525123251-933deb5f2ee9
-	google.golang.org/grpc v1.81.1
 	google.golang.org/protobuf v1.36.11
 )
 
@@ -43,5 +45,6 @@ require (
 	golang.org/x/term v0.43.0 // indirect
 	golang.org/x/text v0.37.0 // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20260226221140-a57be14db171 // indirect
+	google.golang.org/grpc v1.81.1 // indirect
 	rsc.io/qr v0.2.0 // indirect
 )

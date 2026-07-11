@@ -9,7 +9,7 @@ import (
 	"os"
 
 	"github.com/akshettrj/wuphf/connectors/instagram/internal/config"
-	coreclient "github.com/akshettrj/wuphf/connectors/instagram/internal/core"
+	coreclient "github.com/akshettrj/wuphf/connectors/shared/coreclient"
 	wuphfpb "github.com/akshettrj/wuphf/proto/go/connector/v1"
 	"github.com/rs/zerolog"
 	"go.mau.fi/mautrix-meta/pkg/messagix"
@@ -83,7 +83,13 @@ func (c Connector) Run(ctx context.Context) error {
 	logger.Info().Msg("Instagram session connected")
 	runResult := make(chan error, 1)
 	go func() {
-		runResult <- coreclient.New(c.cfg, logger).Run(ctx, NewSender(client), inputs)
+		runResult <- coreclient.New(coreclient.Options{
+			CoreAddress:         c.cfg.CoreAddress,
+			ConnectorID:         c.cfg.ConnectorID,
+			Platform:            wuphfpb.Platform_PLATFORM_INSTAGRAM,
+			SupportsThreads:     c.cfg.SupportsThreads,
+			SupportsTopicCreate: c.cfg.SupportsTopicCreate,
+		}, logger).Run(ctx, NewSender(client), inputs)
 	}()
 
 	// Replay the inbox snapshot so messages exchanged while the connector was

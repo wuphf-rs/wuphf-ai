@@ -4,17 +4,19 @@ go 1.25.0
 
 require (
 	github.com/akshettrj/wuphf/connectors/mediaconv v0.0.0
+	github.com/akshettrj/wuphf/connectors/shared v0.0.0
 	github.com/akshettrj/wuphf/proto/go v0.0.0
 	github.com/gotd/td v0.144.0
 	github.com/pelletier/go-toml/v2 v2.2.4
 	github.com/rs/zerolog v1.35.1
 	golang.org/x/term v0.41.0
-	google.golang.org/grpc v1.76.0
 )
 
 replace github.com/akshettrj/wuphf/proto/go => ../../proto/go
 
 replace github.com/akshettrj/wuphf/connectors/mediaconv => ../mediaconv
+
+replace github.com/akshettrj/wuphf/connectors/shared => ../shared
 
 require (
 	github.com/cenkalti/backoff/v4 v4.3.0 // indirect
@@ -50,7 +52,8 @@ require (
 	golang.org/x/sys v0.42.0 // indirect
 	golang.org/x/text v0.35.0 // indirect
 	golang.org/x/tools v0.43.0 // indirect
-	google.golang.org/genproto/googleapis/rpc v0.0.0-20250804133106-a7a43d27e69b // indirect
+	google.golang.org/genproto/googleapis/rpc v0.0.0-20260226221140-a57be14db171 // indirect
+	google.golang.org/grpc v1.81.1 // indirect
 	google.golang.org/protobuf v1.36.11 // indirect
 	gopkg.in/yaml.v2 v2.4.0 // indirect
 	rsc.io/qr v0.2.0 // indirect

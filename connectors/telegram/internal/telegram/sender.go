@@ -11,8 +11,8 @@ import (
 	"unicode/utf16"
 
 	"github.com/akshettrj/wuphf/connectors/mediaconv"
+	coreclient "github.com/akshettrj/wuphf/connectors/shared/coreclient"
 	"github.com/akshettrj/wuphf/connectors/telegram/internal/config"
-	coreclient "github.com/akshettrj/wuphf/connectors/telegram/internal/core"
 	"github.com/akshettrj/wuphf/proto/go/connector/v1"
 	"github.com/gotd/td/telegram/message"
 	"github.com/gotd/td/telegram/message/styling"

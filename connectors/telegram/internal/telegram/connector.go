@@ -8,8 +8,8 @@ import (
 	"os"
 	"strings"
 
+	coreclient "github.com/akshettrj/wuphf/connectors/shared/coreclient"
 	"github.com/akshettrj/wuphf/connectors/telegram/internal/config"
-	coreclient "github.com/akshettrj/wuphf/connectors/telegram/internal/core"
 	"github.com/akshettrj/wuphf/proto/go/connector/v1"
 	"github.com/gotd/td/session"
 	gotd "github.com/gotd/td/telegram"
@@ -64,7 +64,14 @@ func (c Connector) Run(ctx context.Context) error {
 		}
 		c.logger.Info().Msg("Telegram session connected")
 		sender := NewSender(client.API(), peers, media, c.cfg.Rendering)
-		return coreclient.New(c.cfg, c.logger).Run(ctx, sender, inputs)
+		return coreclient.New(coreclient.Options{
+			CoreAddress:         c.cfg.CoreAddress,
+			ConnectorID:         c.cfg.ConnectorID,
+			Platform:            wuphfpb.Platform_PLATFORM_TELEGRAM,
+			SupportsThreads:     c.cfg.SupportsThreads,
+			SupportsTopicCreate: c.cfg.SupportsTopicCreate,
+			IsPermanent:         telegramPermanent,
+		}, c.logger).Run(ctx, sender, inputs)
 	})
 }
 

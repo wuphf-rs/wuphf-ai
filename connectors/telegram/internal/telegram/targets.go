@@ -6,7 +6,7 @@ import (
 	"strings"
 	"sync"
 
-	coreclient "github.com/akshettrj/wuphf/connectors/telegram/internal/core"
+	coreclient "github.com/akshettrj/wuphf/connectors/shared/coreclient"
 	"github.com/gotd/td/tg"
 )
 

@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"os"
 
+	coreclient "github.com/akshettrj/wuphf/connectors/shared/coreclient"
 	"github.com/akshettrj/wuphf/connectors/whatsapp/internal/config"
-	coreclient "github.com/akshettrj/wuphf/connectors/whatsapp/internal/core"
 	wuphfpb "github.com/akshettrj/wuphf/proto/go/connector/v1"
 	_ "github.com/mattn/go-sqlite3"
 	"github.com/mdp/qrterminal/v3"
@@ -82,7 +82,13 @@ func (c Connector) Run(ctx context.Context) error {
 	c.logger.Info().Str("jid", ownJID.String()).Msg("WhatsApp session connected")
 	runResult := make(chan error, 1)
 	go func() {
-		runResult <- coreclient.New(c.cfg, c.logger).Run(ctx, NewSender(client, media, ownJID, c.cfg.StickerMetadata(), c.cfg.Rendering), inputs)
+		runResult <- coreclient.New(coreclient.Options{
+			CoreAddress:         c.cfg.CoreAddress,
+			ConnectorID:         c.cfg.ConnectorID,
+			Platform:            wuphfpb.Platform_PLATFORM_WHATSAPP,
+			SupportsThreads:     c.cfg.SupportsThreads,
+			SupportsTopicCreate: c.cfg.SupportsTopicCreate,
+		}, c.logger).Run(ctx, NewSender(client, media, ownJID, c.cfg.StickerMetadata(), c.cfg.Rendering), inputs)
 	}()
 	select {
 	case <-ctx.Done():

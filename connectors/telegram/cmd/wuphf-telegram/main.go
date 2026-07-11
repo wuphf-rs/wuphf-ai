@@ -7,8 +7,8 @@ import (
 	"os"
 	"os/signal"
 
+	"github.com/akshettrj/wuphf/connectors/shared/logging"
 	"github.com/akshettrj/wuphf/connectors/telegram/internal/config"
-	"github.com/akshettrj/wuphf/connectors/telegram/internal/logging"
 	telegramconnector "github.com/akshettrj/wuphf/connectors/telegram/internal/telegram"
 )
 

@@ -7,7 +7,7 @@ import (
 	"strconv"
 	"time"
 
-	coreclient "github.com/akshettrj/wuphf/connectors/instagram/internal/core"
+	coreclient "github.com/akshettrj/wuphf/connectors/shared/coreclient"
 	wuphfpb "github.com/akshettrj/wuphf/proto/go/connector/v1"
 	"go.mau.fi/mautrix-meta/pkg/messagix/methods"
 	"go.mau.fi/mautrix-meta/pkg/messagix/socket"

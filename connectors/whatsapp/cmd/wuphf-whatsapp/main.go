@@ -7,8 +7,8 @@ import (
 	"os"
 	"os/signal"
 
+	"github.com/akshettrj/wuphf/connectors/shared/logging"
 	"github.com/akshettrj/wuphf/connectors/whatsapp/internal/config"
-	"github.com/akshettrj/wuphf/connectors/whatsapp/internal/logging"
 	whatsappconnector "github.com/akshettrj/wuphf/connectors/whatsapp/internal/whatsapp"
 )
 

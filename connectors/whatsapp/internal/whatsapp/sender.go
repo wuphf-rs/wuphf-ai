@@ -8,8 +8,8 @@ import (
 	"unicode/utf8"
 
 	"github.com/akshettrj/wuphf/connectors/mediaconv"
+	coreclient "github.com/akshettrj/wuphf/connectors/shared/coreclient"
 	"github.com/akshettrj/wuphf/connectors/whatsapp/internal/config"
-	coreclient "github.com/akshettrj/wuphf/connectors/whatsapp/internal/core"
 	wuphfpb "github.com/akshettrj/wuphf/proto/go/connector/v1"
 	"go.mau.fi/whatsmeow"
 	waE2E "go.mau.fi/whatsmeow/proto/waE2E"
