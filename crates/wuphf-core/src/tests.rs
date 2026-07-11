@@ -72,7 +72,13 @@ fn mirror_rule() -> RoutingRule {
 }
 
 fn core(rules: Vec<RoutingRule>) -> Core<InMemoryStorage> {
-    let storage = Arc::new(InMemoryStorage::default());
+    core_over(Arc::new(InMemoryStorage::default()), rules)
+}
+
+/// Build a core over caller-owned storage, so a test can construct a second core
+/// over the same storage to simulate a process restart (the in-memory
+/// provisioning cache starts empty on the new core).
+fn core_over(storage: Arc<InMemoryStorage>, rules: Vec<RoutingRule>) -> Core<InMemoryStorage> {
     let config = Arc::new(RoutingConfig::new(rules, connectors()));
     Core::new(storage, config)
 }
@@ -329,6 +335,67 @@ async fn concurrent_messages_provision_one_thread_and_replay_the_rest() {
     assert_eq!(command.target_connector, ConnectorId(TELEGRAM.into()));
     assert!(command.target.provision_thread.is_none());
     assert_eq!(command.target.address.thread_id, Some("777".into()));
+}
+
+#[tokio::test]
+async fn restart_replays_stash_when_provisioning_settled_while_down() {
+    let storage = Arc::new(InMemoryStorage::default());
+    let core = core_over(Arc::clone(&storage), vec![mirror_rule()]);
+
+    // A provisions the mirror thread; B arrives mid-provision and is deferred
+    // into the durable stash.
+    let first = core
+        .ingest(event(WHATSAPP, "111@g.us", "wa-1", None))
+        .await
+        .unwrap();
+    let IngestOutcome::Routed { dispatches, .. } = first else {
+        panic!("first message routes");
+    };
+    assert!(dispatches[0].command.target.provision_thread.is_some());
+    let provisioning_id = dispatches[0].id;
+    let deferred = core
+        .ingest(event(WHATSAPP, "111@g.us", "wa-2", None))
+        .await
+        .unwrap();
+    assert!(matches!(deferred, IngestOutcome::Deferred { .. }));
+
+    // Simulate a restart: a fresh core over the same storage begins with an empty
+    // provisioning cache. recover_provisioning rebuilds the pending set from the
+    // still-pending provision so the ack below can find and drain the durable
+    // stash; nothing is orphaned yet, so it replays nothing now.
+    drop(core);
+    let core = core_over(storage, vec![mirror_rule()]);
+    let recovered = core.recover_provisioning().await.unwrap();
+    assert!(
+        recovered.is_empty(),
+        "the provision is still pending, so nothing is orphaned",
+    );
+
+    // Acknowledging the provision on the restarted core replays the durable stash
+    // — the in-memory stash of the old core is gone, so this passes only because
+    // the stash persisted and the pending set was rebuilt.
+    let replayed = core
+        .acknowledge_dispatch(DispatchAcknowledgement {
+            dispatch_id: provisioning_id,
+            platform_message_id: "tg-1".into(),
+            thread_id: Some("777".into()),
+        })
+        .await
+        .unwrap();
+    let replayed_b = replayed
+        .iter()
+        .find(|dispatch| {
+            matches!(
+                dispatch.command.payload,
+                DispatchPayload::MessageCreate { .. }
+            )
+        })
+        .expect("the stashed message replays after restart");
+    assert!(replayed_b.command.target.provision_thread.is_none());
+    assert_eq!(
+        replayed_b.command.target.address.thread_id,
+        Some("777".into())
+    );
 }
 
 #[tokio::test]

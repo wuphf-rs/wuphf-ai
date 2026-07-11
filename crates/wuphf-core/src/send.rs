@@ -12,7 +12,7 @@
 //! without this the mirrors would silently miss owner-sent messages, because
 //! the platform echo that would normally replicate them is suppressed.
 
-use crate::{Core, CoreError, StashedMessage};
+use crate::{Core, CoreError};
 use wuphf_model::{
     Alias, ConnectorId, DispatchCommand, DispatchPayload, Endpoint, EndpointId, Message, MessageId,
     PlatformAddress, RAW_SENDER, RawOutbound, RawSendOutcome, ReplicaSet, ReplicaSetId,
@@ -175,22 +175,23 @@ where
             Some(conversation) => conversation.title.unwrap_or_else(|| chat_id.to_owned()),
             None => chat_id.to_owned(),
         };
-        let stashed = {
-            let mut provisioning = self.provisioning.lock().unwrap();
-            match provisioning.get_mut(&replica_set_id) {
-                Some(state) if !state.pending.is_empty() => {
-                    state.stash.push(StashedMessage {
-                        message: message.clone(),
-                        origin_endpoint,
-                        provision_title: provision_title.clone(),
-                    });
-                    true
-                }
-                _ => false,
-            }
+        let provisioning = {
+            let provisioning = self.provisioning.lock().unwrap();
+            provisioning
+                .get(&replica_set_id)
+                .is_some_and(|state| !state.pending.is_empty())
         };
-        if stashed {
-            return Ok(Vec::new());
+        if provisioning {
+            // Stash durably; stash_deferred replays immediately only if the
+            // provision settled while we stashed, otherwise the message waits.
+            return self
+                .stash_deferred(
+                    replica_set_id,
+                    message.id,
+                    origin_endpoint,
+                    &provision_title,
+                )
+                .await;
         }
         let (_, dispatches) = self
             .route_and_record(&message, origin_endpoint, &provision_title)

@@ -563,6 +563,74 @@ impl Storage for SqliteStorage {
         Ok(())
     }
 
+    async fn stash_provisioning_message(
+        &self,
+        replica_set_id: ReplicaSetId,
+        message_id: MessageId,
+        origin_endpoint: EndpointId,
+        provision_title: &str,
+    ) -> StorageResult<()> {
+        sqlx::query(
+            "INSERT INTO provisioning_stash
+                 (replica_set_id, message_id, origin_endpoint, provision_title)
+             VALUES (?, ?, ?, ?)
+             ON CONFLICT(replica_set_id, message_id) DO NOTHING",
+        )
+        .bind(replica_set_id.to_string())
+        .bind(message_id.to_string())
+        .bind(origin_endpoint.to_string())
+        .bind(provision_title)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    async fn drain_provisioning_stash(
+        &self,
+        replica_set_id: ReplicaSetId,
+    ) -> StorageResult<Vec<(Message, EndpointId, String)>> {
+        let mut transaction = self.pool.begin().await?;
+        // Join the message body back on; ORDER BY rowid preserves insertion
+        // order. Rows whose message vanished are dropped by the inner join.
+        let rows = sqlx::query(
+            "SELECT stash.origin_endpoint, stash.provision_title, messages.payload AS message
+             FROM provisioning_stash AS stash
+             JOIN messages ON messages.id = stash.message_id
+             WHERE stash.replica_set_id = ?
+             ORDER BY stash.rowid",
+        )
+        .bind(replica_set_id.to_string())
+        .fetch_all(&mut *transaction)
+        .await?;
+        sqlx::query("DELETE FROM provisioning_stash WHERE replica_set_id = ?")
+            .bind(replica_set_id.to_string())
+            .execute(&mut *transaction)
+            .await?;
+        transaction.commit().await?;
+
+        let mut drained = Vec::with_capacity(rows.len());
+        for row in rows {
+            let message: Message = serde_json::from_str(row.get("message"))?;
+            let origin_endpoint = parse_endpoint_id(row.get("origin_endpoint"))?;
+            let provision_title: String = row.get("provision_title");
+            drained.push((message, origin_endpoint, provision_title));
+        }
+        Ok(drained)
+    }
+
+    async fn stashed_replica_sets(&self) -> StorageResult<Vec<ReplicaSetId>> {
+        let rows = sqlx::query("SELECT DISTINCT replica_set_id FROM provisioning_stash")
+            .fetch_all(&self.pool)
+            .await?;
+        rows.into_iter()
+            .map(|row| {
+                uuid::Uuid::parse_str(row.get("replica_set_id"))
+                    .map(ReplicaSetId)
+                    .map_err(|err| StorageError::Identifier(err.to_string()))
+            })
+            .collect()
+    }
+
     async fn log_observed(
         &self,
         mut observed: ObservedMessage,

@@ -9,8 +9,8 @@ use tonic::transport::Server;
 use wuphf_core::RoutingConfig;
 use wuphf_model::{
     ConnectorCapabilities, ConnectorId, ConnectorInfo, ConnectorInput, ConnectorOutput,
-    ConnectorRegistration, DispatchPayload, EventPayload, InboundMessage, Platform,
-    PlatformAddress, RoutingRule, RoutingRuleFlow, RuleChat, RuleId,
+    ConnectorRegistration, DispatchPayload, EventPayload, InboundMessage, IngestOutcome, Platform,
+    PlatformAddress, RoutingRule, RoutingRuleFlow, RuleChat, RuleChatsFilter, RuleId,
 };
 use wuphf_proto::connector as pb;
 use wuphf_proto::connector::connector_transport_client::ConnectorTransportClient;
@@ -18,6 +18,7 @@ use wuphf_proto::connector::connector_transport_server::ConnectorTransportServer
 use wuphf_proto::connector::media_transport_client::MediaTransportClient;
 use wuphf_proto::connector::media_transport_server::MediaTransportServer;
 use wuphf_storage::InMemoryStorage;
+use wuphf_storage::Storage;
 
 const WA: &str = "whatsapp-main";
 const TG: &str = "telegram-main";
@@ -90,6 +91,42 @@ fn core() -> Arc<Core<InMemoryStorage>> {
 fn core_over(storage: Arc<InMemoryStorage>) -> Arc<Core<InMemoryStorage>> {
     let config = Arc::new(RoutingConfig::new(rules(), connector_infos()));
     Arc::new(Core::new(storage, config))
+}
+
+/// A many-to-one mirror rule whose destination thread must be provisioned on
+/// first send — the flow that stashes concurrent messages behind provisioning.
+fn mirror_rules() -> Vec<RoutingRule> {
+    vec![RoutingRule {
+        id: RuleId("mirror".into()),
+        flow: RoutingRuleFlow::ManyToOne {
+            source_connector: ConnectorId(WA.into()),
+            source_chats_filter: RuleChatsFilter::Only {
+                chats: vec![RuleChat {
+                    chat_id: "wa-group".into(),
+                    thread_id: None,
+                }],
+            },
+            destination_connector: ConnectorId(TG.into()),
+            destination_chat: RuleChat {
+                chat_id: "tg-group".into(),
+                thread_id: None,
+            },
+        },
+    }]
+}
+
+fn mirror_core(storage: Arc<InMemoryStorage>) -> Arc<Core<InMemoryStorage>> {
+    let config = Arc::new(RoutingConfig::new(mirror_rules(), connector_infos()));
+    Arc::new(Core::new(storage, config))
+}
+
+fn wa_group_event(native_id: &str) -> NormalizedEvent {
+    source_event(
+        ConnectorId(WA.into()),
+        PlatformAddress::new("wa-group", None),
+        native_id,
+        None,
+    )
 }
 
 #[tokio::test]
@@ -325,6 +362,43 @@ async fn only_the_assigned_session_may_fail_a_dispatch() {
 
     hub_task.abort();
     runtime_task.abort();
+}
+
+#[tokio::test]
+async fn restart_with_orphaned_stash_replays_immediately() {
+    let storage = Arc::new(InMemoryStorage::default());
+
+    // Pre-crash state, built deterministically with a core: A provisions the
+    // mirror thread and B is deferred into the durable stash.
+    {
+        let core = mirror_core(Arc::clone(&storage));
+        let first = core.ingest(wa_group_event("wa-1")).await.unwrap();
+        let provision = &first.dispatches()[0];
+        assert!(provision.command.target.provision_thread.is_some());
+        let provision_id = provision.id;
+        let deferred = core.ingest(wa_group_event("wa-2")).await.unwrap();
+        assert!(matches!(deferred, IngestOutcome::Deferred { .. }));
+
+        // Simulate a crash after the provision settled but before its stash was
+        // replayed: mark it failed in storage directly (not via the core, which
+        // would replay right away), leaving B orphaned in the durable stash.
+        storage
+            .fail_dispatch(provision_id, "crashed mid-provision".into())
+            .await
+            .unwrap();
+    }
+
+    // Restart: the runtime's startup recovery drains the orphaned stash, so B's
+    // dispatch appears without any acknowledgement, re-attempting provisioning.
+    let (runtime, mut channels, _observer) = Runtime::channelled(mirror_core(storage), 8);
+    let task = tokio::spawn(runtime.run());
+    let replayed = channels.dispatches.recv().await.unwrap();
+    assert!(
+        replayed.command.target.provision_thread.is_some(),
+        "the orphaned stash replays and re-attempts provisioning at startup",
+    );
+    drop(channels.inbound);
+    task.await.unwrap().unwrap();
 }
 
 #[tokio::test]

@@ -5,7 +5,7 @@
 use crate::{Core, CoreError};
 use wuphf_model::{
     Alias, ConnectorId, DispatchAcknowledgement, DispatchId, EndpointId, MessageCopy, MessageId,
-    PlatformAddress, StoredDispatch,
+    PlatformAddress, ReplicaSetId, StoredDispatch,
 };
 use wuphf_storage::Storage;
 
@@ -103,7 +103,7 @@ where
         dispatch: &StoredDispatch,
     ) -> Result<Vec<StoredDispatch>, CoreError> {
         let replica_set_id = dispatch.command.message_replica_set_id();
-        let stash = {
+        {
             let mut provisioning = self.provisioning.lock().unwrap();
             let Some(state) = provisioning.get_mut(&replica_set_id) else {
                 return Ok(Vec::new());
@@ -112,21 +112,96 @@ where
             if !state.pending.is_empty() {
                 return Ok(Vec::new());
             }
-            provisioning
-                .remove(&replica_set_id)
-                .map(|state| state.stash)
-                .unwrap_or_default()
-        };
+            provisioning.remove(&replica_set_id);
+        }
+        self.replay_stash(replica_set_id).await
+    }
+
+    /// Drain the durable provisioning stash for a replica set and re-route each
+    /// held message, returning the resulting dispatches. Replay re-attempts
+    /// provisioning if the thread still does not exist (a failed provision), so
+    /// the conversation is not stranded.
+    pub(crate) async fn replay_stash(
+        &self,
+        replica_set_id: ReplicaSetId,
+    ) -> Result<Vec<StoredDispatch>, CoreError> {
+        let stash = self
+            .storage
+            .drain_provisioning_stash(replica_set_id)
+            .await?;
         let mut dispatches = Vec::new();
-        for stashed in stash {
+        for (message, origin_endpoint, provision_title) in stash {
             let (_, routed) = self
-                .route_and_record(
-                    &stashed.message,
-                    stashed.origin_endpoint,
-                    &stashed.provision_title,
-                )
+                .route_and_record(&message, origin_endpoint, &provision_title)
                 .await?;
             dispatches.extend(routed);
+        }
+        Ok(dispatches)
+    }
+
+    /// Durably stash a message deferred behind in-flight provisioning, closing
+    /// the race where the provision settles between the caller's pending-check
+    /// and this write: if it settled, the settle already drained the stash and
+    /// will not run again, so replay the now-orphaned row immediately rather than
+    /// stranding it. Returns the dispatches to emit — the replayed ones on that
+    /// race, otherwise empty (the message waits for the provision to settle).
+    pub(crate) async fn stash_deferred(
+        &self,
+        replica_set_id: ReplicaSetId,
+        message_id: MessageId,
+        origin_endpoint: EndpointId,
+        provision_title: &str,
+    ) -> Result<Vec<StoredDispatch>, CoreError> {
+        self.storage
+            .stash_provisioning_message(
+                replica_set_id,
+                message_id,
+                origin_endpoint,
+                provision_title,
+            )
+            .await?;
+        let settled = {
+            let provisioning = self.provisioning.lock().unwrap();
+            !provisioning.contains_key(&replica_set_id)
+        };
+        if settled {
+            self.replay_stash(replica_set_id).await
+        } else {
+            Ok(Vec::new())
+        }
+    }
+
+    /// Rebuild the provisioning cache from storage after a restart: every pending
+    /// dispatch that provisions a thread re-registers its replica set, so a later
+    /// acknowledgement finds the set and drains its durable stash. Any stashed
+    /// replica set with no such dispatch left — its provision was acknowledged or
+    /// failed in a previous run, or was lost — is drained and replayed
+    /// immediately, and the resulting dispatches returned for delivery.
+    pub async fn recover_provisioning(&self) -> Result<Vec<StoredDispatch>, CoreError> {
+        let pending = self.storage.pending_dispatches().await?;
+        {
+            let mut provisioning = self.provisioning.lock().unwrap();
+            for dispatch in &pending {
+                if dispatch.command.target.provision_thread.is_some() {
+                    provisioning
+                        .entry(dispatch.command.message_replica_set_id())
+                        .or_default()
+                        .pending
+                        .insert(dispatch.id);
+                }
+            }
+        }
+        let mut dispatches = Vec::new();
+        for replica_set_id in self.storage.stashed_replica_sets().await? {
+            let outstanding = {
+                let provisioning = self.provisioning.lock().unwrap();
+                provisioning
+                    .get(&replica_set_id)
+                    .is_some_and(|state| !state.pending.is_empty())
+            };
+            if !outstanding {
+                dispatches.extend(self.replay_stash(replica_set_id).await?);
+            }
         }
         Ok(dispatches)
     }

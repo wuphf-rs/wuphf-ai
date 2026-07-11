@@ -34,6 +34,10 @@ struct State {
     chat_settings: HashMap<EndpointId, ChatSettings>,
     media: HashMap<MediaId, StoredMedia>,
     dispatches: HashMap<DispatchId, StoredDispatch>,
+    /// Provisioning stash, keyed by replica set, insertion-ordered. Mirrors the
+    /// SQLite `provisioning_stash` table; the message body is resolved from
+    /// `messages` on drain.
+    provisioning_stash: HashMap<ReplicaSetId, Vec<(MessageId, EndpointId, String)>>,
     observed_messages: HashMap<(ConnectorId, String, String), ObservedMessage>,
     observed_chats: HashMap<(ConnectorId, String), ObservedChat>,
 }
@@ -477,6 +481,57 @@ impl Storage for InMemoryStorage {
             .ok_or(StorageError::DispatchNotFound(dispatch_id))?;
         dispatch.state = DispatchState::Failed { reason };
         Ok(())
+    }
+
+    async fn stash_provisioning_message(
+        &self,
+        replica_set_id: ReplicaSetId,
+        message_id: MessageId,
+        origin_endpoint: EndpointId,
+        provision_title: &str,
+    ) -> StorageResult<()> {
+        let mut state = self.state.write().await;
+        let entries = state.provisioning_stash.entry(replica_set_id).or_default();
+        // Idempotent on (replica_set_id, message_id), matching the SQLite PK.
+        if entries.iter().any(|(id, _, _)| *id == message_id) {
+            return Ok(());
+        }
+        entries.push((message_id, origin_endpoint, provision_title.to_owned()));
+        Ok(())
+    }
+
+    async fn drain_provisioning_stash(
+        &self,
+        replica_set_id: ReplicaSetId,
+    ) -> StorageResult<Vec<(Message, EndpointId, String)>> {
+        let mut state = self.state.write().await;
+        let Some(entries) = state.provisioning_stash.remove(&replica_set_id) else {
+            return Ok(Vec::new());
+        };
+        // Resolve each row back to its message body, dropping any whose message
+        // is no longer stored (mirrors the SQLite inner join).
+        let drained = entries
+            .into_iter()
+            .filter_map(|(message_id, origin_endpoint, provision_title)| {
+                state
+                    .messages
+                    .get(&message_id)
+                    .cloned()
+                    .map(|message| (message, origin_endpoint, provision_title))
+            })
+            .collect();
+        Ok(drained)
+    }
+
+    async fn stashed_replica_sets(&self) -> StorageResult<Vec<ReplicaSetId>> {
+        Ok(self
+            .state
+            .read()
+            .await
+            .provisioning_stash
+            .keys()
+            .copied()
+            .collect())
     }
 
     async fn log_observed(

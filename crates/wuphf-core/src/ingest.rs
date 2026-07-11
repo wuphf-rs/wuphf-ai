@@ -2,7 +2,7 @@
 //! logical message and the dispatches that fan it out, including mirror-thread
 //! provisioning and source-rename retitling.
 
-use crate::{Core, CoreError, StashedMessage};
+use crate::{Core, CoreError};
 use wuphf_model::{
     DedupKey, Endpoint, EndpointId, IgnoreReason, IngestOutcome, Message, MessageCopy, MessageId,
     ReplicaSetId, RoutingOutcome, SourceAddress, StoredDispatch,
@@ -80,25 +80,36 @@ where
             .unwrap_or_else(|| source.address.chat_id.clone());
 
         // Hold the message if this conversation's mirror thread is still being
-        // provisioned; it is replayed once the thread exists. This prevents a
-        // burst of messages from each provisioning a duplicate thread.
-        let stashed = {
-            let mut provisioning = self.provisioning.lock().unwrap();
-            match provisioning.get_mut(&replica_set_id) {
-                Some(state) if !state.pending.is_empty() => {
-                    state.stash.push(StashedMessage {
-                        message: message.clone(),
-                        origin_endpoint,
-                        provision_title: provision_title.clone(),
-                    });
-                    true
-                }
-                _ => false,
-            }
+        // provisioned; it is stashed durably and replayed once the thread exists.
+        // This prevents a burst of messages from each provisioning a duplicate
+        // thread, and — unlike an in-memory stash — survives a crash.
+        let provisioning = {
+            let provisioning = self.provisioning.lock().unwrap();
+            provisioning
+                .get(&replica_set_id)
+                .is_some_and(|state| !state.pending.is_empty())
         };
-        if stashed {
-            return Ok(IngestOutcome::Deferred {
+        if provisioning {
+            let replayed = self
+                .stash_deferred(
+                    replica_set_id,
+                    message.id,
+                    origin_endpoint,
+                    &provision_title,
+                )
+                .await?;
+            // The provision is normally still pending, so the message waits
+            // (Deferred). If it settled while we stashed, stash_deferred replayed
+            // the stash instead, and those dispatches carry this message out.
+            if replayed.is_empty() {
+                return Ok(IngestOutcome::Deferred {
+                    message_id: message.id,
+                });
+            }
+            return Ok(IngestOutcome::Routed {
                 message_id: message.id,
+                routing: RoutingOutcome::default(),
+                dispatches: replayed,
             });
         }
 

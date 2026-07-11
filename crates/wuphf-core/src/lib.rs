@@ -3,7 +3,7 @@ use std::sync::{Arc, Mutex};
 use thiserror::Error;
 use wuphf_model::{
     ConnectorId, DispatchId, EndpointId, EventPayload, IgnoreReason, IngestOutcome, MediaId,
-    Message, MessageId, NormalizedEvent, Platform, ReplicaSetId,
+    MessageId, NormalizedEvent, Platform, ReplicaSetId,
 };
 use wuphf_router::{Router, RouterError};
 use wuphf_storage::{Storage, StorageError};
@@ -20,26 +20,21 @@ pub struct Core<S> {
     router: Router<S>,
     config: Arc<RoutingConfig>,
     /// Conversations whose mirror thread is mid-provisioning, keyed by replica
-    /// set. Guards against a burst of messages each provisioning a duplicate
-    /// thread before the first provision is acknowledged. The lock is never
-    /// held across an await.
+    /// set, holding the dispatch ids whose acknowledgement establishes the
+    /// thread. Guards against a burst of messages each provisioning a duplicate
+    /// thread before the first provision settles. This is a rebuildable cache of
+    /// storage (see [`Core::recover_provisioning`]); the messages held until the
+    /// thread exists live in the durable `provisioning_stash` table, not here, so
+    /// a crash cannot lose them. The lock is never held across an await.
     provisioning: Mutex<HashMap<ReplicaSetId, ProvisionState>>,
 }
 
 /// A conversation's in-flight thread provisioning: the dispatches whose
-/// acknowledgement establishes the thread, and the messages held until it does.
+/// acknowledgement (or failure) establishes the thread or gives up. The stashed
+/// messages themselves are persisted in storage, not here.
 #[derive(Default)]
 struct ProvisionState {
     pending: HashSet<DispatchId>,
-    stash: Vec<StashedMessage>,
-}
-
-/// A message received while its conversation's mirror thread was still being
-/// provisioned, replayed once the thread exists.
-struct StashedMessage {
-    message: Message,
-    origin_endpoint: EndpointId,
-    provision_title: String,
 }
 
 impl<S> Core<S>

@@ -89,14 +89,29 @@ where
     }
 
     pub async fn run(mut self) -> Result<(), RuntimeError> {
+        // Snapshot the pending set before recovery replays any orphaned stash:
+        // recover_provisioning rebuilds the in-memory provisioning cache and
+        // replays stashes whose provision settled while we were down, enqueuing
+        // fresh dispatches. Capturing pending first keeps those replays out of
+        // the redelivery set, so each dispatch is sent exactly once.
         let pending = self.core.pending_dispatches().await?;
+        let recovered = self.core.recover_provisioning().await?;
         if !pending.is_empty() {
             info!(
                 count = pending.len(),
                 "redelivering dispatches pending from a previous run"
             );
         }
+        if !recovered.is_empty() {
+            info!(
+                count = recovered.len(),
+                "replaying provisioning stashes orphaned by a previous run"
+            );
+        }
         for dispatch in pending {
+            self.send(dispatch).await?;
+        }
+        for dispatch in recovered {
             self.send(dispatch).await?;
         }
         // Each connector gets its own ingest worker so one connector's offline

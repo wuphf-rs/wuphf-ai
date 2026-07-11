@@ -138,6 +138,26 @@ pub trait Storage: Send + Sync + 'static {
     /// is never redelivered. Unlike acknowledgement, it records no sent copy.
     async fn fail_dispatch(&self, dispatch_id: DispatchId, reason: String) -> StorageResult<()>;
 
+    /// Persist one provisioning-deferred message for later replay, so a crash
+    /// while a mirror thread is being provisioned cannot lose it. Idempotent on
+    /// `(replica_set_id, message_id)`.
+    async fn stash_provisioning_message(
+        &self,
+        replica_set_id: ReplicaSetId,
+        message_id: MessageId,
+        origin_endpoint: EndpointId,
+        provision_title: &str,
+    ) -> StorageResult<()>;
+    /// Remove and return the stashed messages for a replica set, in insertion
+    /// order, resolved back to full messages (rows whose message is no longer
+    /// stored are dropped). The removal and the read are one atomic step.
+    async fn drain_provisioning_stash(
+        &self,
+        replica_set_id: ReplicaSetId,
+    ) -> StorageResult<Vec<(Message, EndpointId, String)>>;
+    /// Replica sets that still have stashed messages, for startup recovery.
+    async fn stashed_replica_sets(&self) -> StorageResult<Vec<ReplicaSetId>>;
+
     /// Record a message in the observation log, upserting both the message row
     /// and its chat summary, and return the row as stored. Idempotent on the
     /// message's native coordinates. A `chat_title` refreshes the chat's title;

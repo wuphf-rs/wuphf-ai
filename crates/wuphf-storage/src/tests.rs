@@ -605,3 +605,70 @@ async fn outgoing_direction_survives_the_platform_echo<S: Storage>(storage: S) {
     assert_eq!(page.len(), 1);
     assert_eq!(page[0].direction, ObservedDirection::Outgoing);
 }
+
+#[tokio::test]
+async fn memory_provisioning_stash_drains_in_insertion_order() {
+    provisioning_stash_drains_in_insertion_order(InMemoryStorage::default()).await;
+}
+
+#[tokio::test]
+async fn sqlite_provisioning_stash_drains_in_insertion_order() {
+    let path = std::env::temp_dir().join(format!("wuphf-stash-{}.sqlite", DispatchId::new()));
+    let url = format!("sqlite://{}", path.display());
+    provisioning_stash_drains_in_insertion_order(SqliteStorage::connect(&url).await.unwrap()).await;
+}
+
+/// Stashed messages drain in insertion order resolved back to full messages;
+/// stashing the same message twice is a no-op; a second drain is empty; and
+/// `stashed_replica_sets` lists the set before the drain and not after.
+async fn provisioning_stash_drains_in_insertion_order<S: Storage>(storage: S) {
+    let replica_set_id = ReplicaSetId::new();
+    let endpoint_id = EndpointId::new();
+    let first = MessageId::new();
+    let second = MessageId::new();
+    storage.put_message(message(first)).await.unwrap();
+    storage.put_message(message(second)).await.unwrap();
+
+    storage
+        .stash_provisioning_message(replica_set_id, first, endpoint_id, "Title")
+        .await
+        .unwrap();
+    // A duplicate stash of the same message must not add a second row.
+    storage
+        .stash_provisioning_message(replica_set_id, first, endpoint_id, "Title")
+        .await
+        .unwrap();
+    storage
+        .stash_provisioning_message(replica_set_id, second, endpoint_id, "Title")
+        .await
+        .unwrap();
+
+    assert_eq!(
+        storage.stashed_replica_sets().await.unwrap(),
+        vec![replica_set_id]
+    );
+
+    let drained = storage
+        .drain_provisioning_stash(replica_set_id)
+        .await
+        .unwrap();
+    assert_eq!(
+        drained.iter().map(|(m, _, _)| m.id).collect::<Vec<_>>(),
+        vec![first, second],
+    );
+    assert!(
+        drained
+            .iter()
+            .all(|(_, origin, title)| *origin == endpoint_id && title == "Title")
+    );
+
+    // The drain removed the rows: a second drain is empty and the set is gone.
+    assert!(
+        storage
+            .drain_provisioning_stash(replica_set_id)
+            .await
+            .unwrap()
+            .is_empty()
+    );
+    assert!(storage.stashed_replica_sets().await.unwrap().is_empty());
+}
