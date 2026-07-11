@@ -30,8 +30,8 @@ code).
 | 010 | Storage hardening trio (ORDER BY, poison locks, SQL allowlist) | P3 | S | 009 | TODO |
 | 011 | Instagram CDN download size cap | P2 | S | — | TODO |
 | 012 | Bound Instagram message→thread cache | P3 | S-M | — | TODO |
-| 013 | Instagram core client retry tests | P3 | S | — | TODO |
-| 014 | Shared Go connector core module (de-triplicate) | P2 | M | 013 | TODO |
+| 013 | Instagram core client retry tests | P3 | S | — | DONE |
+| 014 | Shared Go connector core module (de-triplicate) | P2 | M | 013 | DONE |
 | 015 | SPIKE: reactions end-to-end design | P2 | M | — | TODO |
 | 016 | SPIKE: media blob lifecycle policy | P2 | S-M | — | TODO |
 | 017 | SPIKE: per-side replication direction (one-way mirrors) | P3 | S | — | TODO |
@@ -73,6 +73,17 @@ REJECTED (with one-line rationale).
   all three `internal/core/client.go` copies, and `connectors/mediaconv` now
   demonstrates the shared-local-module pattern (`replace` directive) 014
   proposes. Refresh 014's line counts before executing it.
+  **Done 2026-07-11** (`advisor/014-shared-go-core`): the grown divergence
+  (telegram alone renders retitle/reaction/delivery-ack/seen-receipt via
+  Sender methods; whatsapp/instagram ack-only them) was handled by making
+  those four behaviors opt-in capability interfaces on `coreclient`
+  (`ThreadRetitler`, `Reactor`, `DeliveryAcker`, `SeenReceiptMarker`) with an
+  ack-only fallback, so behavior is byte-for-byte preserved per connector.
+  Telegram's `tgerr` RPC-400 classifier stays in the telegram module as
+  `telegramPermanent` and is passed via `Options.IsPermanent`. `media.go` was
+  identical across the three (Step 4) and moved into `coreclient` too. Shared
+  suite has 5 tests (union + the IsPermanent-hook case); all four Go modules
+  build/vet/test green.
 - 020 is independent of 019/021 (touches only `wuphf-router`/`wuphf-core`);
   022 is independent of everything.
 - **023 vs 020**: both edit `wuphf-core/src/ingest.rs` but different
