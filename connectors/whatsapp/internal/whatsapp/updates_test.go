@@ -2,6 +2,7 @@ package whatsappconnector
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -15,7 +16,7 @@ import (
 
 func TestNormalizeGroupTextAndReply(t *testing.T) {
 	t.Parallel()
-	normalizer := NewNormalizer(make(chan *wuphfpb.ClientFrame), MediaCodec{}, nil, nil)
+	normalizer := NewNormalizer(make(chan *wuphfpb.ClientFrame), MediaCodec{}, nil, nil, nil)
 	event, ok, err := normalizer.normalize(context.Background(), &events.Message{
 		Info: types.MessageInfo{
 			MessageSource: types.MessageSource{
@@ -56,7 +57,7 @@ func (s stubNamer) PersonName(_ context.Context, jid types.JID, pushHint string)
 
 func TestNormalizeSetsChatTitleFromNamer(t *testing.T) {
 	t.Parallel()
-	normalizer := NewNormalizer(make(chan *wuphfpb.ClientFrame), MediaCodec{}, stubNamer{title: "Family Group"}, nil)
+	normalizer := NewNormalizer(make(chan *wuphfpb.ClientFrame), MediaCodec{}, stubNamer{title: "Family Group"}, nil, nil)
 	event, ok, err := normalizer.normalize(context.Background(), &events.Message{
 		Info: types.MessageInfo{
 			MessageSource: types.MessageSource{
@@ -79,7 +80,7 @@ func TestNormalizeSetsChatTitleFromNamer(t *testing.T) {
 func TestHandleQueuesMessageCreateFrame(t *testing.T) {
 	t.Parallel()
 	inputs := make(chan *wuphfpb.ClientFrame, 1)
-	normalizer := NewNormalizer(inputs, MediaCodec{}, nil, nil)
+	normalizer := NewNormalizer(inputs, MediaCodec{}, nil, nil, nil)
 	if err := normalizer.Handle(context.Background(), &events.Message{
 		Info: types.MessageInfo{
 			MessageSource: types.MessageSource{
@@ -99,7 +100,7 @@ func TestHandleQueuesMessageCreateFrame(t *testing.T) {
 
 func TestNormalizeIncludesOwnUserMessagesForCoreEchoDecision(t *testing.T) {
 	t.Parallel()
-	normalizer := NewNormalizer(make(chan *wuphfpb.ClientFrame), MediaCodec{}, nil, nil)
+	normalizer := NewNormalizer(make(chan *wuphfpb.ClientFrame), MediaCodec{}, nil, nil, nil)
 	event, ok, err := normalizer.normalize(context.Background(), &events.Message{
 		Info: types.MessageInfo{
 			MessageSource: types.MessageSource{
@@ -118,7 +119,7 @@ func TestNormalizeIncludesOwnUserMessagesForCoreEchoDecision(t *testing.T) {
 
 func TestNormalizeDirectChatCarriesParticipant(t *testing.T) {
 	t.Parallel()
-	normalizer := NewNormalizer(make(chan *wuphfpb.ClientFrame), MediaCodec{}, stubNamer{}, nil)
+	normalizer := NewNormalizer(make(chan *wuphfpb.ClientFrame), MediaCodec{}, stubNamer{}, nil, nil)
 	event, ok, err := normalizer.normalize(context.Background(), &events.Message{
 		Info: types.MessageInfo{
 			MessageSource: types.MessageSource{
@@ -143,7 +144,7 @@ func TestNormalizeDirectChatCarriesParticipant(t *testing.T) {
 
 func TestNormalizeLabelsOwnMessagesAsMe(t *testing.T) {
 	t.Parallel()
-	normalizer := NewNormalizer(make(chan *wuphfpb.ClientFrame), MediaCodec{}, stubNamer{}, nil)
+	normalizer := NewNormalizer(make(chan *wuphfpb.ClientFrame), MediaCodec{}, stubNamer{}, nil, nil)
 	event, ok, err := normalizer.normalize(context.Background(), &events.Message{
 		Info: types.MessageInfo{
 			MessageSource: types.MessageSource{
@@ -165,7 +166,7 @@ func TestNormalizeLabelsOwnMessagesAsMe(t *testing.T) {
 
 func TestNormalizeTagsOwnLinkedDeviceMessages(t *testing.T) {
 	t.Parallel()
-	normalizer := NewNormalizer(make(chan *wuphfpb.ClientFrame), MediaCodec{}, stubNamer{}, nil)
+	normalizer := NewNormalizer(make(chan *wuphfpb.ClientFrame), MediaCodec{}, stubNamer{}, nil, nil)
 	event, ok, err := normalizer.normalize(context.Background(), &events.Message{
 		Info: types.MessageInfo{
 			MessageSource: types.MessageSource{
@@ -187,7 +188,7 @@ func TestNormalizeTagsOwnLinkedDeviceMessages(t *testing.T) {
 
 func TestNormalizeTagsPeerLinkedDeviceMessages(t *testing.T) {
 	t.Parallel()
-	normalizer := NewNormalizer(make(chan *wuphfpb.ClientFrame), MediaCodec{}, stubNamer{}, nil)
+	normalizer := NewNormalizer(make(chan *wuphfpb.ClientFrame), MediaCodec{}, stubNamer{}, nil, nil)
 	event, ok, err := normalizer.normalize(context.Background(), &events.Message{
 		Info: types.MessageInfo{
 			MessageSource: types.MessageSource{
@@ -243,7 +244,7 @@ func TestHandleCanonicalizesChatAndEmitsMigrationOnce(t *testing.T) {
 	lid := types.NewJID("88887777", types.HiddenUserServer)
 	identity := fakeIdentity{lids: map[string]types.JID{phone.String(): lid}}
 	inputs := make(chan *wuphfpb.ClientFrame, 8)
-	normalizer := NewNormalizer(inputs, MediaCodec{}, stubNamer{}, identity)
+	normalizer := NewNormalizer(inputs, MediaCodec{}, stubNamer{}, identity, nil)
 	message := &events.Message{
 		Info: types.MessageInfo{
 			MessageSource: types.MessageSource{Chat: phone, Sender: phone},
@@ -280,7 +281,7 @@ func TestHandleCanonicalizesChatAndEmitsMigrationOnce(t *testing.T) {
 
 func TestNormalizeStripsSenderDeviceFromIdentity(t *testing.T) {
 	t.Parallel()
-	normalizer := NewNormalizer(make(chan *wuphfpb.ClientFrame), MediaCodec{}, stubNamer{}, nil)
+	normalizer := NewNormalizer(make(chan *wuphfpb.ClientFrame), MediaCodec{}, stubNamer{}, nil, nil)
 	event, ok, err := normalizer.normalize(context.Background(), &events.Message{
 		Info: types.MessageInfo{
 			MessageSource: types.MessageSource{
@@ -301,7 +302,7 @@ func TestNormalizeStripsSenderDeviceFromIdentity(t *testing.T) {
 
 func TestNormalizeReactionEmitsToggle(t *testing.T) {
 	t.Parallel()
-	normalizer := NewNormalizer(make(chan *wuphfpb.ClientFrame), MediaCodec{}, stubNamer{}, nil)
+	normalizer := NewNormalizer(make(chan *wuphfpb.ClientFrame), MediaCodec{}, stubNamer{}, nil, nil)
 	message := &events.Message{
 		Info: types.MessageInfo{
 			MessageSource: types.MessageSource{
@@ -334,7 +335,7 @@ func TestNormalizeReactionEmitsToggle(t *testing.T) {
 
 func TestNormalizeReactionClearedHasEmptyEmoji(t *testing.T) {
 	t.Parallel()
-	normalizer := NewNormalizer(make(chan *wuphfpb.ClientFrame), MediaCodec{}, stubNamer{}, nil)
+	normalizer := NewNormalizer(make(chan *wuphfpb.ClientFrame), MediaCodec{}, stubNamer{}, nil, nil)
 	message := &events.Message{
 		Info: types.MessageInfo{
 			MessageSource: types.MessageSource{
@@ -370,7 +371,7 @@ func TestHandleReceiptEmitsReceiptForDM(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			inputs := make(chan *wuphfpb.ClientFrame, 4)
-			normalizer := NewNormalizer(inputs, MediaCodec{}, stubNamer{}, nil)
+			normalizer := NewNormalizer(inputs, MediaCodec{}, stubNamer{}, nil, nil)
 			err := normalizer.HandleReceipt(context.Background(), &events.Receipt{
 				MessageSource: types.MessageSource{
 					Chat:   types.NewJID("15550001111", types.DefaultUserServer),
@@ -396,7 +397,7 @@ func TestHandleReceiptEmitsReceiptForDM(t *testing.T) {
 func TestHandleReceiptSkipsGroupAndUnsurfaced(t *testing.T) {
 	t.Parallel()
 	inputs := make(chan *wuphfpb.ClientFrame, 4)
-	normalizer := NewNormalizer(inputs, MediaCodec{}, stubNamer{}, nil)
+	normalizer := NewNormalizer(inputs, MediaCodec{}, stubNamer{}, nil, nil)
 	// A group receipt is per-participant noise, not a DM signal.
 	if err := normalizer.HandleReceipt(context.Background(), &events.Receipt{
 		MessageSource: types.MessageSource{Chat: types.NewJID("1", types.GroupServer), IsGroup: true},
@@ -517,7 +518,7 @@ func TestHandleReportsThePhoneFormOfALIDAddressedChat(t *testing.T) {
 	lid := types.NewJID("88887777", types.HiddenUserServer)
 	identity := fakeIdentity{lids: map[string]types.JID{phone.String(): lid}}
 	inputs := make(chan *wuphfpb.ClientFrame, 8)
-	normalizer := NewNormalizer(inputs, MediaCodec{}, stubNamer{}, identity)
+	normalizer := NewNormalizer(inputs, MediaCodec{}, stubNamer{}, identity, nil)
 	message := &events.Message{
 		Info: types.MessageInfo{
 			MessageSource: types.MessageSource{
@@ -548,5 +549,69 @@ func TestHandleReportsThePhoneFormOfALIDAddressedChat(t *testing.T) {
 	}
 	if (<-inputs).GetMessageCreate() == nil {
 		t.Fatal("second message re-reported the address link")
+	}
+}
+
+// fakeDecryptor stands in for the whatsmeow client's message-secret decryption,
+// returning a fixed reaction or an error without a live session.
+type fakeDecryptor struct {
+	reaction *waE2E.ReactionMessage
+	err      error
+}
+
+func (f fakeDecryptor) DecryptReaction(context.Context, *events.Message) (*waE2E.ReactionMessage, error) {
+	return f.reaction, f.err
+}
+
+func encryptedReaction() *events.Message {
+	return &events.Message{
+		Info: types.MessageInfo{
+			MessageSource: types.MessageSource{
+				Chat:    types.NewJID("123456789", types.GroupServer),
+				Sender:  types.NewJID("9988", types.DefaultUserServer),
+				IsGroup: true,
+			},
+			ID:       "wa-enc-react",
+			PushName: "Alice",
+		},
+		Message: &waE2E.Message{EncReactionMessage: &waE2E.EncReactionMessage{
+			TargetMessageKey: &waCommon.MessageKey{ID: proto.String("wa-target")},
+		}},
+	}
+}
+
+func TestNormalizeReactionDecryptsGroupReaction(t *testing.T) {
+	t.Parallel()
+	decryptor := fakeDecryptor{reaction: &waE2E.ReactionMessage{
+		Key:  &waCommon.MessageKey{ID: proto.String("wa-target")},
+		Text: proto.String("🔥"),
+	}}
+	normalizer := NewNormalizer(make(chan *wuphfpb.ClientFrame), MediaCodec{}, stubNamer{}, nil, decryptor)
+	message := encryptedReaction()
+	chat := normalizer.canonical(context.Background(), message.Info.Chat)
+	event, ok := normalizer.normalizeReaction(context.Background(), message, chat)
+	if !ok {
+		t.Fatal("normalizeReaction() did not decrypt an encrypted group reaction")
+	}
+	if event.GetPlatformMessageId() != "wa-target" || event.GetEmoji() != "🔥" {
+		t.Fatalf("normalizeReaction() = %#v, want the decrypted target and emoji", event)
+	}
+}
+
+func TestNormalizeReactionSkipsUndecryptableReaction(t *testing.T) {
+	t.Parallel()
+	cases := map[string]reactionDecryptor{
+		"no decryptor wired": nil,
+		"decryption failed":  fakeDecryptor{err: errors.New("no message secret")},
+	}
+	for name, decryptor := range cases {
+		t.Run(name, func(t *testing.T) {
+			normalizer := NewNormalizer(make(chan *wuphfpb.ClientFrame), MediaCodec{}, stubNamer{}, nil, decryptor)
+			message := encryptedReaction()
+			chat := normalizer.canonical(context.Background(), message.Info.Chat)
+			if event, ok := normalizer.normalizeReaction(context.Background(), message, chat); ok {
+				t.Fatalf("normalizeReaction() = %#v, want no reaction", event)
+			}
+		})
 	}
 }

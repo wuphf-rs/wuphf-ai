@@ -14,7 +14,7 @@ difference is called out under **Deviation** with the reasoning.
 
 | Platform | Receive | Send |
 |---|---|---|
-| WhatsApp | `waE2E.Message.ReactionMessage` — names the reacted message via `GetKey().GetID()`, carries the emoji as text, and an **empty** text clears the reactor's reaction. Read through `Normalizer.normalizeReaction` (`connectors/whatsapp/internal/whatsapp/updates.go:244`). Encrypted group reactions (`EncReactionMessage`) need client-side decryption and are **not** handled. | Not implemented — WhatsApp is a source, not a mirror (see §3). |
+| WhatsApp | `waE2E.Message.ReactionMessage` — names the reacted message via `GetKey().GetID()`, carries the emoji as text, and an **empty** text clears the reactor's reaction. Read through `Normalizer.normalizeReaction` (`connectors/whatsapp/internal/whatsapp/updates.go`). Group reactions arriving as an `EncReactionMessage` are opened through the client's `DecryptReaction` behind the `reactionDecryptor` seam; one that cannot be decrypted is reported as no reaction and dropped. | Not implemented — WhatsApp is a source, not a mirror (see §3). |
 | WhatsApp receipts | `events.Receipt` with `types.ReceiptTypeDelivered` / `types.ReceiptTypeRead`, mapped by `receiptKind` and reported per message id by `Normalizer.HandleReceipt` (`updates.go:196`). Group receipts are dropped as per-participant noise. | n/a |
 | Telegram | **Not implemented.** The connector emits no `ClientFrame_Reaction` or `ClientFrame_Receipt`; it is a mirror only. This is load-bearing — see the echo invariant in §3. | `tg.MessagesSendReactionRequest` + `tg.ReactionEmoji` (`connectors/telegram/internal/telegram/sender.go:208`), used **only** for the bridge's own signalling emoji. Mirrored reactions render as text instead (`sender.go:168`). |
 | Instagram | `table.LSUpsertReaction` and `table.LSDeleteReaction` rows, carrying `MessageId`, `ActorId`, and `Reaction`; a delete is normalized as an empty emoji (`connectors/instagram/internal/instagram/updates.go:78-95`). The thread is recovered from the message→thread cache, so a reaction on a message the connector never observed is skipped with a warning. | Not implemented — Instagram is a source. |
@@ -163,13 +163,11 @@ acknowledging a mirror create emits a delivery ack to the origin.
 
 Open items, none blocking:
 
-1. **Encrypted WhatsApp group reactions** (`EncReactionMessage`) are dropped —
-   they need client-side decryption. Group reactions in unencrypted form work.
-2. **No live verification.** The whole path is unit-tested but has never run
+1. **No live verification.** The whole path is unit-tested but has never run
    against real traffic; the emoji-set limits Telegram enforces on
    `MessagesSendReaction` for the account type in use are unconfirmed.
-3. **Instagram reactions depend on the message→thread cache**, which is
+2. **Instagram reactions depend on the message→thread cache**, which is
    bounded (plan 012) — a reaction on a message evicted from the cache is
    skipped with a warning rather than routed.
-4. The Telegram echo invariant in §3 needs a suppression rule *before* anyone
+3. The Telegram echo invariant in §3 needs a suppression rule *before* anyone
    adds inbound reaction reporting to that connector.

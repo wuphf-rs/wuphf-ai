@@ -46,12 +46,13 @@ func (s Sender) SendMessage(ctx context.Context, dispatch *wuphfpb.MessageCreate
 	if err != nil {
 		return "", "", coreclient.Permanent(fmt.Errorf("parse WhatsApp target chat %q: %w", dispatch.GetTargetChatId(), err))
 	}
-	if len(dispatch.Attachments) > 1 {
-		return "", "", coreclient.Permanent(errors.New("multiple attachment dispatch is not implemented"))
-	}
 	contextInfo, err := s.quotedContext(dispatch)
 	if err != nil {
 		return "", "", err
+	}
+	if len(dispatch.Attachments) > 1 {
+		id, err := s.sendAttachments(ctx, chat, dispatch, contextInfo)
+		return id, "", err
 	}
 	var message *waE2E.Message
 	switch {
@@ -74,6 +75,61 @@ func (s Sender) SendMessage(ctx context.Context, dispatch *wuphfpb.MessageCreate
 		return "", "", fmt.Errorf("send WhatsApp message: %w", err)
 	}
 	return string(response.ID), "", nil
+}
+
+// sendAttachments delivers a multi-attachment dispatch. WhatsApp carries one
+// media per message and whatsmeow exposes no album primitive, so the group goes
+// out as consecutive messages: the first carries the dispatch text as its
+// caption and the quoted context, the rest are bare media. The first message's
+// id is returned as the copy, so replies and edits against this message resolve
+// to the head of the group.
+//
+// A failure partway through is reported as permanent. The earlier messages are
+// already delivered and cannot be recalled, so letting the core redeliver would
+// duplicate them; dead-lettering instead leaves the partial group in place and
+// surfaces the failure once.
+func (s Sender) sendAttachments(
+	ctx context.Context,
+	chat types.JID,
+	dispatch *wuphfpb.MessageCreateDispatch,
+	contextInfo *waE2E.ContextInfo,
+) (string, error) {
+	var first string
+	for i, attachment := range dispatch.Attachments {
+		caption := ""
+		if i == 0 {
+			caption = dispatch.GetText()
+		}
+		message, err := s.attachmentMessage(ctx, attachment, caption, s.rendering.AttachmentsAsFiles)
+		if err != nil {
+			return "", attachmentGroupError(err, i)
+		}
+		if i == 0 {
+			message = withContext(message, contextInfo)
+		}
+		response, err := s.client.SendMessage(ctx, chat, message)
+		if err != nil {
+			return "", attachmentGroupError(fmt.Errorf("send WhatsApp message: %w", err), i)
+		}
+		if i == 0 {
+			first = string(response.ID)
+		}
+	}
+	return first, nil
+}
+
+// attachmentGroupError marks a failure that leaves a partly-sent attachment
+// group permanent, so the dispatch is dead-lettered rather than redelivered
+// into duplicates. A failure on the first attachment has sent nothing yet and
+// keeps whatever retry semantics the underlying error carries.
+func attachmentGroupError(err error, index int) error {
+	if index == 0 {
+		return err
+	}
+	return coreclient.Permanent(fmt.Errorf(
+		"attachment %d of a multi-attachment message failed after %d were sent: %w",
+		index+1, index, err,
+	))
 }
 
 // EditMessage revises an already-delivered copy in place. WhatsApp keeps the

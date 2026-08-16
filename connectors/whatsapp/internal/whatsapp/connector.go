@@ -52,7 +52,7 @@ func (c Connector) Run(ctx context.Context) error {
 	}
 	defer media.Close()
 	inputs := make(chan *wuphfpb.ClientFrame, 128)
-	normalizer := NewNormalizer(inputs, NewMediaCodec(media, client), newChatNamer(client), newIdentityResolver(client))
+	normalizer := NewNormalizer(inputs, NewMediaCodec(media, client), newChatNamer(client), newIdentityResolver(client), client)
 	eventErrors := make(chan error, 1)
 	client.AddEventHandler(func(raw any) {
 		var err error

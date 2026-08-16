@@ -40,8 +40,11 @@ func NewSender(api *tg.Client, peers *PeerCache, media MediaBroker, rendering co
 }
 
 func (s Sender) SendMessage(ctx context.Context, dispatch *wuphfpb.MessageCreateDispatch) (string, string, error) {
-	if len(dispatch.Attachments) > 1 {
-		return "", "", coreclient.Permanent(errors.New("multiple attachment dispatch is not implemented"))
+	if len(dispatch.Attachments) > albumLimit {
+		return "", "", coreclient.Permanent(fmt.Errorf(
+			"Telegram albums hold at most %d attachments, dispatch carries %d",
+			albumLimit, len(dispatch.Attachments),
+		))
 	}
 	peer, err := s.peers.InputPeer(dispatch.TargetChatId)
 	if err != nil {
@@ -77,6 +80,8 @@ func (s Sender) SendMessage(ctx context.Context, dispatch *wuphfpb.MessageCreate
 	body := attributedText(dispatch.GetSenderName(), dispatch.GetParticipant(), dispatch.GetText())
 	var updates tg.UpdatesClass
 	switch {
+	case len(dispatch.Attachments) > 1:
+		updates, err = s.sendAlbum(ctx, builder, dispatch.Attachments, body, s.rendering.AttachmentsAsFiles)
 	case len(dispatch.Attachments) > 0:
 		updates, err = s.sendAttachment(ctx, builder, dispatch.Attachments[0], body, s.rendering.AttachmentsAsFiles)
 	case textExceedsLimit(dispatch.GetText(), s.rendering.MaxMessageLength):
@@ -372,6 +377,127 @@ func (s Sender) sendAttachment(
 		return upload.File(ctx, captionOptions...)
 	default:
 		return nil, coreclient.Permanent(fmt.Errorf("unsupported outbound attachment kind %s", attachment.Kind))
+	}
+}
+
+// albumLimit is the number of items Telegram accepts in one grouped media
+// message. A dispatch carrying more is rejected as permanently undeliverable
+// rather than split, so a partly-sent album can never be duplicated by a
+// redelivery.
+const albumLimit = 10
+
+// sendAlbum delivers several attachments as one grouped media message. The
+// caption rides on the first item, which is how Telegram shows a single caption
+// under an album, and the group is sent in exactly one API call so there is no
+// partial-send state to reconcile if it fails.
+//
+// Telegram will not group arbitrary media: photos and videos group with each
+// other, audio with audio, documents with documents, and nothing groups with a
+// sticker or an animation. When the attachments do not all fall in one group
+// they are sent as documents instead, which accepts any file type — the album
+// survives as a unit at the cost of inline previews for some items.
+func (s Sender) sendAlbum(
+	ctx context.Context,
+	builder *message.Builder,
+	attachments []*wuphfpb.Attachment,
+	captionOptions []message.StyledTextOption,
+	asFile bool,
+) (tg.UpdatesClass, error) {
+	asFile = asFile || !groupable(attachments)
+	options := make([]message.MultiMediaOption, 0, len(attachments))
+	for i, attachment := range attachments {
+		// Only the first item carries the caption; the rest are bare media.
+		var caption []message.StyledTextOption
+		if i == 0 {
+			caption = captionOptions
+		}
+		option, err := s.albumItem(ctx, builder, attachment, caption, asFile)
+		if err != nil {
+			return nil, err
+		}
+		options = append(options, option)
+	}
+	return builder.Album(ctx, options[0], options[1:]...)
+}
+
+// albumItem uploads one attachment and returns it as a media option for the
+// album. It mirrors sendAttachment's kind handling, minus the paths that cannot
+// appear in an album (stickers and animations, which groupable rejects).
+func (s Sender) albumItem(
+	ctx context.Context,
+	builder *message.Builder,
+	attachment *wuphfpb.Attachment,
+	captionOptions []message.StyledTextOption,
+	asFile bool,
+) (message.MultiMediaOption, error) {
+	bytes, err := s.media.Download(ctx, attachment.MediaId)
+	if err != nil {
+		return nil, fmt.Errorf("download media from core: %w", err)
+	}
+	name, hasExtension := uploadName(attachment)
+	file, err := builder.Upload(message.FromBytes(name, bytes)).AsInputFile(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("upload Telegram album item: %w", err)
+	}
+	kind := attachment.Kind
+	if asFile || !hasExtension {
+		kind = wuphfpb.Attachment_KIND_FILE
+	}
+	switch kind {
+	case wuphfpb.Attachment_KIND_IMAGE:
+		return message.UploadedPhoto(file, captionOptions...), nil
+	case wuphfpb.Attachment_KIND_VIDEO:
+		return message.Video(file, captionOptions...), nil
+	case wuphfpb.Attachment_KIND_AUDIO:
+		return message.Audio(file, captionOptions...), nil
+	case wuphfpb.Attachment_KIND_FILE:
+		return message.File(file, captionOptions...).Filename(name), nil
+	default:
+		return nil, coreclient.Permanent(fmt.Errorf("unsupported outbound attachment kind %s", attachment.Kind))
+	}
+}
+
+// groupable reports whether every attachment belongs to the same Telegram album
+// group, so the album can keep their native kinds. Stickers and animations are
+// never groupable, and an attachment with no usable extension degrades to a
+// document anyway, so it only groups with other documents.
+func groupable(attachments []*wuphfpb.Attachment) bool {
+	first := ""
+	for _, attachment := range attachments {
+		group := albumGroup(attachment)
+		if group == "" {
+			return false
+		}
+		if first == "" {
+			first = group
+		} else if group != first {
+			return false
+		}
+	}
+	return true
+}
+
+// albumGroup names the album group an attachment belongs to, or "" when it
+// cannot be grouped at all.
+func albumGroup(attachment *wuphfpb.Attachment) string {
+	if attachment.Kind == wuphfpb.Attachment_KIND_STICKER {
+		return ""
+	}
+	if attachment.Kind == wuphfpb.Attachment_KIND_VIDEO && attachment.GetAnimated() {
+		return ""
+	}
+	if _, hasExtension := uploadName(attachment); !hasExtension {
+		return "file"
+	}
+	switch attachment.Kind {
+	case wuphfpb.Attachment_KIND_IMAGE, wuphfpb.Attachment_KIND_VIDEO:
+		return "visual"
+	case wuphfpb.Attachment_KIND_AUDIO:
+		return "audio"
+	case wuphfpb.Attachment_KIND_FILE:
+		return "file"
+	default:
+		return ""
 	}
 }
 

@@ -2,8 +2,11 @@ package whatsappconnector
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"testing"
 
+	coreclient "github.com/akshettrj/wuphf/connectors/shared/coreclient"
 	"github.com/akshettrj/wuphf/connectors/whatsapp/internal/config"
 	wuphfpb "github.com/akshettrj/wuphf/proto/go/connector/v1"
 	"go.mau.fi/whatsmeow"
@@ -299,5 +302,104 @@ func TestSendRejectsLegacyReplyWithoutContext(t *testing.T) {
 	})
 	if err == nil || client.sent != nil {
 		t.Fatalf("SendMessage() error = %v, sent = %#v", err, client.sent)
+	}
+}
+
+// recordingSendClient keeps every message it was asked to send, and can fail on
+// a chosen call so a partly-delivered attachment group can be exercised.
+type recordingSendClient struct {
+	stubSendClient
+	sentAll []*waE2E.Message
+	failAt  int
+	err     error
+}
+
+func (r *recordingSendClient) SendMessage(ctx context.Context, to types.JID, message *waE2E.Message, extra ...whatsmeow.SendRequestExtra) (whatsmeow.SendResponse, error) {
+	if r.err != nil && len(r.sentAll) == r.failAt {
+		return whatsmeow.SendResponse{}, r.err
+	}
+	r.sentAll = append(r.sentAll, message)
+	response, err := r.stubSendClient.SendMessage(ctx, to, message, extra...)
+	response.ID = types.MessageID(fmt.Sprintf("sent-%d", len(r.sentAll)))
+	return response, err
+}
+
+func imageAttachments(n int) []*wuphfpb.Attachment {
+	attachments := make([]*wuphfpb.Attachment, 0, n)
+	for i := 0; i < n; i++ {
+		mime := "image/jpeg"
+		attachments = append(attachments, &wuphfpb.Attachment{
+			MediaId:  fmt.Sprintf("media-%d", i),
+			Kind:     wuphfpb.Attachment_KIND_IMAGE,
+			MimeType: &mime,
+		})
+	}
+	return attachments
+}
+
+func TestSendMultipleAttachmentsCaptionsOnlyTheFirst(t *testing.T) {
+	t.Parallel()
+	client := &recordingSendClient{}
+	sender := NewSender(client, &stubBroker{bytes: []byte("data")}, types.JID{}, config.StickerMetadata{}, config.RenderingOptions{})
+	text := "caption"
+	id, _, err := sender.SendMessage(context.Background(), &wuphfpb.MessageCreateDispatch{
+		TargetChatId: "123@s.whatsapp.net",
+		Text:         &text,
+		Attachments:  imageAttachments(3),
+	})
+	if err != nil {
+		t.Fatalf("SendMessage() error = %v", err)
+	}
+	if len(client.sentAll) != 3 {
+		t.Fatalf("sent %d messages, want one per attachment", len(client.sentAll))
+	}
+	if got := client.sentAll[0].GetImageMessage().GetCaption(); got != text {
+		t.Fatalf("first caption = %q, want %q", got, text)
+	}
+	for i, sent := range client.sentAll[1:] {
+		if caption := sent.GetImageMessage().GetCaption(); caption != "" {
+			t.Fatalf("attachment %d caption = %q, want the caption only on the first", i+1, caption)
+		}
+	}
+	// The copy the core records is the head of the group, so replies and edits
+	// against this message resolve to the first item.
+	if id != "sent-1" {
+		t.Fatalf("recorded copy = %q, want the first message id", id)
+	}
+}
+
+func TestSendMultipleAttachmentsDeadLettersAfterPartialDelivery(t *testing.T) {
+	t.Parallel()
+	client := &recordingSendClient{failAt: 1, err: errors.New("upstream refused")}
+	sender := NewSender(client, &stubBroker{bytes: []byte("data")}, types.JID{}, config.StickerMetadata{}, config.RenderingOptions{})
+	_, _, err := sender.SendMessage(context.Background(), &wuphfpb.MessageCreateDispatch{
+		TargetChatId: "123@s.whatsapp.net",
+		Attachments:  imageAttachments(3),
+	})
+	if err == nil {
+		t.Fatal("SendMessage() error = nil, want the partial-group failure")
+	}
+	// Permanent so the core dead-letters instead of redelivering, which would
+	// duplicate the attachments that did go out.
+	var permanent coreclient.PermanentError
+	if !errors.As(err, &permanent) {
+		t.Fatalf("SendMessage() error = %v, want a permanent error", err)
+	}
+	if len(client.sentAll) != 1 {
+		t.Fatalf("sent %d messages, want only the one before the failure", len(client.sentAll))
+	}
+}
+
+func TestSendFirstAttachmentFailureStaysRetryable(t *testing.T) {
+	t.Parallel()
+	client := &recordingSendClient{failAt: 0, err: errors.New("transient")}
+	sender := NewSender(client, &stubBroker{bytes: []byte("data")}, types.JID{}, config.StickerMetadata{}, config.RenderingOptions{})
+	_, _, err := sender.SendMessage(context.Background(), &wuphfpb.MessageCreateDispatch{
+		TargetChatId: "123@s.whatsapp.net",
+		Attachments:  imageAttachments(2),
+	})
+	var permanent coreclient.PermanentError
+	if err == nil || errors.As(err, &permanent) {
+		t.Fatalf("SendMessage() error = %v, want a retryable failure with nothing sent", err)
 	}
 }

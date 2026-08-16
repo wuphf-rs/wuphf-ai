@@ -21,11 +21,21 @@ type ChatNamer interface {
 	PersonName(ctx context.Context, jid types.JID, pushHint string) string
 }
 
+// reactionDecryptor opens a reaction WhatsApp delivered encrypted. Group
+// reactions travel as an EncReactionMessage sealed with the target message's
+// secret, which only the client holding the session can open. Kept as a seam so
+// the normalizer stays testable without a live client; a nil decryptor simply
+// leaves encrypted reactions unreported.
+type reactionDecryptor interface {
+	DecryptReaction(ctx context.Context, message *events.Message) (*waE2E.ReactionMessage, error)
+}
+
 type Normalizer struct {
-	inputs   chan<- *wuphfpb.ClientFrame
-	media    MediaCodec
-	namer    ChatNamer
-	identity identityResolver
+	inputs    chan<- *wuphfpb.ClientFrame
+	media     MediaCodec
+	namer     ChatNamer
+	identity  identityResolver
+	decryptor reactionDecryptor
 	// migrations dedupes the phone-to-LID address changes already reported to
 	// the core, so a long-lived chat does not re-emit the same migration on
 	// every message. It is a pointer so the shared gate survives the value
@@ -33,12 +43,19 @@ type Normalizer struct {
 	migrations *migrationGate
 }
 
-func NewNormalizer(inputs chan<- *wuphfpb.ClientFrame, media MediaCodec, namer ChatNamer, identity identityResolver) Normalizer {
+func NewNormalizer(
+	inputs chan<- *wuphfpb.ClientFrame,
+	media MediaCodec,
+	namer ChatNamer,
+	identity identityResolver,
+	decryptor reactionDecryptor,
+) Normalizer {
 	return Normalizer{
 		inputs:     inputs,
 		media:      media,
 		namer:      namer,
 		identity:   identity,
+		decryptor:  decryptor,
 		migrations: newMigrationGate(),
 	}
 }
@@ -239,11 +256,10 @@ func receiptKind(t types.ReceiptType) (wuphfpb.ReceiptKind, bool) {
 // a message whose ReactionMessage names the reacted message and holds the emoji
 // (empty text clears the reactor's reaction). The reactor is the message sender,
 // canonicalized like any other id; the core resolves the reacted message and
-// fans the reaction to the other endpoints. Encrypted group reactions
-// (EncReactionMessage) need the client to decrypt and are not handled here yet.
+// fans the reaction to the other endpoints.
 func (n Normalizer) normalizeReaction(ctx context.Context, message *events.Message, chat types.JID) (*wuphfpb.ReactionEvent, bool) {
-	reaction := message.Message.GetReactionMessage()
-	if reaction == nil {
+	reaction, ok := n.reactionMessage(ctx, message)
+	if !ok {
 		return nil, false
 	}
 	target := reaction.GetKey().GetID()
@@ -262,6 +278,27 @@ func (n Normalizer) normalizeReaction(ctx context.Context, message *events.Messa
 		event.SenderName = &name
 	}
 	return event, true
+}
+
+// reactionMessage extracts the reaction a message carries, decrypting it when
+// needed. Reactions in groups with message-secret encryption arrive as an
+// EncReactionMessage whose payload only the client can open, so those are
+// decrypted through the decryptor; a plaintext ReactionMessage is used as-is.
+// A decryption failure is reported as "no reaction" rather than an error: the
+// message is then handled as an ordinary (empty) message and dropped, which is
+// what happened to every encrypted reaction before they were decrypted at all.
+func (n Normalizer) reactionMessage(ctx context.Context, message *events.Message) (*waE2E.ReactionMessage, bool) {
+	if reaction := message.Message.GetReactionMessage(); reaction != nil {
+		return reaction, true
+	}
+	if message.Message.GetEncReactionMessage() == nil || n.decryptor == nil {
+		return nil, false
+	}
+	reaction, err := n.decryptor.DecryptReaction(ctx, message)
+	if err != nil || reaction == nil {
+		return nil, false
+	}
+	return reaction, true
 }
 
 // senderName resolves the per-message sender label, formatted by the namer when

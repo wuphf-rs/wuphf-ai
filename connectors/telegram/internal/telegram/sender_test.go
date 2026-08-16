@@ -141,3 +141,49 @@ func TestSentMessageID(t *testing.T) {
 		t.Fatalf("sentMessageID() = %d, want 42", id)
 	}
 }
+
+func TestAlbumGrouping(t *testing.T) {
+	t.Parallel()
+
+	image := func() *wuphfpb.Attachment {
+		return &wuphfpb.Attachment{Kind: wuphfpb.Attachment_KIND_IMAGE, MimeType: ptr("image/jpeg")}
+	}
+	video := func() *wuphfpb.Attachment {
+		return &wuphfpb.Attachment{Kind: wuphfpb.Attachment_KIND_VIDEO, MimeType: ptr("video/mp4")}
+	}
+	audio := func() *wuphfpb.Attachment {
+		return &wuphfpb.Attachment{Kind: wuphfpb.Attachment_KIND_AUDIO, MimeType: ptr("audio/mpeg")}
+	}
+
+	cases := []struct {
+		name        string
+		attachments []*wuphfpb.Attachment
+		groupable   bool
+	}{
+		{"photos group", []*wuphfpb.Attachment{image(), image()}, true},
+		{"photos and videos share the visual group", []*wuphfpb.Attachment{image(), video()}, true},
+		{"audio does not group with photos", []*wuphfpb.Attachment{image(), audio()}, false},
+		{
+			"a sticker never groups",
+			[]*wuphfpb.Attachment{image(), {Kind: wuphfpb.Attachment_KIND_STICKER, MimeType: ptr("image/webp")}},
+			false,
+		},
+		{
+			"an animation never groups",
+			[]*wuphfpb.Attachment{video(), {Kind: wuphfpb.Attachment_KIND_VIDEO, MimeType: ptr("video/mp4"), Animated: true}},
+			false,
+		},
+		{
+			"an extensionless item degrades to a document and stops grouping with photos",
+			[]*wuphfpb.Attachment{image(), {Kind: wuphfpb.Attachment_KIND_IMAGE}},
+			false,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := groupable(tc.attachments); got != tc.groupable {
+				t.Fatalf("groupable() = %v, want %v", got, tc.groupable)
+			}
+		})
+	}
+}
