@@ -1308,3 +1308,135 @@ async fn raw_send_to_an_unknown_connector_is_rejected() {
         .unwrap_err();
     assert!(matches!(error, CoreError::UnknownConnector(_)));
 }
+
+/// A many-to-one rule whose allow list names the source chat by its phone JID,
+/// the form a user can actually read off their contact list. WhatsApp delivers
+/// the same chat under a LID.
+fn phone_listed_mirror_rule(filter: RuleChatsFilter) -> RoutingRule {
+    RoutingRule {
+        id: RuleId("wa-mirror".into()),
+        flow: RoutingRuleFlow::ManyToOne {
+            source_connector: ConnectorId(WHATSAPP.into()),
+            source_chats_filter: filter,
+            destination_connector: ConnectorId(TELEGRAM.into()),
+            destination_chat: RuleChat {
+                chat_id: "-1001234567".into(),
+                thread_id: None,
+            },
+        },
+    }
+}
+
+fn chats(chat_id: &str) -> Vec<RuleChat> {
+    vec![RuleChat {
+        chat_id: chat_id.into(),
+        thread_id: None,
+    }]
+}
+
+async fn link_phone_to_lid(core: &Core<InMemoryStorage>) {
+    core.migrate_identity(
+        ConnectorId(WHATSAPP.into()),
+        PlatformAddress::new("15550001111@s.whatsapp.net", None),
+        PlatformAddress::new("88887777@lid", None),
+    )
+    .await
+    .unwrap();
+}
+
+#[tokio::test]
+async fn allow_list_written_with_the_phone_jid_matches_the_linked_lid() {
+    let core = core(vec![phone_listed_mirror_rule(RuleChatsFilter::Only {
+        chats: chats("15550001111@s.whatsapp.net"),
+    })]);
+    // The connector reports the phone/LID equivalence before the message, as it
+    // does for every direct chat it resolves.
+    link_phone_to_lid(&core).await;
+
+    let outcome = core
+        .ingest(event(WHATSAPP, "88887777@lid", "wa-1", None))
+        .await
+        .unwrap();
+    assert_eq!(outcome.dispatches().len(), 1);
+}
+
+#[tokio::test]
+async fn deny_list_written_with_the_phone_jid_excludes_the_linked_lid() {
+    let core = core(vec![phone_listed_mirror_rule(RuleChatsFilter::Not {
+        chats: chats("15550001111@s.whatsapp.net"),
+    })]);
+    link_phone_to_lid(&core).await;
+
+    let outcome = core
+        .ingest(event(WHATSAPP, "88887777@lid", "wa-1", None))
+        .await
+        .unwrap();
+    assert_eq!(outcome, IngestOutcome::Ignored(IgnoreReason::Unmatched));
+}
+
+#[tokio::test]
+async fn an_unlinked_chat_is_unaffected_by_another_chats_link() {
+    let core = core(vec![phone_listed_mirror_rule(RuleChatsFilter::Only {
+        chats: chats("15550001111@s.whatsapp.net"),
+    })]);
+    link_phone_to_lid(&core).await;
+
+    let outcome = core
+        .ingest(event(WHATSAPP, "99999999@lid", "wa-1", None))
+        .await
+        .unwrap();
+    assert_eq!(outcome, IngestOutcome::Ignored(IgnoreReason::Unmatched));
+}
+
+#[tokio::test]
+async fn every_known_form_of_a_matched_chat_resolves_to_one_endpoint() {
+    let core = core(vec![phone_listed_mirror_rule(RuleChatsFilter::Only {
+        chats: chats("15550001111@s.whatsapp.net"),
+    })]);
+    link_phone_to_lid(&core).await;
+    let lid = core
+        .ingest(event(WHATSAPP, "88887777@lid", "wa-1", None))
+        .await
+        .unwrap();
+    let IngestOutcome::Routed { message_id, .. } = lid else {
+        panic!("listed chat should route");
+    };
+
+    // The same chat arriving under the phone JID lands in the conversation the
+    // LID form already established, rather than minting a second one with its
+    // own mirror thread.
+    let phone = core
+        .ingest(event(WHATSAPP, "15550001111@s.whatsapp.net", "wa-2", None))
+        .await
+        .unwrap();
+    let IngestOutcome::Deferred {
+        message_id: deferred,
+    } = phone
+    else {
+        panic!("second message should be held for the in-flight provision");
+    };
+    assert_ne!(message_id, deferred);
+}
+
+#[tokio::test]
+async fn address_forms_chain_across_successive_migrations() {
+    let core = core(vec![phone_listed_mirror_rule(RuleChatsFilter::Only {
+        chats: chats("15550001111@s.whatsapp.net"),
+    })]);
+    link_phone_to_lid(&core).await;
+    // A second hop: the closure has to walk phone -> lid -> new lid for the
+    // rule's phone-number entry to still name the chat.
+    core.migrate_identity(
+        ConnectorId(WHATSAPP.into()),
+        PlatformAddress::new("88887777@lid", None),
+        PlatformAddress::new("66665555@lid", None),
+    )
+    .await
+    .unwrap();
+
+    let outcome = core
+        .ingest(event(WHATSAPP, "66665555@lid", "wa-1", None))
+        .await
+        .unwrap();
+    assert_eq!(outcome.dispatches().len(), 1);
+}

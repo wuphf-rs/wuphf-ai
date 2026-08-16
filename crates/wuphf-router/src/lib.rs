@@ -2,8 +2,8 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use thiserror::Error;
 use wuphf_model::{
-    ConnectorId, ConnectorInfo, EndpointId, MessageId, PlatformAddress, RoutingRule,
-    RoutingRuleFlow, RuleEnd, RuleId,
+    AddressSet, ConnectorId, ConnectorInfo, EndpointId, MessageId, RoutingRule, RoutingRuleFlow,
+    RuleEnd, RuleId,
 };
 use wuphf_storage::{Storage, StorageError};
 
@@ -35,15 +35,17 @@ impl RoutingConfig {
         self.connectors.get(id)
     }
 
-    /// The first rule end whose connector and selector accept this address.
+    /// The first rule end whose connector and selector accept this chat. The
+    /// chat is named by every address form known for it, so a rule written with
+    /// one form selects it however the platform addressed the event.
     pub fn match_source(
         &self,
         connector: &ConnectorId,
-        address: &PlatformAddress,
+        addresses: &AddressSet,
     ) -> Option<MatchedRule<'_>> {
         for rule in &self.rules {
             for end in [RuleEnd::Source, RuleEnd::Destination] {
-                if rule.flow.end_accepts(end, connector, address) {
+                if rule.flow.end_accepts(end, connector, addresses) {
                     return Some(MatchedRule { rule, origin: end });
                 }
             }

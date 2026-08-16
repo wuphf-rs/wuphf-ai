@@ -64,7 +64,7 @@ func (n Normalizer) Handle(ctx context.Context, message *events.Message) error {
 	message.Message = unwrapViewOnce(message.Message)
 	// Any phone/LID migration must be reported before the message so the core
 	// can bind both addresses to one conversation before resolving this event.
-	for _, migration := range n.migrationsFor(message, chat) {
+	for _, migration := range n.migrationsFor(ctx, message, chat) {
 		if err := n.send(ctx, &wuphfpb.ClientFrame{
 			Body: &wuphfpb.ClientFrame_IdentityMigrated{IdentityMigrated: migration},
 		}); err != nil {
@@ -100,13 +100,20 @@ func (n Normalizer) Handle(ctx context.Context, message *events.Message) error {
 }
 
 // migrationsFor collects the chat identity migrations implied by this message,
-// deduped against ones already reported. Two signals feed it: WhatsApp's own
-// alt-address hint (RecipientAlt) and a canonical shift detected here, where the
+// deduped against ones already reported. Three signals feed it: WhatsApp's own
+// alt-address hint (RecipientAlt); a canonical shift detected here, where the
 // chat's raw address differs from its resolved identity because the LID mapping
 // was learned after an earlier message already minted an endpoint under the
-// phone JID. Reporting the shift rebinds that stale endpoint instead of letting
-// the LID form mint a second mirror thread.
-func (n Normalizer) migrationsFor(message *events.Message, chat types.JID) []*wuphfpb.IdentityMigrated {
+// phone JID; and the counterpart the LID store holds for the canonical address.
+// Reporting the shift rebinds a stale endpoint instead of letting the LID form
+// mint a second mirror thread; reporting the counterpart teaches the core both
+// forms of the chat even when nothing migrated, so a routing rule that names it
+// by phone number still matches a LID-addressed message.
+func (n Normalizer) migrationsFor(
+	ctx context.Context,
+	message *events.Message,
+	chat types.JID,
+) []*wuphfpb.IdentityMigrated {
 	var migrations []*wuphfpb.IdentityMigrated
 	if migration := identityMigration(message); migration != nil {
 		migrations = append(migrations, migration)
@@ -118,8 +125,23 @@ func (n Normalizer) migrationsFor(message *events.Message, chat types.JID) []*wu
 				NewChatId: chat.String(),
 			})
 		}
+		if alternate := n.alternate(ctx, chat); !alternate.IsEmpty() && alternate != chat {
+			migrations = append(migrations, &wuphfpb.IdentityMigrated{
+				OldChatId: alternate.String(),
+				NewChatId: chat.String(),
+			})
+		}
 	}
 	return n.migrations.unseen(migrations)
+}
+
+// alternate returns the chat's other address form, or an empty JID when the
+// resolver is absent (as in tests) or knows no counterpart.
+func (n Normalizer) alternate(ctx context.Context, jid types.JID) types.JID {
+	if n.identity == nil {
+		return types.EmptyJID
+	}
+	return n.identity.Alternate(ctx, jid)
 }
 
 // normalizeEdit reports an inbound content revision. WhatsApp carries an edit as

@@ -220,6 +220,23 @@ func (f fakeIdentity) Canonical(_ context.Context, jid types.JID) types.JID {
 	return jid
 }
 
+func (f fakeIdentity) Alternate(_ context.Context, jid types.JID) types.JID {
+	jid = jid.ToNonAD()
+	if lid, ok := f.lids[jid.String()]; ok {
+		return lid
+	}
+	for phone, lid := range f.lids {
+		if lid == jid {
+			parsed, err := types.ParseJID(phone)
+			if err != nil {
+				return types.EmptyJID
+			}
+			return parsed
+		}
+	}
+	return types.EmptyJID
+}
+
 func TestHandleCanonicalizesChatAndEmitsMigrationOnce(t *testing.T) {
 	t.Parallel()
 	phone := types.NewJID("15550001111", types.DefaultUserServer)
@@ -488,5 +505,48 @@ func TestMarkViewOncePrefixesCaption(t *testing.T) {
 	plain := &waE2E.Message{ImageMessage: &waE2E.ImageMessage{Caption: proto.String("hi")}}
 	if got := markViewOnce(plain, "hi"); got != "hi" {
 		t.Fatalf("non-view-once caption changed: %q", got)
+	}
+}
+
+// A chat WhatsApp already addresses by LID reports no migration of its own, but
+// the core still has to learn the phone number behind it: that is the form a
+// user writes in a routing rule's chat list.
+func TestHandleReportsThePhoneFormOfALIDAddressedChat(t *testing.T) {
+	t.Parallel()
+	phone := types.NewJID("15550001111", types.DefaultUserServer)
+	lid := types.NewJID("88887777", types.HiddenUserServer)
+	identity := fakeIdentity{lids: map[string]types.JID{phone.String(): lid}}
+	inputs := make(chan *wuphfpb.ClientFrame, 8)
+	normalizer := NewNormalizer(inputs, MediaCodec{}, stubNamer{}, identity)
+	message := &events.Message{
+		Info: types.MessageInfo{
+			MessageSource: types.MessageSource{
+				Chat:           lid,
+				Sender:         lid,
+				AddressingMode: types.AddressingModeLID,
+			},
+			ID:       "wa-1",
+			PushName: "Alice",
+		},
+		Message: &waE2E.Message{Conversation: proto.String("hi")},
+	}
+	if err := normalizer.Handle(context.Background(), message); err != nil {
+		t.Fatalf("Handle() error = %v", err)
+	}
+	migration := (<-inputs).GetIdentityMigrated()
+	if migration.GetOldChatId() != phone.String() || migration.GetNewChatId() != lid.String() {
+		t.Fatalf("first frame = %#v, want the chat's phone form linked to its LID", migration)
+	}
+	if create := (<-inputs).GetMessageCreate(); create.GetChatId() != lid.String() {
+		t.Fatalf("chat id = %q, want canonical LID", create.GetChatId())
+	}
+
+	// The link is reported once per session, not on every message.
+	message.Info.ID = "wa-2"
+	if err := normalizer.Handle(context.Background(), message); err != nil {
+		t.Fatalf("Handle() error = %v", err)
+	}
+	if (<-inputs).GetMessageCreate() == nil {
+		t.Fatal("second message re-reported the address link")
 	}
 }

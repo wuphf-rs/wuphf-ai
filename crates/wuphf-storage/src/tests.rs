@@ -672,3 +672,56 @@ async fn provisioning_stash_drains_in_insertion_order<S: Storage>(storage: S) {
     );
     assert!(storage.stashed_replica_sets().await.unwrap().is_empty());
 }
+
+#[tokio::test]
+async fn memory_address_links_resolve_from_either_side() {
+    address_links_resolve_from_either_side(InMemoryStorage::default()).await;
+}
+
+#[tokio::test]
+async fn sqlite_address_links_resolve_from_either_side() {
+    let path = std::env::temp_dir().join(format!("wuphf-links-{}.sqlite", DispatchId::new()));
+    let url = format!("sqlite://{}", path.display());
+    address_links_resolve_from_either_side(SqliteStorage::connect(&url).await.unwrap()).await;
+}
+
+/// A link is symmetric and idempotent, and is scoped to its connector: the same
+/// chat id on another connector is a different chat. Both backends must agree,
+/// since rule matching reads this to decide whether a chat is listed.
+async fn address_links_resolve_from_either_side<S: Storage>(storage: S) {
+    let connector = ConnectorId("whatsapp-main".into());
+    let phone = PlatformAddress::new("15550001111@s.whatsapp.net", None);
+    let lid = PlatformAddress::new("88887777@lid", None);
+    let link = AddressLink {
+        connector_id: connector.clone(),
+        address: phone.clone(),
+        linked_address: lid.clone(),
+    };
+    storage.put_address_link(link.clone()).await.unwrap();
+    // Re-reporting the same link is a no-op rather than a duplicate row.
+    storage.put_address_link(link).await.unwrap();
+
+    assert_eq!(
+        storage.linked_addresses(&connector, &phone).await.unwrap(),
+        vec![lid.clone()]
+    );
+    assert_eq!(
+        storage.linked_addresses(&connector, &lid).await.unwrap(),
+        vec![phone.clone()]
+    );
+    assert!(
+        storage
+            .linked_addresses(&ConnectorId("telegram-main".into()), &phone)
+            .await
+            .unwrap()
+            .is_empty()
+    );
+    // A chat with no reported counterpart has no forms but its own.
+    assert!(
+        storage
+            .linked_addresses(&connector, &PlatformAddress::new("111@g.us", None))
+            .await
+            .unwrap()
+            .is_empty()
+    );
+}

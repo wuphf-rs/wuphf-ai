@@ -4,8 +4,8 @@
 
 use crate::{Core, CoreError};
 use wuphf_model::{
-    Alias, ConnectorId, Conversation, ConversationId, Endpoint, EndpointId, PlatformAddress,
-    ReplicaSet, ReplicaSetId, RoutingRuleFlow, RuleEnd, RuleId, SourceAddress,
+    AddressSet, Alias, ConnectorId, Conversation, ConversationId, Endpoint, EndpointId,
+    PlatformAddress, ReplicaSet, ReplicaSetId, RoutingRuleFlow, RuleEnd, RuleId, SourceAddress,
 };
 use wuphf_storage::Storage;
 
@@ -30,10 +30,14 @@ where
             return Ok(Some(endpoint));
         }
 
-        let Some(matched) = self
-            .config
-            .match_source(&source.connector_id, &source.address)
-        else {
+        // Rules are matched against every address form the platform has
+        // reported for this chat, not just the one the event arrived under: a
+        // chat list written with a WhatsApp phone JID has to select — or
+        // exclude — the same chat when it arrives addressed by LID.
+        let addresses = self
+            .address_set(&source.connector_id, &source.address)
+            .await?;
+        let Some(matched) = self.config.match_source(&source.connector_id, &addresses) else {
             return Ok(None);
         };
         let rule = matched.rule.clone();
@@ -69,7 +73,70 @@ where
                 origin = Some(endpoint);
             }
         }
+        if let Some(origin) = origin {
+            self.bind_known_forms(origin, &source.connector_id, &addresses)
+                .await?;
+        }
         Ok(origin)
+    }
+
+    /// Every platform address known to name this chat: the one the event
+    /// arrived on plus the transitive closure of the equivalences the platform
+    /// has reported (a chain, since a chat can migrate more than once). The
+    /// closure is walked breadth-first over a visited set, so a cycle — links
+    /// are stored symmetrically, so every link is one — terminates.
+    pub(crate) async fn address_set(
+        &self,
+        connector_id: &ConnectorId,
+        address: &PlatformAddress,
+    ) -> Result<AddressSet, CoreError> {
+        let mut addresses = AddressSet::single(address.clone());
+        let mut frontier = vec![address.clone()];
+        while let Some(address) = frontier.pop() {
+            for linked in self
+                .storage
+                .linked_addresses(connector_id, &address)
+                .await?
+            {
+                if addresses.iter().any(|known| *known == linked) {
+                    continue;
+                }
+                addresses.insert(linked.clone());
+                frontier.push(linked);
+            }
+        }
+        Ok(addresses)
+    }
+
+    /// Make every known form of a chat resolve straight to its endpoint, so
+    /// later events skip rule matching whichever address they arrive under. The
+    /// endpoint keeps the canonical alias it was minted with; the other forms
+    /// are added as non-canonical, leaving outbound addressing untouched.
+    async fn bind_known_forms(
+        &self,
+        endpoint_id: EndpointId,
+        connector_id: &ConnectorId,
+        addresses: &AddressSet,
+    ) -> Result<(), CoreError> {
+        for address in addresses.iter() {
+            if self
+                .storage
+                .resolve_endpoint(connector_id, address)
+                .await?
+                .is_some()
+            {
+                continue;
+            }
+            self.storage
+                .put_alias(Alias {
+                    connector_id: connector_id.clone(),
+                    address: address.clone(),
+                    endpoint_id,
+                    is_canonical: false,
+                })
+                .await?;
+        }
+        Ok(())
     }
 
     /// Get the conversation backing this rule's identity address, creating it

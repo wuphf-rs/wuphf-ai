@@ -12,7 +12,7 @@ pub use sqlite::SqliteStorage;
 use async_trait::async_trait;
 use thiserror::Error;
 use wuphf_model::{
-    Alias, ChatSettings, ConnectorId, Contact, Conversation, ConversationId, DedupKey,
+    AddressLink, Alias, ChatSettings, ConnectorId, Contact, Conversation, ConversationId, DedupKey,
     DispatchCommand, DispatchId, Endpoint, EndpointId, MediaBlob, MediaId, Message, MessageCopy,
     MessageId, ObservedChat, ObservedMessage, PlatformAddress, ReplicaSet, ReplicaSetId,
     StoredDispatch, ThreadMapping,
@@ -62,6 +62,19 @@ pub trait Storage: Send + Sync + 'static {
         connector_id: &ConnectorId,
         address: &PlatformAddress,
     ) -> StorageResult<Option<EndpointId>>;
+    /// Record that two addresses on a connector name the same chat. Stored
+    /// symmetrically, so a later lookup from either address finds the other.
+    /// Independent of endpoints: a link is kept for chats that have never been
+    /// routed, which is what lets a rule's chat list recognize a chat under a
+    /// form the user did not write.
+    async fn put_address_link(&self, link: AddressLink) -> StorageResult<()>;
+    /// The addresses directly linked to this one on the connector. Callers walk
+    /// these transitively to get a chat's full set of forms.
+    async fn linked_addresses(
+        &self,
+        connector_id: &ConnectorId,
+        address: &PlatformAddress,
+    ) -> StorageResult<Vec<PlatformAddress>>;
     async fn put_conversation(&self, conversation: Conversation) -> StorageResult<()>;
     async fn conversation(
         &self,

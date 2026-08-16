@@ -7,7 +7,7 @@ use async_trait::async_trait;
 use std::collections::{HashMap, HashSet};
 use tokio::sync::RwLock;
 use wuphf_model::{
-    Alias, ChatSettings, ConnectorId, Contact, Conversation, ConversationId, DedupKey,
+    AddressLink, Alias, ChatSettings, ConnectorId, Contact, Conversation, ConversationId, DedupKey,
     DispatchCommand, DispatchId, DispatchState, Endpoint, EndpointId, MediaBlob, MediaId, Message,
     MessageCopy, MessageId, ObservedChat, ObservedDirection, ObservedMessage, PlatformAddress,
     ReplicaSet, ReplicaSetId, StoredDispatch, ThreadMapping,
@@ -23,6 +23,10 @@ struct State {
     endpoints: HashMap<EndpointId, Endpoint>,
     replica_sets: HashMap<ReplicaSetId, ReplicaSet>,
     aliases: HashMap<(ConnectorId, PlatformAddress), Alias>,
+    /// Symmetric address equivalences, mirroring the SQLite `address_links`
+    /// table. Kept apart from `aliases` because a link exists with or without an
+    /// endpoint behind either address.
+    address_links: HashMap<(ConnectorId, PlatformAddress), Vec<PlatformAddress>>,
     conversations: HashMap<ConversationId, Conversation>,
     thread_mappings: HashMap<(ConversationId, ConnectorId), ThreadMapping>,
     messages: HashMap<MessageId, Message>,
@@ -128,6 +132,41 @@ impl Storage for InMemoryStorage {
             .aliases
             .get(&(connector_id.clone(), address.clone()))
             .map(|alias| alias.endpoint_id))
+    }
+
+    async fn put_address_link(&self, link: AddressLink) -> StorageResult<()> {
+        if link.address == link.linked_address {
+            return Ok(());
+        }
+        let mut state = self.state.write().await;
+        for (from, to) in [
+            (link.address.clone(), link.linked_address.clone()),
+            (link.linked_address, link.address),
+        ] {
+            let linked = state
+                .address_links
+                .entry((link.connector_id.clone(), from))
+                .or_default();
+            if !linked.contains(&to) {
+                linked.push(to);
+            }
+        }
+        Ok(())
+    }
+
+    async fn linked_addresses(
+        &self,
+        connector_id: &ConnectorId,
+        address: &PlatformAddress,
+    ) -> StorageResult<Vec<PlatformAddress>> {
+        Ok(self
+            .state
+            .read()
+            .await
+            .address_links
+            .get(&(connector_id.clone(), address.clone()))
+            .cloned()
+            .unwrap_or_default())
     }
 
     async fn put_conversation(&self, conversation: Conversation) -> StorageResult<()> {

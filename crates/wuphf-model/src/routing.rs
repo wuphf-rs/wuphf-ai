@@ -68,6 +68,78 @@ impl PlatformAddress {
     }
 }
 
+/// Every platform address known to name one chat: the address an event actually
+/// arrived on (the primary) plus the equivalent forms the platform has reported
+/// for it, as recorded by [`AddressLink`].
+///
+/// Platforms hand out several interchangeable addresses for the same peer —
+/// WhatsApp reaches a contact as both a phone JID and a LID — and a user writing
+/// a rule picks whichever form they know. Matching a rule against the whole set
+/// rather than one string is what makes a chat list agree with the platform no
+/// matter which form the user wrote or the connector reported.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AddressSet {
+    primary: PlatformAddress,
+    alternates: Vec<PlatformAddress>,
+}
+
+impl AddressSet {
+    /// A set with no known alternates. Every connector that hands out one stable
+    /// address per chat resolves through this.
+    pub fn single(primary: PlatformAddress) -> Self {
+        Self {
+            primary,
+            alternates: Vec::new(),
+        }
+    }
+
+    /// A set of known-equivalent forms. `alternates` may repeat the primary or
+    /// each other; duplicates are dropped so callers can pass a raw closure.
+    pub fn new(primary: PlatformAddress, alternates: Vec<PlatformAddress>) -> Self {
+        let mut set = Self::single(primary);
+        for address in alternates {
+            set.insert(address);
+        }
+        set
+    }
+
+    /// Add an equivalent form, ignoring one already in the set.
+    pub fn insert(&mut self, address: PlatformAddress) {
+        if address != self.primary && !self.alternates.contains(&address) {
+            self.alternates.push(address);
+        }
+    }
+
+    /// The address the event arrived on. This is the form the core stores and
+    /// routes with; the alternates only widen matching.
+    pub fn primary(&self) -> &PlatformAddress {
+        &self.primary
+    }
+
+    /// Every form in the set, primary first.
+    pub fn iter(&self) -> impl Iterator<Item = &PlatformAddress> {
+        std::iter::once(&self.primary).chain(self.alternates.iter())
+    }
+}
+
+impl From<PlatformAddress> for AddressSet {
+    fn from(address: PlatformAddress) -> Self {
+        Self::single(address)
+    }
+}
+
+/// A platform-reported equivalence between two addresses on one connector (e.g.
+/// a WhatsApp phone JID and the LID for the same contact). Recorded whether or
+/// not either address has an [`Endpoint`] yet, which is what lets rule matching
+/// treat the forms as one chat from the very first message — an [`Alias`], by
+/// contrast, only exists once an endpoint does.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AddressLink {
+    pub connector_id: ConnectorId,
+    pub address: PlatformAddress,
+    pub linked_address: PlatformAddress,
+}
+
 /// A user-declared replication mapping. Rules are the only routing input a user
 /// writes; conversations, endpoints, and replica sets are derived from them
 /// lazily at runtime. The flow names which side owns conversation identity (the
@@ -113,10 +185,16 @@ pub struct RuleChat {
 }
 
 impl RuleChat {
-    /// Whether this rule chat names the address: chat ids must match, and a
+    /// Whether this rule chat names the chat: chat ids must match, and a
     /// thread-scoped rule chat only matches that thread while an unscoped one
-    /// matches the whole chat.
-    pub fn matches(&self, address: &PlatformAddress) -> bool {
+    /// matches the whole chat. Any form in the set counts, so a rule written
+    /// with one of a chat's addresses still names it when the platform reports
+    /// another.
+    pub fn matches(&self, addresses: &AddressSet) -> bool {
+        addresses.iter().any(|address| self.names(address))
+    }
+
+    fn names(&self, address: &PlatformAddress) -> bool {
         self.chat_id == address.chat_id
             && (self.thread_id.is_none() || self.thread_id == address.thread_id)
     }
@@ -143,11 +221,16 @@ pub enum RuleChatsFilter {
 }
 
 impl RuleChatsFilter {
-    pub fn accepts(&self, address: &PlatformAddress) -> bool {
+    /// Whether a chat, named by every address form known for it, passes. Both
+    /// list kinds test the whole set: an allow list admits a chat listed under
+    /// any of its forms, and a deny list excludes one listed under any of its
+    /// forms — so a chat cannot slip past a deny list by arriving under the
+    /// address the user did not write.
+    pub fn accepts(&self, addresses: &AddressSet) -> bool {
         match self {
             RuleChatsFilter::All => true,
-            RuleChatsFilter::Only { chats } => chats.iter().any(|chat| chat.matches(address)),
-            RuleChatsFilter::Not { chats } => !chats.iter().any(|chat| chat.matches(address)),
+            RuleChatsFilter::Only { chats } => chats.iter().any(|chat| chat.matches(addresses)),
+            RuleChatsFilter::Not { chats } => !chats.iter().any(|chat| chat.matches(addresses)),
         }
     }
 }
@@ -194,41 +277,44 @@ impl RoutingRuleFlow {
     }
 
     /// Whether the given end of this flow, served by `connector`, accepts an
-    /// inbound address. A many-to-one destination matches on the container
-    /// chat alone: its threads are minted per conversation, so a thread-level
-    /// address still belongs to the container.
+    /// inbound chat, named by every address form known for it. A many-to-one
+    /// destination matches on the container chat alone: its threads are minted
+    /// per conversation, so a thread-level address still belongs to the
+    /// container.
     pub fn end_accepts(
         &self,
         end: RuleEnd,
         connector: &ConnectorId,
-        address: &PlatformAddress,
+        addresses: &AddressSet,
     ) -> bool {
         if self.connector(end) != connector {
             return false;
         }
         match (self, end) {
             (RoutingRuleFlow::OneToOne { source_chat, .. }, RuleEnd::Source) => {
-                source_chat.matches(address)
+                source_chat.matches(addresses)
             }
             (
                 RoutingRuleFlow::OneToOne {
                     destination_chat, ..
                 },
                 RuleEnd::Destination,
-            ) => destination_chat.matches(address),
+            ) => destination_chat.matches(addresses),
             (
                 RoutingRuleFlow::ManyToOne {
                     source_chats_filter,
                     ..
                 },
                 RuleEnd::Source,
-            ) => source_chats_filter.accepts(address),
+            ) => source_chats_filter.accepts(addresses),
             (
                 RoutingRuleFlow::ManyToOne {
                     destination_chat, ..
                 },
                 RuleEnd::Destination,
-            ) => destination_chat.chat_id == address.chat_id,
+            ) => addresses
+                .iter()
+                .any(|address| destination_chat.chat_id == address.chat_id),
         }
     }
 }

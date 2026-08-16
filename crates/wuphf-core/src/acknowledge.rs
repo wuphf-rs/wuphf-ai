@@ -4,8 +4,8 @@
 
 use crate::{Core, CoreError};
 use wuphf_model::{
-    Alias, ConnectorId, DispatchAcknowledgement, DispatchId, EndpointId, MessageCopy, MessageId,
-    PlatformAddress, ReplicaSetId, StoredDispatch,
+    AddressLink, Alias, ConnectorId, DispatchAcknowledgement, DispatchId, EndpointId, MessageCopy,
+    MessageId, PlatformAddress, ReplicaSetId, StoredDispatch,
 };
 use wuphf_storage::Storage;
 
@@ -255,14 +255,27 @@ where
 
     /// Handle a platform identity migration: bind the new address to the same
     /// endpoint as the old one and promote it to canonical for outbound sends.
-    /// The old alias stays resolvable for inbound. If the old address was never
-    /// seen, there is nothing to remap and a later first sighting mints fresh.
+    /// The old alias stays resolvable for inbound.
+    ///
+    /// The equivalence itself is recorded either way, before any endpoint is
+    /// considered. A migration for a chat that has never been routed still
+    /// teaches the core that the two addresses name one chat, which is what
+    /// lets a rule's chat list recognize the chat whichever form the user wrote
+    /// — including a chat the list is there to exclude. Returns whether an
+    /// existing endpoint was rebound.
     pub async fn migrate_identity(
         &self,
         connector_id: ConnectorId,
         old: PlatformAddress,
         new: PlatformAddress,
     ) -> Result<bool, CoreError> {
+        self.storage
+            .put_address_link(AddressLink {
+                connector_id: connector_id.clone(),
+                address: old.clone(),
+                linked_address: new.clone(),
+            })
+            .await?;
         let Some(endpoint_id) = self.storage.resolve_endpoint(&connector_id, &old).await? else {
             return Ok(false);
         };

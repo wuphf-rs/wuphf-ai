@@ -8,7 +8,7 @@ use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
 use sqlx::{Row, SqlitePool};
 use std::str::FromStr;
 use wuphf_model::{
-    Alias, ChatSettings, ConnectorId, Contact, Conversation, ConversationId, DedupKey,
+    AddressLink, Alias, ChatSettings, ConnectorId, Contact, Conversation, ConversationId, DedupKey,
     DispatchCommand, DispatchId, DispatchState, Endpoint, EndpointId, MediaBlob, MediaId, Message,
     MessageCopy, MessageId, ObservedChat, ObservedDirection, ObservedMessage, PlatformAddress,
     ReplicaSet, ReplicaSetId, StoredDispatch, ThreadMapping,
@@ -128,6 +128,60 @@ impl Storage for SqliteStorage {
         .await?;
         row.map(|row| parse_endpoint_id(row.get("endpoint_id")))
             .transpose()
+    }
+
+    async fn put_address_link(&self, link: AddressLink) -> StorageResult<()> {
+        if link.address == link.linked_address {
+            return Ok(());
+        }
+        let mut transaction = self.pool.begin().await?;
+        for (from, to) in [
+            (&link.address, &link.linked_address),
+            (&link.linked_address, &link.address),
+        ] {
+            sqlx::query(
+                "INSERT INTO address_links
+                   (connector_id, chat_id, thread_key, linked_chat_id, linked_thread_key)
+                 VALUES (?, ?, ?, ?, ?)
+                 ON CONFLICT DO NOTHING",
+            )
+            .bind(link.connector_id.to_string())
+            .bind(&from.chat_id)
+            .bind(thread_key(from))
+            .bind(&to.chat_id)
+            .bind(thread_key(to))
+            .execute(&mut *transaction)
+            .await?;
+        }
+        transaction.commit().await?;
+        Ok(())
+    }
+
+    async fn linked_addresses(
+        &self,
+        connector_id: &ConnectorId,
+        address: &PlatformAddress,
+    ) -> StorageResult<Vec<PlatformAddress>> {
+        let rows = sqlx::query(
+            "SELECT linked_chat_id, linked_thread_key FROM address_links
+             WHERE connector_id = ? AND chat_id = ? AND thread_key = ?
+             ORDER BY rowid",
+        )
+        .bind(connector_id.to_string())
+        .bind(&address.chat_id)
+        .bind(thread_key(address))
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(rows
+            .into_iter()
+            .map(|row| {
+                let thread: String = row.get("linked_thread_key");
+                PlatformAddress::new(
+                    row.get::<String, _>("linked_chat_id"),
+                    (!thread.is_empty()).then_some(thread),
+                )
+            })
+            .collect())
     }
 
     async fn put_conversation(&self, conversation: Conversation) -> StorageResult<()> {

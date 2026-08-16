@@ -53,6 +53,13 @@ supports_topic_create = true
 # [rules.flow.source_chats_filter]
 # kind = "not"
 # chats = [{ chat_id = "12345@s.whatsapp.net" }]
+#
+# Chat ids may be written in any address form the platform uses for the chat.
+# WhatsApp reaches a contact as both a phone JID (`<number>@s.whatsapp.net`) and
+# a hidden LID (`<number>@lid`), and delivers messages under either; a list
+# entry written with one form selects — or, in a blocklist, excludes — the chat
+# under all of them, as soon as the connector has reported that the forms belong
+# together. Group ids (`<id>@g.us`) have a single form.
 [[rules]]
 id = "wa-to-telegram-mirror"
 
