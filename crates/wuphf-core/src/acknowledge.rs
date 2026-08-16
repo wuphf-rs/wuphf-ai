@@ -263,6 +263,14 @@ where
     /// lets a rule's chat list recognize the chat whichever form the user wrote
     /// — including a chat the list is there to exclude. Returns whether an
     /// existing endpoint was rebound.
+    ///
+    /// A platform can also report a form the core has not seen for a chat it
+    /// already routes under the other one — WhatsApp does this when the phone
+    /// number behind an already-LID-addressed chat is learned mid-run. There is
+    /// nothing to migrate then, but the newly learned form is still bound to
+    /// the endpoint (non-canonically, leaving outbound addressing alone) so an
+    /// event arriving under it joins the existing conversation instead of
+    /// minting a second one with its own mirror thread.
     pub async fn migrate_identity(
         &self,
         connector_id: ConnectorId,
@@ -276,18 +284,23 @@ where
                 linked_address: new.clone(),
             })
             .await?;
-        let Some(endpoint_id) = self.storage.resolve_endpoint(&connector_id, &old).await? else {
-            return Ok(false);
-        };
+        let (address, endpoint_id, is_canonical) =
+            match self.storage.resolve_endpoint(&connector_id, &old).await? {
+                Some(endpoint_id) => (new, endpoint_id, true),
+                None => match self.storage.resolve_endpoint(&connector_id, &new).await? {
+                    Some(endpoint_id) => (old, endpoint_id, false),
+                    None => return Ok(false),
+                },
+            };
         self.storage
             .put_alias(Alias {
                 connector_id,
-                address: new,
+                address,
                 endpoint_id,
-                is_canonical: true,
+                is_canonical,
             })
             .await?;
-        Ok(true)
+        Ok(is_canonical)
     }
 
     pub async fn pending_dispatches(&self) -> Result<Vec<StoredDispatch>, CoreError> {

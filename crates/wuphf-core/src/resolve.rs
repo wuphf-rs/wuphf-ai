@@ -27,7 +27,7 @@ where
             .resolve_endpoint(&source.connector_id, &source.address)
             .await?
         {
-            return Ok(Some(endpoint));
+            return self.still_covered(endpoint, source).await;
         }
 
         // Rules are matched against every address form the platform has
@@ -78,6 +78,49 @@ where
                 .await?;
         }
         Ok(origin)
+    }
+
+    /// Re-check an already-resolved chat against the rules, returning `None`
+    /// when no rule covers it any more.
+    ///
+    /// Coverage is not settled at first sighting. A chat can gain an address
+    /// form after it was first routed — and that form may be one a deny list
+    /// names, in which case the chat slipped past the list only because the
+    /// core did not yet know the two addresses were the same. The user can also
+    /// edit the rules between runs. Testing on every event keeps a deny list
+    /// meaning what it says instead of only applying to chats the core had
+    /// never seen when the list was written.
+    ///
+    /// Endpoints with no conversation behind them are exempt: those are the
+    /// standalone chats a raw send mints outside every rule, and they have to
+    /// stay resolvable so their echoes are recognized.
+    async fn still_covered(
+        &self,
+        endpoint_id: EndpointId,
+        source: &SourceAddress,
+    ) -> Result<Option<EndpointId>, CoreError> {
+        let Some(replica_set_id) = self.storage.replica_set_for_endpoint(endpoint_id).await? else {
+            return Ok(Some(endpoint_id));
+        };
+        let Some(conversation) = self
+            .storage
+            .conversation_for_replica_set(replica_set_id)
+            .await?
+        else {
+            return Ok(Some(endpoint_id));
+        };
+        // A conversation whose rule is gone from the config is no longer
+        // covered by anything, so it stops replicating.
+        let Some(rule) = self.config.rule(&conversation.rule_id) else {
+            return Ok(None);
+        };
+        let addresses = self
+            .address_set(&source.connector_id, &source.address)
+            .await?;
+        let covered = [RuleEnd::Source, RuleEnd::Destination]
+            .into_iter()
+            .any(|end| rule.flow.end_accepts(end, &source.connector_id, &addresses));
+        Ok(covered.then_some(endpoint_id))
     }
 
     /// Every platform address known to name this chat: the one the event

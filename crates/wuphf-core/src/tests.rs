@@ -1440,3 +1440,86 @@ async fn address_forms_chain_across_successive_migrations() {
         .unwrap();
     assert_eq!(outcome.dispatches().len(), 1);
 }
+
+#[tokio::test]
+async fn a_form_learned_after_the_chat_is_routed_joins_the_same_conversation() {
+    let core = core(vec![phone_listed_mirror_rule(RuleChatsFilter::All)]);
+    let first = core
+        .ingest(event(WHATSAPP, "88887777@lid", "wa-1", None))
+        .await
+        .unwrap();
+    core.acknowledge_dispatch(DispatchAcknowledgement {
+        dispatch_id: first.dispatches()[0].id,
+        platform_message_id: "tg-1".into(),
+        thread_id: Some("777".into()),
+    })
+    .await
+    .unwrap();
+
+    // Mid-run, the connector learns the phone number behind the LID. Nothing
+    // migrated — the chat is already routed under the form it arrived on — but
+    // the newly learned form has to reach the same conversation.
+    link_phone_to_lid(&core).await;
+
+    let under_phone = core
+        .ingest(event(WHATSAPP, "15550001111@s.whatsapp.net", "wa-2", None))
+        .await
+        .unwrap();
+    let dispatch = &under_phone.dispatches()[0];
+    assert_eq!(
+        dispatch.command.target.address,
+        PlatformAddress::new("-1001234567", Some("777".into()))
+    );
+    assert!(
+        dispatch.command.target.provision_thread.is_none(),
+        "the phone form provisioned a second mirror thread"
+    );
+}
+
+#[tokio::test]
+async fn a_deny_list_applies_to_a_chat_once_its_listed_form_is_learned() {
+    let core = core(vec![phone_listed_mirror_rule(RuleChatsFilter::Not {
+        chats: chats("15550001111@s.whatsapp.net"),
+    })]);
+    // The chat arrives before the core knows the phone number behind it, so
+    // nothing yet connects it to the deny list and it routes.
+    let leaked = core
+        .ingest(event(WHATSAPP, "88887777@lid", "wa-1", None))
+        .await
+        .unwrap();
+    assert_eq!(leaked.dispatches().len(), 1);
+
+    link_phone_to_lid(&core).await;
+
+    // Now that the forms are known to be one chat, the deny list covers it and
+    // replication stops, rather than the chat staying bridged because it once
+    // slipped past.
+    let outcome = core
+        .ingest(event(WHATSAPP, "88887777@lid", "wa-2", None))
+        .await
+        .unwrap();
+    assert_eq!(outcome, IngestOutcome::Ignored(IgnoreReason::Unmatched));
+}
+
+#[tokio::test]
+async fn a_routed_chat_stops_when_its_rule_leaves_the_config() {
+    let storage = Arc::new(InMemoryStorage::default());
+    let core = core_over(
+        Arc::clone(&storage),
+        vec![phone_listed_mirror_rule(RuleChatsFilter::All)],
+    );
+    let routed = core
+        .ingest(event(WHATSAPP, "88887777@lid", "wa-1", None))
+        .await
+        .unwrap();
+    assert_eq!(routed.dispatches().len(), 1);
+
+    // Restart with the rule removed: the endpoints it minted are still in
+    // storage, but nothing declares them any more.
+    let restarted = core_over(storage, vec![]);
+    let outcome = restarted
+        .ingest(event(WHATSAPP, "88887777@lid", "wa-2", None))
+        .await
+        .unwrap();
+    assert_eq!(outcome, IngestOutcome::Ignored(IgnoreReason::Unmatched));
+}
