@@ -134,11 +134,32 @@ one pilot connector → remaining connectors), the test list (mirror of plan
 
 ## Done criteria
 
-- [ ] `plans/015-reactions-design.md` exists answering Steps 1-5
-- [ ] Each claim about a platform API cites a concrete upstream symbol
-- [ ] The one-reaction-per-user policy decision is stated with trade-offs
-- [ ] No merged code changes (`git status` clean apart from plans/)
-- [ ] `plans/README.md` status row updated
+- [x] `plans/015-reactions-design.md` exists answering Steps 1-5
+- [x] Each claim about a platform API cites a concrete upstream symbol
+- [x] The one-reaction-per-user policy decision is stated with trade-offs
+- [x] No merged code changes (`git status` clean apart from plans/)
+- [x] `plans/README.md` status row updated
+
+## Outcome
+
+STOP condition 2 fired: reactions, delivery acks, and read receipts were
+already implemented end to end when this spike was picked up, so the spike
+could not run as a pre-implementation exercise. `015-reactions-design.md` was
+written instead as the design **of record** — the same Steps 1-5, answered
+with what is in the tree and cited to it, plus the decisions that differ from
+what this plan anticipated:
+
+- Delivery acks and read receipts were folded in, because they compete with
+  mirrored reactions for the same display slot.
+- Mirrored reactions render as **text**, not native reactions — neither of the
+  two policies this plan offered (last-writer-wins / summary-as-text). The
+  native reaction API is reserved for the bridge's 👍/👀 signals.
+- No `message_reactions` table, and no echo-suppression state: the bridge never
+  applies a native reaction that any connector reports back. The design doc
+  records this as an invariant with the condition that would break it.
+- No `supports_reactions` capability flag (this plan's maintenance note).
+  Connectors opt in structurally through optional Go interfaces, with an
+  ack-only fallback, so the core stays uniform.
 
 ## STOP conditions
 

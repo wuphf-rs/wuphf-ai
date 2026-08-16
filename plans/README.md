@@ -32,7 +32,7 @@ code).
 | 012 | Bound Instagram message→thread cache | P3 | S-M | — | TODO |
 | 013 | Instagram core client retry tests | P3 | S | — | DONE |
 | 014 | Shared Go connector core module (de-triplicate) | P2 | M | 013 | DONE |
-| 015 | SPIKE: reactions end-to-end design | P2 | M | — | TODO |
+| 015 | SPIKE: reactions end-to-end design | P2 | M | — | DONE (design in `015-reactions-design.md`, written as-built) |
 | 016 | SPIKE: media blob lifecycle policy | P2 | S-M | — | TODO |
 | 017 | SPIKE: per-side replication direction (one-way mirrors) | P3 | S | — | TODO |
 | 018 | Observation log + multi-platform TUI (phased) | P2 | L | — | DONE (all 6 phases) |
