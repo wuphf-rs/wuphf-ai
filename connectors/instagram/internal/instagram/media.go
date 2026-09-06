@@ -9,7 +9,7 @@ import (
 	"strings"
 
 	wuphfpb "github.com/akshettrj/wuphf/proto/go/connector/v1"
-	"go.mau.fi/mautrix-meta/pkg/messagix/data/responses"
+	"go.mau.fi/mautrix-meta/pkg/messagix/responses"
 	"go.mau.fi/mautrix-meta/pkg/messagix/table"
 )
 
