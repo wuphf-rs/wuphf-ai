@@ -1,0 +1,13 @@
+#!/usr/bin/env bash
+# Run the telegram connector from its own directory, where its session and
+# config files live. Config comes from $WUPHF_TELEGRAM_CONFIG, or the checked-in
+# example. Any argument switches to passthrough, so subcommands still work.
+set -euo pipefail
+
+repo="$(cd "$(dirname "$(readlink -f "$0")")/../.." && pwd)"
+cd "$repo/connectors/telegram"
+
+if [ "$#" -gt 0 ]; then
+    exec go run ./cmd/wuphf-telegram "$@"
+fi
+exec go run ./cmd/wuphf-telegram -config "${WUPHF_TELEGRAM_CONFIG:-config.example.toml}"

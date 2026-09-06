@@ -45,13 +45,29 @@ crates/
   wuphf-core/      Identity orchestration and event ingestion
   wuphf-runtime/   Tokio event bus, dispatch pipeline, media broker, gRPC
   wuphf-cli/       Server executable
+  wuphf-tui/       Observer TUI (read-only view of the observation log)
 connectors/        Go Telegram (gotd/td), WhatsApp (whatsmeow), Instagram connectors
 proto/go/          Generated Go connector bindings
 migrations/        SQLite schema migrations
 config/            Example server topology and rules
+scripts/           Dev session launcher, zellij layout, per-component runners
 ```
 
 ## Run
+
+The whole stack at once, in a zellij session with a pane per component:
+
+```sh
+./scripts/dev-session.sh
+```
+
+Panes are shells, so a crashed connector leaves you somewhere to restart it
+from. Each starts its component by name — `wuphf-server`, `wuphf-telegram`,
+`wuphf-whatsapp`, `wuphf-instagram`, `wuphf-tui` — or by the short aliases
+`ws`, `wtg`, `wwa`, `wig`, `wtui`. Run `wuphf-help` in any pane for the list.
+Re-running the script attaches to the existing session; `--kill` ends it.
+
+Or by hand:
 
 ```sh
 cargo run -p wuphf-cli -- serve --config config/example.toml

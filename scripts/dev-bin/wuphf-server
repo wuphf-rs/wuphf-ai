@@ -1,0 +1,13 @@
+#!/usr/bin/env bash
+# Run the wuphf core server. Config comes from $WUPHF_SERVER_CONFIG, or the
+# checked-in example. Any argument switches to passthrough, so subcommands and
+# one-off flags work: `wuphf-server serve --config config.local.toml`.
+set -euo pipefail
+
+repo="$(cd "$(dirname "$(readlink -f "$0")")/../.." && pwd)"
+cd "$repo"
+
+if [ "$#" -gt 0 ]; then
+    exec cargo run -p wuphf-cli -- "$@"
+fi
+exec cargo run -p wuphf-cli -- serve --config "${WUPHF_SERVER_CONFIG:-config/example.toml}"

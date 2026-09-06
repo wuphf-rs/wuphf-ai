@@ -1,0 +1,17 @@
+#!/usr/bin/env bash
+# Run the observer TUI against the local server. Point it elsewhere with
+# $WUPHF_TUI_SERVER, or pass flags directly.
+set -euo pipefail
+
+repo="$(cd "$(dirname "$(readlink -f "$0")")/../.." && pwd)"
+cd "$repo"
+
+if [ "$#" -gt 0 ]; then
+    exec cargo run -p wuphf-tui -- "$@"
+fi
+
+set -- --server "${WUPHF_TUI_SERVER:-http://127.0.0.1:50051}"
+if [ -n "${WUPHF_OBSERVER_TOKEN:-}" ]; then
+    set -- "$@" --token "$WUPHF_OBSERVER_TOKEN"
+fi
+exec cargo run -p wuphf-tui -- "$@"

@@ -1,0 +1,45 @@
+// Zellij layout for the wuphf dev session, launched by scripts/dev-session.sh.
+//
+// Every pane is a plain shell rather than a running process: a bridge is
+// started and restarted constantly while developing, and a shell that has just
+// exited a crashed connector is more useful than a dead pane. The launcher puts
+// scripts/dev-bin on PATH, so each pane starts one component by name
+// (wuphf-server, wuphf-telegram, …) with the short aliases from
+// scripts/dev-aliases.sh.
+//
+// Pane cwds are relative to the directory zellij is started in, which the
+// launcher sets to the repository root.
+
+layout {
+    default_tab_template {
+        pane size=1 borderless=true {
+            plugin location="tab-bar"
+        }
+        children
+        pane size=1 borderless=true {
+            plugin location="status-bar"
+        }
+    }
+
+    tab name="run" focus=true {
+        pane split_direction="vertical" {
+            // The server takes the wider half: it carries the routing logs that
+            // explain what the connectors are doing.
+            pane name="server" size="50%"
+            pane split_direction="horizontal" size="50%" {
+                pane name="telegram" cwd="connectors/telegram"
+                pane name="whatsapp" cwd="connectors/whatsapp"
+                pane name="instagram" cwd="connectors/instagram"
+            }
+        }
+    }
+
+    // The observer TUI is full-screen, so it gets a tab rather than a pane.
+    tab name="tui" {
+        pane name="tui"
+    }
+
+    tab name="shell" {
+        pane name="shell"
+    }
+}

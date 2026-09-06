@@ -1,0 +1,13 @@
+#!/usr/bin/env bash
+# Run the whatsapp connector from its own directory, where its session and
+# config files live. Config comes from $WUPHF_WHATSAPP_CONFIG, or the checked-in
+# example. Any argument switches to passthrough, so subcommands still work.
+set -euo pipefail
+
+repo="$(cd "$(dirname "$(readlink -f "$0")")/../.." && pwd)"
+cd "$repo/connectors/whatsapp"
+
+if [ "$#" -gt 0 ]; then
+    exec go run ./cmd/wuphf-whatsapp "$@"
+fi
+exec go run ./cmd/wuphf-whatsapp -config "${WUPHF_WHATSAPP_CONFIG:-config.example.toml}"
