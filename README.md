@@ -55,16 +55,16 @@ scripts/           Dev session launcher, zellij layout, per-component runners
 
 ## Run
 
-The whole stack at once, in a zellij session with a pane per component:
+The whole stack at once, in a zellij session with a tab per component:
 
 ```sh
 ./scripts/dev-session.sh
 ```
 
-Panes are shells, so a crashed connector leaves you somewhere to restart it
+Tabs are shells, so a crashed connector leaves you somewhere to restart it
 from. Each starts its component by name — `wuphf-server`, `wuphf-telegram`,
 `wuphf-whatsapp`, `wuphf-instagram`, `wuphf-tui` — or by the short aliases
-`ws`, `wtg`, `wwa`, `wig`, `wtui`. Run `wuphf-help` in any pane for the list.
+`ws`, `wtg`, `wwa`, `wig`, `wtui`. Run `wuphf-help` in any tab for the list.
 Re-running the script attaches to the existing session; `--kill` ends it.
 
 Or by hand:

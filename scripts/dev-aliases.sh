@@ -1,4 +1,4 @@
-# Short aliases for the wuphf dev session, sourced by every pane's shell.
+# Short aliases for the wuphf dev session, sourced by every tab's shell.
 #
 # The commands themselves are real scripts in scripts/dev-bin, which the
 # launcher puts on PATH — they work in any shell, and outside zellij too. These
@@ -32,12 +32,13 @@ or `ws serve --config config.local.toml`.
 Override a config without arguments: WUPHF_SERVER_CONFIG,
 WUPHF_TELEGRAM_CONFIG, WUPHF_WHATSAPP_CONFIG, WUPHF_INSTAGRAM_CONFIG.
 
+Tabs: Alt+<number> to jump, Alt+h / Alt+l to cycle.
 Start the server before the connectors: they connect to it on startup.
 HELP
 }
 
-# Show the banner once per pane. The marker is exported, so subshells started
-# inside a pane stay quiet.
+# Show the banner once per tab. The marker is exported, so subshells started
+# inside a tab stay quiet.
 if [ -n "${WUPHF_DEV_SESSION:-}" ] && [ -z "${WUPHF_DEV_BANNER:-}" ]; then
     export WUPHF_DEV_BANNER=1
     wuphf-help

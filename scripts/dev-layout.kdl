@@ -1,9 +1,13 @@
 // Zellij layout for the wuphf dev session, launched by scripts/dev-session.sh.
 //
-// Every pane is a plain shell rather than a running process: a bridge is
-// started and restarted constantly while developing, and a shell that has just
-// exited a crashed connector is more useful than a dead pane. The launcher puts
-// scripts/dev-bin on PATH, so each pane starts one component by name
+// One tab per component, so each gets the full window: bridge logs are wide and
+// noisy, and reading them side by side in split panes means reading none of
+// them. Switch with Alt+<number> or Alt+h/l.
+//
+// Every tab is a plain shell rather than a running process: a bridge is started
+// and restarted constantly while developing, and a shell that has just exited a
+// crashed connector is more useful than a dead pane. The launcher puts
+// scripts/dev-bin on PATH, so each tab starts one component by name
 // (wuphf-server, wuphf-telegram, …) with the short aliases from
 // scripts/dev-aliases.sh.
 //
@@ -21,20 +25,23 @@ layout {
         }
     }
 
-    tab name="run" focus=true {
-        pane split_direction="vertical" {
-            // The server takes the wider half: it carries the routing logs that
-            // explain what the connectors are doing.
-            pane name="server" size="50%"
-            pane split_direction="horizontal" size="50%" {
-                pane name="telegram" cwd="connectors/telegram"
-                pane name="whatsapp" cwd="connectors/whatsapp"
-                pane name="instagram" cwd="connectors/instagram"
-            }
-        }
+    // The server first: it carries the routing logs that explain what the
+    // connectors are doing, and it has to be up before they connect.
+    tab name="server" focus=true {
+        pane name="server"
     }
 
-    // The observer TUI is full-screen, so it gets a tab rather than a pane.
+    // Each connector runs from its own directory, where its session files live.
+    tab name="telegram" {
+        pane name="telegram" cwd="connectors/telegram"
+    }
+    tab name="whatsapp" {
+        pane name="whatsapp" cwd="connectors/whatsapp"
+    }
+    tab name="instagram" {
+        pane name="instagram" cwd="connectors/instagram"
+    }
+
     tab name="tui" {
         pane name="tui"
     }

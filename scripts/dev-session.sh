@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# Launch (or re-attach to) the wuphf dev session in zellij: a pane for the
-# server, one per connector, a tab for the observer TUI, and a spare shell.
+# Launch (or re-attach to) the wuphf dev session in zellij: one tab per
+# component — server, each connector, the observer TUI — plus a spare shell.
 #
-# Panes are shells, not running processes — see scripts/dev-layout.kdl. Each one
+# Tabs are shells, not running processes — see scripts/dev-layout.kdl. Each one
 # starts its component by name (wuphf-server, wuphf-telegram, …) or by the short
-# aliases in scripts/dev-aliases.sh; run `wuphf-help` in any pane for the list.
+# aliases in scripts/dev-aliases.sh; run `wuphf-help` in any tab for the list.
 set -euo pipefail
 
 readonly REPO="$(cd "$(dirname "$(readlink -f "$0")")/.." && pwd)"
@@ -78,7 +78,7 @@ fi
     exit 1
 }
 
-# Every pane inherits this environment from the zellij server, which is what
+# Every tab inherits this environment from the zellij server, which is what
 # makes the commands and aliases available without touching the user's shell
 # configuration.
 export PATH="$REPO/scripts/dev-bin:$PATH"
@@ -90,7 +90,7 @@ export WUPHF_DEV_SESSION="$SESSION"
 if [ "$(basename "${SHELL:-}")" = "zsh" ]; then
     rc_dir="${XDG_RUNTIME_DIR:-${TMPDIR:-/tmp}}/wuphf-dev-$(id -u)"
     mkdir -p "$rc_dir"
-    # The real rc file is sourced first so the pane is the user's normal shell,
+    # The real rc file is sourced first so each tab is the user's normal shell,
     # with the session's aliases layered on top.
     cat > "$rc_dir/.zshrc" <<RC
 [ -f "\${WUPHF_DEV_USER_ZDOTDIR:-\$HOME}/.zshrc" ] && . "\${WUPHF_DEV_USER_ZDOTDIR:-\$HOME}/.zshrc"
