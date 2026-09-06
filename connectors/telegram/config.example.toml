@@ -13,6 +13,19 @@ supports_topic_create = true
 # WUPHF_TELEGRAM_PASSWORD. Authentication codes are prompted on first login.
 # Alternatively set WUPHF_TELEGRAM_BOT_TOKEN for a bot session.
 #
+# A bot session needs two things set up on the bot itself, or the bridge runs
+# one-way without any error to show for it:
+#
+#   * Privacy mode off (@BotFather -> /setprivacy -> Disable), or the bot made an
+#     admin. Otherwise it only receives commands, replies and mentions, so
+#     messages typed into a mirror topic never reach the core.
+#   * Admin in the mirror group with "manage topics", which is what
+#     provisioning and renaming a topic per conversation requires.
+#
+# A bot also cannot open a chat with someone who has not messaged it first, so
+# any rule (or core [[notify]] target) pointing at "telegram:user:..." needs
+# that person to have started the bot.
+#
 # Routing is owned entirely by the core. Configure which conversations map
 # where through the core's [[rules]] using typed chat IDs such as
 # "telegram:channel:1234567890", "telegram:chat:7", or "telegram:user:88".

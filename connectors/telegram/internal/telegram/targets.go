@@ -18,6 +18,7 @@ type PeerCache struct {
 	mu       sync.RWMutex
 	users    map[int64]int64
 	channels map[int64]int64
+	bot      bool
 }
 
 func NewPeerCache() *PeerCache {
@@ -25,6 +26,22 @@ func NewPeerCache() *PeerCache {
 		users:    make(map[int64]int64),
 		channels: make(map[int64]int64),
 	}
+}
+
+// UseBotAddressing allows peers this session has never seen an update from to be
+// addressed with a zero access hash, which Telegram accepts from a bot for any
+// peer the bot already has access to.
+//
+// A user session primes its hashes from the dialog list at start-up, but that
+// call is user-only, so a bot knows a hash only once an update carries one. A
+// bot receives no update for its own sends, so without this the mirror stalls
+// after every restart until somebody else happens to post in the target chat —
+// and a quiet chat would stall forever. The cache still records real hashes when
+// updates do carry them; this only decides what happens on a miss.
+func (c *PeerCache) UseBotAddressing() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.bot = true
 }
 
 // Observe records the access hashes carried by an update's entities so later
@@ -75,17 +92,17 @@ func (c *PeerCache) InputPeer(chatID string) (tg.InputPeerClass, error) {
 	defer c.mu.RUnlock()
 	switch kind {
 	case "user":
-		hash, ok := c.users[id]
-		if !ok {
-			return nil, fmt.Errorf("no known access hash for Telegram user %d", id)
+		hash, err := c.accessHash(c.users, id, "user")
+		if err != nil {
+			return nil, err
 		}
 		return &tg.InputPeerUser{UserID: id, AccessHash: hash}, nil
 	case "chat":
 		return &tg.InputPeerChat{ChatID: id}, nil
 	case "channel":
-		hash, ok := c.channels[id]
-		if !ok {
-			return nil, fmt.Errorf("no known access hash for Telegram channel %d", id)
+		hash, err := c.accessHash(c.channels, id, "channel")
+		if err != nil {
+			return nil, err
 		}
 		return &tg.InputPeerChannel{ChannelID: id, AccessHash: hash}, nil
 	default:
@@ -143,4 +160,19 @@ func parseChatID(chatID string) (kind string, id int64, err error) {
 		return "", 0, fmt.Errorf("invalid Telegram chat id %q: %w", chatID, err)
 	}
 	return parts[1], id, nil
+}
+
+// accessHash returns the recorded hash for a peer, or zero for a bot session
+// that has not seen one yet (see UseBotAddressing). The error is deliberately
+// not permanent: a user session that has simply not observed the peer yet may
+// still learn it, so the dispatch is worth retrying rather than dead-lettering.
+// Callers hold the read lock.
+func (c *PeerCache) accessHash(known map[int64]int64, id int64, kind string) (int64, error) {
+	if hash, ok := known[id]; ok {
+		return hash, nil
+	}
+	if c.bot {
+		return 0, nil
+	}
+	return 0, fmt.Errorf("no known access hash for Telegram %s %d", kind, id)
 }

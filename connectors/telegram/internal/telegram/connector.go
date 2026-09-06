@@ -54,13 +54,14 @@ func (c Connector) Run(ctx context.Context) error {
 		if err := c.authenticate(ctx, client); err != nil {
 			return err
 		}
-		// Bots cannot list dialogs (messages.getDialogs is user-only), and they
-		// receive an access hash on the first update from any peer, so cold-start
-		// priming applies only to user sessions.
-		if c.credentials.BotToken == "" {
-			if err := primePeers(ctx, client.API(), peers); err != nil {
-				return err
-			}
+		// Cold-start peer addressing differs by session kind. A user session
+		// primes access hashes from its dialog list; messages.getDialogs is
+		// user-only, so a bot instead relies on Telegram accepting a zero hash
+		// for peers it already has access to.
+		if c.credentials.BotToken != "" {
+			peers.UseBotAddressing()
+		} else if err := primePeers(ctx, client.API(), peers); err != nil {
+			return err
 		}
 		c.logger.Info().Msg("Telegram session connected")
 		sender := NewSender(client.API(), peers, media, c.cfg.Rendering)

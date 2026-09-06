@@ -86,3 +86,50 @@ func TestPeerCacheUnknownChannelHashFails(t *testing.T) {
 		t.Fatal("InputPeer() resolved channel without a known access hash")
 	}
 }
+
+// A bot never sees an update for its own sends, so a target it has not observed
+// has to stay addressable — otherwise the mirror stalls after every restart
+// until somebody else posts in the chat.
+func TestBotAddressingResolvesUnseenPeers(t *testing.T) {
+	t.Parallel()
+
+	cache := NewPeerCache()
+	cache.UseBotAddressing()
+
+	peer, err := cache.InputPeer("telegram:channel:99")
+	if err != nil {
+		t.Fatalf("InputPeer() error = %v, want a zero-hash peer", err)
+	}
+	channel, ok := peer.(*tg.InputPeerChannel)
+	if !ok || channel.ChannelID != 99 || channel.AccessHash != 0 {
+		t.Fatalf("InputPeer() = %#v, want channel 99 with a zero hash", peer)
+	}
+
+	user, err := cache.InputPeer("telegram:user:7")
+	if err != nil {
+		t.Fatalf("InputPeer() error = %v, want a zero-hash peer", err)
+	}
+	if got, ok := user.(*tg.InputPeerUser); !ok || got.UserID != 7 || got.AccessHash != 0 {
+		t.Fatalf("InputPeer() = %#v, want user 7 with a zero hash", user)
+	}
+}
+
+// An observed hash is still preferred: bot addressing only decides what happens
+// when the cache misses.
+func TestBotAddressingPrefersAnObservedHash(t *testing.T) {
+	t.Parallel()
+
+	cache := NewPeerCache()
+	cache.UseBotAddressing()
+	channel := &tg.Channel{ID: 5}
+	channel.SetAccessHash(4242)
+	cache.Observe(tg.Entities{Channels: map[int64]*tg.Channel{5: channel}})
+
+	peer, err := cache.InputPeer("telegram:channel:5")
+	if err != nil {
+		t.Fatalf("InputPeer() error = %v", err)
+	}
+	if channel, ok := peer.(*tg.InputPeerChannel); !ok || channel.AccessHash != 4242 {
+		t.Fatalf("InputPeer() = %#v, want the observed hash", peer)
+	}
+}
