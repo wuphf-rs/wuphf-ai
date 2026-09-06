@@ -39,10 +39,9 @@ supports_topic_create = true
 # platform you want to stay reachable on, and leave this out entirely to keep
 # notices in the log only.
 #
-# [[notify]]
-# connector = "telegram-main"
-# chat_id = "telegram:user:12345678"
-# thread_id = "42"           # optional, for a topic inside the chat
+[[notify]]
+connector_id = "telegram-main"
+chat_id = "telegram:user:704338780"
 
 # Rules declare a flow between a source and a destination. The source end owns
 # conversation identity; replication itself is two-way.

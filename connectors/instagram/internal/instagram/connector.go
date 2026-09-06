@@ -54,7 +54,20 @@ func (c Connector) Run(ctx context.Context) error {
 				reportEventError(eventErrors, fmt.Errorf("normalize Instagram event: %w", err))
 			}
 		case *messagix.Event_PermanentError:
-			reportEventError(eventErrors, fmt.Errorf("Instagram connection failed permanently: %w", evt.Err))
+			// messagix's connection loop has given up and returned, so nothing
+			// will arrive on this session again. Report it to the owner rather
+			// than failing the connector: the core session is what carries the
+			// notice out through the other connectors, and tearing it down here
+			// would race the notice off the wire. The connector is left idle
+			// until it is restarted, which the notice says to do.
+			logger.Err(evt.Err).Msg("Instagram connection failed permanently; connector is idle until restarted")
+			kind, detail := sessionNotice(evt.Err)
+			coreclient.SendNotice(ctx, inputs, kind, detail)
+		case *messagix.Event_Ready, *messagix.Event_Reconnected:
+			// Paired with the above: reaching the platform again tells the owner
+			// the bridge is back. The core drops it when nothing was reported
+			// wrong, so an ordinary connect stays quiet.
+			coreclient.SendNotice(ctx, inputs, wuphfpb.NoticeKind_NOTICE_KIND_RECOVERED, "")
 		}
 	})
 
@@ -153,4 +166,21 @@ func persistCookies(path string, jar *cookies.Cookies) error {
 		return fmt.Errorf("write Instagram session: %w", err)
 	}
 	return nil
+}
+
+// sessionNotice classifies a permanent Instagram connection failure for the
+// owner. Instagram refuses the realtime connection outright once the session is
+// no longer good, so the fix is nearly always fresh cookies rather than
+// anything the connector can retry — messagix only reports this after it has
+// already given up reconnecting.
+//
+// Transient socket errors are deliberately not reported: messagix retries them
+// with backoff and they routinely clear on their own, so notifying would page
+// the owner about an outage that fixes itself.
+func sessionNotice(err error) (wuphfpb.NoticeKind, string) {
+	detail := "Instagram refused the realtime connection"
+	if err != nil {
+		detail = fmt.Sprintf("%s: %v", detail, err)
+	}
+	return wuphfpb.NoticeKind_NOTICE_KIND_AUTH_REQUIRED, detail
 }
