@@ -2,8 +2,8 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use thiserror::Error;
 use wuphf_model::{
-    AddressSet, ConnectorId, ConnectorInfo, EndpointId, MessageId, RoutingRule, RoutingRuleFlow,
-    RuleEnd, RuleId,
+    AddressSet, ConnectorId, ConnectorInfo, EndpointId, MessageId, NoticeTarget, RoutingRule,
+    RoutingRuleFlow, RuleEnd, RuleId,
 };
 use wuphf_storage::{Storage, StorageError};
 
@@ -14,6 +14,7 @@ mod routing;
 pub struct RoutingConfig {
     rules: Vec<RoutingRule>,
     connectors: HashMap<ConnectorId, ConnectorInfo>,
+    notice_targets: Vec<NoticeTarget>,
 }
 
 /// The end of a rule that an inbound address matched.
@@ -24,7 +25,31 @@ pub struct MatchedRule<'a> {
 
 impl RoutingConfig {
     pub fn new(rules: Vec<RoutingRule>, connectors: HashMap<ConnectorId, ConnectorInfo>) -> Self {
-        Self { rules, connectors }
+        Self {
+            rules,
+            connectors,
+            notice_targets: Vec::new(),
+        }
+    }
+
+    /// Declare where owner notices are delivered. Separate from [`Self::new`] so
+    /// the common case — and every test that only cares about routing — stays a
+    /// two-argument call.
+    pub fn with_notice_targets(mut self, targets: Vec<NoticeTarget>) -> Self {
+        self.notice_targets = targets;
+        self
+    }
+
+    /// The chats an owner notice is delivered to, excluding any served by
+    /// `raising` — the connector reporting trouble is the one least likely to
+    /// be able to deliver the news about it.
+    pub fn notice_targets_excluding(
+        &self,
+        raising: &ConnectorId,
+    ) -> impl Iterator<Item = &NoticeTarget> {
+        self.notice_targets
+            .iter()
+            .filter(move |target| target.connector_id != *raising)
     }
 
     pub fn rule(&self, id: &RuleId) -> Option<&RoutingRule> {

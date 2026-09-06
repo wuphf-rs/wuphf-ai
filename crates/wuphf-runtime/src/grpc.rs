@@ -8,8 +8,8 @@ use uuid::Uuid;
 use wuphf_model::{
     Attachment, AttachmentKind, ConnectorCapabilities, ConnectorId, ConnectorInput,
     ConnectorOutput, ConnectorRegistration, DispatchAcknowledgement, DispatchPayload, EventPayload,
-    InboundMessage, MediaId, NormalizedEvent, Platform, PlatformAddress, ProvisionThread,
-    ReceiptKind, ReplyContext, SourceAddress,
+    InboundMessage, MediaId, NormalizedEvent, NoticeKind, Platform, PlatformAddress,
+    ProvisionThread, ReceiptKind, ReplyContext, SourceAddress,
 };
 use wuphf_proto::connector as pb;
 use wuphf_proto::connector::connector_transport_server::ConnectorTransport;
@@ -202,6 +202,23 @@ fn input_from_proto(
                     required_string(migration.new_chat_id, "new_chat_id")?,
                     migration.new_thread_id,
                 ),
+            })
+        }
+        Some(pb::client_frame::Body::OwnerNotice(notice)) => {
+            let kind = match pb::NoticeKind::try_from(notice.kind) {
+                Ok(pb::NoticeKind::LoggedOut) => NoticeKind::LoggedOut,
+                Ok(pb::NoticeKind::AuthRequired) => NoticeKind::AuthRequired,
+                Ok(pb::NoticeKind::Degraded) => NoticeKind::Degraded,
+                Ok(pb::NoticeKind::Recovered) => NoticeKind::Recovered,
+                // An unset or unknown kind still means the connector is trying
+                // to say something is wrong, so it is reported as a degradation
+                // rather than dropped.
+                Ok(pb::NoticeKind::Unspecified) | Err(_) => NoticeKind::Degraded,
+            };
+            Ok(ConnectorInput::OwnerNotice {
+                connector_id: connector_id.clone(),
+                kind,
+                detail: notice.detail,
             })
         }
         Some(pb::client_frame::Body::DispatchFailed(failure)) => {

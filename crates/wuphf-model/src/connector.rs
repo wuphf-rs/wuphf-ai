@@ -25,6 +25,49 @@ pub struct ConnectorInfo {
 /// A terminal dispatch failure reported by a connector: `(dispatch, reason)`.
 pub type DispatchFailure = (DispatchId, String);
 
+/// How badly a connector's own operation is affected, as the connector reports
+/// it. The core turns this into the wording the owner reads, so a connector
+/// never decides how its trouble is phrased.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum NoticeKind {
+    /// The platform ended the session; it cannot recover without the owner
+    /// re-authenticating (a WhatsApp logout, a revoked pairing).
+    LoggedOut,
+    /// Credentials were rejected or expired, and the connector needs new ones.
+    AuthRequired,
+    /// Still running, but impaired — rate limited, temporarily banned, or
+    /// otherwise degraded.
+    Degraded,
+    /// Back to normal after one of the above.
+    Recovered,
+}
+
+impl NoticeKind {
+    /// One line describing the state, used to compose the owner's message.
+    pub fn summary(self) -> &'static str {
+        match self {
+            NoticeKind::LoggedOut => {
+                "logged out and is no longer bridging; re-pair it to restore the link"
+            }
+            NoticeKind::AuthRequired => "needs new credentials before it can bridge again",
+            NoticeKind::Degraded => "is degraded and may be dropping or delaying messages",
+            NoticeKind::Recovered => "is working again",
+        }
+    }
+}
+
+/// Where an owner notice is delivered: a chat on a connector that is expected to
+/// still be working. Several may be configured, since the point is to reach the
+/// owner somewhere other than the connector in trouble.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct NoticeTarget {
+    pub connector_id: ConnectorId,
+    pub chat_id: String,
+    #[serde(default)]
+    pub thread_id: Option<String>,
+}
+
 /// Ordered inbound work from one connector: a normalized event or an identity
 /// migration. Both travel one per-connector path so the connector's frame order
 /// is preserved end to end. A migration that precedes a message is applied
@@ -37,6 +80,14 @@ pub enum InboundWork {
         old: PlatformAddress,
         new: PlatformAddress,
     },
+    /// The connector reported on its own health. It shares the queue so a
+    /// notice lands in the order the connector raised it, after whatever it had
+    /// already reported.
+    Notice {
+        connector_id: ConnectorId,
+        kind: NoticeKind,
+        detail: String,
+    },
 }
 
 impl InboundWork {
@@ -45,6 +96,7 @@ impl InboundWork {
         match self {
             InboundWork::Event(event) => &event.source.connector_id,
             InboundWork::Migration { connector_id, .. } => connector_id,
+            InboundWork::Notice { connector_id, .. } => connector_id,
         }
     }
 }
@@ -78,6 +130,14 @@ pub enum ConnectorInput {
     DispatchFailed {
         dispatch_id: DispatchId,
         reason: String,
+    },
+    /// The connector reported on its own health (e.g. its session was ended by
+    /// the platform), for the core to relay to the owner through the other
+    /// connectors.
+    OwnerNotice {
+        connector_id: ConnectorId,
+        kind: NoticeKind,
+        detail: String,
     },
 }
 

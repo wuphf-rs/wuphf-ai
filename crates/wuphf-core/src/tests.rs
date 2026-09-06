@@ -2,9 +2,9 @@ use super::*;
 use std::collections::HashMap;
 use wuphf_model::{
     Attachment, AttachmentKind, ConnectorCapabilities, ConnectorInfo, DispatchAcknowledgement,
-    DispatchPayload, InboundMessage, MediaBlob, MediaId, Platform, PlatformAddress, RAW_SENDER,
-    RawOutbound, ReceiptKind, RoutingRule, RoutingRuleFlow, RuleChat, RuleChatsFilter, RuleId,
-    SourceAddress,
+    DispatchPayload, InboundMessage, MediaBlob, MediaId, NoticeKind, Platform, PlatformAddress,
+    RAW_SENDER, RawOutbound, ReceiptKind, RoutingRule, RoutingRuleFlow, RuleChat, RuleChatsFilter,
+    RuleId, SourceAddress, StoredDispatch,
 };
 use wuphf_storage::InMemoryStorage;
 
@@ -1658,4 +1658,110 @@ async fn a_quote_of_a_bridge_sent_copy_is_attributed_to_the_bridge() {
     let reply_context = reply_context.as_ref().expect("the reply quotes its parent");
     assert_eq!(reply_context.platform_message_id, "wa-1");
     assert!(reply_context.authored_by_bridge);
+}
+
+/// A core whose owner notices go to a Telegram chat, plus a WhatsApp target the
+/// notices must skip when WhatsApp is the connector in trouble.
+fn notifying_core() -> Core<InMemoryStorage> {
+    let config = RoutingConfig::new(vec![], connectors()).with_notice_targets(vec![
+        wuphf_model::NoticeTarget {
+            connector_id: ConnectorId(TELEGRAM.into()),
+            chat_id: "-100999".into(),
+            thread_id: None,
+        },
+        wuphf_model::NoticeTarget {
+            connector_id: ConnectorId(WHATSAPP.into()),
+            chat_id: "99999@s.whatsapp.net".into(),
+            thread_id: None,
+        },
+    ]);
+    Core::new(Arc::new(InMemoryStorage::default()), Arc::new(config))
+}
+
+fn notice_text(dispatch: &StoredDispatch) -> String {
+    let DispatchPayload::MessageCreate { message, .. } = &dispatch.command.payload else {
+        panic!("a notice should dispatch a message create");
+    };
+    message.text.clone().expect("a notice carries text")
+}
+
+#[tokio::test]
+async fn an_owner_notice_reaches_the_other_connectors_only() {
+    let core = notifying_core();
+    let dispatches = core
+        .notify_owners(
+            ConnectorId(WHATSAPP.into()),
+            NoticeKind::LoggedOut,
+            "WhatsApp ended the session",
+            1,
+        )
+        .await
+        .unwrap();
+
+    // The WhatsApp target is skipped: a logged-out connector cannot deliver
+    // the news that it is logged out.
+    assert_eq!(dispatches.len(), 1);
+    assert_eq!(
+        dispatches[0].command.target_connector,
+        ConnectorId(TELEGRAM.into())
+    );
+    let text = notice_text(&dispatches[0]);
+    assert!(
+        text.contains(WHATSAPP),
+        "the notice names the connector: {text}"
+    );
+    assert!(
+        text.contains("re-pair"),
+        "the notice says what to do: {text}"
+    );
+    assert!(text.contains("WhatsApp ended the session"));
+}
+
+#[tokio::test]
+async fn a_repeated_notice_is_sent_once_until_the_state_changes() {
+    let core = notifying_core();
+    let whatsapp = ConnectorId(WHATSAPP.into());
+
+    let first = core
+        .notify_owners(whatsapp.clone(), NoticeKind::LoggedOut, "", 1)
+        .await
+        .unwrap();
+    assert_eq!(first.len(), 1);
+
+    // A connector in a reconnect loop repeats itself; the owner is told once.
+    let repeat = core
+        .notify_owners(whatsapp.clone(), NoticeKind::LoggedOut, "", 2)
+        .await
+        .unwrap();
+    assert!(repeat.is_empty());
+
+    // A change is news again, and reads as a recovery.
+    let recovered = core
+        .notify_owners(whatsapp, NoticeKind::Recovered, "", 3)
+        .await
+        .unwrap();
+    assert_eq!(recovered.len(), 1);
+    assert!(notice_text(&recovered[0]).contains("working again"));
+}
+
+#[tokio::test]
+async fn a_recovery_without_prior_trouble_says_nothing() {
+    let core = notifying_core();
+    // Connectors report health on every connect, so a healthy start-up must not
+    // announce that nothing is wrong.
+    let dispatches = core
+        .notify_owners(ConnectorId(WHATSAPP.into()), NoticeKind::Recovered, "", 1)
+        .await
+        .unwrap();
+    assert!(dispatches.is_empty());
+}
+
+#[tokio::test]
+async fn a_notice_with_no_configured_target_is_dropped() {
+    let core = core(vec![]);
+    let dispatches = core
+        .notify_owners(ConnectorId(WHATSAPP.into()), NoticeKind::LoggedOut, "", 1)
+        .await
+        .unwrap();
+    assert!(dispatches.is_empty());
 }

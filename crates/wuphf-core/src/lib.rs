@@ -3,7 +3,7 @@ use std::sync::{Arc, Mutex};
 use thiserror::Error;
 use wuphf_model::{
     ConnectorId, DispatchId, EndpointId, EventPayload, IgnoreReason, IngestOutcome, MediaId,
-    MessageId, NormalizedEvent, Platform, ReplicaSetId,
+    MessageId, NormalizedEvent, NoticeKind, Platform, ReplicaSetId,
 };
 use wuphf_router::{Router, RouterError};
 use wuphf_storage::{Storage, StorageError};
@@ -12,6 +12,7 @@ pub use wuphf_router::RoutingConfig;
 
 mod acknowledge;
 mod ingest;
+mod notify;
 mod resolve;
 mod send;
 
@@ -27,6 +28,11 @@ pub struct Core<S> {
     /// thread exists live in the durable `provisioning_stash` table, not here, so
     /// a crash cannot lose them. The lock is never held across an await.
     provisioning: Mutex<HashMap<ReplicaSetId, ProvisionState>>,
+    /// The last health state each connector reported, so a connector repeating
+    /// itself does not page the owner over and over. See
+    /// [`Core::notify_owners`]. Deliberately in memory: a restart re-notifies
+    /// about a connector that is still down.
+    notices: Mutex<HashMap<ConnectorId, NoticeKind>>,
 }
 
 /// A conversation's in-flight thread provisioning: the dispatches whose
@@ -47,6 +53,7 @@ where
             config,
             storage,
             provisioning: Mutex::new(HashMap::new()),
+            notices: Mutex::new(HashMap::new()),
         }
     }
 

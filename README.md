@@ -27,6 +27,9 @@ For a human-friendly tour, open [`docs/index.html`](docs/index.html).
   persistence, and orphan-upload pruning.
 - Bidirectional Tonic/gRPC connector transport; connector session hub with
   registration allowlist and capability gating.
+- Owner notices: a connector that loses its session (a WhatsApp logout) reports
+  it, and the core relays the alert through the connectors that still work, so a
+  bridge that stopped bridging says so instead of going quiet.
 - Go connectors: Telegram (`gotd/td`, forum topics, albums), WhatsApp
   (`whatsmeow`, QR pairing), and Instagram (`mautrix-meta` lightspeed).
 

@@ -33,6 +33,12 @@ host a threaded mirror.
   the core dead-letters it instead of redelivering. Transient failures are not
   reported this way: the connector simply drops its session and the core
   redelivers.
+- `OwnerNotice` — the connector's own health: a `NoticeKind` (logged out, auth
+  required, degraded, recovered) plus optional platform detail. Report what
+  happened, not how it should read — the core composes the message, picks the
+  chats, and drops a repeat of a state it has already reported. It is relayed
+  only through *other* connectors, so a connector cannot be asked to announce
+  its own outage.
 
 ## Server frames (core → connector)
 

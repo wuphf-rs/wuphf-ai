@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::time::{SystemTime, UNIX_EPOCH};
 use thiserror::Error;
 use tokio::sync::mpsc;
 use tracing::{debug, info, warn};
@@ -246,6 +247,23 @@ where
             .await?
             .dispatches()
             .to_vec()),
+        InboundWork::Notice {
+            connector_id,
+            kind,
+            detail,
+        } => {
+            warn!(
+                connector = %connector_id.0,
+                ?kind,
+                detail,
+                "connector reported a health problem",
+            );
+            // The core is clock-free, so the send time comes from here.
+            let dispatches = core
+                .notify_owners(connector_id, kind, &detail, now_ms())
+                .await?;
+            Ok(dispatches)
+        }
         InboundWork::Migration {
             connector_id,
             old,
@@ -337,3 +355,11 @@ pub enum RuntimeError {
 
 #[cfg(test)]
 mod tests;
+
+/// Wall-clock milliseconds for work the core stamps but does not time itself.
+fn now_ms() -> i64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|since| since.as_millis() as i64)
+        .unwrap_or_default()
+}

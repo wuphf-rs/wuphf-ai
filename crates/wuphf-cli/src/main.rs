@@ -5,7 +5,8 @@ use std::{collections::HashMap, net::SocketAddr, path::PathBuf, sync::Arc, time:
 use tonic::transport::Server;
 use wuphf_core::{Core, RoutingConfig};
 use wuphf_model::{
-    ConnectorCapabilities, ConnectorId, ConnectorInfo, ConnectorRegistration, Platform, RoutingRule,
+    ConnectorCapabilities, ConnectorId, ConnectorInfo, ConnectorRegistration, NoticeTarget,
+    Platform, RoutingRule,
 };
 use wuphf_proto::connector::connector_transport_server::ConnectorTransportServer;
 use wuphf_proto::connector::media_transport_server::MediaTransportServer;
@@ -50,6 +51,12 @@ struct Configuration {
     connectors: Vec<ConnectorConfiguration>,
     #[serde(default)]
     rules: Vec<RoutingRule>,
+    /// Chats that receive operational notices from connectors (e.g. a WhatsApp
+    /// session ending). A notice is never sent through the connector that
+    /// raised it, so listing targets on more than one connector is what keeps
+    /// the owner reachable when one platform is down.
+    #[serde(default)]
+    notify: Vec<NoticeTarget>,
 }
 
 fn default_max_media_bytes() -> usize {
@@ -120,7 +127,10 @@ async fn serve(path: PathBuf) -> Result<()> {
             capabilities,
         });
     }
-    let config = Arc::new(RoutingConfig::new(configuration.rules, connector_infos));
+    let config = Arc::new(
+        RoutingConfig::new(configuration.rules, connector_infos)
+            .with_notice_targets(configuration.notify),
+    );
 
     let media_service = GrpcMediaService::new(
         Arc::clone(&storage),

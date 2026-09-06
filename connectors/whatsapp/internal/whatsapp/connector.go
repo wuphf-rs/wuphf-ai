@@ -62,6 +62,14 @@ func (c Connector) Run(ctx context.Context) error {
 		case *events.Receipt:
 			err = normalizer.HandleReceipt(ctx, evt)
 		default:
+			// Session-health events do not fail the connector: whatsmeow stops
+			// delivering messages but the core session stays up, which is what
+			// carries the notice out through the other connectors. Staying
+			// alive also means a recovery can be reported on the same session.
+			if kind, detail, ok := sessionNotice(raw); ok {
+				c.logger.Warn().Str("detail", detail).Msg("WhatsApp session health changed")
+				coreclient.SendNotice(ctx, inputs, kind, detail)
+			}
 			return
 		}
 		if err != nil {
@@ -126,4 +134,39 @@ func connect(ctx context.Context, client *whatsmeow.Client) error {
 		}
 	}
 	return errors.New("WhatsApp QR pairing stopped before success")
+}
+
+// sessionNotice maps the whatsmeow events that stop a session from bridging to
+// an owner notice, reporting whether the event is one of them.
+//
+// Without this the connector stays running and silent after a logout: whatsmeow
+// simply stops delivering messages, which from the outside is indistinguishable
+// from nobody having written to you.
+func sessionNotice(raw any) (wuphfpb.NoticeKind, string, bool) {
+	switch evt := raw.(type) {
+	case *events.LoggedOut:
+		detail := "WhatsApp ended the session"
+		if evt.OnConnect {
+			detail = fmt.Sprintf("WhatsApp rejected the session on connect (%s)", evt.Reason)
+		}
+		return wuphfpb.NoticeKind_NOTICE_KIND_LOGGED_OUT, detail, true
+	case *events.StreamReplaced:
+		// Another client took the session over; this one is done until it is
+		// paired again.
+		return wuphfpb.NoticeKind_NOTICE_KIND_LOGGED_OUT,
+			"another WhatsApp client replaced this session", true
+	case *events.ClientOutdated:
+		// WhatsApp refuses to serve the client version whatsmeow announces, so
+		// the fix is a connector upgrade rather than a re-pair.
+		return wuphfpb.NoticeKind_NOTICE_KIND_AUTH_REQUIRED,
+			"WhatsApp rejected this client as outdated; upgrade the connector", true
+	case *events.TemporaryBan:
+		return wuphfpb.NoticeKind_NOTICE_KIND_DEGRADED, evt.String(), true
+	case *events.Connected:
+		// Paired with the above: a reconnect after trouble tells the owner the
+		// bridge is back. The core drops it when nothing was reported wrong.
+		return wuphfpb.NoticeKind_NOTICE_KIND_RECOVERED, "", true
+	default:
+		return wuphfpb.NoticeKind_NOTICE_KIND_UNSPECIFIED, "", false
+	}
 }

@@ -116,6 +116,35 @@ dedup, reply mapping, loop prevention, or address mapping.
   and otherwise as consecutive messages with the caption on the first, whose id
   becomes the recorded copy.
 
+
+## Owner Notices
+
+A connector that loses its session stops bridging without failing: whatsmeow
+keeps the process alive after a WhatsApp logout and simply delivers nothing,
+which from the outside is indistinguishable from nobody writing to you. Rather
+than have every connector decide how to raise the alarm, a connector reports
+*what happened* — an `OwnerNotice` carrying a `NoticeKind` (logged out, auth
+required, degraded, recovered) plus platform detail — and the core decides the
+rest.
+
+The core composes the wording, names the connector in it (the notice arrives
+somewhere unrelated to the connector in trouble), and delivers it to the chats
+configured under `[[notify]]` through the ordinary raw-send path, so a notice is
+a durable dispatch that survives a restart and is redelivered if its own target
+connector is offline.
+
+Two rules make it useful rather than noisy:
+
+- **Never through the connector that raised it.** A logged-out WhatsApp cannot
+  deliver the news that it is logged out, so targets on the reporting connector
+  are skipped. Configuring targets on more than one platform is what keeps the
+  owner reachable when one is down.
+- **The same state is reported once.** A connector in a reconnect loop repeats
+  itself; the owner is told on a change and then not again until the state
+  changes. Suppression is by state rather than elapsed time, which keeps the core
+  clock-free. A recovery is only news after trouble, so a healthy start-up says
+  nothing. The state is in memory, so a restart re-notifies about a connector
+  that is still down — the moment the owner most wants to know.
 ## Media
 
 The runtime exposes a bounded media broker. A source connector uploads bytes

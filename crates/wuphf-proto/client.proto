@@ -110,6 +110,37 @@ message ReceiptEvent {
   ReceiptKind kind = 6;
 }
 
+
+// How badly a connector's own operation is affected. The core picks the
+// wording from this, so a connector reports what happened rather than how it
+// should read.
+enum NoticeKind {
+  NOTICE_KIND_UNSPECIFIED = 0;
+  // The platform ended the session; it cannot recover without the owner
+  // re-authenticating (a WhatsApp logout, a revoked pairing).
+  NOTICE_KIND_LOGGED_OUT = 1;
+  // Credentials were rejected or expired, and the connector needs new ones.
+  NOTICE_KIND_AUTH_REQUIRED = 2;
+  // Still running, but impaired — rate limited, temporarily banned, or
+  // otherwise degraded.
+  NOTICE_KIND_DEGRADED = 3;
+  // Back to normal after one of the above.
+  NOTICE_KIND_RECOVERED = 4;
+}
+
+// A connector reporting its own operational state to the account owner. A
+// connector that loses its session goes quiet, and a bridge that has quietly
+// stopped bridging is worse than one that says so: the core turns this into a
+// message delivered through the *other* connectors, which are still working.
+//
+// The connector reports only what happened. Where the notice goes, how it is
+// worded, and whether a repeat is worth sending are all core decisions.
+message OwnerNotice {
+  NoticeKind kind = 1;
+  // Platform-supplied specifics, if any (a ban expiry, a failure reason).
+  // Appended to the core's wording; safe to leave empty.
+  string detail = 2;
+}
 message ClientFrame {
   oneof body {
     Registration registration = 1;
@@ -121,5 +152,6 @@ message ClientFrame {
     MessageDeleteEvent message_delete = 7;
     ReactionEvent reaction = 8;
     ReceiptEvent receipt = 9;
+    OwnerNotice owner_notice = 10;
   }
 }

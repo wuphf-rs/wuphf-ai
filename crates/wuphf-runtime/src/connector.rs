@@ -191,6 +191,20 @@ impl ConnectorHub {
                     .await;
                 }
             }
+            ConnectorInput::OwnerNotice { kind, detail, .. } => {
+                // Onto the same ordered queue as this connector's events, so a
+                // notice lands after whatever it had already reported rather
+                // than overtaking it.
+                let _ = self
+                    .runtime
+                    .inbound
+                    .send(InboundWork::Notice {
+                        connector_id,
+                        kind,
+                        detail,
+                    })
+                    .await;
+            }
             ConnectorInput::IdentityMigrated { old, new, .. } => {
                 let _ = self
                     .runtime

@@ -72,6 +72,70 @@ func (ReceiptKind) EnumDescriptor() ([]byte, []int) {
 	return file_client_proto_rawDescGZIP(), []int{0}
 }
 
+// How badly a connector's own operation is affected. The core picks the
+// wording from this, so a connector reports what happened rather than how it
+// should read.
+type NoticeKind int32
+
+const (
+	NoticeKind_NOTICE_KIND_UNSPECIFIED NoticeKind = 0
+	// The platform ended the session; it cannot recover without the owner
+	// re-authenticating (a WhatsApp logout, a revoked pairing).
+	NoticeKind_NOTICE_KIND_LOGGED_OUT NoticeKind = 1
+	// Credentials were rejected or expired, and the connector needs new ones.
+	NoticeKind_NOTICE_KIND_AUTH_REQUIRED NoticeKind = 2
+	// Still running, but impaired — rate limited, temporarily banned, or
+	// otherwise degraded.
+	NoticeKind_NOTICE_KIND_DEGRADED NoticeKind = 3
+	// Back to normal after one of the above.
+	NoticeKind_NOTICE_KIND_RECOVERED NoticeKind = 4
+)
+
+// Enum value maps for NoticeKind.
+var (
+	NoticeKind_name = map[int32]string{
+		0: "NOTICE_KIND_UNSPECIFIED",
+		1: "NOTICE_KIND_LOGGED_OUT",
+		2: "NOTICE_KIND_AUTH_REQUIRED",
+		3: "NOTICE_KIND_DEGRADED",
+		4: "NOTICE_KIND_RECOVERED",
+	}
+	NoticeKind_value = map[string]int32{
+		"NOTICE_KIND_UNSPECIFIED":   0,
+		"NOTICE_KIND_LOGGED_OUT":    1,
+		"NOTICE_KIND_AUTH_REQUIRED": 2,
+		"NOTICE_KIND_DEGRADED":      3,
+		"NOTICE_KIND_RECOVERED":     4,
+	}
+)
+
+func (x NoticeKind) Enum() *NoticeKind {
+	p := new(NoticeKind)
+	*p = x
+	return p
+}
+
+func (x NoticeKind) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (NoticeKind) Descriptor() protoreflect.EnumDescriptor {
+	return file_client_proto_enumTypes[1].Descriptor()
+}
+
+func (NoticeKind) Type() protoreflect.EnumType {
+	return &file_client_proto_enumTypes[1]
+}
+
+func (x NoticeKind) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use NoticeKind.Descriptor instead.
+func (NoticeKind) EnumDescriptor() ([]byte, []int) {
+	return file_client_proto_rawDescGZIP(), []int{1}
+}
+
 // Raw origin coordinates for an inbound message. The connector id is taken from
 // the session registration, not the wire, so a session cannot speak for another
 // connector. The core resolves (connector, chat_id, thread_id) to an endpoint.
@@ -712,6 +776,67 @@ func (x *ReceiptEvent) GetKind() ReceiptKind {
 	return ReceiptKind_RECEIPT_KIND_UNSPECIFIED
 }
 
+// A connector reporting its own operational state to the account owner. A
+// connector that loses its session goes quiet, and a bridge that has quietly
+// stopped bridging is worse than one that says so: the core turns this into a
+// message delivered through the *other* connectors, which are still working.
+//
+// The connector reports only what happened. Where the notice goes, how it is
+// worded, and whether a repeat is worth sending are all core decisions.
+type OwnerNotice struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	Kind  NoticeKind             `protobuf:"varint,1,opt,name=kind,proto3,enum=wuphf.connector.v1.NoticeKind" json:"kind,omitempty"`
+	// Platform-supplied specifics, if any (a ban expiry, a failure reason).
+	// Appended to the core's wording; safe to leave empty.
+	Detail        string `protobuf:"bytes,2,opt,name=detail,proto3" json:"detail,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *OwnerNotice) Reset() {
+	*x = OwnerNotice{}
+	mi := &file_client_proto_msgTypes[8]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *OwnerNotice) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*OwnerNotice) ProtoMessage() {}
+
+func (x *OwnerNotice) ProtoReflect() protoreflect.Message {
+	mi := &file_client_proto_msgTypes[8]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use OwnerNotice.ProtoReflect.Descriptor instead.
+func (*OwnerNotice) Descriptor() ([]byte, []int) {
+	return file_client_proto_rawDescGZIP(), []int{8}
+}
+
+func (x *OwnerNotice) GetKind() NoticeKind {
+	if x != nil {
+		return x.Kind
+	}
+	return NoticeKind_NOTICE_KIND_UNSPECIFIED
+}
+
+func (x *OwnerNotice) GetDetail() string {
+	if x != nil {
+		return x.Detail
+	}
+	return ""
+}
+
 type ClientFrame struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Types that are valid to be assigned to Body:
@@ -725,6 +850,7 @@ type ClientFrame struct {
 	//	*ClientFrame_MessageDelete
 	//	*ClientFrame_Reaction
 	//	*ClientFrame_Receipt
+	//	*ClientFrame_OwnerNotice
 	Body          isClientFrame_Body `protobuf_oneof:"body"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -732,7 +858,7 @@ type ClientFrame struct {
 
 func (x *ClientFrame) Reset() {
 	*x = ClientFrame{}
-	mi := &file_client_proto_msgTypes[8]
+	mi := &file_client_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -744,7 +870,7 @@ func (x *ClientFrame) String() string {
 func (*ClientFrame) ProtoMessage() {}
 
 func (x *ClientFrame) ProtoReflect() protoreflect.Message {
-	mi := &file_client_proto_msgTypes[8]
+	mi := &file_client_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -757,7 +883,7 @@ func (x *ClientFrame) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ClientFrame.ProtoReflect.Descriptor instead.
 func (*ClientFrame) Descriptor() ([]byte, []int) {
-	return file_client_proto_rawDescGZIP(), []int{8}
+	return file_client_proto_rawDescGZIP(), []int{9}
 }
 
 func (x *ClientFrame) GetBody() isClientFrame_Body {
@@ -848,6 +974,15 @@ func (x *ClientFrame) GetReceipt() *ReceiptEvent {
 	return nil
 }
 
+func (x *ClientFrame) GetOwnerNotice() *OwnerNotice {
+	if x != nil {
+		if x, ok := x.Body.(*ClientFrame_OwnerNotice); ok {
+			return x.OwnerNotice
+		}
+	}
+	return nil
+}
+
 type isClientFrame_Body interface {
 	isClientFrame_Body()
 }
@@ -888,6 +1023,10 @@ type ClientFrame_Receipt struct {
 	Receipt *ReceiptEvent `protobuf:"bytes,9,opt,name=receipt,proto3,oneof"`
 }
 
+type ClientFrame_OwnerNotice struct {
+	OwnerNotice *OwnerNotice `protobuf:"bytes,10,opt,name=owner_notice,json=ownerNotice,proto3,oneof"`
+}
+
 func (*ClientFrame_Registration) isClientFrame_Body() {}
 
 func (*ClientFrame_MessageCreate) isClientFrame_Body() {}
@@ -905,6 +1044,8 @@ func (*ClientFrame_MessageDelete) isClientFrame_Body() {}
 func (*ClientFrame_Reaction) isClientFrame_Body() {}
 
 func (*ClientFrame_Receipt) isClientFrame_Body() {}
+
+func (*ClientFrame_OwnerNotice) isClientFrame_Body() {}
 
 var File_client_proto protoreflect.FileDescriptor
 
@@ -985,7 +1126,10 @@ const file_client_proto_rawDesc = "" +
 	"\afrom_me\x18\x05 \x01(\bR\x06fromMe\x123\n" +
 	"\x04kind\x18\x06 \x01(\x0e2\x1f.wuphf.connector.v1.ReceiptKindR\x04kindB\f\n" +
 	"\n" +
-	"_thread_id\"\xbe\x05\n" +
+	"_thread_id\"Y\n" +
+	"\vOwnerNotice\x122\n" +
+	"\x04kind\x18\x01 \x01(\x0e2\x1e.wuphf.connector.v1.NoticeKindR\x04kind\x12\x16\n" +
+	"\x06detail\x18\x02 \x01(\tR\x06detail\"\x84\x06\n" +
 	"\vClientFrame\x12F\n" +
 	"\fregistration\x18\x01 \x01(\v2 .wuphf.connector.v1.RegistrationH\x00R\fregistration\x12O\n" +
 	"\x0emessage_create\x18\x02 \x01(\v2&.wuphf.connector.v1.MessageCreateEventH\x00R\rmessageCreate\x12O\n" +
@@ -995,12 +1139,21 @@ const file_client_proto_rawDesc = "" +
 	"\fmessage_edit\x18\x06 \x01(\v2$.wuphf.connector.v1.MessageEditEventH\x00R\vmessageEdit\x12O\n" +
 	"\x0emessage_delete\x18\a \x01(\v2&.wuphf.connector.v1.MessageDeleteEventH\x00R\rmessageDelete\x12?\n" +
 	"\breaction\x18\b \x01(\v2!.wuphf.connector.v1.ReactionEventH\x00R\breaction\x12<\n" +
-	"\areceipt\x18\t \x01(\v2 .wuphf.connector.v1.ReceiptEventH\x00R\areceiptB\x06\n" +
+	"\areceipt\x18\t \x01(\v2 .wuphf.connector.v1.ReceiptEventH\x00R\areceipt\x12D\n" +
+	"\fowner_notice\x18\n" +
+	" \x01(\v2\x1f.wuphf.connector.v1.OwnerNoticeH\x00R\vownerNoticeB\x06\n" +
 	"\x04body*^\n" +
 	"\vReceiptKind\x12\x1c\n" +
 	"\x18RECEIPT_KIND_UNSPECIFIED\x10\x00\x12\x1a\n" +
 	"\x16RECEIPT_KIND_DELIVERED\x10\x01\x12\x15\n" +
-	"\x11RECEIPT_KIND_READ\x10\x02B:Z8github.com/akshettrj/wuphf/proto/go/connector/v1;wuphfpbb\x06proto3"
+	"\x11RECEIPT_KIND_READ\x10\x02*\x99\x01\n" +
+	"\n" +
+	"NoticeKind\x12\x1b\n" +
+	"\x17NOTICE_KIND_UNSPECIFIED\x10\x00\x12\x1a\n" +
+	"\x16NOTICE_KIND_LOGGED_OUT\x10\x01\x12\x1d\n" +
+	"\x19NOTICE_KIND_AUTH_REQUIRED\x10\x02\x12\x18\n" +
+	"\x14NOTICE_KIND_DEGRADED\x10\x03\x12\x19\n" +
+	"\x15NOTICE_KIND_RECOVERED\x10\x04B:Z8github.com/akshettrj/wuphf/proto/go/connector/v1;wuphfpbb\x06proto3"
 
 var (
 	file_client_proto_rawDescOnce sync.Once
@@ -1014,39 +1167,43 @@ func file_client_proto_rawDescGZIP() []byte {
 	return file_client_proto_rawDescData
 }
 
-var file_client_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
-var file_client_proto_msgTypes = make([]protoimpl.MessageInfo, 9)
+var file_client_proto_enumTypes = make([]protoimpl.EnumInfo, 2)
+var file_client_proto_msgTypes = make([]protoimpl.MessageInfo, 10)
 var file_client_proto_goTypes = []any{
 	(ReceiptKind)(0),           // 0: wuphf.connector.v1.ReceiptKind
-	(*MessageCreateEvent)(nil), // 1: wuphf.connector.v1.MessageCreateEvent
-	(*MessageEditEvent)(nil),   // 2: wuphf.connector.v1.MessageEditEvent
-	(*MessageDeleteEvent)(nil), // 3: wuphf.connector.v1.MessageDeleteEvent
-	(*IdentityMigrated)(nil),   // 4: wuphf.connector.v1.IdentityMigrated
-	(*Acknowledgement)(nil),    // 5: wuphf.connector.v1.Acknowledgement
-	(*DispatchFailed)(nil),     // 6: wuphf.connector.v1.DispatchFailed
-	(*ReactionEvent)(nil),      // 7: wuphf.connector.v1.ReactionEvent
-	(*ReceiptEvent)(nil),       // 8: wuphf.connector.v1.ReceiptEvent
-	(*ClientFrame)(nil),        // 9: wuphf.connector.v1.ClientFrame
-	(*Attachment)(nil),         // 10: wuphf.connector.v1.Attachment
-	(*Registration)(nil),       // 11: wuphf.connector.v1.Registration
+	(NoticeKind)(0),            // 1: wuphf.connector.v1.NoticeKind
+	(*MessageCreateEvent)(nil), // 2: wuphf.connector.v1.MessageCreateEvent
+	(*MessageEditEvent)(nil),   // 3: wuphf.connector.v1.MessageEditEvent
+	(*MessageDeleteEvent)(nil), // 4: wuphf.connector.v1.MessageDeleteEvent
+	(*IdentityMigrated)(nil),   // 5: wuphf.connector.v1.IdentityMigrated
+	(*Acknowledgement)(nil),    // 6: wuphf.connector.v1.Acknowledgement
+	(*DispatchFailed)(nil),     // 7: wuphf.connector.v1.DispatchFailed
+	(*ReactionEvent)(nil),      // 8: wuphf.connector.v1.ReactionEvent
+	(*ReceiptEvent)(nil),       // 9: wuphf.connector.v1.ReceiptEvent
+	(*OwnerNotice)(nil),        // 10: wuphf.connector.v1.OwnerNotice
+	(*ClientFrame)(nil),        // 11: wuphf.connector.v1.ClientFrame
+	(*Attachment)(nil),         // 12: wuphf.connector.v1.Attachment
+	(*Registration)(nil),       // 13: wuphf.connector.v1.Registration
 }
 var file_client_proto_depIdxs = []int32{
-	10, // 0: wuphf.connector.v1.MessageCreateEvent.attachments:type_name -> wuphf.connector.v1.Attachment
+	12, // 0: wuphf.connector.v1.MessageCreateEvent.attachments:type_name -> wuphf.connector.v1.Attachment
 	0,  // 1: wuphf.connector.v1.ReceiptEvent.kind:type_name -> wuphf.connector.v1.ReceiptKind
-	11, // 2: wuphf.connector.v1.ClientFrame.registration:type_name -> wuphf.connector.v1.Registration
-	1,  // 3: wuphf.connector.v1.ClientFrame.message_create:type_name -> wuphf.connector.v1.MessageCreateEvent
-	5,  // 4: wuphf.connector.v1.ClientFrame.acknowledgement:type_name -> wuphf.connector.v1.Acknowledgement
-	4,  // 5: wuphf.connector.v1.ClientFrame.identity_migrated:type_name -> wuphf.connector.v1.IdentityMigrated
-	6,  // 6: wuphf.connector.v1.ClientFrame.dispatch_failed:type_name -> wuphf.connector.v1.DispatchFailed
-	2,  // 7: wuphf.connector.v1.ClientFrame.message_edit:type_name -> wuphf.connector.v1.MessageEditEvent
-	3,  // 8: wuphf.connector.v1.ClientFrame.message_delete:type_name -> wuphf.connector.v1.MessageDeleteEvent
-	7,  // 9: wuphf.connector.v1.ClientFrame.reaction:type_name -> wuphf.connector.v1.ReactionEvent
-	8,  // 10: wuphf.connector.v1.ClientFrame.receipt:type_name -> wuphf.connector.v1.ReceiptEvent
-	11, // [11:11] is the sub-list for method output_type
-	11, // [11:11] is the sub-list for method input_type
-	11, // [11:11] is the sub-list for extension type_name
-	11, // [11:11] is the sub-list for extension extendee
-	0,  // [0:11] is the sub-list for field type_name
+	1,  // 2: wuphf.connector.v1.OwnerNotice.kind:type_name -> wuphf.connector.v1.NoticeKind
+	13, // 3: wuphf.connector.v1.ClientFrame.registration:type_name -> wuphf.connector.v1.Registration
+	2,  // 4: wuphf.connector.v1.ClientFrame.message_create:type_name -> wuphf.connector.v1.MessageCreateEvent
+	6,  // 5: wuphf.connector.v1.ClientFrame.acknowledgement:type_name -> wuphf.connector.v1.Acknowledgement
+	5,  // 6: wuphf.connector.v1.ClientFrame.identity_migrated:type_name -> wuphf.connector.v1.IdentityMigrated
+	7,  // 7: wuphf.connector.v1.ClientFrame.dispatch_failed:type_name -> wuphf.connector.v1.DispatchFailed
+	3,  // 8: wuphf.connector.v1.ClientFrame.message_edit:type_name -> wuphf.connector.v1.MessageEditEvent
+	4,  // 9: wuphf.connector.v1.ClientFrame.message_delete:type_name -> wuphf.connector.v1.MessageDeleteEvent
+	8,  // 10: wuphf.connector.v1.ClientFrame.reaction:type_name -> wuphf.connector.v1.ReactionEvent
+	9,  // 11: wuphf.connector.v1.ClientFrame.receipt:type_name -> wuphf.connector.v1.ReceiptEvent
+	10, // 12: wuphf.connector.v1.ClientFrame.owner_notice:type_name -> wuphf.connector.v1.OwnerNotice
+	13, // [13:13] is the sub-list for method output_type
+	13, // [13:13] is the sub-list for method input_type
+	13, // [13:13] is the sub-list for extension type_name
+	13, // [13:13] is the sub-list for extension extendee
+	0,  // [0:13] is the sub-list for field type_name
 }
 
 func init() { file_client_proto_init() }
@@ -1062,7 +1219,7 @@ func file_client_proto_init() {
 	file_client_proto_msgTypes[4].OneofWrappers = []any{}
 	file_client_proto_msgTypes[6].OneofWrappers = []any{}
 	file_client_proto_msgTypes[7].OneofWrappers = []any{}
-	file_client_proto_msgTypes[8].OneofWrappers = []any{
+	file_client_proto_msgTypes[9].OneofWrappers = []any{
 		(*ClientFrame_Registration)(nil),
 		(*ClientFrame_MessageCreate)(nil),
 		(*ClientFrame_Acknowledgement)(nil),
@@ -1072,14 +1229,15 @@ func file_client_proto_init() {
 		(*ClientFrame_MessageDelete)(nil),
 		(*ClientFrame_Reaction)(nil),
 		(*ClientFrame_Receipt)(nil),
+		(*ClientFrame_OwnerNotice)(nil),
 	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_client_proto_rawDesc), len(file_client_proto_rawDesc)),
-			NumEnums:      1,
-			NumMessages:   9,
+			NumEnums:      2,
+			NumMessages:   10,
 			NumExtensions: 0,
 			NumServices:   0,
 		},
