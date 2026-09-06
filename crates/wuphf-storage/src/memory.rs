@@ -660,6 +660,67 @@ impl Storage for InMemoryStorage {
         }))
     }
 
+    async fn rename_observed_chat(
+        &self,
+        connector_id: &ConnectorId,
+        from_chat_id: &str,
+        to_chat_id: &str,
+    ) -> StorageResult<()> {
+        if from_chat_id == to_chat_id {
+            return Ok(());
+        }
+        let mut state = self.state.write().await;
+
+        let moving: Vec<(ConnectorId, String, String)> = state
+            .observed_messages
+            .keys()
+            .filter(|(connector, chat, _)| connector == connector_id && chat == from_chat_id)
+            .cloned()
+            .collect();
+        for key in moving {
+            let Some(mut observed) = state.observed_messages.remove(&key) else {
+                continue;
+            };
+            observed.chat_id = to_chat_id.to_owned();
+            // A row already logged under the destination wins: it is the form
+            // the chat is known by now, and re-keying must not overwrite it.
+            state
+                .observed_messages
+                .entry((key.0, to_chat_id.to_owned(), key.2))
+                .or_insert(observed);
+        }
+
+        let Some(mut summary) = state
+            .observed_chats
+            .remove(&(connector_id.clone(), from_chat_id.to_owned()))
+        else {
+            return Ok(());
+        };
+        summary.chat_id = to_chat_id.to_owned();
+        match state
+            .observed_chats
+            .get_mut(&(connector_id.clone(), to_chat_id.to_owned()))
+        {
+            // Both forms have a summary: keep the more recent activity, and keep
+            // whichever title is known.
+            Some(existing) => {
+                if summary.last_message_ts > existing.last_message_ts {
+                    existing.last_message_ts = summary.last_message_ts;
+                    existing.last_message_preview = summary.last_message_preview;
+                }
+                if existing.title.is_none() {
+                    existing.title = summary.title;
+                }
+            }
+            None => {
+                state
+                    .observed_chats
+                    .insert((connector_id.clone(), to_chat_id.to_owned()), summary);
+            }
+        }
+        Ok(())
+    }
+
     async fn list_observed_chats(&self) -> StorageResult<Vec<ObservedChat>> {
         let mut chats: Vec<ObservedChat> = self
             .state

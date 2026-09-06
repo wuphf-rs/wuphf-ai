@@ -31,6 +31,10 @@ pub(crate) fn bind_native_parent(
                 participant: parent.participant,
                 text: parent.text,
                 attachments: parent.attachments,
+                // A blocked reply is released precisely because the bridge just
+                // sent the parent to this endpoint, so the quoted copy is
+                // always one the bridge authored.
+                authored_by_bridge: true,
             })
         }
         DispatchPayload::MessageEdit {

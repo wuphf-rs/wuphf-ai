@@ -284,6 +284,13 @@ where
                 linked_address: new.clone(),
             })
             .await?;
+        // Heal the observation log too. It is written before routing so it can
+        // capture chats no rule matches, which means it never passes through
+        // the alias layer; without this the rows logged under the old address
+        // would stay a separate conversation in the observer forever.
+        self.storage
+            .rename_observed_chat(&connector_id, &old.chat_id, &new.chat_id)
+            .await?;
         let (address, endpoint_id, is_canonical) =
             match self.storage.resolve_endpoint(&connector_id, &old).await? {
                 Some(endpoint_id) => (new, endpoint_id, true),

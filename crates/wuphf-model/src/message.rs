@@ -112,12 +112,25 @@ pub struct ReplyContext {
     pub participant: Option<String>,
     pub text: Option<String>,
     pub attachments: Vec<Attachment>,
+    /// Whether the quoted copy at the target endpoint was written by the bridge
+    /// rather than received from the target platform.
+    ///
+    /// It decides who a platform is told authored the quoted message. When the
+    /// bridge sent that copy the author is the bridge's own account; when the
+    /// copy was received there, the target *is* the message's origin, so
+    /// `sender`/`participant` are already that platform's own ids and name the
+    /// real author. Platforms that address a quote by author (WhatsApp needs a
+    /// participant alongside the quoted id) attribute it wrongly without this.
+    #[serde(default)]
+    pub authored_by_bridge: bool,
 }
 
 impl ReplyContext {
     /// Quote a stored parent message under the native id its copy carries at
-    /// the target endpoint.
-    pub fn quoting(parent: Message, platform_message_id: String) -> Self {
+    /// the target endpoint. `authored_by_bridge` reports whether that copy is
+    /// one the bridge sent, which is what tells a connector whether to
+    /// attribute the quote to its own account or to `participant`/`sender`.
+    pub fn quoting(parent: Message, platform_message_id: String, authored_by_bridge: bool) -> Self {
         Self {
             message_id: parent.id,
             platform_message_id,
@@ -125,6 +138,7 @@ impl ReplyContext {
             participant: parent.participant,
             text: parent.text,
             attachments: parent.attachments,
+            authored_by_bridge,
         }
     }
 }

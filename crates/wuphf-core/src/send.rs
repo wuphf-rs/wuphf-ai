@@ -152,7 +152,12 @@ where
         let Some(parent) = self.storage.message(parent_id).await? else {
             return Ok((None, None));
         };
-        let context = ReplyContext::quoting(parent, platform_message_id.to_owned());
+        let authored_by_bridge = self
+            .storage
+            .is_sent_copy(endpoint_id, platform_message_id)
+            .await?;
+        let context =
+            ReplyContext::quoting(parent, platform_message_id.to_owned(), authored_by_bridge);
         Ok((Some(parent_id), Some(context)))
     }
 

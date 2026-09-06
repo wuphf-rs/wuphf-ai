@@ -163,9 +163,9 @@ func (s Sender) DeleteMessage(ctx context.Context, dispatch *wuphfpb.MessageDele
 }
 
 // quotedContext builds the WhatsApp quote metadata for a reply dispatch. The
-// quoted copy at this endpoint is always bridge-authored, since the router never
-// dispatches a message back to its origin endpoint, so the quoted participant is
-// our own account.
+// quoted copy is not necessarily one the bridge wrote: the router only skips the
+// *replying* message's origin endpoint, so a reply arriving from another
+// platform can quote a message this chat sent us. The dispatch says which it is.
 func (s Sender) quotedContext(dispatch *wuphfpb.MessageCreateDispatch) (*waE2E.ContextInfo, error) {
 	reply := dispatch.GetReplyContext()
 	if reply == nil {
@@ -174,14 +174,39 @@ func (s Sender) quotedContext(dispatch *wuphfpb.MessageCreateDispatch) (*waE2E.C
 		}
 		return nil, nil
 	}
-	if s.ownJID.IsEmpty() {
-		return nil, coreclient.Permanent(errors.New("outbound WhatsApp reply requires a paired account JID"))
+	participant, err := s.quotedAuthor(reply)
+	if err != nil {
+		return nil, err
 	}
 	return &waE2E.ContextInfo{
 		StanzaID:      proto.String(reply.GetPlatformMessageId()),
-		Participant:   proto.String(s.ownJID.ToNonAD().String()),
+		Participant:   proto.String(participant),
 		QuotedMessage: quotedBody(reply),
 	}, nil
+}
+
+// quotedAuthor resolves the JID WhatsApp is told wrote the quoted message.
+// WhatsApp links a quote by (StanzaID, Participant) together, so naming the
+// wrong author leaves the reply unlinked in clients.
+//
+// A copy the bridge sent into this chat was written by the paired account. A
+// copy the bridge received here came from WhatsApp itself, so the reply context
+// already carries this platform's own ids for its author — the group
+// participant when there is one, the chat peer otherwise — canonicalized by the
+// normalizer, so the form matches the quoted message's.
+func (s Sender) quotedAuthor(reply *wuphfpb.ReplyContext) (string, error) {
+	if !reply.GetAuthoredByBridge() {
+		if participant := reply.GetParticipant(); participant != "" {
+			return participant, nil
+		}
+		if sender := reply.GetSender(); sender != "" {
+			return sender, nil
+		}
+	}
+	if s.ownJID.IsEmpty() {
+		return "", coreclient.Permanent(errors.New("outbound WhatsApp reply requires a paired account JID"))
+	}
+	return s.ownJID.ToNonAD().String(), nil
 }
 
 // quotedBody renders the parent message for the WhatsApp quote preview. The

@@ -403,3 +403,50 @@ func TestSendFirstAttachmentFailureStaysRetryable(t *testing.T) {
 		t.Fatalf("SendMessage() error = %v, want a retryable failure with nothing sent", err)
 	}
 }
+
+func TestQuotedAuthorAttributesTheRealSender(t *testing.T) {
+	t.Parallel()
+	own := types.NewJID("19998887777", types.DefaultUserServer)
+	peer := "88887777@lid"
+
+	cases := []struct {
+		name  string
+		reply *wuphfpb.ReplyContext
+		want  string
+	}{
+		{
+			// The bridge wrote the quoted copy, so WhatsApp is told we authored it.
+			"bridge-authored copy quotes our own account",
+			&wuphfpb.ReplyContext{AuthoredByBridge: true, Sender: peer, Participant: &peer},
+			own.String(),
+		},
+		{
+			// The copy came from WhatsApp, so its author is the group participant.
+			"received copy quotes the participant",
+			&wuphfpb.ReplyContext{Sender: "123@g.us", Participant: &peer},
+			peer,
+		},
+		{
+			"received copy without a participant falls back to the sender",
+			&wuphfpb.ReplyContext{Sender: peer},
+			peer,
+		},
+		{
+			"a received copy with no author at all still sends",
+			&wuphfpb.ReplyContext{},
+			own.String(),
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			sender := NewSender(&stubSendClient{}, &stubBroker{}, own, config.StickerMetadata{}, config.RenderingOptions{})
+			got, err := sender.quotedAuthor(tc.reply)
+			if err != nil {
+				t.Fatalf("quotedAuthor() error = %v", err)
+			}
+			if got != tc.want {
+				t.Fatalf("quotedAuthor() = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}

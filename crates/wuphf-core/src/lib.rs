@@ -137,8 +137,6 @@ pub enum CoreError {
     OriginWithoutReplicaSet(EndpointId),
     #[error("rule references connector {0} which is not registered")]
     UnknownConnector(ConnectorId),
-    #[error("reaction ingestion is not yet implemented")]
-    UnsupportedEvent,
     #[error("deleted message {0} maps from a copy but is not stored")]
     DeleteTargetNotStored(MessageId),
     #[error("edited message {0} maps from a copy but is not stored")]

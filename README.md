@@ -12,8 +12,11 @@ For a human-friendly tour, open [`docs/index.html`](docs/index.html).
 
 - Rule-based dynamic routing: raw platform addresses resolve to endpoints
   through an alias table; conversations, replica sets, and mirror threads are
-  minted lazily and reused. Identity migrations (e.g. WhatsApp phone-to-LID)
-  keep both addresses resolvable.
+  minted lazily and reused.
+- Address-form independence: a platform that reaches one chat by several
+  addresses (a WhatsApp phone JID and its LID) is treated as one chat. A rule
+  can name a chat by any form the platform has reported, in an allowlist or a
+  blocklist alike.
 - Message **create, edit, and delete** replication. Rendering (in-place vs
   repost edits; revoke vs tombstone deletes; attachments-as-files; over-length
   text spillover) is each connector's own `[rendering]` config. Internal reply
@@ -24,11 +27,12 @@ For a human-friendly tour, open [`docs/index.html`](docs/index.html).
   persistence, and orphan-upload pruning.
 - Bidirectional Tonic/gRPC connector transport; connector session hub with
   registration allowlist and capability gating.
-- Go Telegram (`gotd/td`, forum topics) and WhatsApp (`whatsmeow`, QR pairing)
-  connectors for text and media.
+- Go connectors: Telegram (`gotd/td`, forum topics, albums), WhatsApp
+  (`whatsmeow`, QR pairing), and Instagram (`mautrix-meta` lightspeed).
 
-Reactions and mirror-thread retitling are modelled or reserved but not yet
-executed.
+Reactions, delivery/read receipts, and mirror-thread retitling are executed
+end to end. Instagram sends text only; its outbound attachments are not
+implemented yet.
 
 ## Layout
 
@@ -41,7 +45,7 @@ crates/
   wuphf-core/      Identity orchestration and event ingestion
   wuphf-runtime/   Tokio event bus, dispatch pipeline, media broker, gRPC
   wuphf-cli/       Server executable
-connectors/        Go Telegram (gotd/td) and WhatsApp (whatsmeow) connectors
+connectors/        Go Telegram (gotd/td), WhatsApp (whatsmeow), Instagram connectors
 proto/go/          Generated Go connector bindings
 migrations/        SQLite schema migrations
 config/            Example server topology and rules

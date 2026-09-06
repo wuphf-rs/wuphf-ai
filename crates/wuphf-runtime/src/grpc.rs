@@ -395,6 +395,7 @@ fn reply_context_to_proto(context: ReplyContext) -> pb::ReplyContext {
             .into_iter()
             .map(attachment_to_proto)
             .collect(),
+        authored_by_bridge: context.authored_by_bridge,
     }
 }
 

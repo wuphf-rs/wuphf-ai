@@ -725,3 +725,81 @@ async fn address_links_resolve_from_either_side<S: Storage>(storage: S) {
             .is_empty()
     );
 }
+
+#[tokio::test]
+async fn memory_rename_observed_chat_merges_both_forms() {
+    rename_observed_chat_merges_both_forms(InMemoryStorage::default()).await;
+}
+
+#[tokio::test]
+async fn sqlite_rename_observed_chat_merges_both_forms() {
+    let path = std::env::temp_dir().join(format!("wuphf-rename-{}.sqlite", DispatchId::new()));
+    let url = format!("sqlite://{}", path.display());
+    rename_observed_chat_merges_both_forms(SqliteStorage::connect(&url).await.unwrap()).await;
+}
+
+/// Rows logged under a chat's old address move onto the new one, so a chat the
+/// platform later reveals to be one conversation stops showing as two — and an
+/// edit or delete arriving under the new address finds the moved row.
+async fn rename_observed_chat_merges_both_forms<S: Storage>(storage: S) {
+    let connector = ConnectorId("whatsapp-main".into());
+    let phone = "15550001111@s.whatsapp.net";
+    let lid = "88887777@lid";
+
+    storage
+        .log_observed(
+            observed(&connector, phone, "m-1", 10, Some("hi")),
+            Some("Alice".into()),
+        )
+        .await
+        .unwrap();
+    storage
+        .log_observed(observed(&connector, lid, "m-2", 20, Some("hi")), None)
+        .await
+        .unwrap();
+    assert_eq!(storage.list_observed_chats().await.unwrap().len(), 2);
+
+    storage
+        .rename_observed_chat(&connector, phone, lid)
+        .await
+        .unwrap();
+
+    let chats = storage.list_observed_chats().await.unwrap();
+    assert_eq!(
+        chats.len(),
+        1,
+        "the two forms should collapse into one chat"
+    );
+    assert_eq!(chats[0].chat_id, lid);
+    // The newer message keeps the summary, and the title known only to the old
+    // form survives the merge.
+    assert_eq!(chats[0].last_message_ts, 20);
+    assert_eq!(chats[0].title.as_deref(), Some("Alice"));
+
+    let messages = storage
+        .observed_messages(&connector, lid, None, 10)
+        .await
+        .unwrap();
+    assert_eq!(
+        messages.len(),
+        2,
+        "both messages should live under one chat"
+    );
+    assert!(messages.iter().all(|message| message.chat_id == lid));
+    assert!(
+        storage
+            .observed_messages(&connector, phone, None, 10)
+            .await
+            .unwrap()
+            .is_empty()
+    );
+
+    // A delete reported under the new address now finds the row that was logged
+    // under the old one.
+    let deleted = storage
+        .mark_observed_deleted(&connector, lid, "m-1")
+        .await
+        .unwrap()
+        .expect("the moved row is reachable under the new address");
+    assert!(deleted.deleted);
+}

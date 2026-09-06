@@ -13,6 +13,13 @@ message ReplyContext {
   optional string participant = 4;
   optional string text = 5;
   repeated Attachment attachments = 6;
+  // Whether the bridge wrote the quoted copy at this endpoint, rather than
+  // receiving it from this platform. It decides who the connector tells the
+  // platform authored the quoted message: its own account when true, and
+  // `participant`/`sender` (already this platform's own ids in that case)
+  // when false. Platforms that address a quote by author, as WhatsApp does,
+  // attribute it to the wrong person without this.
+  bool authored_by_bridge = 7;
 }
 
 // Instruction to create a thread/topic in a container before sending, used when

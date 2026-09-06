@@ -29,8 +29,15 @@ type ReplyContext struct {
 	Participant       *string                `protobuf:"bytes,4,opt,name=participant,proto3,oneof" json:"participant,omitempty"`
 	Text              *string                `protobuf:"bytes,5,opt,name=text,proto3,oneof" json:"text,omitempty"`
 	Attachments       []*Attachment          `protobuf:"bytes,6,rep,name=attachments,proto3" json:"attachments,omitempty"`
-	unknownFields     protoimpl.UnknownFields
-	sizeCache         protoimpl.SizeCache
+	// Whether the bridge wrote the quoted copy at this endpoint, rather than
+	// receiving it from this platform. It decides who the connector tells the
+	// platform authored the quoted message: its own account when true, and
+	// `participant`/`sender` (already this platform's own ids in that case)
+	// when false. Platforms that address a quote by author, as WhatsApp does,
+	// attribute it to the wrong person without this.
+	AuthoredByBridge bool `protobuf:"varint,7,opt,name=authored_by_bridge,json=authoredByBridge,proto3" json:"authored_by_bridge,omitempty"`
+	unknownFields    protoimpl.UnknownFields
+	sizeCache        protoimpl.SizeCache
 }
 
 func (x *ReplyContext) Reset() {
@@ -103,6 +110,13 @@ func (x *ReplyContext) GetAttachments() []*Attachment {
 		return x.Attachments
 	}
 	return nil
+}
+
+func (x *ReplyContext) GetAuthoredByBridge() bool {
+	if x != nil {
+		return x.AuthoredByBridge
+	}
+	return false
 }
 
 // Instruction to create a thread/topic in a container before sending, used when
@@ -998,14 +1012,15 @@ var File_server_proto protoreflect.FileDescriptor
 
 const file_server_proto_rawDesc = "" +
 	"\n" +
-	"\fserver.proto\x12\x12wuphf.connector.v1\x1a\fcommon.proto\"\x9f\x02\n" +
+	"\fserver.proto\x12\x12wuphf.connector.v1\x1a\fcommon.proto\"\xcd\x02\n" +
 	"\fReplyContext\x12,\n" +
 	"\x12logical_message_id\x18\x01 \x01(\tR\x10logicalMessageId\x12.\n" +
 	"\x13platform_message_id\x18\x02 \x01(\tR\x11platformMessageId\x12\x16\n" +
 	"\x06sender\x18\x03 \x01(\tR\x06sender\x12%\n" +
 	"\vparticipant\x18\x04 \x01(\tH\x00R\vparticipant\x88\x01\x01\x12\x17\n" +
 	"\x04text\x18\x05 \x01(\tH\x01R\x04text\x88\x01\x01\x12@\n" +
-	"\vattachments\x18\x06 \x03(\v2\x1e.wuphf.connector.v1.AttachmentR\vattachmentsB\x0e\n" +
+	"\vattachments\x18\x06 \x03(\v2\x1e.wuphf.connector.v1.AttachmentR\vattachments\x12,\n" +
+	"\x12authored_by_bridge\x18\a \x01(\bR\x10authoredByBridgeB\x0e\n" +
 	"\f_participantB\a\n" +
 	"\x05_text\"E\n" +
 	"\x0fProvisionThread\x12\x1c\n" +

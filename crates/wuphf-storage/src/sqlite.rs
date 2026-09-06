@@ -813,6 +813,101 @@ impl Storage for SqliteStorage {
         .await
     }
 
+    async fn rename_observed_chat(
+        &self,
+        connector_id: &ConnectorId,
+        from_chat_id: &str,
+        to_chat_id: &str,
+    ) -> StorageResult<()> {
+        if from_chat_id == to_chat_id {
+            return Ok(());
+        }
+        let mut transaction = self.pool.begin().await?;
+
+        // The chat id lives in the payload as well as the key columns, so rows
+        // are re-encoded rather than moved with a bare UPDATE. `OR IGNORE`
+        // leaves a row already recorded under the destination alone: that is
+        // the form the chat is known by now.
+        let rows = sqlx::query(
+            "SELECT payload FROM observed_messages WHERE connector_id = ? AND chat_id = ?",
+        )
+        .bind(connector_id.to_string())
+        .bind(from_chat_id)
+        .fetch_all(&mut *transaction)
+        .await?;
+        for row in rows {
+            let mut observed: ObservedMessage = serde_json::from_str(row.get("payload"))?;
+            observed.chat_id = to_chat_id.to_owned();
+            sqlx::query(
+                "INSERT OR IGNORE INTO observed_messages
+                   (connector_id, chat_id, platform_message_id, timestamp_ms, payload)
+                 VALUES (?, ?, ?, ?, ?)",
+            )
+            .bind(connector_id.to_string())
+            .bind(to_chat_id)
+            .bind(&observed.platform_message_id)
+            .bind(observed.timestamp_ms)
+            .bind(serde_json::to_string(&observed)?)
+            .execute(&mut *transaction)
+            .await?;
+        }
+        sqlx::query("DELETE FROM observed_messages WHERE connector_id = ? AND chat_id = ?")
+            .bind(connector_id.to_string())
+            .bind(from_chat_id)
+            .execute(&mut *transaction)
+            .await?;
+
+        let summary = sqlx::query(
+            "SELECT payload FROM observed_chats WHERE connector_id = ? AND chat_id = ?",
+        )
+        .bind(connector_id.to_string())
+        .bind(from_chat_id)
+        .fetch_optional(&mut *transaction)
+        .await?;
+        if let Some(row) = summary {
+            let mut moved: ObservedChat = serde_json::from_str(row.get("payload"))?;
+            moved.chat_id = to_chat_id.to_owned();
+            let existing = sqlx::query(
+                "SELECT payload FROM observed_chats WHERE connector_id = ? AND chat_id = ?",
+            )
+            .bind(connector_id.to_string())
+            .bind(to_chat_id)
+            .fetch_optional(&mut *transaction)
+            .await?;
+            // Both forms have a summary: keep the more recent activity, and keep
+            // whichever title is known.
+            if let Some(existing) = existing {
+                let existing: ObservedChat = serde_json::from_str(existing.get("payload"))?;
+                if existing.last_message_ts >= moved.last_message_ts {
+                    moved.last_message_ts = existing.last_message_ts;
+                    moved.last_message_preview = existing.last_message_preview;
+                }
+                moved.title = existing.title.or(moved.title);
+            }
+            sqlx::query(
+                "INSERT INTO observed_chats (connector_id, chat_id, last_message_ts, payload)
+                 VALUES (?, ?, ?, ?)
+                 ON CONFLICT(connector_id, chat_id) DO UPDATE SET
+                   last_message_ts = excluded.last_message_ts,
+                   payload = excluded.payload",
+            )
+            .bind(connector_id.to_string())
+            .bind(to_chat_id)
+            .bind(moved.last_message_ts)
+            .bind(serde_json::to_string(&moved)?)
+            .execute(&mut *transaction)
+            .await?;
+            sqlx::query("DELETE FROM observed_chats WHERE connector_id = ? AND chat_id = ?")
+                .bind(connector_id.to_string())
+                .bind(from_chat_id)
+                .execute(&mut *transaction)
+                .await?;
+        }
+
+        transaction.commit().await?;
+        Ok(())
+    }
+
     async fn list_observed_chats(&self) -> StorageResult<Vec<ObservedChat>> {
         let rows = sqlx::query("SELECT payload FROM observed_chats ORDER BY last_message_ts DESC")
             .fetch_all(&self.pool)

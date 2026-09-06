@@ -55,7 +55,18 @@ where
                                 .message(parent_id)
                                 .await?
                                 .ok_or(RouterError::MessageNotFound(parent_id))?;
-                            Some(ReplyContext::quoting(parent, copy.platform_message_id))
+                            // Whether this copy was sent by the bridge or
+                            // received here decides who the target platform is
+                            // told wrote the quoted message.
+                            let authored_by_bridge = self
+                                .storage
+                                .is_sent_copy(endpoint_id, &copy.platform_message_id)
+                                .await?;
+                            Some(ReplyContext::quoting(
+                                parent,
+                                copy.platform_message_id,
+                                authored_by_bridge,
+                            ))
                         }
                         None => {
                             outcome.blocked.push(BlockedDispatch {

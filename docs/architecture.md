@@ -21,6 +21,38 @@ are thin pipes.
 - **Conversation** — the abstract unit a rule pairs across its two ends (one
   per source chat), backed by one replica set.
 
+
+## Address Identity
+
+Platforms hand out several interchangeable addresses for one chat. WhatsApp
+reaches a contact as a phone JID (`<number>@s.whatsapp.net`), a hidden LID
+(`<number>@lid`), and per-device AD-JIDs, and switches between them from one
+message to the next. Left alone, each form mints its own endpoint and one chat
+splits across several mirror threads.
+
+Two mechanisms keep that variance out of the rest of the core:
+
+- **Canonicalization at the connector.** The source connector resolves every
+  address it reports to one stable form (device stripped, phone promoted to LID),
+  so the core sees one address per chat within a session.
+- **Address links.** When a platform reveals that two addresses name the same
+  chat, the connector reports an identity migration and the core records the
+  pair in `address_links` — symmetric, and independent of endpoints, so a link
+  is kept even for a chat that has never been routed.
+
+Everything that keys on an address goes through one of them. A rule's chat list
+is matched against an `AddressSet` (the address an event arrived on plus the
+transitive closure of its links), so a chat written by phone number is selected —
+or, in a `not` list, excluded — however the platform addressed it. Event dedup
+and the retitle check key on the *endpoint's* address rather than the raw one,
+which makes them address-agnostic for free. The observation log is the one layer
+written before resolution (so it can capture chats no rule matches), so a
+migration re-keys its rows onto the new address to heal a chat already split
+across both forms.
+
+A rule can only recognize a chat by a form the platform has actually reported.
+Where no counterpart is known — the LID store has no mapping and WhatsApp sends
+no alternate address — a chat listed under the other form stays unmatched.
 ## Routing Rules
 
 Rules are the only routing input a user writes; conversations, endpoints, and
@@ -76,6 +108,13 @@ dedup, reply mapping, loop prevention, or address mapping.
   core shipping it.
 - **Reactions** — fanned out like edits, carrying the reactor and emoji
   (empty = cleared); the target connector decides how to display them.
+- **Delivery / read receipts** — emitted as their own signals rather than as
+  reactions, so a connector can render them separately (Telegram: 👍 delivered,
+  👀 read in DMs). A connector that renders neither acknowledges them unchanged.
+- **Attachment groups** — a message carrying several attachments is delivered as
+  one album where the platform has one (Telegram, capped at its limit of 10),
+  and otherwise as consecutive messages with the caption on the first, whose id
+  becomes the recorded copy.
 
 ## Media
 
@@ -107,4 +146,6 @@ identity. Uploads not linked into a logical message are pruned after
 ## Planned
 
 - Symmetric N-to-N rules (every side both source and mirror).
-- Execute reactions; broaden media kinds and define a media-deletion policy.
+- Per-side replication direction (one-way mirrors).
+- Instagram outbound attachments (the connector sends text only).
+- Broaden media kinds and define a media-deletion policy.

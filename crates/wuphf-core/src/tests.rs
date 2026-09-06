@@ -1523,3 +1523,139 @@ async fn a_routed_chat_stops_when_its_rule_leaves_the_config() {
         .unwrap();
     assert_eq!(outcome, IngestOutcome::Ignored(IgnoreReason::Unmatched));
 }
+
+#[tokio::test]
+async fn migration_heals_a_chat_split_across_the_observation_log() {
+    let storage = Arc::new(InMemoryStorage::default());
+    let core = core_over(Arc::clone(&storage), vec![]);
+    let connector = ConnectorId(WHATSAPP.into());
+    let phone = "15550001111@s.whatsapp.net";
+    let lid = "88887777@lid";
+
+    // The observation log records chats no rule matches, so it logs under
+    // whichever address the connector reported before it knew the two were one.
+    for (chat_id, native_id, ts) in [(phone, "m-1", 10), (lid, "m-2", 20)] {
+        storage
+            .log_observed(
+                wuphf_model::ObservedMessage {
+                    connector_id: connector.clone(),
+                    platform: Platform::WhatsApp,
+                    chat_id: chat_id.into(),
+                    thread_id: None,
+                    platform_message_id: native_id.into(),
+                    sender: "alice".into(),
+                    sender_name: None,
+                    participant: None,
+                    text: Some("hi".into()),
+                    attachments: Vec::new(),
+                    reply_to_platform_message_id: None,
+                    direction: wuphf_model::ObservedDirection::Incoming,
+                    timestamp_ms: ts,
+                    deleted: false,
+                    edited: false,
+                },
+                None,
+            )
+            .await
+            .unwrap();
+    }
+    assert_eq!(storage.list_observed_chats().await.unwrap().len(), 2);
+
+    core.migrate_identity(
+        connector.clone(),
+        PlatformAddress::new(phone, None),
+        PlatformAddress::new(lid, None),
+    )
+    .await
+    .unwrap();
+
+    let chats = storage.list_observed_chats().await.unwrap();
+    assert_eq!(chats.len(), 1, "the observer should show one chat, not two");
+    assert_eq!(chats[0].chat_id, lid);
+    assert_eq!(
+        storage
+            .observed_messages(&connector, lid, None, 10)
+            .await
+            .unwrap()
+            .len(),
+        2,
+    );
+}
+
+#[tokio::test]
+async fn a_quote_of_a_received_copy_is_not_attributed_to_the_bridge() {
+    let core = core(vec![direct_rule()]);
+    // A message from the WhatsApp side, mirrored to Telegram.
+    let inbound = core
+        .ingest(event(WHATSAPP, "12345@s.whatsapp.net", "wa-1", None))
+        .await
+        .unwrap();
+    core.acknowledge_dispatch(DispatchAcknowledgement {
+        dispatch_id: inbound.dispatches()[0].id,
+        platform_message_id: "tg-1".into(),
+        thread_id: None,
+    })
+    .await
+    .unwrap();
+
+    // Replying to it from Telegram sends back to WhatsApp, quoting the copy
+    // WhatsApp itself gave us — so the quote belongs to the peer, not to us.
+    let reply = core
+        .ingest(event_in(
+            TELEGRAM,
+            "-100123",
+            Some("12"),
+            "tg-2",
+            Some("tg-1"),
+        ))
+        .await
+        .unwrap();
+    let DispatchPayload::MessageCreate { reply_context, .. } =
+        &reply.dispatches()[0].command.payload
+    else {
+        panic!("reply should dispatch a create");
+    };
+    let reply_context = reply_context.as_ref().expect("the reply quotes its parent");
+    assert_eq!(reply_context.platform_message_id, "wa-1");
+    assert!(
+        !reply_context.authored_by_bridge,
+        "a copy received from the target platform is not bridge-authored",
+    );
+}
+
+#[tokio::test]
+async fn a_quote_of_a_bridge_sent_copy_is_attributed_to_the_bridge() {
+    let core = core(vec![direct_rule()]);
+    // A message from Telegram, mirrored into WhatsApp by the bridge.
+    let inbound = core
+        .ingest(event_in(TELEGRAM, "-100123", Some("12"), "tg-1", None))
+        .await
+        .unwrap();
+    core.acknowledge_dispatch(DispatchAcknowledgement {
+        dispatch_id: inbound.dispatches()[0].id,
+        platform_message_id: "wa-1".into(),
+        thread_id: None,
+    })
+    .await
+    .unwrap();
+
+    // Replying on Telegram quotes the WhatsApp copy the bridge wrote.
+    let reply = core
+        .ingest(event_in(
+            TELEGRAM,
+            "-100123",
+            Some("12"),
+            "tg-2",
+            Some("tg-1"),
+        ))
+        .await
+        .unwrap();
+    let DispatchPayload::MessageCreate { reply_context, .. } =
+        &reply.dispatches()[0].command.payload
+    else {
+        panic!("reply should dispatch a create");
+    };
+    let reply_context = reply_context.as_ref().expect("the reply quotes its parent");
+    assert_eq!(reply_context.platform_message_id, "wa-1");
+    assert!(reply_context.authored_by_bridge);
+}

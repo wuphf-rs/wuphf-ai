@@ -200,6 +200,21 @@ pub trait Storage: Send + Sync + 'static {
         platform_message_id: &str,
         text: Option<String>,
     ) -> StorageResult<Option<ObservedMessage>>;
+    /// Re-key every observation row of one chat onto another address on the
+    /// same connector, merging into whatever is already recorded there.
+    ///
+    /// The observation log is written before routing so it can capture chats no
+    /// rule matches, which means it never passes through the endpoint/alias
+    /// layer that keeps the rest of the core address-agnostic. When a platform
+    /// later reveals that two addresses are one chat, the rows already logged
+    /// under the old address would otherwise stay a separate conversation
+    /// forever. Applying the rename heals that split retroactively.
+    async fn rename_observed_chat(
+        &self,
+        connector_id: &ConnectorId,
+        from_chat_id: &str,
+        to_chat_id: &str,
+    ) -> StorageResult<()>;
     /// Every chat the observation log has seen, most recently active first.
     async fn list_observed_chats(&self) -> StorageResult<Vec<ObservedChat>>;
     /// A page of a chat's observed messages, newest first, older than `before_ms`
