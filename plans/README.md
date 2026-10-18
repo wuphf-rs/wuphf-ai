@@ -42,6 +42,7 @@ code).
 | 022 | Move Platform name mapping into wuphf-model | P3 | S | — | TODO |
 | 023 | Consolidate similar model types behind shared constructors | P3 | S-M | — (020 soft) | DONE |
 | 024 | SPIKE: real-time WhatsApp↔Telegram call forwarding | P3 | M (impl XL) | — | TODO |
+| 025 | Rust WhatsApp connector on whatsapp-rust | P2 | L | — | DONE |
 
 Status values: TODO | IN PROGRESS | DONE | BLOCKED (with one-line reason) |
 REJECTED (with one-line rationale).

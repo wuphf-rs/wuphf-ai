@@ -30,3 +30,6 @@
 *.swo
 .idea/
 .vscode/
+
+/vendor/
+/connectors/whatsapp-rust/target/

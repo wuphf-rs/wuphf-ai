@@ -8,7 +8,13 @@ members = [
   "crates/wuphf-runtime",
   "crates/wuphf-cli",
   "crates/wuphf-tui",
+  "crates/wuphf-connector",
 ]
+# The whatsapp-rust connector is its own workspace (like the Go connectors are
+# separate Go modules): its session store links libsqlite3-sys 0.37 via diesel,
+# which cannot coexist in one dependency graph with the 0.28 that sqlx links
+# for wuphf-storage.
+exclude = ["connectors/whatsapp-rust"]
 resolver = "2"
 
 [workspace.package]
@@ -27,14 +33,16 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio", "sqlite", "migrate", "macros"] }
 thiserror = "2"
-tokio = { version = "1", features = ["fs", "macros", "rt-multi-thread", "sync"] }
+tokio = { version = "1", features = ["fs", "macros", "rt-multi-thread", "signal", "sync", "time"] }
 tokio-stream = "0.1"
+tokio-util = { version = "0.7", features = ["rt"] }
 tonic = "0.12"
 tonic-build = "0.12"
 toml = "0.8"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 uuid = { version = "1", features = ["serde", "v4"] }
+wuphf-connector = { path = "crates/wuphf-connector" }
 wuphf-core = { path = "crates/wuphf-core" }
 wuphf-model = { path = "crates/wuphf-model" }
 wuphf-proto = { path = "crates/wuphf-proto" }

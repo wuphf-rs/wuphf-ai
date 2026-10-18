@@ -19,6 +19,12 @@ orphan_media_retention_seconds = 86400
 id = "whatsapp-main"
 platform = "whatsapp"
 
+# Rust WhatsApp connector alternative. Keep its id in sync with
+# connectors/whatsapp-rust/config.example.toml.
+[[connectors]]
+id = "whatsapp-rust"
+platform = "whatsapp"
+
 [[connectors]]
 id = "instagram-main"
 platform = "instagram"

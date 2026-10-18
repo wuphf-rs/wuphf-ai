@@ -82,6 +82,22 @@ cargo run -p wuphf-cli -- serve --config config/example.toml
 (cd connectors/whatsapp && go run ./cmd/wuphf-whatsapp --config config.example.toml)
 ```
 
+### Rust WhatsApp connector
+
+The text-first Rust connector lives in a separate Cargo workspace because
+`whatsapp-rust` and the core require incompatible `libsqlite3-sys` versions:
+
+```sh
+cd connectors/whatsapp-rust
+cargo build --release
+./target/release/wuphf-connector-whatsapp --config config.example.toml
+```
+
+First launch pairs through a terminal QR code. Set `phone_number` in the
+connector config to use a pair code instead. The connector supports inbound
+text, edits, deletes, and reactions plus outbound create/edit/delete; media is
+deliberately unsupported in this first version.
+
 ## Verify
 
 ```sh

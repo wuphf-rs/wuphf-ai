@@ -1,0 +1,27 @@
+# Standalone workspace on purpose (like the Go connectors are separate Go
+# modules): whatsapp-rust's session store links libsqlite3-sys 0.37 via diesel,
+# which cannot coexist in one dependency graph with the 0.28 that sqlx links
+# for wuphf-storage in the main workspace. Path dependencies reach back into
+# the main workspace for the shared contract and session client.
+[workspace]
+
+[package]
+name = "wuphf-connector-whatsapp"
+description = "WhatsApp connector for wuphf, built on whatsapp-rust"
+edition = "2024"
+license = "MIT"
+version = "0.1.0"
+
+[dependencies]
+anyhow = "1"
+clap = { version = "4", features = ["derive"] }
+qrcode = { version = "0.14", default-features = false }
+serde = { version = "1", features = ["derive"] }
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "signal", "sync", "time"] }
+tokio-util = { version = "0.7", features = ["rt"] }
+toml = "0.8"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+whatsapp-rust = { git = "https://github.com/oxidezap/whatsapp-rust", rev = "5ca80c5c" }
+wuphf-connector = { path = "../../crates/wuphf-connector" }
+wuphf-proto = { path = "../../crates/wuphf-proto" }
