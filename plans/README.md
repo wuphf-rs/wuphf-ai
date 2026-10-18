@@ -41,6 +41,7 @@ code).
 | 021 | Split Storage god-trait into role traits | P3 | M | 019 (soft) | TODO |
 | 022 | Move Platform name mapping into wuphf-model | P3 | S | — | TODO |
 | 023 | Consolidate similar model types behind shared constructors | P3 | S-M | — (020 soft) | DONE |
+| 024 | SPIKE: real-time WhatsApp↔Telegram call forwarding | P3 | M (impl XL) | — | TODO |
 
 Status values: TODO | IN PROGRESS | DONE | BLOCKED (with one-line reason) |
 REJECTED (with one-line rationale).
@@ -96,6 +97,14 @@ REJECTED (with one-line rationale).
   build/vet/test green.
 - 020 is independent of 019/021 (touches only `wuphf-router`/`wuphf-core`);
   022 is independent of everything.
+- **024 is a standalone direction spike** (added 2026-07-20 at `f7f0c16`),
+  independent of every other plan. It scopes real-time voice-call bridging
+  now that `vendor/whatsapp-rust` provides a WhatsApp VoIP media plane. The
+  spike is read/design + throwaway PoC only; its eventual implementation is
+  XL and introduces a real-time media subsystem that deliberately bypasses
+  the dispatch pipeline (media never touches `Storage`; only call *signaling*
+  may ride the connector protocol). Its **Phase 1 (call notifications, no
+  audio)** is a small shippable slice decoupled from the risky media work.
 - **023 vs 020**: both edit `wuphf-core/src/ingest.rs` but different
   functions (020: the `ingest_edit`/`ingest_delete`/`ingest_reaction`/
   `ingest_receipt` tails; 023: `ingest_create` only). Either order works;
