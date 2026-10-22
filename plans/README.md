@@ -49,6 +49,8 @@ code).
 | 029 | Fold the wuphf-router crate into wuphf-core | P3 | S | 028 (soft) | TODO |
 | 030 | Collapse the dispatch types into one `Dispatch` | P2 | M–L | 019, 026–029 | TODO |
 | 031 | Merge ReplicaSet and ThreadMapping into Conversation | P2 | M–L | 030 | TODO |
+| 032 | Add a remote function broker to the core (`wuphf-functions`) | P2 | L | — | TODO |
+| 033 | Move sticker conversion into a `media.convert` provider | P2 | M–L | 032 | TODO |
 
 Status values: TODO | IN PROGRESS | DONE | BLOCKED (with one-line reason) |
 REJECTED (with one-line rationale).
@@ -144,6 +146,30 @@ Rust) by the owner's decision.
 - **022 is independent** but touches `crates/wuphf-cli/src/main.rs` like 026
   and 028; whichever lands second rebases trivially.
 
+### Remote functions 032–033 (added 2026-10-22 at `2c92f5a`)
+
+Designed in an interview with the owner. The decisions are recorded in 032's
+"Design decisions" table so executors do not reopen them: a general registry
+brokered by the core; JSON bodies plus media ids; providers as a new peer
+kind; `(name, major)` keys; wait for a provider, reject a second owner (with
+same-id takeover); per-provider tokens; callers outside the core only;
+configurable timeouts and limits.
+
+- **033 hard-depends on 032** (generated Go bindings and broker semantics).
+- **032 is independent of 019–031**. It adds lines to
+  `crates/wuphf-cli/src/main.rs` and workspace `members`, which 026, 028 and
+  029 also edit; whichever lands second rebases trivially.
+- **033 removes local sticker conversion** (owner's decision). Without a
+  running provider, animated stickers fall back to a static sticker
+  (Telegram) or a document (WhatsApp). Remove the provider from the core's
+  `[functions]` config when it is not deployed, or each animated sticker
+  waits for the conversion timeout first (see 033's Maintenance notes).
+- **Deferred to later plans**: merging `ProviderTransport` and
+  `ConnectorTransport` into one role-based session (which also gives
+  connectors per-peer tokens and enables per-caller ACLs); schema
+  validation; a Rust caller helper for `whatsapp-rust` once it has media;
+  rewriting the provider in another language.
+
 ## Findings considered and rejected
 
 (Recorded so nobody re-audits them.)
@@ -205,6 +231,20 @@ From the 2026-10-21 simplification batch:
   (`OwnerMessage`, `Alias`, `AddressLink`, `ObservedMessage`,
   `SourceAddress`): wide churn for little clarity; 028 introduces `ChatRef`
   for notice targets and 031 for a conversation's source only.
+
+From the 2026-10-22 remote-functions design:
+
+- **A typed media-conversion service instead of a general registry**: the
+  owner chose a general registry so later helpers need no core change.
+- **Directory mode (the core returns a provider address; callers dial it)**:
+  needs every provider to listen and be reachable, duplicates auth and
+  timeouts in each client, and hides calls from the core.
+- **Load-balancing several providers of one function**: rejected for v1 in
+  favor of a single owner with same-id takeover; revisit if one converter is
+  not enough.
+- **The core converting media while planning a dispatch**: dispatch planning
+  is synchronous and deterministic; a remote call there needs a new dispatch
+  state and couples correctness to provider uptime. Spike first if wanted.
 
 ## What was NOT audited
 
