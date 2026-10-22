@@ -22,7 +22,7 @@ code).
 | 002 | Sync README (Instagram connector, retitling) | P3 | S | — | TODO |
 | 003 | Validate routing rules at startup (no panic) | P2 | S | — | TODO |
 | 004 | Storage backend parity tests (SQLite + InMemory) | P2 | S | — | DONE |
-| 005 | Indexed replica-set-for-endpoint lookup | P2 | S-M | 004 | TODO |
+| 005 | Indexed replica-set-for-endpoint lookup | P2 | S-M | 004 | REJECTED — superseded by 031, whose `conversation_endpoints` table is this index |
 | 006 | Metadata-only attachment validation at ingest | P2 | S | 004 | TODO |
 | 007 | Delete-replication tests + router unit tests | P1 | M | — | TODO |
 | 008 | Dispatch failure / dead-letter path tests | P1 | S | — | DONE |
@@ -43,6 +43,12 @@ code).
 | 023 | Consolidate similar model types behind shared constructors | P3 | S-M | — (020 soft) | DONE |
 | 024 | SPIKE: real-time WhatsApp↔Telegram call forwarding | P3 | M (impl XL) | — | TODO |
 | 025 | Rust WhatsApp connector on whatsapp-rust | P2 | L | — | DONE |
+| 026 | Rename the wuphf-model types to plain names (type names only) | P2 | M | 019 (soft) | TODO |
+| 027 | Rename model fields and variants, keeping old stored JSON readable | P2 | M | 026 | TODO |
+| 028 | Delete dead and duplicate model types | P2 | M | 026, 027 | TODO |
+| 029 | Fold the wuphf-router crate into wuphf-core | P3 | S | 028 (soft) | TODO |
+| 030 | Collapse the dispatch types into one `Dispatch` | P2 | M–L | 019, 026–029 | TODO |
+| 031 | Merge ReplicaSet and ThreadMapping into Conversation | P2 | M–L | 030 | TODO |
 
 Status values: TODO | IN PROGRESS | DONE | BLOCKED (with one-line reason) |
 REJECTED (with one-line rationale).
@@ -112,6 +118,32 @@ REJECTED (with one-line rationale).
   whoever goes second rebases trivially. 023 was added 2026-07-10 at
   `f3bff96` and deliberately excludes the fan-out duplication 020 owns.
 
+### Simplification batch 026–031 (added 2026-10-21 at `5c38943`)
+
+Written on request to make the model vocabulary and the internal structure
+easier to understand. Baseline at `5c38943`: `cargo test --workspace` = 111
+passing, clippy clean. Scope excludes the two WhatsApp connectors (Go and
+Rust) by the owner's decision.
+
+- **Run 019 first.** 019 fixes a live memory-backend bug and quotes today's
+  type names; 026–027 rename them, which would trip 019's drift check. 030
+  hard-depends on 019 because it adapts 019's shared settlement helpers.
+- **026 → 027 → 028 → 029 → 030 → 031, in order.** Each later plan's excerpts
+  are written against the names the earlier ones introduce. 026 is renames
+  only (no data impact); 027 renames stored JSON keys behind serde aliases;
+  028 adds migration `0011`; 030 changes the stored dispatch shape behind a
+  legacy decoder (no migration); 031 adds migration `0012` and needs a human
+  to run its pre-deploy query on a copy of the real database.
+- **021 must be re-planned after 031.** 028 performs 021's deletion of
+  `put_contact`/`put_chat_settings`, and 031 replaces seven of the trait
+  methods 021 groups into role traits.
+- **003, 007, 017 cite `crates/wuphf-router/…`.** After 029 those items live in
+  `crates/wuphf-core/src/config.rs` and `router.rs`; after 026 their type names
+  change per the table in 026. Their drift checks will flag this; it is
+  expected.
+- **022 is independent** but touches `crates/wuphf-cli/src/main.rs` like 026
+  and 028; whichever lands second rebases trivially.
+
 ## Findings considered and rejected
 
 (Recorded so nobody re-audits them.)
@@ -155,6 +187,24 @@ From the 2026-07-07 architecture audit:
   crash. Plan 019 single-sources the *decisions* in `shared.rs` instead.
 - **grpc.rs proto mapping verbosity** (`wuphf-runtime/src/grpc.rs`): inherent
   wire-boundary code; splitting or macro-izing it would hide the contract.
+
+From the 2026-10-21 simplification batch:
+
+- **Session hub "mirrors the dispatch queue"** (`ConnectorHub.assigned` and
+  `.held` in `crates/wuphf-runtime/src/connector.rs`): looked like a duplicate
+  of storage's pending queue, but it is per-session delivery tracking, which
+  storage cannot provide. Replacing it with "ask storage for pending work on
+  reconnect" races the shared dispatch channel: a dispatch that is both
+  pending in storage and still queued in the channel would be sent twice, and
+  one acknowledged between the storage read and the channel delivery would be
+  resent. Avoiding that needs per-session tracking again. Not worth doing.
+- **Folding `participant` into `author_id`**: on WhatsApp `participant` always
+  equals the author today, but WhatsApp's sender uses it to address quoted
+  replies. Needs its own check across all three connectors; left out of 027.
+- **Converting every connector-plus-chat field pair to `ChatRef`**
+  (`OwnerMessage`, `Alias`, `AddressLink`, `ObservedMessage`,
+  `SourceAddress`): wide churn for little clarity; 028 introduces `ChatRef`
+  for notice targets and 031 for a conversation's source only.
 
 ## What was NOT audited
 
