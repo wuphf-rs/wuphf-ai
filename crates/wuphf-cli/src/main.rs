@@ -1,12 +1,10 @@
 use anyhow::{Context, Result, bail};
 use clap::{Parser, Subcommand};
 use serde::Deserialize;
-use std::{collections::HashMap, net::SocketAddr, path::PathBuf, sync::Arc, time::Duration};
+use std::{net::SocketAddr, path::PathBuf, sync::Arc, time::Duration};
 use tonic::transport::Server;
 use wuphf_core::{Core, RoutingConfig};
-use wuphf_model::{
-    Connector, ConnectorCapabilities, ConnectorId, ConnectorInfo, NoticeTarget, Platform, Rule,
-};
+use wuphf_model::{Connector, ConnectorCapabilities, ConnectorId, NoticeTarget, Platform, Rule};
 use wuphf_proto::connector::connector_transport_server::ConnectorTransportServer;
 use wuphf_proto::connector::media_transport_server::MediaTransportServer;
 use wuphf_proto::connector::observer_transport_server::ObserverTransportServer;
@@ -104,30 +102,19 @@ async fn serve(path: PathBuf) -> Result<()> {
         toml::from_str(&source).context("failed to parse TOML configuration")?;
     let storage = Arc::new(SqliteStorage::connect(&configuration.database_url).await?);
 
-    let mut connector_infos = HashMap::new();
-    let mut allowed = Vec::new();
+    let mut connectors = Vec::new();
     for connector in &configuration.connectors {
-        let id = ConnectorId(connector.id.clone());
-        let platform = platform(&connector.platform)?;
-        let capabilities = ConnectorCapabilities {
-            supports_threads: connector.supports_threads,
-            supports_topic_create: connector.supports_topic_create,
-        };
-        connector_infos.insert(
-            id.clone(),
-            ConnectorInfo {
-                platform: platform.clone(),
-                capabilities,
+        connectors.push(Connector {
+            id: ConnectorId(connector.id.clone()),
+            platform: platform(&connector.platform)?,
+            capabilities: ConnectorCapabilities {
+                supports_threads: connector.supports_threads,
+                supports_topic_create: connector.supports_topic_create,
             },
-        );
-        allowed.push(Connector {
-            id,
-            platform,
-            capabilities,
         });
     }
     let config = Arc::new(
-        RoutingConfig::new(configuration.rules, connector_infos)
+        RoutingConfig::new(configuration.rules, connectors.clone())
             .with_notice_targets(configuration.notify),
     );
 
@@ -145,7 +132,7 @@ async fn serve(path: PathBuf) -> Result<()> {
     if configuration.observer_token.is_none() {
         tracing::warn!("observer service has no token set; bind it to a local address only");
     }
-    let (hub, handle) = ConnectorHub::new(channels, allowed);
+    let (hub, handle) = ConnectorHub::new(channels, connectors);
     let runtime_task = tokio::spawn(runtime.run());
     let hub_task = tokio::spawn(hub.run());
     tracing::info!(listen = %configuration.listen, "wuphf connector gRPC server listening");

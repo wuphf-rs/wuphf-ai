@@ -2,15 +2,13 @@ use super::*;
 use crate::connector::ConnectorHub;
 use crate::grpc::GrpcConnectorService;
 use crate::media::GrpcMediaService;
-use std::collections::HashMap;
 use tokio::net::TcpListener;
 use tokio_stream::wrappers::{ReceiverStream, TcpListenerStream};
 use tonic::transport::Server;
 use wuphf_core::RoutingConfig;
 use wuphf_model::{
-    Action, ChatAddress, ChatFilter, Connector, ConnectorCapabilities, ConnectorId, ConnectorInfo,
-    ConnectorInput, ConnectorOutput, EventKind, IngestOutcome, NewMessage, Platform, Rule, RuleId,
-    RuleKind,
+    Action, ChatAddress, ChatFilter, Connector, ConnectorCapabilities, ConnectorId, ConnectorInput,
+    ConnectorOutput, EventKind, IngestOutcome, NewMessage, Platform, Rule, RuleId, RuleKind,
 };
 use wuphf_proto::connector as pb;
 use wuphf_proto::connector::connector_transport_client::ConnectorTransportClient;
@@ -48,25 +46,6 @@ fn telegram_capabilities() -> ConnectorCapabilities {
     }
 }
 
-fn connector_infos() -> HashMap<ConnectorId, ConnectorInfo> {
-    HashMap::from([
-        (
-            ConnectorId(WA.into()),
-            ConnectorInfo {
-                platform: Platform::WhatsApp,
-                capabilities: ConnectorCapabilities::default(),
-            },
-        ),
-        (
-            ConnectorId(TG.into()),
-            ConnectorInfo {
-                platform: Platform::Telegram,
-                capabilities: telegram_capabilities(),
-            },
-        ),
-    ])
-}
-
 fn registrations() -> Vec<Connector> {
     vec![
         Connector {
@@ -89,7 +68,7 @@ fn core() -> Arc<Core<InMemoryStorage>> {
 /// Build a core over caller-owned storage, so a test can construct a second
 /// core/runtime over the same storage to simulate a process restart.
 fn core_over(storage: Arc<InMemoryStorage>) -> Arc<Core<InMemoryStorage>> {
-    let config = Arc::new(RoutingConfig::new(rules(), connector_infos()));
+    let config = Arc::new(RoutingConfig::new(rules(), registrations()));
     Arc::new(Core::new(storage, config))
 }
 
@@ -116,7 +95,7 @@ fn mirror_rules() -> Vec<Rule> {
 }
 
 fn mirror_core(storage: Arc<InMemoryStorage>) -> Arc<Core<InMemoryStorage>> {
-    let config = Arc::new(RoutingConfig::new(mirror_rules(), connector_infos()));
+    let config = Arc::new(RoutingConfig::new(mirror_rules(), registrations()));
     Arc::new(Core::new(storage, config))
 }
 

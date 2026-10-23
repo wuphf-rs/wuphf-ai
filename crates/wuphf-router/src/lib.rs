@@ -2,8 +2,8 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use thiserror::Error;
 use wuphf_model::{
-    AddressSet, ConnectorId, ConnectorInfo, EndpointId, MessageId, NoticeTarget, Rule, RuleEnd,
-    RuleId, RuleKind,
+    AddressSet, Connector, ConnectorId, EndpointId, MessageId, NoticeTarget, Rule, RuleEnd, RuleId,
+    RuleKind,
 };
 use wuphf_storage::{Storage, StorageError};
 
@@ -13,7 +13,7 @@ mod routing;
 /// thread provisioning. Shared by the core and the router.
 pub struct RoutingConfig {
     rules: Vec<Rule>,
-    connectors: HashMap<ConnectorId, ConnectorInfo>,
+    connectors: HashMap<ConnectorId, Connector>,
     notice_targets: Vec<NoticeTarget>,
 }
 
@@ -24,10 +24,13 @@ pub struct MatchedRule<'a> {
 }
 
 impl RoutingConfig {
-    pub fn new(rules: Vec<Rule>, connectors: HashMap<ConnectorId, ConnectorInfo>) -> Self {
+    pub fn new(rules: Vec<Rule>, connectors: Vec<Connector>) -> Self {
         Self {
             rules,
-            connectors,
+            connectors: connectors
+                .into_iter()
+                .map(|connector| (connector.id.clone(), connector))
+                .collect(),
             notice_targets: Vec::new(),
         }
     }
@@ -56,7 +59,7 @@ impl RoutingConfig {
         self.rules.iter().find(|rule| rule.id == *id)
     }
 
-    pub fn connector(&self, id: &ConnectorId) -> Option<&ConnectorInfo> {
+    pub fn connector(&self, id: &ConnectorId) -> Option<&Connector> {
         self.connectors.get(id)
     }
 

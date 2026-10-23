@@ -14,14 +14,6 @@ pub struct ConnectorCapabilities {
     pub supports_topic_create: bool,
 }
 
-/// Static per-connector facts the core learns at registration: the platform it
-/// speaks and the capabilities it advertises (used to gate rule ends).
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct ConnectorInfo {
-    pub platform: Platform,
-    pub capabilities: ConnectorCapabilities,
-}
-
 /// A terminal dispatch failure reported by a connector: `(dispatch, reason)`.
 pub type DispatchFailure = (DispatchId, String);
 

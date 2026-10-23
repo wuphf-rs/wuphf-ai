@@ -3,7 +3,6 @@
 //! ConnectorHub and GrpcConnectorService on a loopback listener, with the SDK
 //! client as the connector under test.
 
-use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::Mutex as StdMutex;
 use std::time::Duration;
@@ -16,8 +15,8 @@ use tonic::transport::Server;
 use wuphf_connector::{Client, Delivery, Failure, Options};
 use wuphf_core::{Core, RoutingConfig};
 use wuphf_model::{
-    ChatAddress, Connector, ConnectorCapabilities, ConnectorId, ConnectorInfo, Event, EventKind,
-    InboundWork, NewMessage, Platform, Rule, RuleId, RuleKind,
+    ChatAddress, Connector, ConnectorCapabilities, ConnectorId, Event, EventKind, InboundWork,
+    NewMessage, Platform, Rule, RuleId, RuleKind,
 };
 use wuphf_proto::connector as pb;
 use wuphf_runtime::Runtime;
@@ -62,26 +61,22 @@ fn routing() -> RoutingConfig {
             },
         },
     }];
-    let infos = HashMap::from([
-        (
-            ConnectorId(WA.into()),
-            ConnectorInfo {
-                platform: Platform::WhatsApp,
-                capabilities: ConnectorCapabilities::default(),
+    let connectors = vec![
+        Connector {
+            id: ConnectorId(WA.into()),
+            platform: Platform::WhatsApp,
+            capabilities: ConnectorCapabilities::default(),
+        },
+        Connector {
+            id: ConnectorId(TG.into()),
+            platform: Platform::Telegram,
+            capabilities: ConnectorCapabilities {
+                supports_threads: true,
+                supports_topic_create: true,
             },
-        ),
-        (
-            ConnectorId(TG.into()),
-            ConnectorInfo {
-                platform: Platform::Telegram,
-                capabilities: ConnectorCapabilities {
-                    supports_threads: true,
-                    supports_topic_create: true,
-                },
-            },
-        ),
-    ]);
-    RoutingConfig::new(rules, infos)
+        },
+    ];
+    RoutingConfig::new(rules, connectors)
 }
 
 struct Harness {

@@ -1,35 +1,30 @@
 use super::*;
-use std::collections::HashMap;
 use wuphf_model::{
-    Action, Attachment, AttachmentKind, ChatAddress, ChatFilter, ConnectorCapabilities,
-    ConnectorInfo, Dispatch, DispatchAck, MediaBlob, MediaId, NewMessage, NoticeKind, OWNER_AUTHOR,
-    OwnerMessage, Platform, ReceiptKind, Rule, RuleId, RuleKind, SourceAddress,
+    Action, Attachment, AttachmentKind, ChatAddress, ChatFilter, Connector, ConnectorCapabilities,
+    Dispatch, DispatchAck, MediaBlob, MediaId, NewMessage, NoticeKind, OWNER_AUTHOR, OwnerMessage,
+    Platform, ReceiptKind, Rule, RuleId, RuleKind, SourceAddress,
 };
 use wuphf_storage::InMemoryStorage;
 
 const WHATSAPP: &str = "whatsapp-main";
 const TELEGRAM: &str = "telegram-main";
 
-fn connectors() -> HashMap<ConnectorId, ConnectorInfo> {
-    HashMap::from([
-        (
-            ConnectorId(WHATSAPP.into()),
-            ConnectorInfo {
-                platform: Platform::WhatsApp,
-                capabilities: ConnectorCapabilities::default(),
+fn connectors() -> Vec<Connector> {
+    vec![
+        Connector {
+            id: ConnectorId(WHATSAPP.into()),
+            platform: Platform::WhatsApp,
+            capabilities: ConnectorCapabilities::default(),
+        },
+        Connector {
+            id: ConnectorId(TELEGRAM.into()),
+            platform: Platform::Telegram,
+            capabilities: ConnectorCapabilities {
+                supports_threads: true,
+                supports_topic_create: true,
             },
-        ),
-        (
-            ConnectorId(TELEGRAM.into()),
-            ConnectorInfo {
-                platform: Platform::Telegram,
-                capabilities: ConnectorCapabilities {
-                    supports_threads: true,
-                    supports_topic_create: true,
-                },
-            },
-        ),
-    ])
+        },
+    ]
 }
 
 fn direct_rule() -> Rule {
