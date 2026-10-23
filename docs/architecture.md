@@ -85,7 +85,7 @@ dedup, reply mapping, loop prevention, or address mapping.
 | Crate | Responsibility |
 |-------|----------------|
 | `wuphf-model` | Shared domain types, grouped into `ids` / `routing` / `connector` / `message` / `dispatch`. |
-| `wuphf-storage` | The `Storage` trait plus two backends: `memory` (tests) and `sqlite` (durable). |
+| `wuphf-storage` | The `Storage` trait — the sum of six role traits (topology, messages, media, dispatch queue, provisioning stash, observation log) — plus two backends: `memory` (tests) and `sqlite` (durable). A consumer that needs only part of storage bounds on its roles. |
 | `wuphf-core` | Owns logical identity, dedup, echo suppression, reply resolution and identity migration; evaluates rules and computes dispatch targets (`config.rs`, `router.rs`). |
 | `wuphf-runtime` | Tokio event bus + dispatch pipeline; connector session hub; bounded media broker; gRPC transport adapter. |
 | `wuphf-proto` | Canonical protobuf contract and Tonic bindings. |

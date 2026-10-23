@@ -22,7 +22,7 @@ code).
 | 002 | Sync README (Instagram connector, retitling) | P3 | S | — | TODO |
 | 003 | Validate routing rules at startup (no panic) | P2 | S | — | TODO |
 | 004 | Storage backend parity tests (SQLite + InMemory) | P2 | S | — | DONE |
-| 005 | Indexed replica-set-for-endpoint lookup | P2 | S-M | 004 | REJECTED — superseded by 031, whose `conversation_endpoints` table is this index |
+| 005 | Indexed replica-set-for-endpoint lookup | P2 | S-M | 004 | REJECTED — superseded by 031, whose `conversation_endpoints` table is this index (landed) |
 | 006 | Metadata-only attachment validation at ingest | P2 | S | 004 | TODO |
 | 007 | Delete-replication tests + router unit tests | P1 | M | — | TODO |
 | 008 | Dispatch failure / dead-letter path tests | P1 | S | — | DONE |
@@ -38,7 +38,7 @@ code).
 | 018 | Observation log + multi-platform TUI (phased) | P2 | L | — | DONE (all 6 phases) |
 | 019 | Single-source dispatch settlement across storage backends | P1 | M | — (004 helps) | DONE |
 | 020 | Deduplicate per-operation fan-out in router + core | P2 | M | — | DONE |
-| 021 | Split Storage god-trait into role traits | P3 | M | 019 (soft) | TODO |
+| 021 | Split Storage god-trait into role traits | P3 | M | 019 (soft) | DONE (re-planned in place, see notes) |
 | 022 | Move Platform name mapping into wuphf-model | P3 | S | — | TODO |
 | 023 | Consolidate similar model types behind shared constructors | P3 | S-M | — (020 soft) | DONE |
 | 024 | SPIKE: real-time WhatsApp↔Telegram call forwarding | P3 | M (impl XL) | — | TODO |
@@ -245,9 +245,29 @@ Rust) by the owner's decision.
   - Workspace: 124 tests passing, clippy clean.
   - **005 is superseded**, because `conversation_endpoints` is its index.
     **021 must be re-planned** against the new conversation API.
-- **021 must be re-planned after 031.** 028 performs 021's deletion of
-  `put_contact`/`put_chat_settings`, and 031 replaces seven of the trait
-  methods 021 groups into role traits.
+- **021 done 2026-10-23** (`advisor/021-storage-role-traits`). It was
+  re-planned against the post-031 trait (38 methods). Step 4 had already been
+  done by 028.
+  - **Roles:** six, not the planned five. `TopologyStore` (12: endpoints,
+    aliases, address links, conversations), `MessageStore` (9), `MediaStore`
+    (3), `DispatchStore` (5), **`ProvisioningStash`** (3, new) and
+    `ObservationStore` (6, including `rename_observed_chat`). `Storage` is
+    their blanket-implemented sum.
+  - **Method moves:** the backends' methods were regrouped verbatim by script.
+    A sorted multiset diff of each backend shows only `impl` headers and
+    imports changed.
+  - **Narrowed bounds:** `Observer` → `ObservationStore`, `GrpcMediaService`
+    → `MediaStore`, `Router` → `TopologyStore + MessageStore`.
+  - **Not narrowed:** `GrpcObserverService` keeps `S: Storage`. It gained the
+    owner-send path (`OwnerMessageSender<S>` drives the full `Core`) after the
+    plan was written. Per the owner, `ObservationStore` stays one read/write
+    role with no `ObservationRead` split.
+  - **Call-site imports:** calls on a concrete backend need the role trait in
+    scope, so tests import the role they call. Generic `S: Storage` code needs
+    no import, because supertrait methods resolve through the bound.
+  - **For future work:** a new persistence concern gets its own role trait,
+    added to the `Storage` sum.
+  - Workspace: 124 tests passing, clippy clean.
 - **003, 007, 017 cite `crates/wuphf-router/…`.** After 029 those items live in
   `crates/wuphf-core/src/config.rs` and `router.rs`; after 026 their type names
   change per the table in 026. Their drift checks will flag this; it is
