@@ -48,7 +48,7 @@ code).
 | 028 | Delete dead and duplicate model types | P2 | M | 026, 027 | DONE (migration 0012) |
 | 029 | Fold the wuphf-router crate into wuphf-core | P3 | S | 028 (soft) | DONE |
 | 030 | Collapse the dispatch types into one `Dispatch` | P2 | M–L | 019, 026–029 | DONE (migration 0013, no legacy decoder) |
-| 031 | Merge ReplicaSet and ThreadMapping into Conversation | P2 | M–L | 030 | TODO |
+| 031 | Merge ReplicaSet and ThreadMapping into Conversation | P2 | M–L | 030 | DONE (migration 0014) |
 | 032 | Add a remote function broker to the core (`wuphf-functions`) | P2 | L | — | TODO |
 | 033 | Move sticker conversion into a `media.convert` provider | P2 | M–L | 032 | TODO |
 
@@ -214,6 +214,37 @@ Rust) by the owner's decision.
     in `Message`) should be a key-rename migration in the style of 0011, plus a
     `migration_tests.rs` case, not the `#[serde(alias)]` attributes or
     `legacy.rs` extension the plan describes.
+- **031 done 2026-10-23** (`advisor/031-conversation-absorbs-replica-set`):
+  no drift.
+  - **Migration:** `migrations/0014_merge_conversations.sql` (0012 and 0013
+    were taken). It has **no `#[serde(alias)]` attributes**: 0014 itself
+    renames the `replica_set_id` keys in messages and dispatches.
+  - **Pre-deploy check:** the owner has no production database, so Step 8 ran
+    against a copy of the local `wuphf.sqlite` (at migration 0010, with 15
+    conversations, 30 endpoints, 279 messages and 717 dispatches). It
+    returned **0 rows**. Also checked: no endpoint is in two replica sets, and
+    replica sets and conversations were 1:1.
+  - **Real-data test:** `real_database_migrates_and_decodes` in
+    `migration_tests.rs` is opt-in (`#[ignore]`). Point `WUPHF_MIGRATION_DB`
+    at a copy of a database; it runs 0011–0014 on that copy and decodes every
+    stored row. It passed on the local copy.
+  - **Tests:** `migration_0014_merges_replica_sets_into_conversations` checks
+    the merged rows byte-for-byte, the rule-less conversation, the
+    `conversation_endpoints` index, the dropped tables and the stash column.
+    The 0011/0013 chain tests now also run through 0014.
+  - **Departure from the plan:** the plan's raw-SQL test was replaced by the
+    `database_before` pattern.
+  - **Router:** `resolve_target`/`route_retitle` share an `is_mirror` helper
+    and use `endpoint.address()`, which equals the old thread-mapping address
+    because the endpoint carries the thread.
+  - **Storage tests:** both backends now test idempotent
+    `add_conversation_endpoint`, `set_conversation_title` keeping the
+    endpoints, and both narrow writers rejecting an unknown conversation.
+  - **Core test:** the owner-message test now asserts the rule-less
+    conversation. No existing assertion changed.
+  - Workspace: 124 tests passing, clippy clean.
+  - **005 is superseded**, because `conversation_endpoints` is its index.
+    **021 must be re-planned** against the new conversation API.
 - **021 must be re-planned after 031.** 028 performs 021's deletion of
   `put_contact`/`put_chat_settings`, and 031 replaces seven of the trait
   methods 021 groups into role traits.
