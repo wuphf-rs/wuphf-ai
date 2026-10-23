@@ -1,0 +1,17 @@
+#!/usr/bin/env bash
+# Run the mediaconv provider (the media.convert@1 sticker converter) from its own
+# directory. Config comes from $WUPHF_MEDIACONV_CONFIG, or the checked-in
+# example. Any argument switches to passthrough, so one-off flags still work.
+#
+# The provider reads its token from the variable its config names
+# (WUPHF_PROVIDER_MEDIACONV_TOKEN in the example), and the core only accepts it
+# when its own config has a matching [[functions.providers]] entry.
+set -euo pipefail
+
+repo="$(cd "$(dirname "$(readlink -f "$0")")/../.." && pwd)"
+cd "$repo/providers/mediaconv"
+
+if [ "$#" -gt 0 ]; then
+    exec go run ./cmd/wuphf-mediaconv "$@"
+fi
+exec go run ./cmd/wuphf-mediaconv -config "${WUPHF_MEDIACONV_CONFIG:-config.example.toml}"

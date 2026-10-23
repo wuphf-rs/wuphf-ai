@@ -11,6 +11,7 @@ alias ws='wuphf-server'
 alias wtg='wuphf-telegram'
 alias wwa='wuphf-whatsapp'
 alias wig='wuphf-instagram'
+alias wmc='wuphf-mediaconv'
 alias wtui='wuphf-tui'
 
 # wuphf-help lists what this session provides. Kept as a function so it is
@@ -23,6 +24,7 @@ wuphf dev session
   wtg    wuphf-telegram     Telegram connector
   wwa    wuphf-whatsapp     WhatsApp connector
   wig    wuphf-instagram    Instagram connector
+  wmc    wuphf-mediaconv    sticker converter (media.convert@1 provider)
   wtui   wuphf-tui          observer TUI
 
 Each command runs with no arguments for the usual dev config. Pass any
@@ -30,7 +32,11 @@ argument to drive it yourself, e.g. `wtg reset -chat telegram:channel:123`
 or `ws serve --config config.local.toml`.
 
 Override a config without arguments: WUPHF_SERVER_CONFIG,
-WUPHF_TELEGRAM_CONFIG, WUPHF_WHATSAPP_CONFIG, WUPHF_INSTAGRAM_CONFIG.
+WUPHF_TELEGRAM_CONFIG, WUPHF_WHATSAPP_CONFIG, WUPHF_INSTAGRAM_CONFIG,
+WUPHF_MEDIACONV_CONFIG.
+
+wmc needs WUPHF_PROVIDER_MEDIACONV_TOKEN set, and the server config needs the
+matching [[functions.providers]] entry (see providers/mediaconv/README.md).
 
 Tabs: Alt+<number> to jump, Alt+h / Alt+l to cycle.
 Start the server before the connectors: they connect to it on startup.

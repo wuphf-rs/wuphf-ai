@@ -11,6 +11,9 @@
 /connectors/whatsapp/wuphf-whatsapp
 /connectors/instagram/wuphf-instagram
 
+# Go provider build output
+/providers/mediaconv/wuphf-mediaconv
+
 # Local runtime state and configuration
 *.db
 *.db-shm
@@ -18,6 +21,7 @@
 *.sqlite
 *.sqlite-shm
 *.sqlite-wal
+*.sqlite.backup
 /.env
 /.env.*
 /config.local.toml

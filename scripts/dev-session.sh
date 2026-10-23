@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Launch (or re-attach to) the wuphf dev session in zellij: one tab per
-# component — server, each connector, the observer TUI — plus a spare shell.
+# component — server, each connector, the sticker converter, the observer TUI —
+# plus a spare shell.
 #
 # Tabs are shells, not running processes — see scripts/dev-layout.kdl. Each one
 # starts its component by name (wuphf-server, wuphf-telegram, …) or by the short

@@ -42,6 +42,11 @@ layout {
         pane name="instagram" cwd="connectors/instagram"
     }
 
+    // The sticker converter the connectors call through the core.
+    tab name="mediaconv" {
+        pane name="mediaconv" cwd="providers/mediaconv"
+    }
+
     tab name="tui" {
         pane name="tui"
     }
