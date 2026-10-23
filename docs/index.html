@@ -205,15 +205,10 @@
           phone-to-LID migration changes nothing downstream.</p>
       </div>
       <div class="card">
-        <h3><span class="ic">◆</span>Replica set</h3>
-        <p>The set of endpoints that mirror each other. A message delivered to
-          one member fans out to all the others — and <em>never</em> back to the
-          origin.</p>
-      </div>
-      <div class="card">
         <h3><span class="ic">◆</span>Conversation</h3>
-        <p>The abstract unit a rule pairs across sides — one per source chat —
-          backed by exactly one replica set.</p>
+        <p>The set of endpoints that mirror each other — one per source chat a
+          rule matches. A message delivered to one endpoint fans out to all the
+          others — and <em>never</em> back to the origin.</p>
       </div>
     </div>
   </div>
@@ -222,8 +217,8 @@
 <section>
   <div class="wrap">
     <h2><span class="num">03</span>Routing rules</h2>
-    <p class="lead">Rules are the only routing input you write. Conversations,
-      endpoints, and replica sets are derived lazily at runtime. Each rule pairs
+    <p class="lead">Rules are the only routing input you write. Conversations
+      and endpoints are derived lazily at runtime. Each rule pairs
       two or more sides; each side names a connector and a kind.</p>
     <div class="grid c3">
       <div class="card">
@@ -307,7 +302,7 @@ container = <span class="str">"telegram:channel:2060340733"</span></div>
     <p class="lead">Create, edit, and delete are replicated across the set. How
       each <em>target</em> renders an edit or delete is set per connector and
       resolved directionally at routing time — never forced symmetrically onto a
-      replica set.</p>
+      conversation.</p>
     <div class="grid c2">
       <div class="card">
         <h3><span class="ic">✎</span>Edit modes</h3>

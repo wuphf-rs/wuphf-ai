@@ -11,8 +11,8 @@ For a human-friendly tour, open [`docs/index.html`](docs/index.html).
 ## What works
 
 - Rule-based dynamic routing: raw platform addresses resolve to endpoints
-  through an alias table; conversations, replica sets, and mirror threads are
-  minted lazily and reused.
+  through an alias table; conversations and mirror threads are minted lazily
+  and reused.
 - Address-form independence: a platform that reaches one chat by several
   addresses (a WhatsApp phone JID and its LID) is treated as one chat. A rule
   can name a chat by any form the platform has reported, in an allowlist or a

@@ -15,11 +15,9 @@ are thin pipes.
   addresses, and the core resolves an address to an endpoint through an
   **`Alias`**. Many aliases can point at one endpoint (e.g. a WhatsApp
   phone-to-LID migration), with exactly one canonical for outbound sends.
-- **Replica set** — the set of endpoints that mirror each other. A message
-  delivered to one member is dispatched to all the others, never back to the
-  origin.
-- **Conversation** — the abstract unit a rule pairs across its two ends (one
-  per source chat), backed by one replica set.
+- **Conversation** — the set of endpoints that mirror each other, one per
+  source chat a rule matches. A message delivered to one endpoint is
+  dispatched to all the others, never back to the origin.
 
 
 ## Address Identity
@@ -55,8 +53,8 @@ Where no counterpart is known — the LID store has no mapping and WhatsApp send
 no alternate address — a chat listed under the other form stays unmatched.
 ## Routing Rules
 
-Rules are the only routing input a user writes; conversations, endpoints, and
-replica sets are derived lazily at runtime. A `Rule` declares a flow
+Rules are the only routing input a user writes; conversations and endpoints
+are derived lazily at runtime. A `Rule` declares a flow
 between a source end and a destination end. The source end owns conversation
 identity; replication itself is two-way.
 
@@ -96,7 +94,7 @@ dedup, reply mapping, loop prevention, or address mapping.
 
 ## Replicated Operations
 
-- **Create** — fanned out to every other endpoint in the replica set. The
+- **Create** — fanned out to every other endpoint in the conversation. The
   dispatch carries content only; how a copy is rendered (attachments-as-files,
   over-length text spillover) is each connector's own `[rendering]`
   configuration.
