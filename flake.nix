@@ -39,10 +39,11 @@
             rustc
             rustfmt
             sqlite
+            # ffmpeg and ImageMagick are used by the providers/mediaconv sticker
+            # converter. ImageMagick decodes animated WebP (which ffmpeg cannot)
+            # so WhatsApp animated stickers can be re-encoded by ffmpeg into
+            # Telegram WebM video stickers.
             ffmpeg
-            # ImageMagick decodes animated WebP (which ffmpeg cannot), used by the
-            # sticker transcoder to turn WhatsApp animated stickers into a form
-            # ffmpeg can re-encode to a Telegram WebM video sticker.
             imagemagick
             # libwebp provides webpmux, used to embed WhatsApp sticker-pack
             # metadata (pack name, author, project link) into bridged stickers.

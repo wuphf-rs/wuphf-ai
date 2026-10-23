@@ -111,6 +111,7 @@ destination_chat = { chat_id = "telegram:channel:2060340733" }
 # max_queued_calls = 256
 # invoke_token_env = "WUPHF_INVOKE_TOKEN"
 #
+# The sticker converter; configure it from providers/mediaconv/config.example.toml.
 # [[functions.providers]]
 # id = "mediaconv"
 # token_env = "WUPHF_PROVIDER_MEDIACONV_TOKEN"

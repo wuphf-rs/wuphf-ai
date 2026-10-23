@@ -171,6 +171,12 @@ the provider. A provider lost mid-call has its calls re-queued when the function
 is declared idempotent and failed otherwise, and a provider reconnecting under
 its id takes over its old session.
 
+The first function is `media.convert@1`, served by `providers/mediaconv`. It
+converts animated stickers between the formats platforms use (WhatsApp's
+animated WebP, Telegram's WebM and Lottie stickers), so the Telegram and
+WhatsApp connectors carry no conversion tools; without a converter they fall
+back to a static sticker or a file.
+
 Only processes outside the core call functions: routing, dispatch and
 acknowledgement never wait on a provider, and the broker crate
 (`wuphf-functions`) depends on neither the core nor storage.

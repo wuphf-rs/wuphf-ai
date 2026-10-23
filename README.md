@@ -50,6 +50,7 @@ crates/
   wuphf-cli/       Server executable
   wuphf-tui/       Observer TUI (read-only view of the observation log)
 connectors/        Go Telegram (gotd/td), WhatsApp (whatsmeow), Instagram connectors
+providers/mediaconv/ Sticker converter serving media.convert@1
 proto/go/          Generated Go connector bindings
 migrations/        SQLite schema migrations
 config/            Example server topology and rules
