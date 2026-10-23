@@ -36,7 +36,7 @@ code).
 | 016 | SPIKE: media blob lifecycle policy | P2 | S-M | — | TODO |
 | 017 | SPIKE: per-side replication direction (one-way mirrors) | P3 | S | — | TODO |
 | 018 | Observation log + multi-platform TUI (phased) | P2 | L | — | DONE (all 6 phases) |
-| 019 | Single-source dispatch settlement across storage backends | P1 | M | — (004 helps) | TODO |
+| 019 | Single-source dispatch settlement across storage backends | P1 | M | — (004 helps) | DONE |
 | 020 | Deduplicate per-operation fan-out in router + core | P2 | M | — | DONE |
 | 021 | Split Storage god-trait into role traits | P3 | M | 019 (soft) | TODO |
 | 022 | Move Platform name mapping into wuphf-model | P3 | S | — | TODO |
@@ -104,6 +104,15 @@ REJECTED (with one-line rationale).
   identical across the three (Step 4) and moved into `coreclient` too. Shared
   suite has 5 tests (union + the IsPermanent-hook case); all four Go modules
   build/vet/test green.
+- **019 done 2026-10-23** (`advisor/019-settlement-single-source`): drift since
+  `52c5084` was line numbers only; the excerpts matched. Test 2
+  (`settling_a_create_releases_blocked_and_records_sent_copy`) already existed
+  for both backends as `copy_state_and_blocked_reply_released` (added by 004),
+  so only the signal regression test was added. It covers all three signal
+  payloads and also asserts that a signal releases no blocked dispatch. It
+  failed on the memory backend before the fix. No core test depended on the
+  bug. `bind_native_parent` is now private to `shared.rs`, behind
+  `release_blocked`. Workspace: 113 tests passing, clippy clean.
 - 020 is independent of 019/021 (touches only `wuphf-router`/`wuphf-core`);
   022 is independent of everything.
 - **024 is a standalone direction spike** (added 2026-07-20 at `f7f0c16`),
