@@ -33,6 +33,17 @@ supports_topic_create = true
 # Log verbosity: trace, debug, info, warn, error (WUPHF_LOG_LEVEL overrides).
 log_level = "info"
 
+# Animated stickers from other platforms (animated WebP) are converted to
+# Telegram video stickers by the core's media.convert function, served by the
+# providers/mediaconv process. Without it they arrive as static stickers.
+#
+# Environment variable holding the core's invoke token, when the core sets
+# [functions] invoke_token_env.
+# functions_token_env = "WUPHF_INVOKE_TOKEN"
+# Bound on one sticker conversion, including waiting for the converter. This
+# connector delivers in order, so later messages wait behind it.
+# media_convert_timeout_ms = 20000
+
 # How replicated copies are rendered on Telegram. This connector's own policy;
 # the core dispatches content only.
 [rendering]

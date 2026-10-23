@@ -1,6 +1,9 @@
 package telegramconnector
 
 import (
+	"context"
+	"errors"
+	"slices"
 	"testing"
 
 	"github.com/akshettrj/wuphf/proto/go/connector/v1"
@@ -185,5 +188,77 @@ func TestAlbumGrouping(t *testing.T) {
 				t.Fatalf("groupable() = %v, want %v", got, tc.groupable)
 			}
 		})
+	}
+}
+
+// fakeConverter records each conversion request and answers with fixed bytes
+// or an error.
+type fakeConverter struct {
+	calls  []convertCall
+	output []byte
+	err    error
+}
+
+type convertCall struct {
+	mediaID, sourceMime, sourceName, targetMime string
+}
+
+func (f *fakeConverter) Convert(_ context.Context, mediaID, sourceMime, sourceName, targetMime string) ([]byte, error) {
+	f.calls = append(f.calls, convertCall{mediaID, sourceMime, sourceName, targetMime})
+	return f.output, f.err
+}
+
+func animatedSticker(mimeType, fileName string) *wuphfpb.Attachment {
+	return &wuphfpb.Attachment{
+		MediaId:  "media-1",
+		Kind:     wuphfpb.Attachment_KIND_STICKER,
+		MimeType: &mimeType,
+		FileName: &fileName,
+		Animated: true,
+	}
+}
+
+func TestAnimatedStickerWebMPassesWebMThrough(t *testing.T) {
+	t.Parallel()
+
+	converter := &fakeConverter{}
+	sender := Sender{converter: converter}
+	got, err := sender.animatedStickerWebM(context.Background(), animatedSticker("video/webm", "sticker.webm"), []byte("webm"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != "webm" {
+		t.Errorf("bytes = %q, want the source unchanged", got)
+	}
+	if len(converter.calls) != 0 {
+		t.Errorf("converter called %d times, want 0", len(converter.calls))
+	}
+}
+
+func TestAnimatedStickerWebMConvertsWebP(t *testing.T) {
+	t.Parallel()
+
+	converter := &fakeConverter{output: []byte("converted webm")}
+	sender := Sender{converter: converter}
+	got, err := sender.animatedStickerWebM(context.Background(), animatedSticker("image/webp", "sticker.webp"), []byte("webp"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != "converted webm" {
+		t.Errorf("bytes = %q, want the converter's output", got)
+	}
+	want := []convertCall{{"media-1", "image/webp", "sticker.webp", "video/webm"}}
+	if !slices.Equal(converter.calls, want) {
+		t.Errorf("converter calls = %+v, want %+v", converter.calls, want)
+	}
+}
+
+func TestAnimatedStickerWebMReturnsConverterError(t *testing.T) {
+	t.Parallel()
+
+	failure := errors.New("no provider for media.convert@1 connected")
+	sender := Sender{converter: &fakeConverter{err: failure}}
+	if _, err := sender.animatedStickerWebM(context.Background(), animatedSticker("image/webp", "sticker.webp"), []byte("webp")); !errors.Is(err, failure) {
+		t.Errorf("err = %v, want the converter's error", err)
 	}
 }

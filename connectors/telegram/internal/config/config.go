@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"strconv"
+	"time"
 
 	"github.com/pelletier/go-toml/v2"
 )
@@ -21,6 +22,12 @@ type File struct {
 	// Rendering governs how replicated copies are rendered on Telegram. It is
 	// this connector's own policy; the core dispatches content only.
 	Rendering RenderingOptions `toml:"rendering"`
+	// FunctionsTokenEnv names the environment variable holding the core's
+	// invoke token, when the core requires one.
+	FunctionsTokenEnv string `toml:"functions_token_env"`
+	// MediaConvertTimeoutMs bounds a sticker conversion, including waiting for
+	// the converter; deliveries on this connector wait behind it. 0 = 20000.
+	MediaConvertTimeoutMs uint32 `toml:"media_convert_timeout_ms"`
 }
 
 // RenderingOptions are the connector-owned knobs for how mirrored copies are
@@ -39,6 +46,19 @@ type RenderingOptions struct {
 	// DeleteMode picks how a replicated delete is rendered: "revoke" (default)
 	// deletes the copy, "tombstone" leaves it and posts a deletion notice.
 	DeleteMode string `toml:"delete_mode"`
+}
+
+// defaultMediaConvertTimeout bounds a sticker conversion when the
+// configuration sets no timeout.
+const defaultMediaConvertTimeout = 20 * time.Second
+
+// MediaConvertTimeout bounds one sticker conversion through media.convert,
+// including the time spent waiting for a converter to be available.
+func (c File) MediaConvertTimeout() time.Duration {
+	if c.MediaConvertTimeoutMs == 0 {
+		return defaultMediaConvertTimeout
+	}
+	return time.Duration(c.MediaConvertTimeoutMs) * time.Millisecond
 }
 
 // Rendering modes a configuration may name.

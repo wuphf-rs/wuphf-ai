@@ -1,6 +1,9 @@
 package config
 
-import "testing"
+import (
+	"testing"
+	"time"
+)
 
 func TestValidateRequiresCoreConnectorAndSession(t *testing.T) {
 	t.Parallel()
@@ -37,5 +40,16 @@ func TestValidateAcceptsThreadedConnector(t *testing.T) {
 	}
 	if err := cfg.Validate(); err != nil {
 		t.Fatalf("Validate() failed for valid threaded connector: %v", err)
+	}
+}
+
+func TestMediaConvertTimeoutDefaultsAndOverrides(t *testing.T) {
+	t.Parallel()
+
+	if got := (File{}).MediaConvertTimeout(); got != 20*time.Second {
+		t.Errorf("default MediaConvertTimeout() = %v, want 20s", got)
+	}
+	if got := (File{MediaConvertTimeoutMs: 1500}).MediaConvertTimeout(); got != 1500*time.Millisecond {
+		t.Errorf("MediaConvertTimeout() = %v, want 1.5s", got)
 	}
 }

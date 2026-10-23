@@ -51,3 +51,22 @@ Run the core server, then the connector from this directory:
 ```sh
 go run ./cmd/wuphf-telegram --config config.example.toml
 ```
+
+## Animated stickers
+
+Telegram shows an animated WebP sticker only as a still frame, so the connector
+converts animated stickers to WebM video stickers before sending them. It does
+not convert them itself: it calls the core's `media.convert@1` function, which
+the `providers/mediaconv` process serves (that process needs `ffmpeg` and
+ImageMagick; this connector needs neither). When the conversion fails or no
+converter is available, the sticker is sent as a static sticker.
+
+Delivery on a connector is sequential, so a conversion holds back the messages
+queued behind it. If the core's `[functions]` configuration allows a
+`media.convert` provider that is not running, every animated sticker waits up
+to `media_convert_timeout_ms` (default 20 s) before falling back. If you do not
+run the provider, remove its `[[functions.providers]]` entry from the core
+configuration: calls then fail at once and the sticker falls back immediately.
+
+When the core sets `invoke_token_env`, set `functions_token_env` here to the
+name of an environment variable holding the same token.

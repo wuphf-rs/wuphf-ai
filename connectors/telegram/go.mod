@@ -3,7 +3,6 @@ module github.com/akshettrj/wuphf/connectors/telegram
 go 1.25.0
 
 require (
-	github.com/akshettrj/wuphf/connectors/mediaconv v0.0.0
 	github.com/akshettrj/wuphf/connectors/shared v0.0.0
 	github.com/akshettrj/wuphf/proto/go v0.0.0
 	github.com/gotd/td v0.144.0
@@ -13,8 +12,6 @@ require (
 )
 
 replace github.com/akshettrj/wuphf/proto/go => ../../proto/go
-
-replace github.com/akshettrj/wuphf/connectors/mediaconv => ../mediaconv
 
 replace github.com/akshettrj/wuphf/connectors/shared => ../shared
 

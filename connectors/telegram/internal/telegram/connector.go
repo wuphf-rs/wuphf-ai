@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	coreclient "github.com/akshettrj/wuphf/connectors/shared/coreclient"
+	"github.com/akshettrj/wuphf/connectors/shared/functions"
 	"github.com/akshettrj/wuphf/connectors/telegram/internal/config"
 	"github.com/akshettrj/wuphf/proto/go/connector/v1"
 	"github.com/gotd/td/session"
@@ -35,6 +36,16 @@ func (c Connector) Run(ctx context.Context) error {
 		return err
 	}
 	defer media.Close()
+	var functionsToken string
+	if c.cfg.FunctionsTokenEnv != "" {
+		functionsToken = os.Getenv(c.cfg.FunctionsTokenEnv)
+	}
+	fns, err := functions.Dial(c.cfg.CoreAddress, functionsToken, c.cfg.ConnectorID)
+	if err != nil {
+		return err
+	}
+	defer fns.Close()
+	converter := functions.MediaConverter{Functions: fns, Media: media, Timeout: c.cfg.MediaConvertTimeout()}
 	var client *gotd.Client
 	codec := NewMediaCodec(media, func(ctx context.Context, location tg.InputFileLocationClass) ([]byte, error) {
 		var output bytes.Buffer
@@ -64,7 +75,7 @@ func (c Connector) Run(ctx context.Context) error {
 			return err
 		}
 		c.logger.Info().Msg("Telegram session connected")
-		sender := NewSender(client.API(), peers, media, c.cfg.Rendering)
+		sender := NewSender(client.API(), peers, media, converter, c.cfg.Rendering)
 		return coreclient.New(coreclient.Options{
 			CoreAddress:         c.cfg.CoreAddress,
 			ConnectorID:         c.cfg.ConnectorID,

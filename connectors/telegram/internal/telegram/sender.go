@@ -10,7 +10,6 @@ import (
 	"strconv"
 	"unicode/utf16"
 
-	"github.com/akshettrj/wuphf/connectors/mediaconv"
 	coreclient "github.com/akshettrj/wuphf/connectors/shared/coreclient"
 	"github.com/akshettrj/wuphf/connectors/telegram/internal/config"
 	"github.com/akshettrj/wuphf/proto/go/connector/v1"
@@ -19,22 +18,30 @@ import (
 	"github.com/gotd/td/tg"
 )
 
+// StickerConverter converts stored media to another format (in production,
+// functions.MediaConverter calling media.convert@1 on the core).
+type StickerConverter interface {
+	Convert(ctx context.Context, mediaID, sourceMime, sourceName, targetMime string) ([]byte, error)
+}
+
 type Sender struct {
-	api    *tg.Client
-	sender *message.Sender
-	peers  *PeerCache
-	media  MediaBroker
+	api       *tg.Client
+	sender    *message.Sender
+	peers     *PeerCache
+	media     MediaBroker
+	converter StickerConverter
 	// rendering is this connector's own policy for how mirrored copies are
 	// rendered; the core dispatches content only.
 	rendering config.RenderingOptions
 }
 
-func NewSender(api *tg.Client, peers *PeerCache, media MediaBroker, rendering config.RenderingOptions) Sender {
+func NewSender(api *tg.Client, peers *PeerCache, media MediaBroker, converter StickerConverter, rendering config.RenderingOptions) Sender {
 	return Sender{
 		api:       api,
 		sender:    message.NewSender(api),
 		peers:     peers,
 		media:     media,
+		converter: converter,
 		rendering: rendering,
 	}
 }
@@ -504,9 +511,10 @@ func albumGroup(attachment *wuphfpb.Attachment) string {
 // sendSticker delivers a sticker, preserving animation. A static sticker is sent
 // as-is (WebP). An animated sticker is delivered as a WebM/VP9 video sticker:
 // WhatsApp animated stickers arrive as animated WebP, which Telegram renders only
-// as a still frame, so they are transcoded to WebM first. If the transcode is
-// unavailable (libwebp/ffmpeg missing) or fails, it degrades to a static sticker
-// (the first frame) rather than dropping the message.
+// as a still frame, so they are transcoded to WebM first. The transcode runs on
+// the core's media.convert provider; when no provider is available or the
+// conversion fails, the sticker degrades to a static sticker (the first frame)
+// rather than dropping the message.
 func (s Sender) sendSticker(
 	ctx context.Context,
 	builder *message.Builder,
@@ -526,13 +534,14 @@ func (s Sender) sendSticker(
 }
 
 // animatedStickerWebM returns the sticker as WebM/VP9 bytes, transcoding from
-// animated WebP when needed. A source already in WebM (an animated sticker that
-// originated elsewhere as video) is passed through unchanged.
+// animated WebP through media.convert when needed. A source already in WebM (an
+// animated sticker that originated elsewhere as video) is passed through
+// unchanged.
 func (s Sender) animatedStickerWebM(ctx context.Context, attachment *wuphfpb.Attachment, data []byte) ([]byte, error) {
 	if attachment.GetMimeType() == "video/webm" {
 		return data, nil
 	}
-	return mediaconv.AnimatedWebPToWebM(ctx, data)
+	return s.converter.Convert(ctx, attachment.GetMediaId(), attachment.GetMimeType(), attachment.GetFileName(), "video/webm")
 }
 
 // gifUploadName names a GIF upload with a .mp4 extension, the container Telegram
