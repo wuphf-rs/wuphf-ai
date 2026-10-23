@@ -56,7 +56,7 @@ no alternate address — a chat listed under the other form stays unmatched.
 ## Routing Rules
 
 Rules are the only routing input a user writes; conversations, endpoints, and
-replica sets are derived lazily at runtime. A `RoutingRule` declares a flow
+replica sets are derived lazily at runtime. A `Rule` declares a flow
 between a source end and a destination end. The source end owns conversation
 identity; replication itself is two-way.
 
@@ -74,7 +74,7 @@ into its own Telegram forum topic).
 ## Data Flow
 
 ```text
-Connector --NormalizedEvent (raw address)--> event bus --> Core --> Router
+Connector --Event (raw address)--> event bus --> Core --> Router
          --DispatchCommand (resolved target)--> event bus --> Connector
 ```
 
