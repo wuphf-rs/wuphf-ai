@@ -45,7 +45,7 @@ code).
 | 025 | Rust WhatsApp connector on whatsapp-rust | P2 | L | — | DONE |
 | 026 | Rename the wuphf-model types to plain names (type names only) | P2 | M | 019 (soft) | DONE |
 | 027 | Rename model fields and variants, keeping old stored JSON readable | P2 | M | 026 | DONE (migration 0011, not serde aliases) |
-| 028 | Delete dead and duplicate model types | P2 | M | 026, 027 | TODO |
+| 028 | Delete dead and duplicate model types | P2 | M | 026, 027 | DONE (migration 0012) |
 | 029 | Fold the wuphf-router crate into wuphf-core | P3 | S | 028 (soft) | TODO |
 | 030 | Collapse the dispatch types into one `Dispatch` | P2 | M–L | 019, 026–029 | TODO |
 | 031 | Merge ReplicaSet and ThreadMapping into Conversation | P2 | M–L | 030 | TODO |
@@ -176,6 +176,20 @@ Rust) by the owner's decision.
     the owner's decision above for any new stored renames (030's dispatch
     shape and 031's `replica_set_id` → `conversation_id`): write a migration
     plus a `migration_tests.rs` case, not aliases.
+- **028 done 2026-10-23** (`advisor/028-model-dead-and-duplicate-types`): no
+  drift. The migration is `0012_drop_unused_tables.sql`, because 027 took
+  `0011`. Departures from the plan:
+  - `ConnectorInput::Work` holds a `Box<InboundWork>`, because clippy's
+    `large_enum_variant` fired once the small variants were gone. This matches
+    `ConnectorOutput::Dispatch(Box<Dispatch>)`.
+  - A `ConnectorInput::event(event)` constructor keeps the event call sites
+    short.
+  - No existing test covered the hub stamping the session's connector id on
+    migrations and notices, so `hub_stamps_the_session_connector_on_all_work`
+    was added to `wuphf-runtime`. It fails if `set_connector` is removed.
+  - The `NoticeTarget` doc comment moved onto `RoutingConfig::notice_targets`.
+
+  Workspace: 115 tests passing, clippy clean.
 - **021 must be re-planned after 031.** 028 performs 021's deletion of
   `put_contact`/`put_chat_settings`, and 031 replaces seven of the trait
   methods 021 groups into role traits.
