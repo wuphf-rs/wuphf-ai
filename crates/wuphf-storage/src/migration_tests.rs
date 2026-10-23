@@ -3,7 +3,7 @@
 //! an older release wrote, applies the remaining migrations, and checks every
 //! row decodes into today's model.
 
-use crate::Storage;
+use crate::TopologyStore;
 use crate::sqlite::MIGRATOR;
 use serde::Serialize;
 use serde::de::DeserializeOwned;

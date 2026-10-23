@@ -17,7 +17,7 @@ use wuphf_proto::connector::connector_transport_server::ConnectorTransportServer
 use wuphf_proto::connector::media_transport_client::MediaTransportClient;
 use wuphf_proto::connector::media_transport_server::MediaTransportServer;
 use wuphf_storage::InMemoryStorage;
-use wuphf_storage::Storage;
+use wuphf_storage::{DispatchStore, ObservationStore};
 
 const WA: &str = "whatsapp-main";
 const TG: &str = "telegram-main";

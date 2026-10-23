@@ -4,7 +4,7 @@ use wuphf_model::{
     Dispatch, DispatchAck, MediaBlob, MediaId, NewMessage, NoticeKind, OWNER_AUTHOR, OwnerMessage,
     Platform, ReceiptKind, Rule, RuleId, RuleKind, SourceAddress,
 };
-use wuphf_storage::InMemoryStorage;
+use wuphf_storage::{InMemoryStorage, MediaStore, ObservationStore, TopologyStore};
 
 const WHATSAPP: &str = "whatsapp-main";
 const TELEGRAM: &str = "telegram-main";

@@ -22,7 +22,7 @@ use wuphf_proto::connector as pb;
 use wuphf_runtime::Runtime;
 use wuphf_runtime::connector::ConnectorHub;
 use wuphf_runtime::grpc::GrpcConnectorService;
-use wuphf_storage::{InMemoryStorage, Storage};
+use wuphf_storage::{DispatchStore, InMemoryStorage};
 
 const WA: &str = "whatsapp-main";
 const TG: &str = "telegram-main";

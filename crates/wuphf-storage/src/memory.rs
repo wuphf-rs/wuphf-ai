@@ -2,7 +2,10 @@
 //! used for tests and ephemeral runs.
 
 use crate::shared::{acknowledged_copy, release_blocked};
-use crate::{Storage, StorageError, StorageResult};
+use crate::{
+    DispatchStore, MediaStore, MessageStore, ObservationStore, ProvisioningStash, StorageError,
+    StorageResult, TopologyStore,
+};
 use async_trait::async_trait;
 use std::collections::{HashMap, HashSet};
 use tokio::sync::RwLock;
@@ -47,7 +50,7 @@ struct StoredMedia {
 }
 
 #[async_trait]
-impl Storage for InMemoryStorage {
+impl TopologyStore for InMemoryStorage {
     async fn put_endpoint(&self, endpoint: Endpoint) -> StorageResult<()> {
         self.state
             .write()
@@ -217,7 +220,10 @@ impl Storage for InMemoryStorage {
             .title = Some(title.to_owned());
         Ok(())
     }
+}
 
+#[async_trait]
+impl MessageStore for InMemoryStorage {
     async fn claim_event(&self, key: DedupKey) -> StorageResult<bool> {
         Ok(self.state.write().await.seen_events.insert(key))
     }
@@ -301,7 +307,10 @@ impl Storage for InMemoryStorage {
             })
             .map(|(_, copy)| copy.clone()))
     }
+}
 
+#[async_trait]
+impl MediaStore for InMemoryStorage {
     async fn put_media(&self, media: MediaBlob, stored_at_ms: i64) -> StorageResult<()> {
         let media_id = media.attachment.media_id;
         self.state.write().await.media.insert(
@@ -338,7 +347,10 @@ impl Storage for InMemoryStorage {
             .retain(|id, media| media.stored_at_ms >= cutoff_ms || referenced.contains(id));
         Ok((before - state.media.len()) as u64)
     }
+}
 
+#[async_trait]
+impl DispatchStore for InMemoryStorage {
     async fn enqueue_dispatch(&self, dispatch: &Dispatch) -> StorageResult<()> {
         self.state
             .write()
@@ -430,7 +442,10 @@ impl Storage for InMemoryStorage {
         dispatch.state = DispatchState::Failed { reason };
         Ok(())
     }
+}
 
+#[async_trait]
+impl ProvisioningStash for InMemoryStorage {
     async fn stash_provisioning_message(
         &self,
         conversation_id: ConversationId,
@@ -481,7 +496,10 @@ impl Storage for InMemoryStorage {
             .copied()
             .collect())
     }
+}
 
+#[async_trait]
+impl ObservationStore for InMemoryStorage {
     async fn log_observed(
         &self,
         mut observed: ObservedMessage,

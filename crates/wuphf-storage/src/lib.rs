@@ -41,8 +41,10 @@ pub enum StorageError {
 
 pub type StorageResult<T> = Result<T, StorageError>;
 
+/// Routing topology: endpoints, the aliases and address links that resolve
+/// platform addresses to them, and the conversations that group them.
 #[async_trait]
-pub trait Storage: Send + Sync + 'static {
+pub trait TopologyStore: Send + Sync + 'static {
     async fn put_endpoint(&self, endpoint: Endpoint) -> StorageResult<()>;
     async fn endpoint(&self, endpoint_id: EndpointId) -> StorageResult<Endpoint>;
     /// Insert or update an alias. Inserting a canonical alias clears the
@@ -99,6 +101,12 @@ pub trait Storage: Send + Sync + 'static {
         conversation_id: ConversationId,
         title: &str,
     ) -> StorageResult<()>;
+}
+
+/// Logical messages and their per-endpoint copies, plus inbound dedup and the
+/// sent-copy record that suppresses echoes.
+#[async_trait]
+pub trait MessageStore: Send + Sync + 'static {
     async fn claim_event(&self, key: DedupKey) -> StorageResult<bool>;
     async fn put_message(&self, message: Message) -> StorageResult<()>;
     async fn message(&self, message_id: MessageId) -> StorageResult<Option<Message>>;
@@ -122,9 +130,19 @@ pub trait Storage: Send + Sync + 'static {
     /// The copy of a message at the endpoint it was received on (its origin), if
     /// recorded. Used to target the origin with delivery acks and seen receipts.
     async fn received_copy(&self, message_id: MessageId) -> StorageResult<Option<MessageCopy>>;
+}
+
+/// Media blobs referenced by message attachments.
+#[async_trait]
+pub trait MediaStore: Send + Sync + 'static {
     async fn put_media(&self, media: MediaBlob, stored_at_ms: i64) -> StorageResult<()>;
     async fn media(&self, media_id: MediaId) -> StorageResult<Option<MediaBlob>>;
     async fn prune_unreferenced_media_before(&self, cutoff_ms: i64) -> StorageResult<u64>;
+}
+
+/// The outbound dispatch queue: enqueue, redeliver, and settle dispatches.
+#[async_trait]
+pub trait DispatchStore: Send + Sync + 'static {
     /// Persist a dispatch as given. The caller builds it with
     /// [`Dispatch::new`](wuphf_model::Dispatch::new), which already decides
     /// whether it is pending or blocked.
@@ -139,7 +157,12 @@ pub trait Storage: Send + Sync + 'static {
     /// Mark a dispatch as permanently failed so it leaves the pending queue and
     /// is never redelivered. Unlike acknowledgement, it records no sent copy.
     async fn fail_dispatch(&self, dispatch_id: DispatchId, reason: String) -> StorageResult<()>;
+}
 
+/// Messages held while a conversation's mirror thread is being provisioned,
+/// durable so a crash cannot lose them.
+#[async_trait]
+pub trait ProvisioningStash: Send + Sync + 'static {
     /// Persist one provisioning-deferred message for later replay, so a crash
     /// while a mirror thread is being provisioned cannot lose it. Idempotent on
     /// `(conversation_id, message_id)`.
@@ -159,7 +182,12 @@ pub trait Storage: Send + Sync + 'static {
     ) -> StorageResult<Vec<(Message, EndpointId, String)>>;
     /// Conversations that still have stashed messages, for startup recovery.
     async fn stashed_conversations(&self) -> StorageResult<Vec<ConversationId>>;
+}
 
+/// The observation log: every message a connector reports, for viewers such
+/// as the TUI, independent of routing.
+#[async_trait]
+pub trait ObservationStore: Send + Sync + 'static {
     /// Record a message in the observation log, upserting both the message row
     /// and its chat summary, and return the row as stored. Idempotent on the
     /// message's native coordinates. A `chat_title` refreshes the chat's title;
@@ -215,6 +243,24 @@ pub trait Storage: Send + Sync + 'static {
         before_ms: Option<i64>,
         limit: u32,
     ) -> StorageResult<Vec<ObservedMessage>>;
+}
+
+/// The full persistence surface the core needs: the sum of the role traits.
+/// Blanket-implemented, so a backend implements the roles and gets `Storage`;
+/// a consumer that needs only part of it bounds on the roles it uses.
+pub trait Storage:
+    TopologyStore + MessageStore + MediaStore + DispatchStore + ProvisioningStash + ObservationStore
+{
+}
+
+impl<T> Storage for T where
+    T: TopologyStore
+        + MessageStore
+        + MediaStore
+        + DispatchStore
+        + ProvisioningStash
+        + ObservationStore
+{
 }
 
 #[cfg(test)]

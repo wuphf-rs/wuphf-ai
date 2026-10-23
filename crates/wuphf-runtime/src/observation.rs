@@ -163,7 +163,7 @@ where
 mod tests {
     use super::*;
     use wuphf_model::{ChatAddress, ConnectorId, NewMessage, ObservedDirection, SourceAddress};
-    use wuphf_storage::InMemoryStorage;
+    use wuphf_storage::{InMemoryStorage, ObservationStore};
 
     fn create_event(chat: &str, id: &str, text: &str, title: Option<&str>) -> Event {
         Event {

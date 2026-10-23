@@ -2,7 +2,10 @@
 //! dispatch state is denormalized into columns so pending work can be queried.
 
 use crate::shared::{acknowledged_copy, release_blocked};
-use crate::{Storage, StorageError, StorageResult};
+use crate::{
+    DispatchStore, MediaStore, MessageStore, ObservationStore, ProvisioningStash, StorageError,
+    StorageResult, TopologyStore,
+};
 use async_trait::async_trait;
 use sqlx::migrate::Migrator;
 use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
@@ -35,7 +38,7 @@ impl SqliteStorage {
 }
 
 #[async_trait]
-impl Storage for SqliteStorage {
+impl TopologyStore for SqliteStorage {
     async fn put_endpoint(&self, endpoint: Endpoint) -> StorageResult<()> {
         upsert_json(
             &self.pool,
@@ -257,7 +260,10 @@ impl Storage for SqliteStorage {
         transaction.commit().await?;
         Ok(())
     }
+}
 
+#[async_trait]
+impl MessageStore for SqliteStorage {
     async fn claim_event(&self, key: DedupKey) -> StorageResult<bool> {
         let result = sqlx::query(
             "INSERT OR IGNORE INTO seen_events (platform, chat_id, platform_message_id) VALUES (?, ?, ?)",
@@ -368,7 +374,10 @@ impl Storage for SqliteStorage {
             .transpose()
             .map_err(Into::into)
     }
+}
 
+#[async_trait]
+impl MediaStore for SqliteStorage {
     async fn put_media(&self, media: MediaBlob, stored_at_ms: i64) -> StorageResult<()> {
         sqlx::query(
             "INSERT INTO media_blobs (id, metadata, contents, stored_at_ms) VALUES (?, ?, ?, ?)
@@ -414,7 +423,10 @@ impl Storage for SqliteStorage {
         .await?;
         Ok(result.rows_affected())
     }
+}
 
+#[async_trait]
+impl DispatchStore for SqliteStorage {
     async fn enqueue_dispatch(&self, dispatch: &Dispatch) -> StorageResult<()> {
         insert_dispatch(&self.pool, dispatch).await
     }
@@ -528,7 +540,10 @@ impl Storage for SqliteStorage {
             .await?;
         Ok(())
     }
+}
 
+#[async_trait]
+impl ProvisioningStash for SqliteStorage {
     async fn stash_provisioning_message(
         &self,
         conversation_id: ConversationId,
@@ -596,7 +611,10 @@ impl Storage for SqliteStorage {
             })
             .collect()
     }
+}
 
+#[async_trait]
+impl ObservationStore for SqliteStorage {
     async fn log_observed(
         &self,
         mut observed: ObservedMessage,
