@@ -459,8 +459,12 @@ impl Storage for InMemoryStorage {
         dispatch.state = DispatchState::Acknowledged {
             platform_message_id: platform_message_id.clone(),
         };
-        // A retitle carries no logical message, so it records no copy and
-        // releases no replies; acknowledging it just closes out the dispatch.
+        // Signals that act on an existing copy (reactions, delivery acks, seen
+        // receipts) and retitles record no copy and release no replies;
+        // acknowledging them just closes out the dispatch.
+        if !dispatch.command.records_copy() {
+            return Ok(Vec::new());
+        }
         let Some(message_id) = dispatch.command.message_id() else {
             return Ok(Vec::new());
         };

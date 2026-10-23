@@ -292,6 +292,97 @@ async fn acknowledging_create_binds_blocked_edit<S: Storage>(storage: S) {
 }
 
 #[tokio::test]
+async fn memory_settling_a_signal_dispatch_records_no_copy() {
+    settling_a_signal_dispatch_records_no_copy(InMemoryStorage::default()).await;
+}
+
+#[tokio::test]
+async fn sqlite_settling_a_signal_dispatch_records_no_copy() {
+    let path = std::env::temp_dir().join(format!("wuphf-signal-{}.sqlite", DispatchId::new()));
+    let url = format!("sqlite://{}", path.display());
+    settling_a_signal_dispatch_records_no_copy(SqliteStorage::connect(&url).await.unwrap()).await;
+}
+
+/// Acknowledging a reaction, delivery ack, or seen receipt aimed at a message's
+/// origin copy leaves that copy received: recording it as sent would make the
+/// bridge treat the user's own message as an echo. Nor may a signal release a
+/// dispatch blocked on the message, since no new copy reached the endpoint.
+async fn settling_a_signal_dispatch_records_no_copy<S: Storage>(storage: S) {
+    let message_id = MessageId::new();
+    let endpoint_id = EndpointId::new();
+    let replica_set_id = message(message_id).replica_set_id;
+    storage.put_endpoint(endpoint(endpoint_id)).await.unwrap();
+    storage.put_message(message(message_id)).await.unwrap();
+    storage
+        .put_received_copy(MessageCopy {
+            message_id,
+            endpoint_id,
+            platform_message_id: "origin-1".into(),
+        })
+        .await
+        .unwrap();
+    let blocked = storage
+        .enqueue_dispatch(command(MessageId::new(), endpoint_id), Some(message_id))
+        .await
+        .unwrap();
+
+    let signals = [
+        DispatchPayload::Reaction {
+            message_id,
+            replica_set_id,
+            target_platform_message_id: "origin-1".into(),
+            reactor: "someone".into(),
+            reactor_name: None,
+            emoji: Some("👍".into()),
+        },
+        DispatchPayload::DeliveryAck {
+            message_id,
+            replica_set_id,
+            target_platform_message_id: "origin-1".into(),
+        },
+        DispatchPayload::SeenReceipt {
+            message_id,
+            replica_set_id,
+            target_platform_message_id: "origin-1".into(),
+        },
+    ];
+    for payload in signals {
+        let signal = storage
+            .enqueue_dispatch(
+                DispatchCommand {
+                    payload,
+                    ..command(message_id, endpoint_id)
+                },
+                None,
+            )
+            .await
+            .unwrap();
+        let released = storage
+            .acknowledge_dispatch(signal.id, "origin-1".into())
+            .await
+            .unwrap();
+        assert!(released.is_empty());
+        assert!(!storage.is_sent_copy(endpoint_id, "origin-1").await.unwrap());
+    }
+
+    assert_eq!(
+        storage
+            .message_id_for_copy(endpoint_id, "origin-1")
+            .await
+            .unwrap(),
+        Some(message_id)
+    );
+    assert!(
+        !storage
+            .pending_dispatches()
+            .await
+            .unwrap()
+            .iter()
+            .any(|dispatch| dispatch.id == blocked.id)
+    );
+}
+
+#[tokio::test]
 async fn memory_fail_dispatch_removes_from_pending() {
     fail_dispatch_removes_from_pending(InMemoryStorage::default()).await;
 }
