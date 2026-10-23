@@ -50,8 +50,10 @@ where
             id: MessageId::new(),
             conversation_id,
             author_id: OWNER_AUTHOR.to_owned(),
-            participant: None,
-            author_name: None,
+            // Attributed like the owner's own messages from a platform, so a
+            // mirror labels it; the direct copy drops the label below.
+            participant: Some(OWNER_AUTHOR.to_owned()),
+            author_name: Some(OWNER_AUTHOR.to_owned()),
             text: Some(outbound.text),
             attachments: Vec::new(),
             reply_to,
@@ -60,6 +62,13 @@ where
         };
         self.storage.put_message(message.clone()).await?;
 
+        // The owner's own account posts the direct copy natively, so it carries
+        // no author label for the connector to render.
+        let unlabelled = Message {
+            participant: None,
+            author_name: None,
+            ..message.clone()
+        };
         let direct = Dispatch::new(
             Target {
                 endpoint_id,
@@ -69,7 +78,7 @@ where
             },
             conversation_id,
             Action::Send {
-                message: message.clone(),
+                message: unlabelled,
                 reply: reply_context,
             },
             None,

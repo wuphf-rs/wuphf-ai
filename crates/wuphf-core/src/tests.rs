@@ -1161,6 +1161,18 @@ async fn owner_message_to_a_routed_chat_fans_out_to_the_other_side() {
     assert_eq!(mirror.connector_id, ConnectorId(TELEGRAM.into()));
     assert_eq!(mirror.address.chat_id, "-100123");
 
+    // The mirror labels the copy as the owner's; the owner's own account posts
+    // the direct copy, which needs no label.
+    let sent = |dispatch: &Dispatch| match &dispatch.action {
+        Action::Send { message, .. } => (message.participant.clone(), message.author_name.clone()),
+        other => panic!("owner message dispatches a send, got {other:?}"),
+    };
+    assert_eq!(
+        sent(&outcome.mirrored[0]),
+        (Some(OWNER_AUTHOR.to_owned()), Some(OWNER_AUTHOR.to_owned()))
+    );
+    assert_eq!(sent(&outcome.direct), (None, None));
+
     // The echo stays suppressed on the routed path too.
     core.acknowledge_dispatch(DispatchAck {
         dispatch_id: outcome.direct.id,
