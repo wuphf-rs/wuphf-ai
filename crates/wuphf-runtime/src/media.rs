@@ -11,7 +11,7 @@ use uuid::Uuid;
 use wuphf_model::{Attachment, AttachmentKind, MediaBlob, MediaId};
 use wuphf_proto::connector as pb;
 use wuphf_proto::connector::media_transport_server::MediaTransport;
-use wuphf_storage::Storage;
+use wuphf_storage::MediaStore;
 
 const DOWNLOAD_CHUNK_BYTES: usize = 64 * 1024;
 
@@ -35,7 +35,7 @@ impl<S> GrpcMediaService<S> {
 #[tonic::async_trait]
 impl<S> MediaTransport for GrpcMediaService<S>
 where
-    S: Storage,
+    S: MediaStore,
 {
     type DownloadMediaStream =
         Pin<Box<dyn Stream<Item = Result<pb::MediaChunk, Status>> + Send + 'static>>;

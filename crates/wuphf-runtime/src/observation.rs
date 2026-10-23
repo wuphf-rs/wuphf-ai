@@ -8,7 +8,7 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use tokio::sync::{broadcast, oneshot};
 use wuphf_model::{DispatchId, Event, EventKind, ObservedMessage, Platform};
-use wuphf_storage::{Storage, StorageError};
+use wuphf_storage::{ObservationStore, StorageError};
 
 /// How many recent observed messages the live broadcast retains for a lagging
 /// subscriber before dropping the oldest. Bridging is not high-frequency, so a
@@ -38,7 +38,7 @@ struct PendingOutbound {
 
 impl<S> Observer<S>
 where
-    S: Storage,
+    S: ObservationStore,
 {
     pub fn new(storage: Arc<S>) -> Self {
         let (events, _) = broadcast::channel(BROADCAST_CAPACITY);

@@ -10,7 +10,7 @@ use wuphf_model::{
     Action, ConnectorId, Conversation, ConversationId, Dispatch, Endpoint, EndpointId, Message,
     MessageId, ReceiptKind, ReplyContext, Rule, RuleKind, Target,
 };
-use wuphf_storage::{Storage, StorageError};
+use wuphf_storage::{MessageStore, StorageError, TopologyStore};
 
 pub(crate) struct Router<S> {
     storage: Arc<S>,
@@ -19,7 +19,7 @@ pub(crate) struct Router<S> {
 
 impl<S> Router<S>
 where
-    S: Storage,
+    S: TopologyStore + MessageStore,
 {
     pub fn new(storage: Arc<S>, config: Arc<RoutingConfig>) -> Self {
         Self { storage, config }
@@ -51,7 +51,7 @@ pub enum RouterError {
 
 impl<S> Router<S>
 where
-    S: Storage,
+    S: TopologyStore + MessageStore,
 {
     /// Fan a new message out to every other endpoint in its conversation. A
     /// reply whose parent has no copy at a target yet is blocked on the parent
