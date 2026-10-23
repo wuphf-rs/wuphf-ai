@@ -2,6 +2,7 @@
 members = [
   "crates/wuphf-model",
   "crates/wuphf-proto",
+  "crates/wuphf-functions",
   "crates/wuphf-storage",
   "crates/wuphf-core",
   "crates/wuphf-runtime",
@@ -43,6 +44,7 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 uuid = { version = "1", features = ["serde", "v4"] }
 wuphf-connector = { path = "crates/wuphf-connector" }
 wuphf-core = { path = "crates/wuphf-core" }
+wuphf-functions = { path = "crates/wuphf-functions" }
 wuphf-model = { path = "crates/wuphf-model" }
 wuphf-proto = { path = "crates/wuphf-proto" }
 wuphf-runtime = { path = "crates/wuphf-runtime" }

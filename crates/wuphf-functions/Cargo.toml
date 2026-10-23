@@ -1,0 +1,21 @@
+[package]
+name = "wuphf-functions"
+description = "Remote function broker: provider sessions, call queueing and Invoke"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "sync", "time"] }
+tokio-stream.workspace = true
+tonic.workspace = true
+tracing.workspace = true
+uuid.workspace = true
+wuphf-proto.workspace = true
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["net"] }
+tokio-stream = { workspace = true, features = ["net"] }
