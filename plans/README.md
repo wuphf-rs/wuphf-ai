@@ -49,7 +49,7 @@ code).
 | 029 | Fold the wuphf-router crate into wuphf-core | P3 | S | 028 (soft) | DONE |
 | 030 | Collapse the dispatch types into one `Dispatch` | P2 | M–L | 019, 026–029 | DONE (migration 0013, no legacy decoder) |
 | 031 | Merge ReplicaSet and ThreadMapping into Conversation | P2 | M–L | 030 | DONE (migration 0014) |
-| 032 | Add a remote function broker to the core (`wuphf-functions`) | P2 | L | — | TODO |
+| 032 | Add a remote function broker to the core (`wuphf-functions`) | P2 | L | — | DONE (see notes) |
 | 033 | Move sticker conversion into a `media.convert` provider | P2 | M–L | 032 | TODO |
 
 Status values: TODO | IN PROGRESS | DONE | BLOCKED (with one-line reason) |
@@ -298,6 +298,30 @@ configurable timeouts and limits.
   connectors per-peer tokens and enables per-caller ACLs); schema
   validation; a Rust caller helper for `whatsapp-rust` once it has media;
   rewriting the provider in another language.
+- **032 done 2026-10-23** (`advisor/032-remote-function-broker`). Implemented as
+  planned; the drift check passed (the router now lives in `wuphf-core`, so the
+  dependency check also covers it). Deviations, all small:
+  - **Prefix patterns:** `media.*` is accepted. The plan's literal rule (a
+    valid two-segment name followed by `.*`) would have rejected its own
+    example, so a prefix only needs valid segments.
+  - **Stopped hub:** `InvokeRejection` and `RegisterRejection` gained a
+    `Stopped` variant, mapped to `INTERNAL`, instead of panicking or nesting
+    results when the hub task is gone.
+  - **Zero values:** one `ConfigError::Zero { field }` variant names the
+    offending field (global or override), rather than one variant per field.
+  - **Abandoned counter:** it also counts calls dropped from a queue because
+    their caller had already gone, and in-flight calls lost with a session
+    whose caller had already gone.
+  - **Test timing:** the harness uses 5 s / 10 s deadlines and only the
+    deadline tests use 300 ms ones, so slow CI cannot trip the others. The
+    `start` helper derives each provider's token (`secret-<id>`) from the
+    config instead of taking a token list. No test sleeps; ordering waits on
+    frames, replies and `ListFunctions` state. The suite passed 30 runs in a
+    row, and disabling the re-queue or the cancel frame each fails a test.
+  - **Docs:** the binary is `wuphf-cli`, so the docs say
+    `cargo run -p wuphf-cli -- functions list`.
+  - Workspace: 147 tests passing (124 + 22 broker + 1 CLI), clippy clean.
+    Go bindings were regenerated with no change to existing files.
 
 ## Findings considered and rejected
 
