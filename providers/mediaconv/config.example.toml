@@ -1,0 +1,12 @@
+core_address = "127.0.0.1:50051"
+# Must match an [[functions.providers]] id in the core configuration, whose
+# `functions` list must allow "media.convert".
+provider_id = "mediaconv"
+# The token is read from this environment variable; the core reads the same
+# token from the variable named by its own token_env.
+token_env = "WUPHF_PROVIDER_MEDIACONV_TOKEN"
+# Log verbosity: trace, debug, info, warn, error (WUPHF_LOG_LEVEL overrides).
+log_level = "info"
+# max_concurrency = 0        # 0 = number of CPUs
+# default_deadline_ms = 0    # 0 = the core's default
+# reconnect_delay_ms = 2000

@@ -1,4 +1,4 @@
-package whatsappconnector
+package mediaconv
 
 import (
 	"bytes"
@@ -11,9 +11,9 @@ import (
 func TestTGSToAnimatedWebP(t *testing.T) {
 	t.Parallel()
 
-	out, err := tgsToAnimatedWebP(sampleTGS(t))
+	out, err := TGSToAnimatedWebP(sampleTGS(t))
 	if err != nil {
-		t.Fatalf("tgsToAnimatedWebP() error = %v", err)
+		t.Fatalf("TGSToAnimatedWebP() error = %v", err)
 	}
 	if !isAnimatedWebP(out) {
 		t.Fatalf("output is not an animated WebP (%d bytes)", len(out))
@@ -40,13 +40,4 @@ func sampleTGS(t *testing.T) []byte {
 		t.Fatal(err)
 	}
 	return buf.Bytes()
-}
-
-// isAnimatedWebP reports whether bytes are a RIFF/WEBP container carrying an ANIM
-// chunk, the marker of animation.
-func isAnimatedWebP(data []byte) bool {
-	if len(data) < 12 || !bytes.Equal(data[0:4], []byte("RIFF")) || !bytes.Equal(data[8:12], []byte("WEBP")) {
-		return false
-	}
-	return bytes.Contains(data, []byte("ANIM"))
 }
