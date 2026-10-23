@@ -66,7 +66,8 @@ where
 }
 
 /// Migration 0011 renames the JSON keys of every stored message, copy,
-/// dispatch, and observed message to the current model vocabulary.
+/// dispatch, and observed message to the current model vocabulary. The rows
+/// also pass through every later migration, so they must end in today's shape.
 #[tokio::test]
 async fn migration_0011_rewrites_stored_json_to_current_names() {
     let pool = database_before(11).await;
@@ -86,18 +87,7 @@ async fn migration_0011_rewrites_stored_json_to_current_names() {
     .execute(&pool)
     .await
     .unwrap();
-    for (dispatch, json) in sample_dispatches().iter().zip(LEGACY_DISPATCHES) {
-        sqlx::query(
-            "INSERT INTO dispatches (id, target_endpoint, message_id, waiting_for, state, payload)
-             VALUES (?, ?, NULL, NULL, 'pending', ?)",
-        )
-        .bind(dispatch.id.to_string())
-        .bind(endpoint_id().to_string())
-        .bind(json)
-        .execute(&pool)
-        .await
-        .unwrap();
-    }
+    insert_dispatches(&pool, &LEGACY_DISPATCHES).await;
     sqlx::query(
         "INSERT INTO observed_messages (connector_id, chat_id, platform_message_id, timestamp_ms, payload)
          VALUES ('whatsapp', 'wa-chat', 'wa-1', 1000, ?)",
@@ -119,16 +109,7 @@ async fn migration_0011_rewrites_stored_json_to_current_names() {
         &sample_copy(),
     )
     .await;
-    for expected in sample_dispatches() {
-        assert_stored(
-            &pool,
-            "dispatches",
-            "id",
-            &expected.id.to_string(),
-            &expected,
-        )
-        .await;
-    }
+    assert_dispatches(&pool).await;
     assert_stored(
         &pool,
         "observed_messages",
@@ -137,6 +118,50 @@ async fn migration_0011_rewrites_stored_json_to_current_names() {
         &sample_observed(),
     )
     .await;
+}
+
+/// Migration 0013 reshapes stored dispatches: the command's target fields move
+/// into `to`, the replica set id is hoisted onto the dispatch, a thread to
+/// create shrinks to its title, and delivery acks and seen receipts become one
+/// `Receipt` action.
+#[tokio::test]
+async fn migration_0013_reshapes_stored_dispatches() {
+    let pool = database_before(13).await;
+    insert_dispatches(&pool, &DISPATCHES_BEFORE_0013).await;
+
+    MIGRATOR.run(&pool).await.unwrap();
+
+    assert_dispatches(&pool).await;
+}
+
+/// Seed one `dispatches` row per sample, in the JSON shape given.
+async fn insert_dispatches(pool: &SqlitePool, payloads: &[&str]) {
+    for (dispatch, payload) in sample_dispatches().iter().zip(payloads) {
+        sqlx::query(
+            "INSERT INTO dispatches (id, target_endpoint, message_id, waiting_for, state, payload)
+             VALUES (?, ?, NULL, NULL, 'pending', ?)",
+        )
+        .bind(dispatch.id.to_string())
+        .bind(endpoint_id().to_string())
+        .bind(payload)
+        .execute(pool)
+        .await
+        .unwrap();
+    }
+}
+
+/// Every sample dispatch is stored exactly as today's model writes it.
+async fn assert_dispatches(pool: &SqlitePool) {
+    for expected in sample_dispatches() {
+        assert_stored(
+            pool,
+            "dispatches",
+            "id",
+            &expected.id.to_string(),
+            &expected,
+        )
+        .await;
+    }
 }
 
 /// Prints the JSON today's model writes for each sample. Run it to capture a new
@@ -341,3 +366,15 @@ const LEGACY_DISPATCHES: [&str; 7] = [
     r#"{"id":"00000000-0000-0000-0000-00000000006a","command":{"target_endpoint":"00000000-0000-0000-0000-000000000002","target_connector":"telegram","target":{"address":{"chat_id":"-100","thread_id":"7"},"provision_thread":null},"payload":{"SeenReceipt":{"message_id":"00000000-0000-0000-0000-000000000001","replica_set_id":"00000000-0000-0000-0000-000000000003","target_platform_message_id":"wa-1"}}},"state":"Pending"}"#,
 ];
 const LEGACY_OBSERVED: &str = r#"{"connector_id":"whatsapp","platform":"whats_app","chat_id":"wa-chat","thread_id":"thread","platform_message_id":"wa-1","sender":"15550001111@s.whatsapp.net","sender_name":"Alice","participant":"15550001111@s.whatsapp.net","text":"hello","attachments":[{"media_id":"00000000-0000-0000-0000-000000000004","kind":"image","file_name":"photo.jpg","mime_type":"image/jpeg","size_bytes":1234,"animated":false}],"reply_to_platform_message_id":"wa-0","direction":"incoming","timestamp_ms":1000,"deleted":true,"edited":true}"#;
+
+// Dispatch JSON as written before migration 0013, captured with
+// `print_current_json`.
+const DISPATCHES_BEFORE_0013: [&str; 7] = [
+    r#"{"id":"00000000-0000-0000-0000-000000000064","command":{"target_endpoint":"00000000-0000-0000-0000-000000000002","target_connector":"telegram","target":{"address":{"chat_id":"-100","thread_id":"7"},"create_thread":{"container":"-100","title":"Alice"}},"payload":{"Send":{"message":{"id":"00000000-0000-0000-0000-000000000001","replica_set_id":"00000000-0000-0000-0000-000000000003","author_id":"15550001111@s.whatsapp.net","participant":"15550001111@s.whatsapp.net","author_name":"Alice","text":"hello","attachments":[{"media_id":"00000000-0000-0000-0000-000000000004","kind":"image","file_name":"photo.jpg","mime_type":"image/jpeg","size_bytes":1234,"animated":false}],"reply_to":"00000000-0000-0000-0000-000000000005","timestamp_ms":1000,"deleted":false},"reply":{"message_id":"00000000-0000-0000-0000-000000000005","native_id":"tg-parent","author_id":"15550002222@s.whatsapp.net","participant":null,"text":"parent","attachments":[],"authored_by_bridge":true}}}},"state":{"Acknowledged":{"native_id":"tg-1"}}}"#,
+    r#"{"id":"00000000-0000-0000-0000-000000000065","command":{"target_endpoint":"00000000-0000-0000-0000-000000000002","target_connector":"telegram","target":{"address":{"chat_id":"-100","thread_id":"7"},"create_thread":null},"payload":{"Edit":{"message":{"id":"00000000-0000-0000-0000-000000000001","replica_set_id":"00000000-0000-0000-0000-000000000003","author_id":"15550001111@s.whatsapp.net","participant":"15550001111@s.whatsapp.net","author_name":"Alice","text":"hello","attachments":[{"media_id":"00000000-0000-0000-0000-000000000004","kind":"image","file_name":"photo.jpg","mime_type":"image/jpeg","size_bytes":1234,"animated":false}],"reply_to":"00000000-0000-0000-0000-000000000005","timestamp_ms":1000,"deleted":false},"native_id":"tg-1"}}},"state":"Pending"}"#,
+    r#"{"id":"00000000-0000-0000-0000-000000000066","command":{"target_endpoint":"00000000-0000-0000-0000-000000000002","target_connector":"telegram","target":{"address":{"chat_id":"-100","thread_id":"7"},"create_thread":null},"payload":{"Delete":{"message":{"id":"00000000-0000-0000-0000-000000000001","replica_set_id":"00000000-0000-0000-0000-000000000003","author_id":"15550001111@s.whatsapp.net","participant":"15550001111@s.whatsapp.net","author_name":"Alice","text":"hello","attachments":[{"media_id":"00000000-0000-0000-0000-000000000004","kind":"image","file_name":"photo.jpg","mime_type":"image/jpeg","size_bytes":1234,"animated":false}],"reply_to":"00000000-0000-0000-0000-000000000005","timestamp_ms":1000,"deleted":false},"native_id":"tg-1"}}},"state":"Pending"}"#,
+    r#"{"id":"00000000-0000-0000-0000-000000000067","command":{"target_endpoint":"00000000-0000-0000-0000-000000000002","target_connector":"telegram","target":{"address":{"chat_id":"-100","thread_id":"7"},"create_thread":null},"payload":{"RenameThread":{"replica_set_id":"00000000-0000-0000-0000-000000000003","title":"Alice (renamed)"}}},"state":"Pending"}"#,
+    r#"{"id":"00000000-0000-0000-0000-000000000068","command":{"target_endpoint":"00000000-0000-0000-0000-000000000002","target_connector":"telegram","target":{"address":{"chat_id":"-100","thread_id":"7"},"create_thread":null},"payload":{"React":{"message_id":"00000000-0000-0000-0000-000000000001","replica_set_id":"00000000-0000-0000-0000-000000000003","native_id":"tg-1","reactor":"15550002222@s.whatsapp.net","reactor_name":"Bob","emoji":"👍"}}},"state":"Pending"}"#,
+    r#"{"id":"00000000-0000-0000-0000-000000000069","command":{"target_endpoint":"00000000-0000-0000-0000-000000000002","target_connector":"telegram","target":{"address":{"chat_id":"-100","thread_id":"7"},"create_thread":null},"payload":{"DeliveryAck":{"message_id":"00000000-0000-0000-0000-000000000001","replica_set_id":"00000000-0000-0000-0000-000000000003","native_id":"wa-1"}}},"state":"Pending"}"#,
+    r#"{"id":"00000000-0000-0000-0000-00000000006a","command":{"target_endpoint":"00000000-0000-0000-0000-000000000002","target_connector":"telegram","target":{"address":{"chat_id":"-100","thread_id":"7"},"create_thread":null},"payload":{"SeenReceipt":{"message_id":"00000000-0000-0000-0000-000000000001","replica_set_id":"00000000-0000-0000-0000-000000000003","native_id":"wa-1"}}},"state":"Pending"}"#,
+];
