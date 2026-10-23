@@ -14,13 +14,19 @@ import (
 // every request, so a test can see what a send put on the wire.
 type recordingInvoker struct {
 	requests []bin.Encoder
+	sent     int
 }
 
 func (r *recordingInvoker) Invoke(_ context.Context, input bin.Encoder, output bin.Decoder) error {
 	r.requests = append(r.requests, input)
-	var response bin.Encoder = &tg.Updates{}
-	if _, ok := input.(*tg.UploadSaveFilePartRequest); ok {
+	var response bin.Encoder
+	switch input.(type) {
+	case *tg.UploadSaveFilePartRequest:
 		response = &tg.BoolTrue{}
+	default:
+		// Each sent message gets the next id, as Telegram would assign.
+		r.sent++
+		response = &tg.UpdateShortSentMessage{ID: r.sent}
 	}
 	var buffer bin.Buffer
 	if err := buffer.Encode(response); err != nil {
@@ -74,26 +80,24 @@ func TestBotLabelsStickerWithInlineButton(t *testing.T) {
 	}
 }
 
-func TestUserSessionLabelsStickerWithPrecedingMessage(t *testing.T) {
+func TestUserSessionLabelsStickerWithRepliedLabelMessage(t *testing.T) {
 	t.Parallel()
 	requests := sendLabelledSticker(t, false, "🗣️: me")
-	labelAt, stickerAt := -1, -1
-	for i, request := range requests {
-		switch request := request.(type) {
-		case *tg.MessagesSendMessageRequest:
-			if request.Message != "🗣️: me" {
-				t.Fatalf("label message = %q", request.Message)
-			}
-			labelAt = i
-		case *tg.MessagesSendMediaRequest:
-			if request.ReplyMarkup != nil {
-				t.Fatalf("a user session attached reply markup %#v", request.ReplyMarkup)
-			}
-			stickerAt = i
-		}
+	label, ok := requests[0].(*tg.MessagesSendMessageRequest)
+	if !ok {
+		t.Fatalf("first request = %T, want the label message", requests[0])
 	}
-	if labelAt < 0 || stickerAt < labelAt {
-		t.Fatalf("label at %d, sticker at %d: want the label sent first", labelAt, stickerAt)
+	if label.Message != "🗣️: me\n(Sticker)" {
+		t.Fatalf("label message = %q", label.Message)
+	}
+	sticker := sentMedia(t, requests)
+	if sticker.ReplyMarkup != nil {
+		t.Fatalf("a user session attached reply markup %#v", sticker.ReplyMarkup)
+	}
+	// The label message was the first message sent, so Telegram gave it id 1.
+	reply, ok := sticker.ReplyTo.(*tg.InputReplyToMessage)
+	if !ok || reply.ReplyToMsgID != 1 {
+		t.Fatalf("sticker reply-to = %#v, want the label message (id 1)", sticker.ReplyTo)
 	}
 }
 

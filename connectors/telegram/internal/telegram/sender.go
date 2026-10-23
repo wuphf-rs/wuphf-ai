@@ -533,8 +533,9 @@ func albumGroup(attachment *wuphfpb.Attachment) string {
 //
 // Telegram stickers take no caption, so the sender label a captioned message
 // carries in its text (see senderLabel) is attached another way: a bot session
-// shows it as an inline button under the sticker, and a user session, which
-// cannot send inline keyboards, posts it as a short message just before.
+// shows it as an inline button under the sticker. A user session, which cannot
+// send inline keyboards, posts it as a short message ("(Sticker)" on a second
+// line) and sends the sticker as a reply to it.
 func (s Sender) sendSticker(
 	ctx context.Context,
 	builder *message.Builder,
@@ -545,8 +546,19 @@ func (s Sender) sendSticker(
 	if label != "" {
 		if s.bot {
 			builder = builder.Markup(markup.InlineRow(markup.Callback(label, []byte(labelCallbackData))))
-		} else if _, err := builder.StyledText(ctx, styling.Bold(label)); err != nil {
-			return nil, fmt.Errorf("send Telegram sticker label: %w", err)
+		} else {
+			// The label message stands in for the caption: it names the sender
+			// and what follows, and the sticker replies to it so the two read as
+			// one message.
+			updates, err := builder.StyledText(ctx, styling.Bold(label), styling.Italic("\n(Sticker)"))
+			if err != nil {
+				return nil, fmt.Errorf("send Telegram sticker label: %w", err)
+			}
+			labelID, err := sentMessageID(updates)
+			if err != nil {
+				return nil, fmt.Errorf("send Telegram sticker label: %w", err)
+			}
+			builder = builder.Reply(labelID)
 		}
 	}
 	if attachment.GetAnimated() {
