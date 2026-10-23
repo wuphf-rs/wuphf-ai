@@ -14,8 +14,13 @@ pub struct ConnectorCapabilities {
     pub supports_topic_create: bool,
 }
 
-/// A terminal dispatch failure reported by a connector: `(dispatch, reason)`.
-pub type DispatchFailure = (DispatchId, String);
+/// A connector's report that a dispatch can never succeed, so the core should
+/// dead-letter it instead of redelivering on the next session.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DispatchFailed {
+    pub dispatch_id: DispatchId,
+    pub reason: String,
+}
 
 /// How badly a connector's own operation is affected, as the connector reports
 /// it. The core turns this into the wording the owner reads, so a connector
@@ -60,21 +65,26 @@ pub struct NoticeTarget {
     pub thread_id: Option<String>,
 }
 
-/// Ordered inbound work from one connector: a normalized event or an identity
-/// migration. Both travel one per-connector path so the connector's frame order
+/// Ordered inbound work from one connector: a normalized event, an identity
+/// migration or a health notice. All travel one per-connector path so the connector's frame order
 /// is preserved end to end. A migration that precedes a message is applied
 /// before that message is ingested, so the message cannot mint a fresh endpoint
 /// under an address the migration was meant to rebind.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum InboundWork {
     Event(Event),
+    /// The platform reported that a chat address changed (e.g. WhatsApp
+    /// phone-to-LID). Both addresses remain resolvable; the new one becomes
+    /// canonical for outbound sends.
     Migration {
         connector_id: ConnectorId,
         old: ChatAddress,
         new: ChatAddress,
     },
-    /// The connector reported on its own health. It shares the queue so a
-    /// notice lands in the order the connector raised it, after whatever it had
-    /// already reported.
+    /// The connector reported on its own health (e.g. its session was ended by
+    /// the platform), for the core to relay to the owner through the other
+    /// connectors. It shares the queue so a notice lands in the order the
+    /// connector raised it, after whatever it had already reported.
     Notice {
         connector_id: ConnectorId,
         kind: NoticeKind,
@@ -89,6 +99,17 @@ impl InboundWork {
             InboundWork::Event(event) => &event.source.connector_id,
             InboundWork::Migration { connector_id, .. } => connector_id,
             InboundWork::Notice { connector_id, .. } => connector_id,
+        }
+    }
+
+    /// Stamp the connector the session belongs to. The session, not the wire,
+    /// is the authority on which connector spoke, so a connector cannot present
+    /// itself as another.
+    pub fn set_connector(&mut self, id: ConnectorId) {
+        match self {
+            InboundWork::Event(event) => event.source.connector_id = id,
+            InboundWork::Migration { connector_id, .. }
+            | InboundWork::Notice { connector_id, .. } => *connector_id = id,
         }
     }
 }
@@ -107,30 +128,18 @@ pub struct Connector {
 /// A frame a connector sends up to the core.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ConnectorInput {
-    Event(Event),
+    /// An event, identity migration or health notice, applied in connector
+    /// order.
+    Work(Box<InboundWork>),
     Acknowledgement(DispatchAck),
-    /// The platform reported that a chat address changed (e.g. WhatsApp
-    /// phone-to-LID). Both addresses remain resolvable; the new one becomes
-    /// canonical for outbound sends.
-    IdentityMigrated {
-        connector_id: ConnectorId,
-        old: ChatAddress,
-        new: ChatAddress,
-    },
-    /// The connector reported a dispatch can never succeed, so the core should
-    /// dead-letter it instead of redelivering on the next session.
-    DispatchFailed {
-        dispatch_id: DispatchId,
-        reason: String,
-    },
-    /// The connector reported on its own health (e.g. its session was ended by
-    /// the platform), for the core to relay to the owner through the other
-    /// connectors.
-    OwnerNotice {
-        connector_id: ConnectorId,
-        kind: NoticeKind,
-        detail: String,
-    },
+    DispatchFailed(DispatchFailed),
+}
+
+impl ConnectorInput {
+    /// A normalized event, the most common frame a connector sends.
+    pub fn event(event: Event) -> Self {
+        Self::Work(Box::new(InboundWork::Event(event)))
+    }
 }
 
 /// A frame the core sends down to a connector.

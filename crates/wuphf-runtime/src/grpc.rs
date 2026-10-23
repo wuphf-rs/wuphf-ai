@@ -7,8 +7,9 @@ use tonic::{Request, Response, Status};
 use uuid::Uuid;
 use wuphf_model::{
     Action, Attachment, AttachmentKind, ChatAddress, Connector, ConnectorCapabilities, ConnectorId,
-    ConnectorInput, ConnectorOutput, DispatchAck, Event, EventKind, MediaId, NewMessage,
-    NoticeKind, Platform, ProvisionThread, ReceiptKind, ReplyContext, SourceAddress,
+    ConnectorInput, ConnectorOutput, DispatchAck, DispatchFailed, Event, EventKind, InboundWork,
+    MediaId, NewMessage, NoticeKind, Platform, ProvisionThread, ReceiptKind, ReplyContext,
+    SourceAddress,
 };
 use wuphf_proto::connector as pb;
 use wuphf_proto::connector::connector_transport_server::ConnectorTransport;
@@ -109,7 +110,7 @@ fn input_from_proto(
     connector_id: &ConnectorId,
 ) -> Result<ConnectorInput, WireError> {
     match frame.body {
-        Some(pb::client_frame::Body::MessageCreate(event)) => Ok(ConnectorInput::Event(Event {
+        Some(pb::client_frame::Body::MessageCreate(event)) => Ok(ConnectorInput::event(Event {
             source: SourceAddress {
                 connector_id: connector_id.clone(),
                 address: ChatAddress::new(
@@ -133,7 +134,7 @@ fn input_from_proto(
                 timestamp_ms: event.timestamp_ms,
             }),
         })),
-        Some(pb::client_frame::Body::MessageEdit(event)) => Ok(ConnectorInput::Event(Event {
+        Some(pb::client_frame::Body::MessageEdit(event)) => Ok(ConnectorInput::event(Event {
             source: SourceAddress {
                 connector_id: connector_id.clone(),
                 address: ChatAddress::new(
@@ -147,7 +148,7 @@ fn input_from_proto(
                 text: event.text,
             },
         })),
-        Some(pb::client_frame::Body::MessageDelete(event)) => Ok(ConnectorInput::Event(Event {
+        Some(pb::client_frame::Body::MessageDelete(event)) => Ok(ConnectorInput::event(Event {
             source: SourceAddress {
                 connector_id: connector_id.clone(),
                 address: ChatAddress::new(
@@ -174,7 +175,7 @@ fn input_from_proto(
             }))
         }
         Some(pb::client_frame::Body::IdentityMigrated(migration)) => {
-            Ok(ConnectorInput::IdentityMigrated {
+            Ok(ConnectorInput::Work(Box::new(InboundWork::Migration {
                 connector_id: connector_id.clone(),
                 old: ChatAddress::new(
                     required_string(migration.old_chat_id, "old_chat_id")?,
@@ -184,7 +185,7 @@ fn input_from_proto(
                     required_string(migration.new_chat_id, "new_chat_id")?,
                     migration.new_thread_id,
                 ),
-            })
+            })))
         }
         Some(pb::client_frame::Body::OwnerNotice(notice)) => {
             let kind = match pb::NoticeKind::try_from(notice.kind) {
@@ -197,26 +198,26 @@ fn input_from_proto(
                 // rather than dropped.
                 Ok(pb::NoticeKind::Unspecified) | Err(_) => NoticeKind::Degraded,
             };
-            Ok(ConnectorInput::OwnerNotice {
+            Ok(ConnectorInput::Work(Box::new(InboundWork::Notice {
                 connector_id: connector_id.clone(),
                 kind,
                 detail: notice.detail,
-            })
+            })))
         }
         Some(pb::client_frame::Body::DispatchFailed(failure)) => {
-            Ok(ConnectorInput::DispatchFailed {
+            Ok(ConnectorInput::DispatchFailed(DispatchFailed {
                 dispatch_id: wuphf_model::DispatchId(parse_uuid(
                     &failure.dispatch_id,
                     "dispatch_id",
                 )?),
                 reason: failure.reason,
-            })
+            }))
         }
         Some(pb::client_frame::Body::Registration(_)) => {
             Err(WireError("registration already completed".into()))
         }
         Some(pb::client_frame::Body::Reaction(event)) => {
-            Ok(ConnectorInput::Event(Event {
+            Ok(ConnectorInput::event(Event {
                 source: SourceAddress {
                     connector_id: connector_id.clone(),
                     address: ChatAddress::new(
@@ -245,7 +246,7 @@ fn input_from_proto(
                     return Err(WireError("receipt kind required".into()));
                 }
             };
-            Ok(ConnectorInput::Event(Event {
+            Ok(ConnectorInput::event(Event {
                 source: SourceAddress {
                     connector_id: connector_id.clone(),
                     address: ChatAddress::new(

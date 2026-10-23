@@ -8,7 +8,8 @@ use tonic::transport::Server;
 use wuphf_core::RoutingConfig;
 use wuphf_model::{
     Action, ChatAddress, ChatFilter, Connector, ConnectorCapabilities, ConnectorId, ConnectorInput,
-    ConnectorOutput, EventKind, IngestOutcome, NewMessage, Platform, Rule, RuleId, RuleKind,
+    ConnectorOutput, EventKind, IngestOutcome, NewMessage, NoticeKind, Platform, Rule, RuleId,
+    RuleKind,
 };
 use wuphf_proto::connector as pb;
 use wuphf_proto::connector::connector_transport_client::ConnectorTransportClient;
@@ -237,7 +238,10 @@ async fn failed_dispatch_is_dead_lettered_and_not_redelivered() {
 
     channels
         .failures
-        .send((dispatch.id, "invalid target".to_string()))
+        .send(DispatchFailed {
+            dispatch_id: dispatch.id,
+            reason: "invalid target".to_string(),
+        })
         .await
         .unwrap();
 
@@ -283,7 +287,7 @@ async fn only_the_assigned_session_may_fail_a_dispatch() {
 
     whatsapp
         .input
-        .send(ConnectorInput::Event(wa_event("wa-1", None)))
+        .send(ConnectorInput::event(wa_event("wa-1", None)))
         .await
         .unwrap();
     let ConnectorOutput::Dispatch(dispatch) = telegram.output.recv().await.unwrap() else {
@@ -293,10 +297,10 @@ async fn only_the_assigned_session_may_fail_a_dispatch() {
     // A session that was not assigned the dispatch cannot fail it.
     whatsapp
         .input
-        .send(ConnectorInput::DispatchFailed {
+        .send(ConnectorInput::DispatchFailed(DispatchFailed {
             dispatch_id: dispatch.id,
             reason: "not mine".into(),
-        })
+        }))
         .await
         .unwrap();
     assert!(matches!(
@@ -308,10 +312,10 @@ async fn only_the_assigned_session_may_fail_a_dispatch() {
     // fresh session after reconnect receives no redelivery.
     telegram
         .input
-        .send(ConnectorInput::DispatchFailed {
+        .send(ConnectorInput::DispatchFailed(DispatchFailed {
             dispatch_id: dispatch.id,
             reason: "cannot deliver".into(),
-        })
+        }))
         .await
         .unwrap();
     // Flush the ordered input pipeline: a follow-up input on the same session is
@@ -345,6 +349,56 @@ async fn only_the_assigned_session_may_fail_a_dispatch() {
 
     hub_task.abort();
     runtime_task.abort();
+}
+
+/// Whatever connector id a frame carries, the hub stamps the session's own on
+/// every work item (event, migration and notice), so a connector cannot speak
+/// for another.
+#[tokio::test]
+async fn hub_stamps_the_session_connector_on_all_work() {
+    let (inbound, mut inbound_rx) = mpsc::channel(8);
+    let (acknowledgements, _acknowledgements) = mpsc::channel(8);
+    let (failures, _failures) = mpsc::channel(8);
+    let (_dispatch_tx, dispatches) = mpsc::channel(8);
+    let channels = RuntimeChannels {
+        inbound,
+        acknowledgements,
+        failures,
+        dispatches,
+    };
+    let (hub, handle) = ConnectorHub::new(channels, registrations());
+    let hub_task = tokio::spawn(hub.run());
+    let whatsapp = handle.connect(registrations()[0].clone()).await.unwrap();
+
+    let impostor = ConnectorId(TG.into());
+    let mut event = wa_event("wa-1", None);
+    event.source.connector_id = impostor.clone();
+    let work = [
+        InboundWork::Event(event),
+        InboundWork::Migration {
+            connector_id: impostor.clone(),
+            old: ChatAddress::new("wa-chat", None),
+            new: ChatAddress::new("wa-chat-migrated", None),
+        },
+        InboundWork::Notice {
+            connector_id: impostor,
+            kind: NoticeKind::Degraded,
+            detail: "rate limited".into(),
+        },
+    ];
+    for item in work {
+        whatsapp
+            .input
+            .send(ConnectorInput::Work(Box::new(item)))
+            .await
+            .unwrap();
+    }
+    for _ in 0..3 {
+        let item = inbound_rx.recv().await.unwrap();
+        assert_eq!(item.connector_id(), &ConnectorId(WA.into()));
+    }
+
+    hub_task.abort();
 }
 
 #[tokio::test]
@@ -420,7 +474,7 @@ async fn connector_sessions_route_dispatches_and_authorize_inputs() {
 
     whatsapp
         .input
-        .send(ConnectorInput::Event(wa_event("wa-parent", None)))
+        .send(ConnectorInput::event(wa_event("wa-parent", None)))
         .await
         .unwrap();
     let ConnectorOutput::Dispatch(parent_dispatch) = telegram.output.recv().await.unwrap() else {
@@ -436,7 +490,7 @@ async fn connector_sessions_route_dispatches_and_authorize_inputs() {
     assert_eq!(redelivered_parent.id, parent_dispatch.id);
     whatsapp
         .input
-        .send(ConnectorInput::Event(wa_event(
+        .send(ConnectorInput::event(wa_event(
             "wa-reply",
             Some("wa-parent"),
         )))

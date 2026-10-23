@@ -6,7 +6,7 @@ use tokio::sync::mpsc;
 use tracing::{debug, info, warn};
 use wuphf_core::{Core, CoreError};
 use wuphf_model::{
-    ConnectorId, Dispatch, DispatchAck, DispatchFailure, Event, EventKind, InboundWork,
+    ConnectorId, Dispatch, DispatchAck, DispatchFailed, Event, EventKind, InboundWork,
     IngestOutcome, Platform, ReceiptKind,
 };
 use wuphf_storage::Storage;
@@ -26,7 +26,7 @@ pub struct Runtime<S> {
     observer: Arc<Observer<S>>,
     inbound_rx: mpsc::Receiver<InboundWork>,
     acknowledgement_rx: mpsc::Receiver<DispatchAck>,
-    failure_rx: mpsc::Receiver<DispatchFailure>,
+    failure_rx: mpsc::Receiver<DispatchFailed>,
     dispatch_tx: mpsc::Sender<Dispatch>,
     /// Per-connector ingest worker queue depth. Sized to the runtime capacity so
     /// a connector replaying an offline backlog buffers ahead without stalling
@@ -37,7 +37,7 @@ pub struct Runtime<S> {
 pub struct RuntimeChannels {
     pub inbound: mpsc::Sender<InboundWork>,
     pub acknowledgements: mpsc::Sender<DispatchAck>,
-    pub failures: mpsc::Sender<DispatchFailure>,
+    pub failures: mpsc::Sender<DispatchFailed>,
     pub dispatches: mpsc::Receiver<Dispatch>,
 }
 
@@ -172,7 +172,7 @@ where
                     }
                 }
                 failure = self.failure_rx.recv() => {
-                    if let Some((dispatch_id, reason)) = failure {
+                    if let Some(DispatchFailed { dispatch_id, reason }) = failure {
                         warn!(dispatch_id = %dispatch_id, reason, "dispatch failed permanently, dead-lettering");
                         self.observer.discard_outbound(dispatch_id);
                         for dispatch in self.core.fail_dispatch(dispatch_id, reason).await? {

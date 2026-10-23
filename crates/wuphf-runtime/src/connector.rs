@@ -2,7 +2,6 @@ use crate::RuntimeChannels;
 use std::collections::HashMap;
 use tokio::sync::{mpsc, oneshot};
 use tracing::{debug, info, warn};
-use wuphf_model::InboundWork;
 use wuphf_model::{Connector, ConnectorId, ConnectorInput, ConnectorOutput, Dispatch, DispatchId};
 
 pub struct ConnectorConnection {
@@ -161,11 +160,12 @@ impl ConnectorHub {
             return;
         }
         match input {
-            ConnectorInput::Event(mut event) => {
-                // The session is the authority on which connector spoke; stamp it
-                // so a connector cannot present itself as another.
-                event.source.connector_id = connector_id;
-                let _ = self.runtime.inbound.send(InboundWork::Event(event)).await;
+            ConnectorInput::Work(mut work) => {
+                // The session is the authority on which connector spoke. Work
+                // shares one ordered queue per connector, so a notice or
+                // migration lands after whatever the connector already reported.
+                work.set_connector(connector_id);
+                let _ = self.runtime.inbound.send(*work).await;
             }
             ConnectorInput::Acknowledgement(acknowledgement) => {
                 if self
@@ -183,42 +183,14 @@ impl ConnectorHub {
                     .await;
                 }
             }
-            ConnectorInput::OwnerNotice { kind, detail, .. } => {
-                // Onto the same ordered queue as this connector's events, so a
-                // notice lands after whatever it had already reported rather
-                // than overtaking it.
-                let _ = self
-                    .runtime
-                    .inbound
-                    .send(InboundWork::Notice {
-                        connector_id,
-                        kind,
-                        detail,
-                    })
-                    .await;
-            }
-            ConnectorInput::IdentityMigrated { old, new, .. } => {
-                let _ = self
-                    .runtime
-                    .inbound
-                    .send(InboundWork::Migration {
-                        connector_id,
-                        old,
-                        new,
-                    })
-                    .await;
-            }
-            ConnectorInput::DispatchFailed {
-                dispatch_id,
-                reason,
-            } => {
+            ConnectorInput::DispatchFailed(failure) => {
                 if self
                     .assigned
-                    .get(&dispatch_id)
+                    .get(&failure.dispatch_id)
                     .is_some_and(|(owner, _)| *owner == connector_id)
                 {
-                    self.assigned.remove(&dispatch_id);
-                    let _ = self.runtime.failures.send((dispatch_id, reason)).await;
+                    self.assigned.remove(&failure.dispatch_id);
+                    let _ = self.runtime.failures.send(failure).await;
                 } else {
                     self.reject(&connector_id, "dispatch failure is not assigned to session")
                         .await;
