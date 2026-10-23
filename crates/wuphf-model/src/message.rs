@@ -153,25 +153,6 @@ pub struct DedupKey {
     pub native_id: String,
 }
 
-/// Cached display-name fields for an author, used to label mirrored messages
-/// and newly provisioned threads.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct Contact {
-    pub id: String,
-    pub first_name: Option<String>,
-    pub full_name: Option<String>,
-    pub push_name: Option<String>,
-    pub business_name: Option<String>,
-}
-
-/// Per-endpoint chat options, e.g. a disappearing-message timer.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ChatSettings {
-    pub endpoint_id: EndpointId,
-    pub is_ephemeral: bool,
-    pub ephemeral_timer_seconds: Option<u64>,
-}
-
 /// A new message as normalized by a connector, before the core resolves it to an
 /// endpoint and group. Addresses are still native (`native_id`,
 /// `reply_to_native_id`).

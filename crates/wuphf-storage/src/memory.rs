@@ -7,10 +7,10 @@ use async_trait::async_trait;
 use std::collections::{HashMap, HashSet};
 use tokio::sync::RwLock;
 use wuphf_model::{
-    AddressLink, Alias, ChatAddress, ChatSettings, ConnectorId, Contact, Conversation,
-    ConversationId, DedupKey, Dispatch, DispatchCommand, DispatchId, DispatchState, Endpoint,
-    EndpointId, MediaBlob, MediaId, Message, MessageCopy, MessageId, ObservedChat,
-    ObservedDirection, ObservedMessage, ReplicaSet, ReplicaSetId, ThreadMapping,
+    AddressLink, Alias, ChatAddress, ConnectorId, Conversation, ConversationId, DedupKey, Dispatch,
+    DispatchCommand, DispatchId, DispatchState, Endpoint, EndpointId, MediaBlob, MediaId, Message,
+    MessageCopy, MessageId, ObservedChat, ObservedDirection, ObservedMessage, ReplicaSet,
+    ReplicaSetId, ThreadMapping,
 };
 
 #[derive(Default)]
@@ -34,8 +34,6 @@ struct State {
     copy_ids: HashMap<(EndpointId, String), MessageId>,
     sent_copies: HashSet<(EndpointId, String)>,
     seen_events: HashSet<DedupKey>,
-    contacts: HashMap<String, Contact>,
-    chat_settings: HashMap<EndpointId, ChatSettings>,
     media: HashMap<MediaId, StoredMedia>,
     dispatches: HashMap<DispatchId, Dispatch>,
     /// Provisioning stash, keyed by replica set, insertion-ordered. Mirrors the
@@ -349,24 +347,6 @@ impl Storage for InMemoryStorage {
                         .contains(&(copy.endpoint_id, copy.native_id.clone()))
             })
             .map(|(_, copy)| copy.clone()))
-    }
-
-    async fn put_contact(&self, contact: Contact) -> StorageResult<()> {
-        self.state
-            .write()
-            .await
-            .contacts
-            .insert(contact.id.clone(), contact);
-        Ok(())
-    }
-
-    async fn put_chat_settings(&self, settings: ChatSettings) -> StorageResult<()> {
-        self.state
-            .write()
-            .await
-            .chat_settings
-            .insert(settings.endpoint_id, settings);
-        Ok(())
     }
 
     async fn put_media(&self, media: MediaBlob, stored_at_ms: i64) -> StorageResult<()> {

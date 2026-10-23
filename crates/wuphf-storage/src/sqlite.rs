@@ -9,10 +9,10 @@ use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
 use sqlx::{Row, SqlitePool};
 use std::str::FromStr;
 use wuphf_model::{
-    AddressLink, Alias, ChatAddress, ChatSettings, ConnectorId, Contact, Conversation,
-    ConversationId, DedupKey, Dispatch, DispatchCommand, DispatchId, DispatchState, Endpoint,
-    EndpointId, MediaBlob, MediaId, Message, MessageCopy, MessageId, ObservedChat,
-    ObservedDirection, ObservedMessage, ReplicaSet, ReplicaSetId, ThreadMapping,
+    AddressLink, Alias, ChatAddress, ConnectorId, Conversation, ConversationId, DedupKey, Dispatch,
+    DispatchCommand, DispatchId, DispatchState, Endpoint, EndpointId, MediaBlob, MediaId, Message,
+    MessageCopy, MessageId, ObservedChat, ObservedDirection, ObservedMessage, ReplicaSet,
+    ReplicaSetId, ThreadMapping,
 };
 
 /// The schema migrations, embedded at build time. Shared with the migration
@@ -419,21 +419,6 @@ impl Storage for SqliteStorage {
         row.map(|row| serde_json::from_str(row.get("payload")))
             .transpose()
             .map_err(Into::into)
-    }
-
-    async fn put_contact(&self, contact: Contact) -> StorageResult<()> {
-        upsert_json(&self.pool, "contacts", "id", contact.id.clone(), &contact).await
-    }
-
-    async fn put_chat_settings(&self, settings: ChatSettings) -> StorageResult<()> {
-        upsert_json(
-            &self.pool,
-            "chat_settings",
-            "endpoint_id",
-            settings.endpoint_id.to_string(),
-            &settings,
-        )
-        .await
     }
 
     async fn put_media(&self, media: MediaBlob, stored_at_ms: i64) -> StorageResult<()> {

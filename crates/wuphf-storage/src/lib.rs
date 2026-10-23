@@ -12,10 +12,9 @@ pub use sqlite::SqliteStorage;
 use async_trait::async_trait;
 use thiserror::Error;
 use wuphf_model::{
-    AddressLink, Alias, ChatAddress, ChatSettings, ConnectorId, Contact, Conversation,
-    ConversationId, DedupKey, Dispatch, DispatchCommand, DispatchId, Endpoint, EndpointId,
-    MediaBlob, MediaId, Message, MessageCopy, MessageId, ObservedChat, ObservedMessage, ReplicaSet,
-    ReplicaSetId, ThreadMapping,
+    AddressLink, Alias, ChatAddress, ConnectorId, Conversation, ConversationId, DedupKey, Dispatch,
+    DispatchCommand, DispatchId, Endpoint, EndpointId, MediaBlob, MediaId, Message, MessageCopy,
+    MessageId, ObservedChat, ObservedMessage, ReplicaSet, ReplicaSetId, ThreadMapping,
 };
 
 #[derive(Debug, Error)]
@@ -130,8 +129,6 @@ pub trait Storage: Send + Sync + 'static {
     /// The copy of a message at the endpoint it was received on (its origin), if
     /// recorded. Used to target the origin with delivery acks and seen receipts.
     async fn received_copy(&self, message_id: MessageId) -> StorageResult<Option<MessageCopy>>;
-    async fn put_contact(&self, contact: Contact) -> StorageResult<()>;
-    async fn put_chat_settings(&self, settings: ChatSettings) -> StorageResult<()>;
     async fn put_media(&self, media: MediaBlob, stored_at_ms: i64) -> StorageResult<()>;
     async fn media(&self, media_id: MediaId) -> StorageResult<Option<MediaBlob>>;
     async fn prune_unreferenced_media_before(&self, cutoff_ms: i64) -> StorageResult<u64>;
