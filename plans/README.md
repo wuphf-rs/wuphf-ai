@@ -50,7 +50,7 @@ code).
 | 030 | Collapse the dispatch types into one `Dispatch` | P2 | M–L | 019, 026–029 | DONE (migration 0013, no legacy decoder) |
 | 031 | Merge ReplicaSet and ThreadMapping into Conversation | P2 | M–L | 030 | DONE (migration 0014) |
 | 032 | Add a remote function broker to the core (`wuphf-functions`) | P2 | L | — | DONE (see notes) |
-| 033 | Move sticker conversion into a `media.convert` provider | P2 | M–L | 032 | TODO |
+| 033 | Move sticker conversion into a `media.convert` provider | P2 | M–L | 032 | DONE (see notes) |
 
 Status values: TODO | IN PROGRESS | DONE | BLOCKED (with one-line reason) |
 REJECTED (with one-line rationale).
@@ -322,6 +322,35 @@ configurable timeouts and limits.
     `cargo run -p wuphf-cli -- functions list`.
   - Workspace: 147 tests passing (124 + 22 broker + 1 CLI), clippy clean.
     Go bindings were regenerated with no change to existing files.
+- **033 done 2026-10-23** (`advisor/033-mediaconv-provider`). The SDK is in
+  `connectors/shared/functions`, and the provider is in `providers/mediaconv`.
+  Both connectors call `media.convert@1`, and `connectors/mediaconv` is gone.
+  WhatsApp no longer depends on `tgsconverter` or rlottie; only the provider
+  needs cgo for stickers. The moved conversion files are git renames with
+  their logic unchanged. Deviations:
+  - **Handler order:** the handler picks the conversion before downloading,
+    so an unsupported pair fails without fetching the media.
+  - **Telegram source types:** only a WebP source (by MIME type or file
+    extension) goes to `AnimatedWebPToWebM`; any other non-WebM source is
+    `UNSUPPORTED` and falls back to a static sticker. Before, it went to the
+    WebP decoder and failed there, with the same fallback.
+  - **Placement:** `StickerConverter` is declared in each connector's
+    `sender.go`, because Telegram's `MediaBroker` lives in `media.go`, which
+    is out of scope. The new connector keys sit before the first TOML table in
+    each `config.example.toml`, so uncommenting them keeps them top-level.
+  - **Provider config:** helpers `Concurrency()`, `DefaultDeadline()` and
+    `ReconnectDelay()` apply the defaults, and the example sets `log_level`.
+    `go mod tidy` chose go-toml v2.4.3; the connectors pin v2.2.4.
+  - **SDK shutdown:** when a session ends, `Serve` cancels the running
+    handlers but does not wait for them; their late results are dropped.
+  - **Smoke test:** besides `functions list`, it uploaded a WebM, converted it
+    through the core and checked that the downloaded result is an animated
+    WebP.
+  - **Not done (follow-up):** the dev-session scripts (`scripts/`) do not
+    launch the provider.
+  - Go: shared, mediaconv, telegram, whatsapp and instagram build, vet and
+    test green (the conversion tests ran, none skipped). Rust: 147 tests,
+    unchanged.
 
 ## Findings considered and rejected
 
