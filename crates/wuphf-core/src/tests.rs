@@ -526,11 +526,16 @@ async fn blocks_reply_dispatch_until_target_parent_copy_exists() {
         ))
         .await
         .unwrap();
-    let IngestOutcome::Routed { routing, .. } = reply else {
+    let IngestOutcome::Routed {
+        dispatches,
+        blocked,
+        ..
+    } = reply
+    else {
         panic!("reply should be stored while delivery is blocked");
     };
-    assert!(routing.dispatches.is_empty());
-    assert_eq!(routing.blocked.len(), 1);
+    assert!(dispatches.is_empty());
+    assert_eq!(blocked, 1);
 }
 
 #[tokio::test]
@@ -729,7 +734,7 @@ async fn edit_before_delivery_blocks_then_releases_with_native_id() {
         .await
         .unwrap();
     let IngestOutcome::Routed {
-        routing,
+        blocked,
         dispatches,
         ..
     } = edited
@@ -737,7 +742,7 @@ async fn edit_before_delivery_blocks_then_releases_with_native_id() {
         panic!("edit should be stored while delivery is blocked");
     };
     assert!(dispatches.is_empty());
-    assert_eq!(routing.blocked.len(), 1);
+    assert_eq!(blocked, 1);
 
     let released = core
         .acknowledge_dispatch(DispatchAck {
@@ -865,7 +870,7 @@ async fn reaction_before_delivery_blocks_then_releases_with_native_id() {
         .await
         .unwrap();
     let IngestOutcome::Routed {
-        routing,
+        blocked,
         dispatches,
         ..
     } = reacted
@@ -873,7 +878,7 @@ async fn reaction_before_delivery_blocks_then_releases_with_native_id() {
         panic!("reaction should be stored while delivery is blocked");
     };
     assert!(dispatches.is_empty());
-    assert_eq!(routing.blocked.len(), 1);
+    assert_eq!(blocked, 1);
 
     let released = core
         .acknowledge_dispatch(DispatchAck {

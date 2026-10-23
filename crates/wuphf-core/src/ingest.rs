@@ -108,8 +108,8 @@ where
             }
             return Ok(IngestOutcome::Routed {
                 message_id: message.id,
-                routing: RoutingOutcome::default(),
                 dispatches: replayed,
+                blocked: 0,
             });
         }
 
@@ -122,7 +122,7 @@ where
         );
         Ok(IngestOutcome::Routed {
             message_id: message.id,
-            routing,
+            blocked: routing.blocked.len(),
             dispatches,
         })
     }
@@ -280,7 +280,7 @@ where
         let dispatches = self.enqueue_outcome(&routing).await?;
         Ok(IngestOutcome::Routed {
             message_id,
-            routing,
+            blocked: routing.blocked.len(),
             dispatches,
         })
     }
@@ -314,7 +314,7 @@ where
         let dispatches = self.enqueue_outcome(&routing).await?;
         Ok(IngestOutcome::Routed {
             message_id,
-            routing,
+            blocked: routing.blocked.len(),
             dispatches,
         })
     }
@@ -351,7 +351,7 @@ where
         let dispatches = self.enqueue_outcome(&routing).await?;
         Ok(IngestOutcome::Routed {
             message_id,
-            routing,
+            blocked: routing.blocked.len(),
             dispatches,
         })
     }
@@ -395,7 +395,7 @@ where
         let dispatches = self.enqueue_outcome(&routing).await?;
         Ok(IngestOutcome::Routed {
             message_id,
-            routing,
+            blocked: routing.blocked.len(),
             dispatches,
         })
     }

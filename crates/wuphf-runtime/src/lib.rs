@@ -322,13 +322,14 @@ where
         IngestOutcome::Routed {
             message_id,
             dispatches,
-            ..
+            blocked,
         } => debug!(
             connector,
             chat,
             kind,
             message_id = %message_id,
             dispatches = dispatches.len(),
+            blocked,
             "event routed",
         ),
         IngestOutcome::Deferred { message_id } => debug!(

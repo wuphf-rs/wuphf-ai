@@ -188,8 +188,11 @@ pub struct BlockedDispatch {
 pub enum IngestOutcome {
     Routed {
         message_id: MessageId,
-        routing: RoutingOutcome,
         dispatches: Vec<Dispatch>,
+        /// How many dispatches were parked until another message is delivered
+        /// first. They are not in `dispatches`; they are released when their
+        /// parent is acknowledged.
+        blocked: usize,
     },
     /// Held because the conversation's mirror thread is still being
     /// provisioned; the message is replayed once the thread exists.
