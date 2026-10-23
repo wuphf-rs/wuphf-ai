@@ -5,16 +5,19 @@ use wuphf_model::{
     ConnectorId, DispatchId, EndpointId, Event, EventKind, IgnoreReason, IngestOutcome, MediaId,
     MessageId, NoticeKind, Platform, ReplicaSetId,
 };
-use wuphf_router::{Router, RouterError};
 use wuphf_storage::{Storage, StorageError};
 
-pub use wuphf_router::RoutingConfig;
-
 mod acknowledge;
+mod config;
 mod ingest;
 mod notify;
 mod resolve;
+mod router;
 mod send;
+
+pub use config::{MatchedRule, RoutingConfig};
+use router::Router;
+pub use router::RouterError;
 
 pub struct Core<S> {
     storage: Arc<S>,

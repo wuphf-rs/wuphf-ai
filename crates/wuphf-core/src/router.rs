@@ -3,12 +3,50 @@
 //! provisioning and blocking dispatches whose reply parent or target copy does
 //! not yet exist.
 
-use crate::{Router, RouterError, is_mirror_side};
+use crate::config::RoutingConfig;
+use std::sync::Arc;
+use thiserror::Error;
 use wuphf_model::{
     Action, BlockedDispatch, ChatAddress, ConnectorId, Conversation, DispatchCommand, Endpoint,
-    EndpointId, Message, ProvisionThread, ReceiptKind, ReplyContext, RoutingOutcome, TargetAddress,
+    EndpointId, Message, MessageId, ProvisionThread, ReceiptKind, ReplyContext, RoutingOutcome,
+    Rule, RuleKind, TargetAddress,
 };
-use wuphf_storage::Storage;
+use wuphf_storage::{Storage, StorageError};
+
+pub(crate) struct Router<S> {
+    storage: Arc<S>,
+    config: Arc<RoutingConfig>,
+}
+
+impl<S> Router<S>
+where
+    S: Storage,
+{
+    pub fn new(storage: Arc<S>, config: Arc<RoutingConfig>) -> Self {
+        Self { storage, config }
+    }
+}
+
+fn is_mirror_side(rule: &Rule, connector: &ConnectorId, container: &str) -> bool {
+    match &rule.flow {
+        RuleKind::OneToOne { .. } => false,
+        RuleKind::ManyToOne {
+            destination_connector,
+            destination_chat,
+            ..
+        } => destination_connector == connector && destination_chat.chat_id == container,
+    }
+}
+
+#[derive(Debug, Error)]
+pub enum RouterError {
+    #[error(transparent)]
+    Storage(#[from] StorageError),
+    #[error("origin endpoint {0} is not a member of the replica set")]
+    OriginOutsideReplicaSet(EndpointId),
+    #[error("reply parent message {0} is not stored")]
+    MessageNotFound(MessageId),
+}
 
 impl<S> Router<S>
 where

@@ -44,8 +44,7 @@ crates/
   wuphf-model/     Shared domain types (ids, routing, connector, message, dispatch)
   wuphf-proto/     Canonical protobuf contract and Tonic bindings
   wuphf-storage/   Storage trait, in-memory + SQLite backends
-  wuphf-router/    Rule evaluation and target resolution
-  wuphf-core/      Identity orchestration and event ingestion
+  wuphf-core/      Identity, rule matching, fan-out, and event ingestion
   wuphf-runtime/   Tokio event bus, dispatch pipeline, media broker, gRPC
   wuphf-cli/       Server executable
   wuphf-tui/       Observer TUI (read-only view of the observation log)

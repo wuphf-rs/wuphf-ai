@@ -7,7 +7,6 @@ license.workspace = true
 [dependencies]
 thiserror.workspace = true
 wuphf-model.workspace = true
-wuphf-router.workspace = true
 wuphf-storage.workspace = true
 
 [dev-dependencies]

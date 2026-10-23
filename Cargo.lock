@@ -3051,7 +3051,6 @@ dependencies = [
  "thiserror",
  "tokio",
  "wuphf-model",
- "wuphf-router",
  "wuphf-storage",
 ]
 
@@ -3071,15 +3070,6 @@ dependencies = [
  "prost",
  "tonic",
  "tonic-build",
-]
-
-[[package]]
-name = "wuphf-router"
-version = "0.1.0"
-dependencies = [
- "thiserror",
- "wuphf-model",
- "wuphf-storage",
 ]
 
 [[package]]

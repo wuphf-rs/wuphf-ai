@@ -291,8 +291,7 @@ container = <span class="str">"telegram:channel:2060340733"</span></div>
       <tbody>
         <tr><td class="k">wuphf-model</td><td>Shared domain types — <span class="mono">ids · routing · connector · message · dispatch</span>.</td></tr>
         <tr><td class="k">wuphf-storage</td><td>The <code>Storage</code> trait plus two backends: <span class="mono">memory</span> (tests) and <span class="mono">sqlite</span> (durable).</td></tr>
-        <tr><td class="k">wuphf-router</td><td>Evaluates rules; resolves or lazily provisions endpoints/threads; computes targets and per-target delivery policy.</td></tr>
-        <tr><td class="k">wuphf-core</td><td>Owns logical identity, dedup, echo suppression, reply resolution, and identity migration.</td></tr>
+        <tr><td class="k">wuphf-core</td><td>Owns logical identity, dedup, echo suppression, reply resolution, and identity migration. Evaluates rules and computes dispatch targets.</td></tr>
         <tr><td class="k">wuphf-runtime</td><td>Event bus, dispatch pipeline, connector session hub, bounded media broker, gRPC adapter.</td></tr>
         <tr><td class="k">wuphf-proto</td><td>Canonical protobuf contract and Tonic bindings.</td></tr>
         <tr><td class="k">wuphf-cli</td><td>Loads TOML config, wires it together, serves gRPC.</td></tr>

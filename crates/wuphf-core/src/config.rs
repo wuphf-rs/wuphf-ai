@@ -1,13 +1,7 @@
-use std::collections::HashMap;
-use std::sync::Arc;
-use thiserror::Error;
-use wuphf_model::{
-    AddressSet, ChatRef, Connector, ConnectorId, EndpointId, MessageId, Rule, RuleEnd, RuleId,
-    RuleKind,
-};
-use wuphf_storage::{Storage, StorageError};
+//! The rule set, connector list and owner-notice targets the core routes by.
 
-mod routing;
+use std::collections::HashMap;
+use wuphf_model::{AddressSet, ChatRef, Connector, ConnectorId, Rule, RuleEnd, RuleId};
 
 /// The rule set plus connector metadata that drives address resolution and
 /// thread provisioning. Shared by the core and the router.
@@ -83,39 +77,4 @@ impl RoutingConfig {
         }
         None
     }
-}
-
-pub struct Router<S> {
-    storage: Arc<S>,
-    config: Arc<RoutingConfig>,
-}
-
-impl<S> Router<S>
-where
-    S: Storage,
-{
-    pub fn new(storage: Arc<S>, config: Arc<RoutingConfig>) -> Self {
-        Self { storage, config }
-    }
-}
-
-fn is_mirror_side(rule: &Rule, connector: &ConnectorId, container: &str) -> bool {
-    match &rule.flow {
-        RuleKind::OneToOne { .. } => false,
-        RuleKind::ManyToOne {
-            destination_connector,
-            destination_chat,
-            ..
-        } => destination_connector == connector && destination_chat.chat_id == container,
-    }
-}
-
-#[derive(Debug, Error)]
-pub enum RouterError {
-    #[error(transparent)]
-    Storage(#[from] StorageError),
-    #[error("origin endpoint {0} is not a member of the replica set")]
-    OriginOutsideReplicaSet(EndpointId),
-    #[error("reply parent message {0} is not stored")]
-    MessageNotFound(MessageId),
 }

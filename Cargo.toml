@@ -3,7 +3,6 @@ members = [
   "crates/wuphf-model",
   "crates/wuphf-proto",
   "crates/wuphf-storage",
-  "crates/wuphf-router",
   "crates/wuphf-core",
   "crates/wuphf-runtime",
   "crates/wuphf-cli",
@@ -46,6 +45,5 @@ wuphf-connector = { path = "crates/wuphf-connector" }
 wuphf-core = { path = "crates/wuphf-core" }
 wuphf-model = { path = "crates/wuphf-model" }
 wuphf-proto = { path = "crates/wuphf-proto" }
-wuphf-router = { path = "crates/wuphf-router" }
 wuphf-runtime = { path = "crates/wuphf-runtime" }
 wuphf-storage = { path = "crates/wuphf-storage" }
