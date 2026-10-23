@@ -97,3 +97,24 @@ kind = "many-to-one"
 source_connector = "instagram-main"
 destination_connector = "telegram-main"
 destination_chat = { chat_id = "telegram:channel:2060340733" }
+
+# Remote functions (see docs/connector-protocol.md, "Remote functions").
+# Providers dial the core and serve named functions; connectors call them.
+# A call to a name no provider below may serve fails at once; a call to a
+# servable name waits for a provider until its deadline.
+# [functions]
+# default_deadline_ms = 30000
+# max_deadline_ms = 60000
+# keepalive_interval_ms = 10000
+# keepalive_timeout_ms = 20000
+# max_body_bytes = 1048576
+# max_queued_calls = 256
+# invoke_token_env = "WUPHF_INVOKE_TOKEN"
+#
+# [[functions.providers]]
+# id = "mediaconv"
+# token_env = "WUPHF_PROVIDER_MEDIACONV_TOKEN"
+# functions = ["media.convert"]
+#
+# [functions.overrides."media.convert"]
+# default_deadline_ms = 20000

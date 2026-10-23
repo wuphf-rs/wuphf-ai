@@ -3020,6 +3020,7 @@ dependencies = [
  "tracing-subscriber",
  "uuid",
  "wuphf-core",
+ "wuphf-functions",
  "wuphf-model",
  "wuphf-proto",
  "wuphf-runtime",
