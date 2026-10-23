@@ -44,7 +44,7 @@ code).
 | 024 | SPIKE: real-time WhatsApp↔Telegram call forwarding | P3 | M (impl XL) | — | TODO |
 | 025 | Rust WhatsApp connector on whatsapp-rust | P2 | L | — | DONE |
 | 026 | Rename the wuphf-model types to plain names (type names only) | P2 | M | 019 (soft) | DONE |
-| 027 | Rename model fields and variants, keeping old stored JSON readable | P2 | M | 026 | TODO |
+| 027 | Rename model fields and variants, keeping old stored JSON readable | P2 | M | 026 | DONE (migration 0011, not serde aliases) |
 | 028 | Delete dead and duplicate model types | P2 | M | 026, 027 | TODO |
 | 029 | Fold the wuphf-router crate into wuphf-core | P3 | S | 028 (soft) | TODO |
 | 030 | Collapse the dispatch types into one `Dispatch` | P2 | M–L | 019, 026–029 | TODO |
@@ -152,6 +152,30 @@ Rust) by the owner's decision.
   helpers. Test string literals such as `"wa-raw-1"` were kept. The
   `cargo fmt` reflow from the shorter names landed in the Step 4 commit.
   Workspace: 113 tests passing, clippy clean.
+- **027 done 2026-10-23** (`advisor/027-model-field-renames`). **Owner
+  decision: stored JSON renames use a data migration, not serde aliases.**
+  The model carries no `#[serde(alias)]` attributes. Instead,
+  `migrations/0011_model_field_renames.sql` rewrites the JSON keys in
+  `messages`, `message_copies`, `dispatches` and `observed_messages`, using
+  the anchored `replace()` pattern from 0006. SQL column names are unchanged.
+  The fixture test moved from the planned `wuphf-model/src/legacy_json_tests.rs`
+  to `wuphf-storage/src/migration_tests.rs`. It migrates a database up to 0010,
+  seeds the pre-rename JSON, runs the remaining migrations, and asserts each
+  payload is byte-identical to what today's model writes. Its
+  `database_before(version)` helper is meant for future data migrations. Steps
+  2–4 landed as one commit, because renaming stored and non-stored types
+  together needed only one pass over the callers. Shorthand bindings kept
+  their old local names where renaming them would shadow (for example
+  `reply: reply_context`), and storage-trait parameters still say
+  `platform_message_id`, as the plan's deferred follow-up allows.
+  Workspace: 114 tests passing, clippy clean.
+  - **Knock-on for 028–031:** `0011` is taken, so 028's migration becomes
+    `0012` and 031's becomes `0013`. Plans 030 and 031 still describe
+    `#[serde(alias)]` attributes and a legacy decoder for 027's names. Those
+    names no longer exist in stored rows after 0011, so drop that part. Follow
+    the owner's decision above for any new stored renames (030's dispatch
+    shape and 031's `replica_set_id` → `conversation_id`): write a migration
+    plus a `migration_tests.rs` case, not aliases.
 - **021 must be re-planned after 031.** 028 performs 021's deletion of
   `put_contact`/`put_chat_settings`, and 031 replaces seven of the trait
   methods 021 groups into role traits.
