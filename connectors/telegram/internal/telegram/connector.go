@@ -57,6 +57,16 @@ func (c Connector) Run(ctx context.Context) error {
 	peers := NewPeerCache()
 	inputs := make(chan *wuphfpb.ClientFrame, 128)
 	dispatcher := NewNormalizer(peers, inputs, codec).Dispatcher()
+	// A bot labels stickers with an inline button (see sendSticker). Pressing it
+	// does nothing, but an unanswered press leaves the client spinning, so it is
+	// answered at once with no notification.
+	dispatcher.OnBotCallbackQuery(func(ctx context.Context, _ tg.Entities, update *tg.UpdateBotCallbackQuery) error {
+		if string(update.Data) != labelCallbackData {
+			return nil
+		}
+		_, err := client.API().MessagesSetBotCallbackAnswer(ctx, &tg.MessagesSetBotCallbackAnswerRequest{QueryID: update.QueryID})
+		return err
+	})
 	client = gotd.NewClient(c.credentials.AppID, c.credentials.AppHash, gotd.Options{
 		SessionStorage: &session.FileStorage{Path: c.cfg.SessionFile},
 		UpdateHandler:  dispatcher,
@@ -75,7 +85,7 @@ func (c Connector) Run(ctx context.Context) error {
 			return err
 		}
 		c.logger.Info().Msg("Telegram session connected")
-		sender := NewSender(client.API(), peers, media, converter, c.cfg.Rendering)
+		sender := NewSender(client.API(), peers, media, converter, c.cfg.Rendering, c.credentials.BotToken != "")
 		return coreclient.New(coreclient.Options{
 			CoreAddress:         c.cfg.CoreAddress,
 			ConnectorID:         c.cfg.ConnectorID,

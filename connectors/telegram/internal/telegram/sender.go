@@ -14,6 +14,7 @@ import (
 	"github.com/akshettrj/wuphf/connectors/telegram/internal/config"
 	"github.com/akshettrj/wuphf/proto/go/connector/v1"
 	"github.com/gotd/td/telegram/message"
+	"github.com/gotd/td/telegram/message/markup"
 	"github.com/gotd/td/telegram/message/styling"
 	"github.com/gotd/td/tg"
 )
@@ -30,18 +31,22 @@ type Sender struct {
 	peers     *PeerCache
 	media     MediaBroker
 	converter StickerConverter
+	// bot is set for a bot session, which can attach inline keyboards; a user
+	// session cannot.
+	bot bool
 	// rendering is this connector's own policy for how mirrored copies are
 	// rendered; the core dispatches content only.
 	rendering config.RenderingOptions
 }
 
-func NewSender(api *tg.Client, peers *PeerCache, media MediaBroker, converter StickerConverter, rendering config.RenderingOptions) Sender {
+func NewSender(api *tg.Client, peers *PeerCache, media MediaBroker, converter StickerConverter, rendering config.RenderingOptions, bot bool) Sender {
 	return Sender{
 		api:       api,
 		sender:    message.NewSender(api),
 		peers:     peers,
 		media:     media,
 		converter: converter,
+		bot:       bot,
 		rendering: rendering,
 	}
 }
@@ -90,7 +95,7 @@ func (s Sender) SendMessage(ctx context.Context, dispatch *wuphfpb.MessageCreate
 	case len(dispatch.Attachments) > 1:
 		updates, err = s.sendAlbum(ctx, builder, dispatch.Attachments, body, s.rendering.AttachmentsAsFiles)
 	case len(dispatch.Attachments) > 0:
-		updates, err = s.sendAttachment(ctx, builder, dispatch.Attachments[0], body, s.rendering.AttachmentsAsFiles)
+		updates, err = s.sendAttachment(ctx, builder, dispatch.Attachments[0], body, senderLabel(dispatch.GetSenderName(), dispatch.GetParticipant()), s.rendering.AttachmentsAsFiles)
 	case textExceedsLimit(dispatch.GetText(), s.rendering.MaxMessageLength):
 		updates, err = s.sendTextAsFile(ctx, builder, dispatch.GetSenderName(), dispatch.GetParticipant(), dispatch.GetText())
 	default:
@@ -257,23 +262,36 @@ func (s Sender) RetitleThread(ctx context.Context, dispatch *wuphfpb.MessageReti
 	return dispatch.TargetThreadId, nil
 }
 
+// labelCallbackData marks the inline button that carries a sticker's sender
+// label. The button only displays the label; pressing it does nothing.
+const labelCallbackData = "wuphf:label"
+
+// senderLabel is the attribution header a mirrored message carries ("🗣️: name"),
+// or empty when the dispatch has no participant (an unlabelled direct chat). The
+// name falls back to the raw participant id when the source supplied none.
+func senderLabel(senderName, participant string) string {
+	if participant == "" {
+		return ""
+	}
+	if senderName == "" {
+		senderName = participant
+	}
+	return "🗣️: " + senderName
+}
+
 // attributedText renders a dispatch body for Telegram, prefixing a bold sender
 // header ("🗣️: name") on its own line for group messages so the mirror shows who
 // authored each message. Attribution is added only when a participant is present
 // (a group context); direct chats are left unlabelled. The name falls back to
 // the raw participant id when the source supplied no display name.
 func attributedText(senderName, participant, text string) []message.StyledTextOption {
-	if participant == "" {
+	label := senderLabel(senderName, participant)
+	if label == "" {
 		if text == "" {
 			return nil
 		}
 		return []message.StyledTextOption{styling.Plain(text)}
 	}
-	label := senderName
-	if label == "" {
-		label = participant
-	}
-	label = "🗣️: " + label
 	if text == "" {
 		return []message.StyledTextOption{styling.Bold(label)}
 	}
@@ -284,14 +302,10 @@ func attributedText(senderName, participant, text string) []message.StyledTextOp
 // string, used as the contents of the spill-over text file when a message
 // exceeds the target's length limit.
 func plainAttributedText(senderName, participant, text string) string {
-	if participant == "" {
+	label := senderLabel(senderName, participant)
+	if label == "" {
 		return text
 	}
-	label := senderName
-	if label == "" {
-		label = participant
-	}
-	label = "🗣️: " + label
 	if text == "" {
 		return label
 	}
@@ -346,6 +360,7 @@ func (s Sender) sendAttachment(
 	builder *message.Builder,
 	attachment *wuphfpb.Attachment,
 	captionOptions []message.StyledTextOption,
+	label string,
 	asFile bool,
 ) (tg.UpdatesClass, error) {
 	bytes, err := s.media.Download(ctx, attachment.MediaId)
@@ -357,7 +372,7 @@ func (s Sender) sendAttachment(
 	// media. An animated sticker is rendered as a Telegram WebM video sticker; a
 	// GIF (an animated video) as a Telegram animation.
 	if attachment.Kind == wuphfpb.Attachment_KIND_STICKER {
-		return s.sendSticker(ctx, builder, attachment, bytes)
+		return s.sendSticker(ctx, builder, attachment, bytes, label)
 	}
 	if attachment.Kind == wuphfpb.Attachment_KIND_VIDEO && attachment.GetAnimated() && !asFile {
 		return builder.Upload(message.FromBytes(gifUploadName(attachment), bytes)).GIF(ctx, captionOptions...)
@@ -515,12 +530,25 @@ func albumGroup(attachment *wuphfpb.Attachment) string {
 // the core's media.convert provider; when no provider is available or the
 // conversion fails, the sticker degrades to a static sticker (the first frame)
 // rather than dropping the message.
+//
+// Telegram stickers take no caption, so the sender label a captioned message
+// carries in its text (see senderLabel) is attached another way: a bot session
+// shows it as an inline button under the sticker, and a user session, which
+// cannot send inline keyboards, posts it as a short message just before.
 func (s Sender) sendSticker(
 	ctx context.Context,
 	builder *message.Builder,
 	attachment *wuphfpb.Attachment,
 	data []byte,
+	label string,
 ) (tg.UpdatesClass, error) {
+	if label != "" {
+		if s.bot {
+			builder = builder.Markup(markup.InlineRow(markup.Callback(label, []byte(labelCallbackData))))
+		} else if _, err := builder.StyledText(ctx, styling.Bold(label)); err != nil {
+			return nil, fmt.Errorf("send Telegram sticker label: %w", err)
+		}
+	}
 	if attachment.GetAnimated() {
 		if webm, err := s.animatedStickerWebM(ctx, attachment, data); err == nil {
 			if file, ferr := builder.Upload(message.FromBytes("sticker.webm", webm)).AsInputFile(ctx); ferr == nil {
