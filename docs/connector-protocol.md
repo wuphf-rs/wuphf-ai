@@ -1,7 +1,8 @@
 # Connector Protocol
 
 The canonical contract is `crates/wuphf-proto/connector.proto`: a bidirectional
-gRPC `OpenSession` stream plus a `MediaTransport` service.
+gRPC `OpenSession` stream plus a `MediaTransport` service. Remote functions
+(see below) have services of their own.
 
 ## Session
 
@@ -72,6 +73,87 @@ event; the destination downloads by `media_id` while executing its dispatch.
 Uploads are bounded by `max_media_bytes`, persisted in the core so retries and
 restarts don't lose referenced content, and pruned when unreferenced. The core
 rejects events whose attachment metadata doesn't match the broker-issued record.
+
+## Remote functions
+
+`crates/wuphf-proto/functions.proto` defines two more services, separate from
+the connector session. Provider processes serve named functions over
+`ProviderTransport`; any client (a connector, the CLI, another provider) calls
+them through `FunctionTransport`. The core only brokers calls and never calls a
+function itself.
+
+**Names.** A function is a lowercase dotted name (`media.convert`, at least two
+segments of `[a-z][a-z0-9_]*`) plus a major version of at least 1. A breaking
+change to the body format is a new major; `(name, major)` is the key.
+
+**Providers.** A provider opens `OpenProviderSession` with
+`authorization: Bearer <token>`, where the token is its own, read by the core
+from the `token_env` variable of its `[[functions.providers]]` entry. Its first
+frame is a `ProviderHello`: its provider id and a `FunctionDeclaration` per
+function, giving request and response JSON Schemas (listed, not enforced),
+whether the function is `idempotent`, its `max_concurrency` (0 means 1, at most
+1024) and an optional suggested deadline. The core rejects the whole hello if
+any declaration is invalid (`INVALID_ARGUMENT`), names a function outside the
+provider's configured patterns (`PERMISSION_DENIED`), or names a function another
+provider id serves (`ALREADY_EXISTS`). A second session under the same provider
+id takes over: the old session's stream ends and its in-flight calls count as
+lost. The core then streams `ProviderCall` frames (call id, function, args,
+media ids, a Unix-millisecond deadline, the caller's label) and `CancelCall`
+frames; the provider answers each call with a `CallResult` carrying either a
+`CallSuccess` (JSON result and media ids) or a `CallError` (`INVALID_ARGUMENT`,
+`UNSUPPORTED` or `FAILED`). A result for a cancelled call is ignored.
+
+**Callers.** `Invoke` takes the function, JSON args, media ids and a free-form
+caller label. Args and results are capped at `max_body_bytes`; bulky data is
+uploaded through `MediaTransport` and passed as media ids. The call's deadline
+is the caller's gRPC deadline capped by `max_deadline_ms`, or the default when
+the caller sets none (the function's override, else the provider's suggestion,
+else `default_deadline_ms`). Time spent waiting for a provider counts against
+it, and a caller that cancels or runs out of time cancels the call at the
+provider. When `invoke_token_env` is set, callers present that shared token as
+`authorization: Bearer <token>`. `ListFunctions` reports each function's
+provider, declaration, load and completed/failed/abandoned counters;
+`cargo run -p wuphf-cli -- functions list` prints it.
+
+Status codes a caller can see:
+
+| Code | Meaning |
+|------|---------|
+| `NOT_FOUND` | No configured provider may serve the name; returned at once. |
+| `RESOURCE_EXHAUSTED` | `max_queued_calls` calls are already waiting for the function. |
+| `DEADLINE_EXCEEDED` | No provider connected, the call stayed queued behind busy providers, or the provider did not answer in time; the message says which. |
+| `UNAVAILABLE` | The provider disconnected mid-call and the function is not idempotent. |
+| `INVALID_ARGUMENT` | Malformed function reference, args over the cap or not JSON, or the provider rejected the args. |
+| `UNIMPLEMENTED` | The provider reported the request as unsupported. |
+| `INTERNAL` | The provider failed, or returned a result over the cap or not JSON. |
+
+**Configuration.** The `[functions]` section of the core configuration (all
+durations in milliseconds; defaults shown):
+
+```toml
+[functions]
+default_deadline_ms = 30000
+max_deadline_ms = 60000
+keepalive_interval_ms = 10000   # HTTP/2 keepalive, server-wide
+keepalive_timeout_ms = 20000
+max_body_bytes = 1048576
+max_queued_calls = 256          # per function name and major
+invoke_token_env = "WUPHF_INVOKE_TOKEN"
+
+[[functions.providers]]
+id = "mediaconv"
+token_env = "WUPHF_PROVIDER_MEDIACONV_TOKEN"
+functions = ["media.convert"]   # exact names, "prefix.*" or "*"
+
+# Per-function limits, applying to every major of the name.
+[functions.overrides."media.convert"]
+default_deadline_ms = 20000
+# max_deadline_ms, max_concurrency, max_body_bytes, max_queued_calls
+```
+
+The core refuses to start when a token variable is unset or empty, a value is
+zero, a default deadline exceeds its maximum, or a provider or pattern is
+malformed.
 
 ## Connectors
 

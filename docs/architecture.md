@@ -1,3 +1,4 @@
+| `wuphf-functions` | Brokers remote function calls between callers and provider processes; independent of the core and storage. |
 # Architecture
 
 wuphf replicates messages between chat platforms by modelling **one logical
@@ -150,6 +151,29 @@ once; normalized attachments and dispatches refer only to a core-owned
 dispatch, so platform-private file handles never become cross-platform message
 identity. Uploads not linked into a logical message are pruned after
 `orphan_media_retention_seconds`; linked media is retained.
+
+## Remote Functions
+
+Some work, such as sticker conversion, needs heavy native tooling that should
+not be compiled into every connector or rewritten in each connector language.
+Provider processes, written in any language, serve it as named functions
+instead. The core is only a broker: a provider dials in and registers the
+functions it is configured to serve, and every call travels from the caller to
+the core, on to the provider, and back the same way. Providers never listen.
+
+A call carries a small JSON body plus a list of media ids; bulky data moves
+through the media broker, never through the call itself. When no provider for a
+function is connected, a call waits for one until its deadline, and a name that
+no configured provider may serve fails at once. The deadline is the caller's
+own, capped by the core (or the core's default when the caller sets none), and
+time spent waiting counts against it. A caller that gives up cancels the call at
+the provider. A provider lost mid-call has its calls re-queued when the function
+is declared idempotent and failed otherwise, and a provider reconnecting under
+its id takes over its old session.
+
+Only processes outside the core call functions: routing, dispatch and
+acknowledgement never wait on a provider, and the broker crate
+(`wuphf-functions`) depends on neither the core nor storage.
 
 ## Key Invariants
 

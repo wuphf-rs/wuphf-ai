@@ -288,6 +288,7 @@ container = <span class="str">"telegram:channel:2060340733"</span></div>
         <tr><td class="k">wuphf-storage</td><td>The <code>Storage</code> trait (the sum of six role traits) plus two backends: <span class="mono">memory</span> (tests) and <span class="mono">sqlite</span> (durable).</td></tr>
         <tr><td class="k">wuphf-core</td><td>Owns logical identity, dedup, echo suppression, reply resolution, and identity migration. Evaluates rules and computes dispatch targets.</td></tr>
         <tr><td class="k">wuphf-runtime</td><td>Event bus, dispatch pipeline, connector session hub, bounded media broker, gRPC adapter.</td></tr>
+        <tr><td class="k">wuphf-functions</td><td>Brokers remote function calls between callers and provider processes; independent of the core and storage.</td></tr>
         <tr><td class="k">wuphf-proto</td><td>Canonical protobuf contract and Tonic bindings.</td></tr>
         <tr><td class="k">wuphf-cli</td><td>Loads TOML config, wires it together, serves gRPC.</td></tr>
         <tr><td class="k">connectors/</td><td>Go Telegram (<span class="mono">gotd/td</span>, forum topics) and WhatsApp (<span class="mono">whatsmeow</span>, QR pairing).</td></tr>

@@ -46,6 +46,7 @@ crates/
   wuphf-storage/   Storage trait, in-memory + SQLite backends
   wuphf-core/      Identity, rule matching, fan-out, and event ingestion
   wuphf-runtime/   Tokio event bus, dispatch pipeline, media broker, gRPC
+  wuphf-functions/ Remote function broker: provider sessions and Invoke
   wuphf-cli/       Server executable
   wuphf-tui/       Observer TUI (read-only view of the observation log)
 connectors/        Go Telegram (gotd/td), WhatsApp (whatsmeow), Instagram connectors
