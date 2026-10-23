@@ -1,7 +1,7 @@
 //! SQLite-backed [`Storage`]. Rows hold JSON-encoded model values keyed by id;
 //! dispatch state is denormalized into columns so pending work can be queried.
 
-use crate::shared::{bind_native_parent, dispatch_state};
+use crate::shared::{acknowledged_copy, dispatch_state, release_blocked};
 use crate::{Storage, StorageError, StorageResult};
 use async_trait::async_trait;
 use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
@@ -527,22 +527,11 @@ impl Storage for SqliteStorage {
             .bind(dispatch.id.to_string())
             .execute(&mut *transaction)
             .await?;
-        // Signals that act on an existing copy (reactions, delivery acks, seen
-        // receipts) and retitles record no copy and release no replies;
-        // acknowledging them just closes out the dispatch.
-        if !dispatch.command.records_copy() {
-            transaction.commit().await?;
-            return Ok(Vec::new());
-        }
-        let Some(message_id) = dispatch.command.message_id() else {
+        let Some(copy) = acknowledged_copy(&dispatch.command, &platform_message_id) else {
             transaction.commit().await?;
             return Ok(Vec::new());
         };
-        let copy = MessageCopy {
-            message_id,
-            endpoint_id: dispatch.command.target_endpoint,
-            platform_message_id: platform_message_id.clone(),
-        };
+        let message_id = copy.message_id;
         sqlx::query(
             "INSERT INTO message_copies (message_id, endpoint_id, platform_message_id, sent, payload)
              VALUES (?, ?, ?, 1, ?)
@@ -578,12 +567,7 @@ impl Storage for SqliteStorage {
         let parent: Message = serde_json::from_str(parent_row.get("payload"))?;
         for row in rows {
             let mut blocked: StoredDispatch = serde_json::from_str(row.get("payload"))?;
-            bind_native_parent(
-                &mut blocked.command,
-                parent.clone(),
-                platform_message_id.clone(),
-            );
-            blocked.state = DispatchState::Pending;
+            release_blocked(&mut blocked, parent.clone(), platform_message_id.clone());
             sqlx::query(
                 "UPDATE dispatches SET waiting_for = ?, state = ?, payload = ? WHERE id = ?",
             )

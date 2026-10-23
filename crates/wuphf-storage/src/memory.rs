@@ -1,7 +1,7 @@
 //! In-memory [`Storage`] backend. Keeps all state behind a single `RwLock`,
 //! used for tests and ephemeral runs.
 
-use crate::shared::{bind_native_parent, dispatch_state};
+use crate::shared::{acknowledged_copy, dispatch_state, release_blocked};
 use crate::{Storage, StorageError, StorageResult};
 use async_trait::async_trait;
 use std::collections::{HashMap, HashSet};
@@ -459,25 +459,11 @@ impl Storage for InMemoryStorage {
         dispatch.state = DispatchState::Acknowledged {
             platform_message_id: platform_message_id.clone(),
         };
-        // Signals that act on an existing copy (reactions, delivery acks, seen
-        // receipts) and retitles record no copy and release no replies;
-        // acknowledging them just closes out the dispatch.
-        if !dispatch.command.records_copy() {
-            return Ok(Vec::new());
-        }
-        let Some(message_id) = dispatch.command.message_id() else {
+        let Some(copy) = acknowledged_copy(&dispatch.command, &platform_message_id) else {
             return Ok(Vec::new());
         };
-        let endpoint_id = dispatch.command.target_endpoint;
-        put_copy(
-            &mut state,
-            MessageCopy {
-                message_id,
-                endpoint_id,
-                platform_message_id: platform_message_id.clone(),
-            },
-            true,
-        );
+        let (message_id, endpoint_id) = (copy.message_id, copy.endpoint_id);
+        put_copy(&mut state, copy, true);
 
         let blocked_ids: Vec<DispatchId> = state
             .dispatches
@@ -505,12 +491,7 @@ impl Storage for InMemoryStorage {
                 .dispatches
                 .get_mut(&id)
                 .expect("blocked dispatch present");
-            bind_native_parent(
-                &mut candidate.command,
-                parent.clone(),
-                platform_message_id.clone(),
-            );
-            candidate.state = DispatchState::Pending;
+            release_blocked(candidate, parent.clone(), platform_message_id.clone());
             released.push(candidate.clone());
         }
         Ok(released)
