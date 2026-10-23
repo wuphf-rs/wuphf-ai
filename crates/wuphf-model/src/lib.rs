@@ -3,8 +3,8 @@
 //! wuphf replicates messages between chat platforms. The model is built around
 //! a few ideas, from configured intent down to a single delivery:
 //!
-//! - [`RoutingRule`] — a user-declared flow between a source end and a
-//!   destination end ([`RoutingRuleFlow`]: one-to-one or many-to-one). Rules
+//! - [`Rule`] — a user-declared flow between a source end and a
+//!   destination end ([`RuleKind`]: one-to-one or many-to-one). Rules
 //!   are the only routing input a user writes; everything below is derived.
 //! - [`Endpoint`] — a concrete destination (a chat, optionally a thread) on one
 //!   connector, identified internally by an [`EndpointId`]. Platform addresses

@@ -4,7 +4,7 @@ use tokio::sync::{mpsc, oneshot};
 use tracing::{debug, info, warn};
 use wuphf_model::InboundWork;
 use wuphf_model::{
-    ConnectorId, ConnectorInput, ConnectorOutput, ConnectorRegistration, DispatchId, Dispatch,
+    ConnectorId, ConnectorInput, ConnectorOutput, Connector, DispatchId, Dispatch,
 };
 
 pub struct ConnectorConnection {
@@ -20,7 +20,7 @@ pub struct ConnectorHubHandle {
 impl ConnectorHubHandle {
     pub async fn connect(
         &self,
-        registration: ConnectorRegistration,
+        registration: Connector,
     ) -> Result<ConnectorConnection, String> {
         let (input_tx, input_rx) = mpsc::channel(32);
         let (output_tx, output_rx) = mpsc::channel(32);
@@ -49,7 +49,7 @@ pub struct ConnectorHub {
     connect_rx: mpsc::Receiver<ConnectRequest>,
     inbound_tx: mpsc::Sender<(ConnectorId, ConnectorInput)>,
     inbound_rx: mpsc::Receiver<(ConnectorId, ConnectorInput)>,
-    allowed: HashMap<ConnectorId, ConnectorRegistration>,
+    allowed: HashMap<ConnectorId, Connector>,
     sessions: HashMap<ConnectorId, Session>,
     assigned: HashMap<DispatchId, (ConnectorId, Dispatch)>,
     held: Vec<Dispatch>,
@@ -60,7 +60,7 @@ struct Session {
 }
 
 struct ConnectRequest {
-    registration: ConnectorRegistration,
+    registration: Connector,
     input_rx: mpsc::Receiver<ConnectorInput>,
     output_tx: mpsc::Sender<ConnectorOutput>,
     result_tx: oneshot::Sender<Result<(), String>>,
@@ -69,7 +69,7 @@ struct ConnectRequest {
 impl ConnectorHub {
     pub fn new(
         runtime: RuntimeChannels,
-        allowed: Vec<ConnectorRegistration>,
+        allowed: Vec<Connector>,
     ) -> (Self, ConnectorHubHandle) {
         let (connect_tx, connect_rx) = mpsc::channel(16);
         let (inbound_tx, inbound_rx) = mpsc::channel(64);

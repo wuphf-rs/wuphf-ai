@@ -16,9 +16,9 @@ use tonic::transport::Server;
 use wuphf_connector::{Client, Delivery, Failure, Options};
 use wuphf_core::{Core, RoutingConfig};
 use wuphf_model::{
-    ConnectorCapabilities, ConnectorId, ConnectorInfo, ConnectorRegistration, EventKind,
-    NewMessage, InboundWork, Event, Platform, ChatAddress, RoutingRule,
-    RoutingRuleFlow, RuleChat, RuleId,
+    ConnectorCapabilities, ConnectorId, ConnectorInfo, Connector, EventKind,
+    NewMessage, InboundWork, Event, Platform, ChatAddress, Rule,
+    RuleKind, RuleChat, RuleId,
 };
 use wuphf_proto::connector as pb;
 use wuphf_runtime::Runtime;
@@ -29,14 +29,14 @@ use wuphf_storage::{InMemoryStorage, Storage};
 const WA: &str = "whatsapp-main";
 const TG: &str = "telegram-main";
 
-fn registrations() -> Vec<ConnectorRegistration> {
+fn registrations() -> Vec<Connector> {
     vec![
-        ConnectorRegistration {
+        Connector {
             id: ConnectorId(WA.into()),
             platform: Platform::WhatsApp,
             capabilities: ConnectorCapabilities::default(),
         },
-        ConnectorRegistration {
+        Connector {
             id: ConnectorId(TG.into()),
             platform: Platform::Telegram,
             capabilities: ConnectorCapabilities {
@@ -48,9 +48,9 @@ fn registrations() -> Vec<ConnectorRegistration> {
 }
 
 fn routing() -> RoutingConfig {
-    let rules = vec![RoutingRule {
+    let rules = vec![Rule {
         id: RuleId("direct".into()),
-        flow: RoutingRuleFlow::OneToOne {
+        flow: RuleKind::OneToOne {
             source_connector: ConnectorId(WA.into()),
             source_chat: RuleChat {
                 chat_id: "wa-chat".into(),

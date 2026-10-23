@@ -145,15 +145,15 @@ pub struct AddressLink {
 /// lazily at runtime. The flow names which side owns conversation identity (the
 /// source); replication itself stays two-way.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct RoutingRule {
+pub struct Rule {
     pub id: RuleId,
-    pub flow: RoutingRuleFlow,
+    pub flow: RuleKind,
 }
 
 /// The shape of a rule: which chats on which connectors mirror each other.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case", tag = "kind")]
-pub enum RoutingRuleFlow {
+pub enum RuleKind {
     /// One fixed source chat mirrored into one fixed destination chat.
     OneToOne {
         source_connector: ConnectorId,
@@ -169,7 +169,7 @@ pub enum RoutingRuleFlow {
     ManyToOne {
         source_connector: ConnectorId,
         #[serde(default)]
-        source_chats_filter: RuleChatsFilter,
+        source_chats_filter: ChatFilter,
 
         destination_connector: ConnectorId,
         destination_chat: RuleChat,
@@ -209,7 +209,7 @@ impl RuleChat {
 /// and the config lives in TOML.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase", tag = "kind")]
-pub enum RuleChatsFilter {
+pub enum ChatFilter {
     #[default]
     All,
     Only {
@@ -220,7 +220,7 @@ pub enum RuleChatsFilter {
     },
 }
 
-impl RuleChatsFilter {
+impl ChatFilter {
     /// Whether a chat, named by every address form known for it, passes. Both
     /// list kinds test the whole set: an allow list admits a chat listed under
     /// any of its forms, and a deny list excludes one listed under any of its
@@ -228,9 +228,9 @@ impl RuleChatsFilter {
     /// address the user did not write.
     pub fn accepts(&self, addresses: &AddressSet) -> bool {
         match self {
-            RuleChatsFilter::All => true,
-            RuleChatsFilter::Only { chats } => chats.iter().any(|chat| chat.matches(addresses)),
-            RuleChatsFilter::Not { chats } => !chats.iter().any(|chat| chat.matches(addresses)),
+            ChatFilter::All => true,
+            ChatFilter::Only { chats } => chats.iter().any(|chat| chat.matches(addresses)),
+            ChatFilter::Not { chats } => !chats.iter().any(|chat| chat.matches(addresses)),
         }
     }
 }
@@ -243,31 +243,31 @@ pub enum RuleEnd {
     Destination,
 }
 
-impl RoutingRuleFlow {
+impl RuleKind {
     /// The connector serving the given end of this flow.
     pub fn connector(&self, end: RuleEnd) -> &ConnectorId {
         match (self, end) {
             (
-                RoutingRuleFlow::OneToOne {
+                RuleKind::OneToOne {
                     source_connector, ..
                 },
                 RuleEnd::Source,
             )
             | (
-                RoutingRuleFlow::ManyToOne {
+                RuleKind::ManyToOne {
                     source_connector, ..
                 },
                 RuleEnd::Source,
             ) => source_connector,
             (
-                RoutingRuleFlow::OneToOne {
+                RuleKind::OneToOne {
                     destination_connector,
                     ..
                 },
                 RuleEnd::Destination,
             )
             | (
-                RoutingRuleFlow::ManyToOne {
+                RuleKind::ManyToOne {
                     destination_connector,
                     ..
                 },
@@ -291,24 +291,24 @@ impl RoutingRuleFlow {
             return false;
         }
         match (self, end) {
-            (RoutingRuleFlow::OneToOne { source_chat, .. }, RuleEnd::Source) => {
+            (RuleKind::OneToOne { source_chat, .. }, RuleEnd::Source) => {
                 source_chat.matches(addresses)
             }
             (
-                RoutingRuleFlow::OneToOne {
+                RuleKind::OneToOne {
                     destination_chat, ..
                 },
                 RuleEnd::Destination,
             ) => destination_chat.matches(addresses),
             (
-                RoutingRuleFlow::ManyToOne {
+                RuleKind::ManyToOne {
                     source_chats_filter,
                     ..
                 },
                 RuleEnd::Source,
             ) => source_chats_filter.accepts(addresses),
             (
-                RoutingRuleFlow::ManyToOne {
+                RuleKind::ManyToOne {
                     destination_chat, ..
                 },
                 RuleEnd::Destination,

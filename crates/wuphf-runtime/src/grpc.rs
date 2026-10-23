@@ -7,7 +7,7 @@ use tonic::{Request, Response, Status};
 use uuid::Uuid;
 use wuphf_model::{
     Attachment, AttachmentKind, ConnectorCapabilities, ConnectorId, ConnectorInput,
-    ConnectorOutput, ConnectorRegistration, DispatchAck, Action, EventKind,
+    ConnectorOutput, Connector, DispatchAck, Action, EventKind,
     NewMessage, MediaId, Event, NoticeKind, Platform, ChatAddress,
     ProvisionThread, ReceiptKind, ReplyContext, SourceAddress,
 };
@@ -93,8 +93,8 @@ struct WireError(String);
 
 fn registration_from_proto(
     registration: pb::Registration,
-) -> Result<ConnectorRegistration, WireError> {
-    Ok(ConnectorRegistration {
+) -> Result<Connector, WireError> {
+    Ok(Connector {
         id: ConnectorId(required_string(registration.connector_id, "connector_id")?),
         platform: platform_from_proto(registration.platform)?,
         capabilities: registration

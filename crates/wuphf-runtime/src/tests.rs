@@ -9,8 +9,8 @@ use tonic::transport::Server;
 use wuphf_core::RoutingConfig;
 use wuphf_model::{
     ConnectorCapabilities, ConnectorId, ConnectorInfo, ConnectorInput, ConnectorOutput,
-    ConnectorRegistration, Action, EventKind, NewMessage, IngestOutcome, Platform,
-    ChatAddress, RoutingRule, RoutingRuleFlow, RuleChat, RuleChatsFilter, RuleId,
+    Connector, Action, EventKind, NewMessage, IngestOutcome, Platform,
+    ChatAddress, Rule, RuleKind, RuleChat, ChatFilter, RuleId,
 };
 use wuphf_proto::connector as pb;
 use wuphf_proto::connector::connector_transport_client::ConnectorTransportClient;
@@ -23,10 +23,10 @@ use wuphf_storage::Storage;
 const WA: &str = "whatsapp-main";
 const TG: &str = "telegram-main";
 
-fn rules() -> Vec<RoutingRule> {
-    vec![RoutingRule {
+fn rules() -> Vec<Rule> {
+    vec![Rule {
         id: RuleId("direct".into()),
-        flow: RoutingRuleFlow::OneToOne {
+        flow: RuleKind::OneToOne {
             source_connector: ConnectorId(WA.into()),
             source_chat: RuleChat {
                 chat_id: "wa-chat".into(),
@@ -67,14 +67,14 @@ fn connector_infos() -> HashMap<ConnectorId, ConnectorInfo> {
     ])
 }
 
-fn registrations() -> Vec<ConnectorRegistration> {
+fn registrations() -> Vec<Connector> {
     vec![
-        ConnectorRegistration {
+        Connector {
             id: ConnectorId(WA.into()),
             platform: Platform::WhatsApp,
             capabilities: ConnectorCapabilities::default(),
         },
-        ConnectorRegistration {
+        Connector {
             id: ConnectorId(TG.into()),
             platform: Platform::Telegram,
             capabilities: telegram_capabilities(),
@@ -95,12 +95,12 @@ fn core_over(storage: Arc<InMemoryStorage>) -> Arc<Core<InMemoryStorage>> {
 
 /// A many-to-one mirror rule whose destination thread must be provisioned on
 /// first send — the flow that stashes concurrent messages behind provisioning.
-fn mirror_rules() -> Vec<RoutingRule> {
-    vec![RoutingRule {
+fn mirror_rules() -> Vec<Rule> {
+    vec![Rule {
         id: RuleId("mirror".into()),
-        flow: RoutingRuleFlow::ManyToOne {
+        flow: RuleKind::ManyToOne {
             source_connector: ConnectorId(WA.into()),
-            source_chats_filter: RuleChatsFilter::Only {
+            source_chats_filter: ChatFilter::Only {
                 chats: vec![RuleChat {
                     chat_id: "wa-group".into(),
                     thread_id: None,
@@ -411,7 +411,7 @@ async fn connector_sessions_route_dispatches_and_authorize_inputs() {
     let mut telegram = handle.connect(registrations()[1].clone()).await.unwrap();
     assert!(
         handle
-            .connect(ConnectorRegistration {
+            .connect(Connector {
                 id: ConnectorId("rogue".into()),
                 platform: Platform::Telegram,
                 capabilities: telegram_capabilities(),

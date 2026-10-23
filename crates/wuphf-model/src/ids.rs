@@ -53,7 +53,7 @@ uuid_id!(
 );
 uuid_id!(
     ConversationId,
-    "Id of a [`Conversation`] — the unit a [`RoutingRule`] pairs across its ends."
+    "Id of a [`Conversation`] — the unit a [`Rule`] pairs across its ends."
 );
 
 // User-chosen string ids have no `new()`/`Default`: they come from config or a
@@ -74,7 +74,7 @@ macro_rules! string_id {
 
 string_id!(
     RuleId,
-    "User-chosen id of a [`RoutingRule`], taken verbatim from configuration."
+    "User-chosen id of a [`Rule`], taken verbatim from configuration."
 );
 string_id!(
     ConnectorId,

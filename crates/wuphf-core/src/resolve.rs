@@ -5,7 +5,7 @@
 use crate::{Core, CoreError};
 use wuphf_model::{
     AddressSet, Alias, ConnectorId, Conversation, ConversationId, Endpoint, EndpointId,
-    ChatAddress, ReplicaSet, ReplicaSetId, RoutingRuleFlow, RuleEnd, RuleId, SourceAddress,
+    ChatAddress, ReplicaSet, ReplicaSetId, RuleKind, RuleEnd, RuleId, SourceAddress,
 };
 use wuphf_storage::Storage;
 
@@ -46,7 +46,7 @@ where
         // in a thread no conversation has claimed yet: conversations are minted
         // from the source end, so there is nothing to bind it to.
         if origin_end == RuleEnd::Destination
-            && matches!(rule.flow, RoutingRuleFlow::ManyToOne { .. })
+            && matches!(rule.flow, RuleKind::ManyToOne { .. })
         {
             return Ok(None);
         }
@@ -55,8 +55,8 @@ where
         // by its fixed source chat, a many-to-one rule by the actual source
         // chat this event arrived on.
         let identity_address = match &rule.flow {
-            RoutingRuleFlow::OneToOne { source_chat, .. } => source_chat.address(),
-            RoutingRuleFlow::ManyToOne { .. } => source.address.clone(),
+            RuleKind::OneToOne { source_chat, .. } => source_chat.address(),
+            RuleKind::ManyToOne { .. } => source.address.clone(),
         };
         let identity_connector = rule.flow.connector(RuleEnd::Source).clone();
 
@@ -223,26 +223,26 @@ where
     async fn ensure_end_endpoint(
         &self,
         conversation: &Conversation,
-        flow: &RoutingRuleFlow,
+        flow: &RuleKind,
         end: RuleEnd,
         identity_address: &ChatAddress,
     ) -> Result<EndpointId, CoreError> {
         let connector = flow.connector(end).clone();
         let (address, with_alias) = match (flow, end) {
-            (RoutingRuleFlow::OneToOne { source_chat, .. }, RuleEnd::Source) => {
+            (RuleKind::OneToOne { source_chat, .. }, RuleEnd::Source) => {
                 (source_chat.address(), true)
             }
             (
-                RoutingRuleFlow::OneToOne {
+                RuleKind::OneToOne {
                     destination_chat, ..
                 },
                 RuleEnd::Destination,
             ) => (destination_chat.address(), true),
-            (RoutingRuleFlow::ManyToOne { .. }, RuleEnd::Source) => {
+            (RuleKind::ManyToOne { .. }, RuleEnd::Source) => {
                 (identity_address.clone(), true)
             }
             (
-                RoutingRuleFlow::ManyToOne {
+                RuleKind::ManyToOne {
                     destination_chat, ..
                 },
                 RuleEnd::Destination,

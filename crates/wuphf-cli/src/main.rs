@@ -5,8 +5,8 @@ use std::{collections::HashMap, net::SocketAddr, path::PathBuf, sync::Arc, time:
 use tonic::transport::Server;
 use wuphf_core::{Core, RoutingConfig};
 use wuphf_model::{
-    ConnectorCapabilities, ConnectorId, ConnectorInfo, ConnectorRegistration, NoticeTarget,
-    Platform, RoutingRule,
+    ConnectorCapabilities, ConnectorId, ConnectorInfo, Connector, NoticeTarget,
+    Platform, Rule,
 };
 use wuphf_proto::connector::connector_transport_server::ConnectorTransportServer;
 use wuphf_proto::connector::media_transport_server::MediaTransportServer;
@@ -50,7 +50,7 @@ struct Configuration {
     #[serde(default)]
     connectors: Vec<ConnectorConfiguration>,
     #[serde(default)]
-    rules: Vec<RoutingRule>,
+    rules: Vec<Rule>,
     /// Chats that receive operational notices from connectors (e.g. a WhatsApp
     /// session ending). A notice is never sent through the connector that
     /// raised it, so listing targets on more than one connector is what keeps
@@ -121,7 +121,7 @@ async fn serve(path: PathBuf) -> Result<()> {
                 capabilities,
             },
         );
-        allowed.push(ConnectorRegistration {
+        allowed.push(Connector {
             id,
             platform,
             capabilities,
@@ -182,7 +182,7 @@ fn platform(name: &str) -> Result<Platform> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use wuphf_model::{RoutingRuleFlow, RuleChatsFilter};
+    use wuphf_model::{RuleKind, ChatFilter};
 
     /// The shipped example config is the reference for the rule format; it must
     /// always parse, and its flows must land in the expected variants.
@@ -192,7 +192,7 @@ mod tests {
             toml::from_str(include_str!("../../../config/example.toml")).unwrap();
         assert_eq!(configuration.rules.len(), 2);
         for rule in &configuration.rules {
-            let RoutingRuleFlow::ManyToOne {
+            let RuleKind::ManyToOne {
                 source_chats_filter,
                 destination_chat,
                 ..
@@ -200,7 +200,7 @@ mod tests {
             else {
                 panic!("example rules are many-to-one mirrors");
             };
-            assert_eq!(*source_chats_filter, RuleChatsFilter::All);
+            assert_eq!(*source_chats_filter, ChatFilter::All);
             assert_eq!(destination_chat.chat_id, "telegram:channel:2060340733");
         }
     }
@@ -234,7 +234,7 @@ mod tests {
             "#,
         )
         .unwrap();
-        let RoutingRuleFlow::OneToOne {
+        let RuleKind::OneToOne {
             source_chat,
             destination_chat,
             ..
@@ -244,8 +244,8 @@ mod tests {
         };
         assert_eq!(source_chat.chat_id, "123@s.whatsapp.net");
         assert_eq!(destination_chat.thread_id.as_deref(), Some("12"));
-        let RoutingRuleFlow::ManyToOne {
-            source_chats_filter: RuleChatsFilter::Not { chats },
+        let RuleKind::ManyToOne {
+            source_chats_filter: ChatFilter::Not { chats },
             ..
         } = &configuration.rules[1].flow
         else {

@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use wuphf_model::{
     Attachment, AttachmentKind, ConnectorCapabilities, ConnectorInfo, DispatchAck,
     Action, NewMessage, MediaBlob, MediaId, NoticeKind, Platform, ChatAddress,
-    RAW_SENDER, RawOutbound, ReceiptKind, RoutingRule, RoutingRuleFlow, RuleChat, RuleChatsFilter,
+    RAW_SENDER, RawOutbound, ReceiptKind, Rule, RuleKind, RuleChat, ChatFilter,
     RuleId, SourceAddress, Dispatch,
 };
 use wuphf_storage::InMemoryStorage;
@@ -33,10 +33,10 @@ fn connectors() -> HashMap<ConnectorId, ConnectorInfo> {
     ])
 }
 
-fn direct_rule() -> RoutingRule {
-    RoutingRule {
+fn direct_rule() -> Rule {
+    Rule {
         id: RuleId("direct".into()),
-        flow: RoutingRuleFlow::OneToOne {
+        flow: RuleKind::OneToOne {
             source_connector: ConnectorId(WHATSAPP.into()),
             source_chat: RuleChat {
                 chat_id: "12345@s.whatsapp.net".into(),
@@ -51,12 +51,12 @@ fn direct_rule() -> RoutingRule {
     }
 }
 
-fn mirror_rule() -> RoutingRule {
-    RoutingRule {
+fn mirror_rule() -> Rule {
+    Rule {
         id: RuleId("wa-mirror".into()),
-        flow: RoutingRuleFlow::ManyToOne {
+        flow: RuleKind::ManyToOne {
             source_connector: ConnectorId(WHATSAPP.into()),
-            source_chats_filter: RuleChatsFilter::Only {
+            source_chats_filter: ChatFilter::Only {
                 chats: vec![RuleChat {
                     chat_id: "111@g.us".into(),
                     thread_id: None,
@@ -71,14 +71,14 @@ fn mirror_rule() -> RoutingRule {
     }
 }
 
-fn core(rules: Vec<RoutingRule>) -> Core<InMemoryStorage> {
+fn core(rules: Vec<Rule>) -> Core<InMemoryStorage> {
     core_over(Arc::new(InMemoryStorage::default()), rules)
 }
 
 /// Build a core over caller-owned storage, so a test can construct a second core
 /// over the same storage to simulate a process restart (the in-memory
 /// provisioning cache starts empty on the new core).
-fn core_over(storage: Arc<InMemoryStorage>, rules: Vec<RoutingRule>) -> Core<InMemoryStorage> {
+fn core_over(storage: Arc<InMemoryStorage>, rules: Vec<Rule>) -> Core<InMemoryStorage> {
     let config = Arc::new(RoutingConfig::new(rules, connectors()));
     Core::new(storage, config)
 }
@@ -1312,10 +1312,10 @@ async fn raw_send_to_an_unknown_connector_is_rejected() {
 /// A many-to-one rule whose allow list names the source chat by its phone JID,
 /// the form a user can actually read off their contact list. WhatsApp delivers
 /// the same chat under a LID.
-fn phone_listed_mirror_rule(filter: RuleChatsFilter) -> RoutingRule {
-    RoutingRule {
+fn phone_listed_mirror_rule(filter: ChatFilter) -> Rule {
+    Rule {
         id: RuleId("wa-mirror".into()),
-        flow: RoutingRuleFlow::ManyToOne {
+        flow: RuleKind::ManyToOne {
             source_connector: ConnectorId(WHATSAPP.into()),
             source_chats_filter: filter,
             destination_connector: ConnectorId(TELEGRAM.into()),
@@ -1346,7 +1346,7 @@ async fn link_phone_to_lid(core: &Core<InMemoryStorage>) {
 
 #[tokio::test]
 async fn allow_list_written_with_the_phone_jid_matches_the_linked_lid() {
-    let core = core(vec![phone_listed_mirror_rule(RuleChatsFilter::Only {
+    let core = core(vec![phone_listed_mirror_rule(ChatFilter::Only {
         chats: chats("15550001111@s.whatsapp.net"),
     })]);
     // The connector reports the phone/LID equivalence before the message, as it
@@ -1362,7 +1362,7 @@ async fn allow_list_written_with_the_phone_jid_matches_the_linked_lid() {
 
 #[tokio::test]
 async fn deny_list_written_with_the_phone_jid_excludes_the_linked_lid() {
-    let core = core(vec![phone_listed_mirror_rule(RuleChatsFilter::Not {
+    let core = core(vec![phone_listed_mirror_rule(ChatFilter::Not {
         chats: chats("15550001111@s.whatsapp.net"),
     })]);
     link_phone_to_lid(&core).await;
@@ -1376,7 +1376,7 @@ async fn deny_list_written_with_the_phone_jid_excludes_the_linked_lid() {
 
 #[tokio::test]
 async fn an_unlinked_chat_is_unaffected_by_another_chats_link() {
-    let core = core(vec![phone_listed_mirror_rule(RuleChatsFilter::Only {
+    let core = core(vec![phone_listed_mirror_rule(ChatFilter::Only {
         chats: chats("15550001111@s.whatsapp.net"),
     })]);
     link_phone_to_lid(&core).await;
@@ -1390,7 +1390,7 @@ async fn an_unlinked_chat_is_unaffected_by_another_chats_link() {
 
 #[tokio::test]
 async fn every_known_form_of_a_matched_chat_resolves_to_one_endpoint() {
-    let core = core(vec![phone_listed_mirror_rule(RuleChatsFilter::Only {
+    let core = core(vec![phone_listed_mirror_rule(ChatFilter::Only {
         chats: chats("15550001111@s.whatsapp.net"),
     })]);
     link_phone_to_lid(&core).await;
@@ -1420,7 +1420,7 @@ async fn every_known_form_of_a_matched_chat_resolves_to_one_endpoint() {
 
 #[tokio::test]
 async fn address_forms_chain_across_successive_migrations() {
-    let core = core(vec![phone_listed_mirror_rule(RuleChatsFilter::Only {
+    let core = core(vec![phone_listed_mirror_rule(ChatFilter::Only {
         chats: chats("15550001111@s.whatsapp.net"),
     })]);
     link_phone_to_lid(&core).await;
@@ -1443,7 +1443,7 @@ async fn address_forms_chain_across_successive_migrations() {
 
 #[tokio::test]
 async fn a_form_learned_after_the_chat_is_routed_joins_the_same_conversation() {
-    let core = core(vec![phone_listed_mirror_rule(RuleChatsFilter::All)]);
+    let core = core(vec![phone_listed_mirror_rule(ChatFilter::All)]);
     let first = core
         .ingest(event(WHATSAPP, "88887777@lid", "wa-1", None))
         .await
@@ -1478,7 +1478,7 @@ async fn a_form_learned_after_the_chat_is_routed_joins_the_same_conversation() {
 
 #[tokio::test]
 async fn a_deny_list_applies_to_a_chat_once_its_listed_form_is_learned() {
-    let core = core(vec![phone_listed_mirror_rule(RuleChatsFilter::Not {
+    let core = core(vec![phone_listed_mirror_rule(ChatFilter::Not {
         chats: chats("15550001111@s.whatsapp.net"),
     })]);
     // The chat arrives before the core knows the phone number behind it, so
@@ -1506,7 +1506,7 @@ async fn a_routed_chat_stops_when_its_rule_leaves_the_config() {
     let storage = Arc::new(InMemoryStorage::default());
     let core = core_over(
         Arc::clone(&storage),
-        vec![phone_listed_mirror_rule(RuleChatsFilter::All)],
+        vec![phone_listed_mirror_rule(ChatFilter::All)],
     );
     let routed = core
         .ingest(event(WHATSAPP, "88887777@lid", "wa-1", None))

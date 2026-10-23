@@ -2,8 +2,8 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use thiserror::Error;
 use wuphf_model::{
-    AddressSet, ConnectorId, ConnectorInfo, EndpointId, MessageId, NoticeTarget, RoutingRule,
-    RoutingRuleFlow, RuleEnd, RuleId,
+    AddressSet, ConnectorId, ConnectorInfo, EndpointId, MessageId, NoticeTarget, Rule,
+    RuleKind, RuleEnd, RuleId,
 };
 use wuphf_storage::{Storage, StorageError};
 
@@ -12,19 +12,19 @@ mod routing;
 /// The rule set plus connector metadata that drives address resolution and
 /// thread provisioning. Shared by the core and the router.
 pub struct RoutingConfig {
-    rules: Vec<RoutingRule>,
+    rules: Vec<Rule>,
     connectors: HashMap<ConnectorId, ConnectorInfo>,
     notice_targets: Vec<NoticeTarget>,
 }
 
 /// The end of a rule that an inbound address matched.
 pub struct MatchedRule<'a> {
-    pub rule: &'a RoutingRule,
+    pub rule: &'a Rule,
     pub origin: RuleEnd,
 }
 
 impl RoutingConfig {
-    pub fn new(rules: Vec<RoutingRule>, connectors: HashMap<ConnectorId, ConnectorInfo>) -> Self {
+    pub fn new(rules: Vec<Rule>, connectors: HashMap<ConnectorId, ConnectorInfo>) -> Self {
         Self {
             rules,
             connectors,
@@ -52,7 +52,7 @@ impl RoutingConfig {
             .filter(move |target| target.connector_id != *raising)
     }
 
-    pub fn rule(&self, id: &RuleId) -> Option<&RoutingRule> {
+    pub fn rule(&self, id: &RuleId) -> Option<&Rule> {
         self.rules.iter().find(|rule| rule.id == *id)
     }
 
@@ -93,10 +93,10 @@ where
     }
 }
 
-fn is_mirror_side(rule: &RoutingRule, connector: &ConnectorId, container: &str) -> bool {
+fn is_mirror_side(rule: &Rule, connector: &ConnectorId, container: &str) -> bool {
     match &rule.flow {
-        RoutingRuleFlow::OneToOne { .. } => false,
-        RoutingRuleFlow::ManyToOne {
+        RuleKind::OneToOne { .. } => false,
+        RuleKind::ManyToOne {
             destination_connector,
             destination_chat,
             ..

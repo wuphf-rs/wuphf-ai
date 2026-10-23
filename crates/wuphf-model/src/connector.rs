@@ -105,7 +105,7 @@ impl InboundWork {
 /// pre-assigned; ownership is derived from the rules that reference the
 /// connector, and the connector advertises its capabilities at registration.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ConnectorRegistration {
+pub struct Connector {
     pub id: ConnectorId,
     pub platform: Platform,
     #[serde(default)]
