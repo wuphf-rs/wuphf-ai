@@ -11,7 +11,7 @@
 //! itself offline, and shows up in the observation log like any other message.
 
 use crate::{Core, CoreError};
-use wuphf_model::{ConnectorId, NoticeKind, RawOutbound, Dispatch};
+use wuphf_model::{ConnectorId, Dispatch, NoticeKind, OwnerMessage};
 use wuphf_storage::Storage;
 
 impl<S> Core<S>
@@ -42,7 +42,7 @@ where
         let mut dispatches = Vec::new();
         for target in targets {
             let outcome = self
-                .send_raw(RawOutbound {
+                .send_owner_message(OwnerMessage {
                     connector_id: target.connector_id,
                     chat_id: target.chat_id,
                     thread_id: target.thread_id,

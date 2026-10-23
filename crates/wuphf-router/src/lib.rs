@@ -2,8 +2,8 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use thiserror::Error;
 use wuphf_model::{
-    AddressSet, ConnectorId, ConnectorInfo, EndpointId, MessageId, NoticeTarget, Rule,
-    RuleKind, RuleEnd, RuleId,
+    AddressSet, ConnectorId, ConnectorInfo, EndpointId, MessageId, NoticeTarget, Rule, RuleEnd,
+    RuleId, RuleKind,
 };
 use wuphf_storage::{Storage, StorageError};
 

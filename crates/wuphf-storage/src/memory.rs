@@ -7,10 +7,10 @@ use async_trait::async_trait;
 use std::collections::{HashMap, HashSet};
 use tokio::sync::RwLock;
 use wuphf_model::{
-    AddressLink, Alias, ChatSettings, ConnectorId, Contact, Conversation, ConversationId, DedupKey,
-    DispatchCommand, DispatchId, DispatchState, Endpoint, EndpointId, MediaBlob, MediaId, Message,
-    MessageCopy, MessageId, ObservedChat, ObservedDirection, ObservedMessage, ChatAddress,
-    ReplicaSet, ReplicaSetId, Dispatch, ThreadMapping,
+    AddressLink, Alias, ChatAddress, ChatSettings, ConnectorId, Contact, Conversation,
+    ConversationId, DedupKey, Dispatch, DispatchCommand, DispatchId, DispatchState, Endpoint,
+    EndpointId, MediaBlob, MediaId, Message, MessageCopy, MessageId, ObservedChat,
+    ObservedDirection, ObservedMessage, ReplicaSet, ReplicaSetId, ThreadMapping,
 };
 
 #[derive(Default)]

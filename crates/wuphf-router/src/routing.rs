@@ -5,9 +5,8 @@
 
 use crate::{Router, RouterError, is_mirror_side};
 use wuphf_model::{
-    BlockedDispatch, ConnectorId, Conversation, DispatchCommand, Action, Endpoint,
-    EndpointId, Message, ChatAddress, ProvisionThread, ReceiptKind, ReplyContext,
-    RoutingOutcome, TargetAddress,
+    Action, BlockedDispatch, ChatAddress, ConnectorId, Conversation, DispatchCommand, Endpoint,
+    EndpointId, Message, ProvisionThread, ReceiptKind, ReplyContext, RoutingOutcome, TargetAddress,
 };
 use wuphf_storage::Storage;
 

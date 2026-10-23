@@ -5,8 +5,7 @@ use std::{collections::HashMap, net::SocketAddr, path::PathBuf, sync::Arc, time:
 use tonic::transport::Server;
 use wuphf_core::{Core, RoutingConfig};
 use wuphf_model::{
-    ConnectorCapabilities, ConnectorId, ConnectorInfo, Connector, NoticeTarget,
-    Platform, Rule,
+    Connector, ConnectorCapabilities, ConnectorId, ConnectorInfo, NoticeTarget, Platform, Rule,
 };
 use wuphf_proto::connector::connector_transport_server::ConnectorTransportServer;
 use wuphf_proto::connector::media_transport_server::MediaTransportServer;
@@ -140,7 +139,7 @@ async fn serve(path: PathBuf) -> Result<()> {
     let (runtime, channels, observer) =
         Runtime::channelled(Arc::new(Core::new(storage, config)), 128);
     let observer_service = ObserverTransportServer::with_interceptor(
-        GrpcObserverService::new(observer).with_sender(runtime.raw_sender()),
+        GrpcObserverService::new(observer).with_sender(runtime.owner_sender()),
         bearer_auth(configuration.observer_token.clone()),
     );
     if configuration.observer_token.is_none() {
@@ -182,7 +181,7 @@ fn platform(name: &str) -> Result<Platform> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use wuphf_model::{RuleKind, ChatFilter};
+    use wuphf_model::{ChatFilter, RuleKind};
 
     /// The shipped example config is the reference for the rule format; it must
     /// always parse, and its flows must land in the expected variants.

@@ -4,8 +4,8 @@
 
 use crate::{Core, CoreError};
 use wuphf_model::{
-    DedupKey, Endpoint, EndpointId, IgnoreReason, IngestOutcome, Message, MessageCopy, MessageId,
-    ReplicaSetId, RoutingOutcome, SourceAddress, Dispatch,
+    DedupKey, Dispatch, Endpoint, EndpointId, IgnoreReason, IngestOutcome, Message, MessageCopy,
+    MessageId, ReplicaSetId, RoutingOutcome, SourceAddress,
 };
 use wuphf_storage::Storage;
 
@@ -196,10 +196,7 @@ where
     /// Persist a routing outcome: enqueue the sendable dispatches and park the
     /// blocked ones on the message they wait for. Returns only the sendable
     /// dispatches — blocked ones surface later, when their parent is acknowledged.
-    async fn enqueue_outcome(
-        &self,
-        routing: &RoutingOutcome,
-    ) -> Result<Vec<Dispatch>, CoreError> {
+    async fn enqueue_outcome(&self, routing: &RoutingOutcome) -> Result<Vec<Dispatch>, CoreError> {
         let mut dispatches = Vec::new();
         for command in routing.dispatches.iter().cloned() {
             dispatches.push(self.storage.enqueue_dispatch(command, None).await?);

@@ -6,10 +6,9 @@ use tokio_stream::{Stream, wrappers::ReceiverStream};
 use tonic::{Request, Response, Status};
 use uuid::Uuid;
 use wuphf_model::{
-    Attachment, AttachmentKind, ConnectorCapabilities, ConnectorId, ConnectorInput,
-    ConnectorOutput, Connector, DispatchAck, Action, EventKind,
-    NewMessage, MediaId, Event, NoticeKind, Platform, ChatAddress,
-    ProvisionThread, ReceiptKind, ReplyContext, SourceAddress,
+    Action, Attachment, AttachmentKind, ChatAddress, Connector, ConnectorCapabilities, ConnectorId,
+    ConnectorInput, ConnectorOutput, DispatchAck, Event, EventKind, MediaId, NewMessage,
+    NoticeKind, Platform, ProvisionThread, ReceiptKind, ReplyContext, SourceAddress,
 };
 use wuphf_proto::connector as pb;
 use wuphf_proto::connector::connector_transport_server::ConnectorTransport;
@@ -91,9 +90,7 @@ impl ConnectorTransport for GrpcConnectorService {
 #[error("{0}")]
 struct WireError(String);
 
-fn registration_from_proto(
-    registration: pb::Registration,
-) -> Result<Connector, WireError> {
+fn registration_from_proto(registration: pb::Registration) -> Result<Connector, WireError> {
     Ok(Connector {
         id: ConnectorId(required_string(registration.connector_id, "connector_id")?),
         platform: platform_from_proto(registration.platform)?,
@@ -112,72 +109,66 @@ fn input_from_proto(
     connector_id: &ConnectorId,
 ) -> Result<ConnectorInput, WireError> {
     match frame.body {
-        Some(pb::client_frame::Body::MessageCreate(event)) => {
-            Ok(ConnectorInput::Event(Event {
-                source: SourceAddress {
-                    connector_id: connector_id.clone(),
-                    address: ChatAddress::new(
-                        required_string(event.chat_id, "chat_id")?,
-                        event.thread_id,
-                    ),
-                    chat_title: event.chat_title,
-                },
-                payload: EventKind::MessageCreate(NewMessage {
-                    platform_message_id: required_string(
-                        event.platform_message_id,
-                        "platform_message_id",
-                    )?,
-                    sender: required_string(event.sender, "sender")?,
-                    participant: event.participant,
-                    sender_name: event.sender_name,
-                    text: event.text,
-                    attachments: event
-                        .attachments
-                        .into_iter()
-                        .map(attachment_from_proto)
-                        .collect::<Result<_, _>>()?,
-                    reply_to_platform_message_id: event.reply_to_platform_message_id,
-                    timestamp_ms: event.timestamp_ms,
-                }),
-            }))
-        }
-        Some(pb::client_frame::Body::MessageEdit(event)) => {
-            Ok(ConnectorInput::Event(Event {
-                source: SourceAddress {
-                    connector_id: connector_id.clone(),
-                    address: ChatAddress::new(
-                        required_string(event.chat_id, "chat_id")?,
-                        event.thread_id,
-                    ),
-                    chat_title: None,
-                },
-                payload: EventKind::MessageEdit {
-                    platform_message_id: required_string(
-                        event.platform_message_id,
-                        "platform_message_id",
-                    )?,
-                    text: event.text,
-                },
-            }))
-        }
-        Some(pb::client_frame::Body::MessageDelete(event)) => {
-            Ok(ConnectorInput::Event(Event {
-                source: SourceAddress {
-                    connector_id: connector_id.clone(),
-                    address: ChatAddress::new(
-                        required_string(event.chat_id, "chat_id")?,
-                        event.thread_id,
-                    ),
-                    chat_title: None,
-                },
-                payload: EventKind::MessageDelete {
-                    platform_message_id: required_string(
-                        event.platform_message_id,
-                        "platform_message_id",
-                    )?,
-                },
-            }))
-        }
+        Some(pb::client_frame::Body::MessageCreate(event)) => Ok(ConnectorInput::Event(Event {
+            source: SourceAddress {
+                connector_id: connector_id.clone(),
+                address: ChatAddress::new(
+                    required_string(event.chat_id, "chat_id")?,
+                    event.thread_id,
+                ),
+                chat_title: event.chat_title,
+            },
+            payload: EventKind::MessageCreate(NewMessage {
+                platform_message_id: required_string(
+                    event.platform_message_id,
+                    "platform_message_id",
+                )?,
+                sender: required_string(event.sender, "sender")?,
+                participant: event.participant,
+                sender_name: event.sender_name,
+                text: event.text,
+                attachments: event
+                    .attachments
+                    .into_iter()
+                    .map(attachment_from_proto)
+                    .collect::<Result<_, _>>()?,
+                reply_to_platform_message_id: event.reply_to_platform_message_id,
+                timestamp_ms: event.timestamp_ms,
+            }),
+        })),
+        Some(pb::client_frame::Body::MessageEdit(event)) => Ok(ConnectorInput::Event(Event {
+            source: SourceAddress {
+                connector_id: connector_id.clone(),
+                address: ChatAddress::new(
+                    required_string(event.chat_id, "chat_id")?,
+                    event.thread_id,
+                ),
+                chat_title: None,
+            },
+            payload: EventKind::MessageEdit {
+                platform_message_id: required_string(
+                    event.platform_message_id,
+                    "platform_message_id",
+                )?,
+                text: event.text,
+            },
+        })),
+        Some(pb::client_frame::Body::MessageDelete(event)) => Ok(ConnectorInput::Event(Event {
+            source: SourceAddress {
+                connector_id: connector_id.clone(),
+                address: ChatAddress::new(
+                    required_string(event.chat_id, "chat_id")?,
+                    event.thread_id,
+                ),
+                chat_title: None,
+            },
+            payload: EventKind::MessageDelete {
+                platform_message_id: required_string(
+                    event.platform_message_id,
+                    "platform_message_id",
+                )?,
+            },
+        })),
         Some(pb::client_frame::Body::Acknowledgement(acknowledgement)) => {
             Ok(ConnectorInput::Acknowledgement(DispatchAck {
                 dispatch_id: wuphf_model::DispatchId(parse_uuid(

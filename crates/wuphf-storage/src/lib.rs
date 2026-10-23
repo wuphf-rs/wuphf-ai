@@ -12,10 +12,10 @@ pub use sqlite::SqliteStorage;
 use async_trait::async_trait;
 use thiserror::Error;
 use wuphf_model::{
-    AddressLink, Alias, ChatSettings, ConnectorId, Contact, Conversation, ConversationId, DedupKey,
-    DispatchCommand, DispatchId, Endpoint, EndpointId, MediaBlob, MediaId, Message, MessageCopy,
-    MessageId, ObservedChat, ObservedMessage, ChatAddress, ReplicaSet, ReplicaSetId,
-    Dispatch, ThreadMapping,
+    AddressLink, Alias, ChatAddress, ChatSettings, ConnectorId, Contact, Conversation,
+    ConversationId, DedupKey, Dispatch, DispatchCommand, DispatchId, Endpoint, EndpointId,
+    MediaBlob, MediaId, Message, MessageCopy, MessageId, ObservedChat, ObservedMessage, ReplicaSet,
+    ReplicaSetId, ThreadMapping,
 };
 
 #[derive(Debug, Error)]

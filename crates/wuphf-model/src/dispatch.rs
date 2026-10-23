@@ -230,14 +230,14 @@ pub enum IgnoreReason {
     RedundantDelete,
 }
 
-/// The sender identity stamped on owner-authored raw sends. Platforms deliver
+/// The sender identity stamped on owner messages. Platforms deliver
 /// the message from the owner's own account, so this label only surfaces in the
 /// bridge's own records and mirror renderings.
-pub const RAW_SENDER: &str = "me";
+pub const OWNER_AUTHOR: &str = "me";
 
 /// An owner-authored outbound text addressed by raw platform coordinates.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct RawOutbound {
+pub struct OwnerMessage {
     pub connector_id: ConnectorId,
     pub chat_id: String,
     pub thread_id: Option<String>,
@@ -251,11 +251,11 @@ pub struct RawOutbound {
     pub timestamp_ms: i64,
 }
 
-/// The dispatches a raw send produced: the direct delivery to the addressed
+/// The dispatches an owner message produced: the direct delivery to the addressed
 /// chat, plus any mirror copies routing fanned out (empty for unrouted chats
 /// and for sends deferred behind mirror-thread provisioning).
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct RawSendOutcome {
+pub struct OwnerSendOutcome {
     pub direct: Dispatch,
     pub mirrored: Vec<Dispatch>,
 }

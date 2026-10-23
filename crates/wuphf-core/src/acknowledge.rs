@@ -4,8 +4,8 @@
 
 use crate::{Core, CoreError};
 use wuphf_model::{
-    AddressLink, Alias, ConnectorId, DispatchAck, DispatchId, EndpointId, MessageCopy,
-    MessageId, ChatAddress, ReplicaSetId, Dispatch,
+    AddressLink, Alias, ChatAddress, ConnectorId, Dispatch, DispatchAck, DispatchId, EndpointId,
+    MessageCopy, MessageId, ReplicaSetId,
 };
 use wuphf_storage::Storage;
 
@@ -61,10 +61,7 @@ where
     /// delivery), and only when the origin copy is known. The connector decides
     /// how to surface it (Telegram reacts 👍; sources ignore it). Multiple
     /// mirrors each emit one; the signal is idempotent.
-    async fn delivery_ack_for(
-        &self,
-        dispatch: &Dispatch,
-    ) -> Result<Option<Dispatch>, CoreError> {
+    async fn delivery_ack_for(&self, dispatch: &Dispatch) -> Result<Option<Dispatch>, CoreError> {
         if !matches!(
             dispatch.command.payload,
             wuphf_model::Action::MessageCreate { .. }

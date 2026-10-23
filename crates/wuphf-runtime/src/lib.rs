@@ -6,8 +6,8 @@ use tokio::sync::mpsc;
 use tracing::{debug, info, warn};
 use wuphf_core::{Core, CoreError};
 use wuphf_model::{
-    ConnectorId, DispatchAck, DispatchFailure, EventKind, InboundWork,
-    IngestOutcome, Event, Platform, ReceiptKind, Dispatch,
+    ConnectorId, Dispatch, DispatchAck, DispatchFailure, Event, EventKind, InboundWork,
+    IngestOutcome, Platform, ReceiptKind,
 };
 use wuphf_storage::Storage;
 
@@ -16,10 +16,10 @@ pub mod grpc;
 pub mod media;
 pub mod observation;
 pub mod observer_service;
-pub mod raw_send;
+pub mod owner_send;
 
 pub use observation::Observer;
-pub use raw_send::{RawMessageSender, RawSendError};
+pub use owner_send::{OwnerMessageSender, OwnerSendError};
 
 pub struct Runtime<S> {
     core: Arc<Core<S>>,
@@ -78,11 +78,11 @@ where
         )
     }
 
-    /// A handle that accepts owner-authored raw sends and feeds them into this
+    /// A handle that accepts owner messages and feeds them into this
     /// runtime's delivery loop. Take clones before calling [`Runtime::run`],
     /// which consumes the runtime.
-    pub fn raw_sender(&self) -> RawMessageSender<S> {
-        RawMessageSender::new(
+    pub fn owner_sender(&self) -> OwnerMessageSender<S> {
+        OwnerMessageSender::new(
             Arc::clone(&self.core),
             Arc::clone(&self.observer),
             self.dispatch_tx.clone(),
@@ -159,7 +159,7 @@ where
                         for dispatch in self.core.acknowledge_dispatch(acknowledgement).await? {
                             self.send(dispatch).await?;
                         }
-                        // A raw send settles its outgoing observation here; every
+                        // An owner message settles its outgoing observation here; every
                         // other dispatch is a no-op. A failure only loses the
                         // observation row, never the delivery, so warn and go on.
                         if let Err(error) = self

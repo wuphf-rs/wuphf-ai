@@ -1,4 +1,4 @@
-//! The runtime handle for owner-authored raw sends: turns a send request into
+//! The runtime handle for owner messages: turns a send request into
 //! core dispatches, injects them into the live delivery channel, and registers
 //! the send with the [`Observer`] so its acknowledgement logs an outgoing
 //! observation. Cloned into services (the observer gRPC surface) that accept
@@ -11,21 +11,21 @@ use thiserror::Error;
 use tokio::sync::{mpsc, oneshot};
 use wuphf_core::{Core, CoreError};
 use wuphf_model::{
-    ObservedDirection, ObservedMessage, Platform, RAW_SENDER, RawOutbound, Dispatch,
+    Dispatch, OWNER_AUTHOR, ObservedDirection, ObservedMessage, OwnerMessage, Platform,
 };
 use wuphf_storage::Storage;
 
 use crate::Observer;
 
 /// Accepts owner-authored sends and feeds them into the running delivery loop.
-pub struct RawMessageSender<S> {
+pub struct OwnerMessageSender<S> {
     core: Arc<Core<S>>,
     observer: Arc<Observer<S>>,
     dispatch_tx: mpsc::Sender<Dispatch>,
 }
 
 // Manual impl: `S` itself need not be `Clone` behind the `Arc`s.
-impl<S> Clone for RawMessageSender<S> {
+impl<S> Clone for OwnerMessageSender<S> {
     fn clone(&self) -> Self {
         Self {
             core: Arc::clone(&self.core),
@@ -36,14 +36,14 @@ impl<S> Clone for RawMessageSender<S> {
 }
 
 #[derive(Debug, Error)]
-pub enum RawSendError {
+pub enum OwnerSendError {
     #[error(transparent)]
     Core(#[from] CoreError),
     #[error("dispatch channel closed; the runtime is shutting down")]
     RuntimeStopped,
 }
 
-impl<S> RawMessageSender<S>
+impl<S> OwnerMessageSender<S>
 where
     S: Storage,
 {
@@ -66,10 +66,10 @@ where
     /// is fine; the send proceeds and is logged regardless.
     pub async fn send(
         &self,
-        outbound: RawOutbound,
-    ) -> Result<oneshot::Receiver<ObservedMessage>, RawSendError> {
+        outbound: OwnerMessage,
+    ) -> Result<oneshot::Receiver<ObservedMessage>, OwnerSendError> {
         let observed = self.observed_template(&outbound);
-        let outcome = self.core.send_raw(outbound).await?;
+        let outcome = self.core.send_owner_message(outbound).await?;
         // Track before injecting the dispatch: the acknowledgement must not be
         // able to race past an untracked send.
         let settled = self.observer.track_outbound(outcome.direct.id, observed);
@@ -80,9 +80,9 @@ where
         Ok(settled)
     }
 
-    /// The observation-log row for a raw send, complete except for the native
+    /// The observation-log row for an owner message, complete except for the native
     /// message id its acknowledgement will supply.
-    fn observed_template(&self, outbound: &RawOutbound) -> ObservedMessage {
+    fn observed_template(&self, outbound: &OwnerMessage) -> ObservedMessage {
         let platform = self
             .core
             .connector_platform(&outbound.connector_id)
@@ -93,7 +93,7 @@ where
             chat_id: outbound.chat_id.clone(),
             thread_id: outbound.thread_id.clone(),
             platform_message_id: String::new(),
-            sender: RAW_SENDER.to_owned(),
+            sender: OWNER_AUTHOR.to_owned(),
             sender_name: None,
             participant: None,
             text: Some(outbound.text.clone()),
@@ -106,11 +106,11 @@ where
         }
     }
 
-    async fn inject(&self, dispatch: Dispatch) -> Result<(), RawSendError> {
+    async fn inject(&self, dispatch: Dispatch) -> Result<(), OwnerSendError> {
         self.dispatch_tx
             .send(dispatch)
             .await
-            .map_err(|_| RawSendError::RuntimeStopped)
+            .map_err(|_| OwnerSendError::RuntimeStopped)
     }
 }
 

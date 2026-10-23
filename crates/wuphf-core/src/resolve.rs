@@ -4,8 +4,8 @@
 
 use crate::{Core, CoreError};
 use wuphf_model::{
-    AddressSet, Alias, ConnectorId, Conversation, ConversationId, Endpoint, EndpointId,
-    ChatAddress, ReplicaSet, ReplicaSetId, RuleKind, RuleEnd, RuleId, SourceAddress,
+    AddressSet, Alias, ChatAddress, ConnectorId, Conversation, ConversationId, Endpoint,
+    EndpointId, ReplicaSet, ReplicaSetId, RuleEnd, RuleId, RuleKind, SourceAddress,
 };
 use wuphf_storage::Storage;
 
@@ -45,9 +45,7 @@ where
         // A first sighting arriving on a many-to-one destination is a message
         // in a thread no conversation has claimed yet: conversations are minted
         // from the source end, so there is nothing to bind it to.
-        if origin_end == RuleEnd::Destination
-            && matches!(rule.flow, RuleKind::ManyToOne { .. })
-        {
+        if origin_end == RuleEnd::Destination && matches!(rule.flow, RuleKind::ManyToOne { .. }) {
             return Ok(None);
         }
 
@@ -92,7 +90,7 @@ where
     /// never seen when the list was written.
     ///
     /// Endpoints with no conversation behind them are exempt: those are the
-    /// standalone chats a raw send mints outside every rule, and they have to
+    /// standalone chats an owner message mints outside every rule, and they have to
     /// stay resolvable so their echoes are recognized.
     async fn still_covered(
         &self,
@@ -238,9 +236,7 @@ where
                 },
                 RuleEnd::Destination,
             ) => (destination_chat.address(), true),
-            (RuleKind::ManyToOne { .. }, RuleEnd::Source) => {
-                (identity_address.clone(), true)
-            }
+            (RuleKind::ManyToOne { .. }, RuleEnd::Source) => (identity_address.clone(), true),
             (
                 RuleKind::ManyToOne {
                     destination_chat, ..

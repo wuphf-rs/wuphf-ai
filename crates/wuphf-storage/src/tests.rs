@@ -1,7 +1,7 @@
 use super::*;
 use wuphf_model::{
-    Attachment, AttachmentKind, DedupKey, Action, DispatchState, MediaBlob, MediaId,
-    MessageCopy, ObservedDirection, ObservedMessage, Platform,
+    Action, Attachment, AttachmentKind, DedupKey, DispatchState, MediaBlob, MediaId, MessageCopy,
+    ObservedDirection, ObservedMessage, Platform,
 };
 
 #[tokio::test]
@@ -674,7 +674,7 @@ async fn sqlite_outgoing_direction_survives_the_platform_echo() {
         .await;
 }
 
-/// A row logged as outgoing (a raw send) must stay outgoing when the platform
+/// A row logged as outgoing (an owner message) must stay outgoing when the platform
 /// reports the same message back as an inbound event: both backends return and
 /// store the merged row with the original direction.
 async fn outgoing_direction_survives_the_platform_echo<S: Storage>(storage: S) {

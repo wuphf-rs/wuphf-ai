@@ -2,8 +2,7 @@
 //! dispatch-queue semantics stay identical across them.
 
 use wuphf_model::{
-    DispatchCommand, Action, DispatchState, Message, MessageCopy, MessageId, ReplyContext,
-    Dispatch,
+    Action, Dispatch, DispatchCommand, DispatchState, Message, MessageCopy, MessageId, ReplyContext,
 };
 
 /// The state a freshly enqueued dispatch starts in: blocked while it waits for a

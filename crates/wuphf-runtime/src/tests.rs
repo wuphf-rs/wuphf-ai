@@ -8,9 +8,9 @@ use tokio_stream::wrappers::{ReceiverStream, TcpListenerStream};
 use tonic::transport::Server;
 use wuphf_core::RoutingConfig;
 use wuphf_model::{
-    ConnectorCapabilities, ConnectorId, ConnectorInfo, ConnectorInput, ConnectorOutput,
-    Connector, Action, EventKind, NewMessage, IngestOutcome, Platform,
-    ChatAddress, Rule, RuleKind, RuleChat, ChatFilter, RuleId,
+    Action, ChatAddress, ChatFilter, Connector, ConnectorCapabilities, ConnectorId, ConnectorInfo,
+    ConnectorInput, ConnectorOutput, EventKind, IngestOutcome, NewMessage, Platform, Rule,
+    RuleChat, RuleId, RuleKind,
 };
 use wuphf_proto::connector as pb;
 use wuphf_proto::connector::connector_transport_client::ConnectorTransportClient;
@@ -472,8 +472,7 @@ async fn connector_sessions_route_dispatches_and_authorize_inputs() {
         panic!("Telegram should receive released reply dispatch");
     };
     let reply_dispatch = *reply_dispatch;
-    let Action::MessageCreate { reply_context, .. } = reply_dispatch.command.payload
-    else {
+    let Action::MessageCreate { reply_context, .. } = reply_dispatch.command.payload else {
         panic!("released reply should be a message create");
     };
     let reply_context = reply_context.expect("reply context set on release");
@@ -726,8 +725,8 @@ fn source_event(
     }
 }
 
-fn raw_outbound(chat_id: &str, text: &str) -> wuphf_model::RawOutbound {
-    wuphf_model::RawOutbound {
+fn owner_message(chat_id: &str, text: &str) -> wuphf_model::OwnerMessage {
+    wuphf_model::OwnerMessage {
         connector_id: ConnectorId(WA.into()),
         chat_id: chat_id.into(),
         thread_id: None,
@@ -738,14 +737,14 @@ fn raw_outbound(chat_id: &str, text: &str) -> wuphf_model::RawOutbound {
 }
 
 #[tokio::test]
-async fn raw_send_travels_the_dispatch_loop_and_settles_an_outgoing_observation() {
+async fn owner_message_travels_the_dispatch_loop_and_settles_an_outgoing_observation() {
     let (runtime, mut channels, observer) = Runtime::channelled(core(), 8);
-    let sender = runtime.raw_sender();
+    let sender = runtime.owner_sender();
     let task = tokio::spawn(runtime.run());
     let mut live = observer.subscribe();
 
     let settled = sender
-        .send(raw_outbound("wa-chat", "from the tui"))
+        .send(owner_message("wa-chat", "from the tui"))
         .await
         .unwrap();
 
@@ -755,12 +754,12 @@ async fn raw_send_travels_the_dispatch_loop_and_settles_an_outgoing_observation(
     let direct = [&first, &second]
         .into_iter()
         .find(|dispatch| dispatch.command.target_connector == ConnectorId(WA.into()))
-        .expect("the raw send dispatches to its own connector");
+        .expect("the owner message dispatches to its own connector");
     assert!(
         [&first, &second]
             .into_iter()
             .any(|dispatch| dispatch.command.target_connector == ConnectorId(TG.into())),
-        "a raw send into a routed chat also feeds the mirror",
+        "an owner message into a routed chat also feeds the mirror",
     );
 
     channels
@@ -798,7 +797,8 @@ async fn observer_service_send_message_returns_the_acknowledged_native_id() {
     use wuphf_proto::connector::observer_transport_server::ObserverTransport;
 
     let (runtime, channels, observer) = Runtime::channelled(core(), 8);
-    let service = GrpcObserverService::new(Arc::clone(&observer)).with_sender(runtime.raw_sender());
+    let service =
+        GrpcObserverService::new(Arc::clone(&observer)).with_sender(runtime.owner_sender());
     let task = tokio::spawn(runtime.run());
 
     // Stand in for the WhatsApp connector: acknowledge its dispatch on arrival.

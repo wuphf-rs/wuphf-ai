@@ -3,9 +3,7 @@ use std::collections::HashMap;
 use tokio::sync::{mpsc, oneshot};
 use tracing::{debug, info, warn};
 use wuphf_model::InboundWork;
-use wuphf_model::{
-    ConnectorId, ConnectorInput, ConnectorOutput, Connector, DispatchId, Dispatch,
-};
+use wuphf_model::{Connector, ConnectorId, ConnectorInput, ConnectorOutput, Dispatch, DispatchId};
 
 pub struct ConnectorConnection {
     pub input: mpsc::Sender<ConnectorInput>,
@@ -18,10 +16,7 @@ pub struct ConnectorHubHandle {
 }
 
 impl ConnectorHubHandle {
-    pub async fn connect(
-        &self,
-        registration: Connector,
-    ) -> Result<ConnectorConnection, String> {
+    pub async fn connect(&self, registration: Connector) -> Result<ConnectorConnection, String> {
         let (input_tx, input_rx) = mpsc::channel(32);
         let (output_tx, output_rx) = mpsc::channel(32);
         let (result_tx, result_rx) = oneshot::channel();
@@ -67,10 +62,7 @@ struct ConnectRequest {
 }
 
 impl ConnectorHub {
-    pub fn new(
-        runtime: RuntimeChannels,
-        allowed: Vec<Connector>,
-    ) -> (Self, ConnectorHubHandle) {
+    pub fn new(runtime: RuntimeChannels, allowed: Vec<Connector>) -> (Self, ConnectorHubHandle) {
         let (connect_tx, connect_rx) = mpsc::channel(16);
         let (inbound_tx, inbound_rx) = mpsc::channel(64);
         (

@@ -1,10 +1,9 @@
 use super::*;
 use std::collections::HashMap;
 use wuphf_model::{
-    Attachment, AttachmentKind, ConnectorCapabilities, ConnectorInfo, DispatchAck,
-    Action, NewMessage, MediaBlob, MediaId, NoticeKind, Platform, ChatAddress,
-    RAW_SENDER, RawOutbound, ReceiptKind, Rule, RuleKind, RuleChat, ChatFilter,
-    RuleId, SourceAddress, Dispatch,
+    Action, Attachment, AttachmentKind, ChatAddress, ChatFilter, ConnectorCapabilities,
+    ConnectorInfo, Dispatch, DispatchAck, MediaBlob, MediaId, NewMessage, NoticeKind, OWNER_AUTHOR,
+    OwnerMessage, Platform, ReceiptKind, Rule, RuleChat, RuleId, RuleKind, SourceAddress,
 };
 use wuphf_storage::InMemoryStorage;
 
@@ -83,12 +82,7 @@ fn core_over(storage: Arc<InMemoryStorage>, rules: Vec<Rule>) -> Core<InMemorySt
     Core::new(storage, config)
 }
 
-fn event(
-    connector: &str,
-    chat_id: &str,
-    native_id: &str,
-    reply_to: Option<&str>,
-) -> Event {
+fn event(connector: &str, chat_id: &str, native_id: &str, reply_to: Option<&str>) -> Event {
     event_in(connector, chat_id, None, native_id, reply_to)
 }
 
@@ -249,10 +243,12 @@ async fn source_rename_retitles_the_provisioned_mirror_thread() {
     let mut unchanged = event(WHATSAPP, "111@g.us", "wa-3", None);
     unchanged.source.chat_title = Some("Renamed".into());
     let stable = core.ingest(unchanged).await.unwrap();
-    assert!(stable.dispatches().iter().all(|stored| !matches!(
-        stored.command.payload,
-        Action::RetitleThread { .. }
-    )));
+    assert!(
+        stable
+            .dispatches()
+            .iter()
+            .all(|stored| !matches!(stored.command.payload, Action::RetitleThread { .. }))
+    );
 }
 
 #[tokio::test]
@@ -324,12 +320,7 @@ async fn concurrent_messages_provision_one_thread_and_replay_the_rest() {
     // replayed stashed message is found among the released dispatches.
     let command = &replayed
         .iter()
-        .find(|dispatch| {
-            matches!(
-                dispatch.command.payload,
-                Action::MessageCreate { .. }
-            )
-        })
+        .find(|dispatch| matches!(dispatch.command.payload, Action::MessageCreate { .. }))
         .expect("the stashed message is replayed")
         .command;
     assert_eq!(command.target_connector, ConnectorId(TELEGRAM.into()));
@@ -384,12 +375,7 @@ async fn restart_replays_stash_when_provisioning_settled_while_down() {
         .unwrap();
     let replayed_b = replayed
         .iter()
-        .find(|dispatch| {
-            matches!(
-                dispatch.command.payload,
-                Action::MessageCreate { .. }
-            )
-        })
+        .find(|dispatch| matches!(dispatch.command.payload, Action::MessageCreate { .. }))
         .expect("the stashed message replays after restart");
     assert!(replayed_b.command.target.provision_thread.is_none());
     assert_eq!(
@@ -431,12 +417,7 @@ async fn failed_provisioning_releases_stashed_messages() {
         .unwrap();
     let replay = released
         .iter()
-        .find(|dispatch| {
-            matches!(
-                dispatch.command.payload,
-                Action::MessageCreate { .. }
-            )
-        })
+        .find(|dispatch| matches!(dispatch.command.payload, Action::MessageCreate { .. }))
         .expect("the stashed message replays when provisioning fails");
     assert!(
         replay.command.target.provision_thread.is_some(),
@@ -775,12 +756,7 @@ async fn edit_before_delivery_blocks_then_releases_with_native_id() {
         .unwrap();
     let edit = released
         .iter()
-        .find(|dispatch| {
-            matches!(
-                dispatch.command.payload,
-                Action::MessageEdit { .. }
-            )
-        })
+        .find(|dispatch| matches!(dispatch.command.payload, Action::MessageEdit { .. }))
         .expect("acknowledging the create releases the blocked edit");
     let Action::MessageEdit {
         target_platform_message_id,
@@ -792,12 +768,7 @@ async fn edit_before_delivery_blocks_then_releases_with_native_id() {
     assert_eq!(target_platform_message_id, "tg-1");
 }
 
-fn reaction_event(
-    connector: &str,
-    chat_id: &str,
-    native_id: &str,
-    emoji: Option<&str>,
-) -> Event {
+fn reaction_event(connector: &str, chat_id: &str, native_id: &str, emoji: Option<&str>) -> Event {
     Event {
         source: SourceAddress {
             connector_id: ConnectorId(connector.into()),
@@ -959,12 +930,7 @@ async fn acknowledging_a_mirror_create_emits_a_delivery_ack_to_the_origin() {
         .unwrap();
     let ack = released
         .iter()
-        .find(|dispatch| {
-            matches!(
-                dispatch.command.payload,
-                Action::DeliveryAck { .. }
-            )
-        })
+        .find(|dispatch| matches!(dispatch.command.payload, Action::DeliveryAck { .. }))
         .expect("acknowledging the mirror create emits a delivery ack");
     assert_eq!(ack.command.target_connector, ConnectorId(WHATSAPP.into()));
     let Action::DeliveryAck {
@@ -1162,8 +1128,8 @@ async fn edit_for_unknown_message_is_ignored() {
     );
 }
 
-fn raw(chat_id: &str, text: &str, reply_to: Option<&str>) -> RawOutbound {
-    RawOutbound {
+fn owner_message(chat_id: &str, text: &str, reply_to: Option<&str>) -> OwnerMessage {
+    OwnerMessage {
         connector_id: ConnectorId(WHATSAPP.into()),
         chat_id: chat_id.into(),
         thread_id: None,
@@ -1173,15 +1139,15 @@ fn raw(chat_id: &str, text: &str, reply_to: Option<&str>) -> RawOutbound {
     }
 }
 
-// The phase-5 STOP gate: a raw send must never loop. The acknowledgement
+// The phase-5 STOP gate: an owner message must never loop. The acknowledgement
 // records a sent copy, so the platform reporting our own message back as an
 // inbound event is dropped as an echo instead of being ingested again.
 #[tokio::test]
-async fn raw_send_echo_is_suppressed_after_acknowledgement() {
-    // No rules: the raw send mints the chat's topology itself.
+async fn owner_message_echo_is_suppressed_after_acknowledgement() {
+    // No rules: the owner message mints the chat's topology itself.
     let core = core(vec![]);
     let outcome = core
-        .send_raw(raw("999@s.whatsapp.net", "hi there", None))
+        .send_owner_message(owner_message("999@s.whatsapp.net", "hi there", None))
         .await
         .unwrap();
     assert!(outcome.mirrored.is_empty());
@@ -1201,10 +1167,10 @@ async fn raw_send_echo_is_suppressed_after_acknowledgement() {
 }
 
 #[tokio::test]
-async fn raw_send_to_a_routed_chat_fans_out_to_the_other_side() {
+async fn owner_message_to_a_routed_chat_fans_out_to_the_other_side() {
     let core = core(vec![direct_rule()]);
     let outcome = core
-        .send_raw(raw("12345@s.whatsapp.net", "from the tui", None))
+        .send_owner_message(owner_message("12345@s.whatsapp.net", "from the tui", None))
         .await
         .unwrap();
     assert_eq!(
@@ -1233,10 +1199,10 @@ async fn raw_send_to_a_routed_chat_fans_out_to_the_other_side() {
 }
 
 #[tokio::test]
-async fn raw_send_to_an_unrouted_chat_keeps_later_inbound_ingestible() {
+async fn owner_message_to_an_unrouted_chat_keeps_later_inbound_ingestible() {
     let core = core(vec![direct_rule()]);
     let outcome = core
-        .send_raw(raw("unrouted@s.whatsapp.net", "hello", None))
+        .send_owner_message(owner_message("unrouted@s.whatsapp.net", "hello", None))
         .await
         .unwrap();
     assert!(outcome.mirrored.is_empty());
@@ -1248,18 +1214,22 @@ async fn raw_send_to_an_unrouted_chat_keeps_later_inbound_ingestible() {
         .unwrap()
     {
         IngestOutcome::Routed { dispatches, .. } => assert!(dispatches.is_empty()),
-        other => panic!("inbound after a raw send should ingest, got {other:?}"),
+        other => panic!("inbound after an owner message should ingest, got {other:?}"),
     }
 }
 
 #[tokio::test]
-async fn raw_send_reply_quotes_the_stored_parent_and_degrades_to_plain() {
+async fn owner_message_reply_quotes_the_stored_parent_and_degrades_to_plain() {
     let core = core(vec![direct_rule()]);
     core.ingest(event(WHATSAPP, "12345@s.whatsapp.net", "wa-parent", None))
         .await
         .unwrap();
     let outcome = core
-        .send_raw(raw("12345@s.whatsapp.net", "replying", Some("wa-parent")))
+        .send_owner_message(owner_message(
+            "12345@s.whatsapp.net",
+            "replying",
+            Some("wa-parent"),
+        ))
         .await
         .unwrap();
     let Action::MessageCreate {
@@ -1268,17 +1238,21 @@ async fn raw_send_reply_quotes_the_stored_parent_and_degrades_to_plain() {
         ..
     } = &outcome.direct.command.payload
     else {
-        panic!("raw send dispatches a message create");
+        panic!("owner message dispatches a message create");
     };
     assert!(message.reply_to.is_some());
-    assert_eq!(message.sender, RAW_SENDER);
+    assert_eq!(message.sender, OWNER_AUTHOR);
     let context = reply_context.as_ref().expect("stored parent quotes");
     assert_eq!(context.platform_message_id, "wa-parent");
     assert_eq!(context.sender, "alice");
 
     // A parent the bridge never stored degrades to a plain send.
     let outcome = core
-        .send_raw(raw("12345@s.whatsapp.net", "plain", Some("ghost")))
+        .send_owner_message(owner_message(
+            "12345@s.whatsapp.net",
+            "plain",
+            Some("ghost"),
+        ))
         .await
         .unwrap();
     let Action::MessageCreate {
@@ -1287,16 +1261,16 @@ async fn raw_send_reply_quotes_the_stored_parent_and_degrades_to_plain() {
         ..
     } = &outcome.direct.command.payload
     else {
-        panic!("raw send dispatches a message create");
+        panic!("owner message dispatches a message create");
     };
     assert!(message.reply_to.is_none() && reply_context.is_none());
 }
 
 #[tokio::test]
-async fn raw_send_to_an_unknown_connector_is_rejected() {
+async fn owner_message_to_an_unknown_connector_is_rejected() {
     let core = core(vec![]);
     let error = core
-        .send_raw(RawOutbound {
+        .send_owner_message(OwnerMessage {
             connector_id: ConnectorId("unregistered".into()),
             chat_id: "somewhere".into(),
             thread_id: None,
@@ -1610,9 +1584,7 @@ async fn a_quote_of_a_received_copy_is_not_attributed_to_the_bridge() {
         ))
         .await
         .unwrap();
-    let Action::MessageCreate { reply_context, .. } =
-        &reply.dispatches()[0].command.payload
-    else {
+    let Action::MessageCreate { reply_context, .. } = &reply.dispatches()[0].command.payload else {
         panic!("reply should dispatch a create");
     };
     let reply_context = reply_context.as_ref().expect("the reply quotes its parent");
@@ -1650,9 +1622,7 @@ async fn a_quote_of_a_bridge_sent_copy_is_attributed_to_the_bridge() {
         ))
         .await
         .unwrap();
-    let Action::MessageCreate { reply_context, .. } =
-        &reply.dispatches()[0].command.payload
-    else {
+    let Action::MessageCreate { reply_context, .. } = &reply.dispatches()[0].command.payload else {
         panic!("reply should dispatch a create");
     };
     let reply_context = reply_context.as_ref().expect("the reply quotes its parent");

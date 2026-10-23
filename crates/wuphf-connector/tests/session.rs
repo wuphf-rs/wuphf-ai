@@ -16,9 +16,8 @@ use tonic::transport::Server;
 use wuphf_connector::{Client, Delivery, Failure, Options};
 use wuphf_core::{Core, RoutingConfig};
 use wuphf_model::{
-    ConnectorCapabilities, ConnectorId, ConnectorInfo, Connector, EventKind,
-    NewMessage, InboundWork, Event, Platform, ChatAddress, Rule,
-    RuleKind, RuleChat, RuleId,
+    ChatAddress, Connector, ConnectorCapabilities, ConnectorId, ConnectorInfo, Event, EventKind,
+    InboundWork, NewMessage, Platform, Rule, RuleChat, RuleId, RuleKind,
 };
 use wuphf_proto::connector as pb;
 use wuphf_runtime::Runtime;

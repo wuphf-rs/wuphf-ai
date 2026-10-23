@@ -7,7 +7,7 @@
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use tokio::sync::{broadcast, oneshot};
-use wuphf_model::{DispatchId, EventKind, Event, ObservedMessage, Platform};
+use wuphf_model::{DispatchId, Event, EventKind, ObservedMessage, Platform};
 use wuphf_storage::{Storage, StorageError};
 
 /// How many recent observed messages the live broadcast retains for a lagging
@@ -22,14 +22,14 @@ const BROADCAST_CAPACITY: usize = 1024;
 pub struct Observer<S> {
     storage: Arc<S>,
     events: broadcast::Sender<ObservedMessage>,
-    /// Raw sends in flight, keyed by their direct dispatch. The observed row is
+    /// Owner messages in flight, keyed by their direct dispatch. The observed row is
     /// held here until the connector's acknowledgement supplies the native
     /// message id, at which point it is logged as outgoing and broadcast. The
     /// lock is never held across an await.
     pending_outbound: Mutex<HashMap<DispatchId, PendingOutbound>>,
 }
 
-/// One raw send awaiting its acknowledgement: the observed row missing only its
+/// One owner message awaiting its acknowledgement: the observed row missing only its
 /// native id, and the waiter (if any) to notify with the settled row.
 struct PendingOutbound {
     observed: ObservedMessage,
@@ -70,18 +70,14 @@ where
     /// Whatever row results is broadcast to live subscribers. Observation is a
     /// side concern: a failure is returned for the caller to log, never to abort
     /// ingest.
-    pub async fn observe(
-        &self,
-        event: &Event,
-        platform: Platform,
-    ) -> Result<(), StorageError> {
+    pub async fn observe(&self, event: &Event, platform: Platform) -> Result<(), StorageError> {
         let connector_id = &event.source.connector_id;
         let chat_id = &event.source.address.chat_id;
         let captured = match &event.payload {
             EventKind::MessageCreate(inbound) => {
                 let observed = ObservedMessage::incoming(&event.source, platform, inbound);
                 // Broadcast the row as stored, not as constructed: an echo of
-                // our own raw send keeps its outgoing direction in storage, and
+                // our own owner message keeps its outgoing direction in storage, and
                 // live subscribers must see the same row.
                 Some(
                     self.storage
@@ -114,7 +110,7 @@ where
         Ok(())
     }
 
-    /// Register a raw send awaiting acknowledgement. The observed row (its
+    /// Register an owner message awaiting acknowledgement. The observed row (its
     /// `platform_message_id` still unknown) is held until
     /// [`settle_outbound`](Self::settle_outbound) fills it in from the
     /// connector's acknowledgement. The returned receiver resolves with the
@@ -135,7 +131,7 @@ where
         receiver
     }
 
-    /// Settle a tracked raw send with the native id its acknowledgement
+    /// Settle a tracked owner message with the native id its acknowledgement
     /// carried: log the row as outgoing, broadcast it live, and notify the
     /// waiter. A dispatch that was never tracked (every ordinary bridge
     /// dispatch) is a no-op.
@@ -156,7 +152,7 @@ where
         Ok(())
     }
 
-    /// Drop a tracked raw send whose dispatch failed permanently; nothing was
+    /// Drop a tracked owner message whose dispatch failed permanently; nothing was
     /// delivered, so nothing is logged. Untracked dispatches are a no-op.
     pub fn discard_outbound(&self, dispatch_id: DispatchId) {
         self.pending_outbound.lock().unwrap().remove(&dispatch_id);
@@ -166,9 +162,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use wuphf_model::{
-        ConnectorId, NewMessage, ObservedDirection, ChatAddress, SourceAddress,
-    };
+    use wuphf_model::{ChatAddress, ConnectorId, NewMessage, ObservedDirection, SourceAddress};
     use wuphf_storage::InMemoryStorage;
 
     fn create_event(chat: &str, id: &str, text: &str, title: Option<&str>) -> Event {

@@ -1,6 +1,6 @@
 //! gRPC surface over the observation log for a viewer (e.g. a TUI): list
 //! chats, page a chat's history, subscribe to new activity, and — when built
-//! with a [`RawMessageSender`] — send owner-authored messages. The service
+//! with a [`OwnerMessageSender`] — send owner-authored messages. The service
 //! reads (and can write into) every captured chat, so it is guarded by an
 //! optional bearer token ([`bearer_auth`]) and should be bound locally.
 
@@ -12,15 +12,15 @@ use tokio::sync::{broadcast, mpsc};
 use tokio_stream::{Stream, wrappers::ReceiverStream};
 use tonic::{Request, Response, Status};
 use wuphf_model::{
-    ConnectorId, ObservedChat, ObservedDirection, ObservedMessage, Platform, RawOutbound,
+    ConnectorId, ObservedChat, ObservedDirection, ObservedMessage, OwnerMessage, Platform,
 };
 use wuphf_proto::connector as pb;
 use wuphf_proto::connector::observer_transport_server::ObserverTransport;
 use wuphf_storage::Storage;
 
 use crate::grpc::attachment_to_proto;
-use crate::raw_send::{self, RawMessageSender};
-use crate::{Observer, RawSendError};
+use crate::owner_send::{self, OwnerMessageSender};
+use crate::{Observer, OwnerSendError};
 
 /// Depth of the per-subscriber forwarding queue between the shared broadcast and
 /// one client's stream. Small: a client that cannot keep up should fall behind
@@ -36,7 +36,7 @@ pub struct GrpcObserverService<S> {
     observer: Arc<Observer<S>>,
     /// Send path into the running delivery loop; absent in read-only builds,
     /// where `SendMessage` reports unimplemented.
-    sender: Option<RawMessageSender<S>>,
+    sender: Option<OwnerMessageSender<S>>,
 }
 
 impl<S> GrpcObserverService<S> {
@@ -48,7 +48,7 @@ impl<S> GrpcObserverService<S> {
     }
 
     /// Enable sending through this service.
-    pub fn with_sender(mut self, sender: RawMessageSender<S>) -> Self {
+    pub fn with_sender(mut self, sender: OwnerMessageSender<S>) -> Self {
         self.sender = Some(sender);
         self
     }
@@ -160,18 +160,18 @@ where
             return Err(Status::invalid_argument("text must not be empty"));
         }
         let settled = sender
-            .send(RawOutbound {
+            .send(OwnerMessage {
                 connector_id: ConnectorId(request.connector_id),
                 chat_id: request.chat_id,
                 thread_id: request.thread_id,
                 text: request.text,
                 reply_to_platform_message_id: request.reply_to_platform_message_id,
-                timestamp_ms: raw_send::now_ms(),
+                timestamp_ms: owner_send::now_ms(),
             })
             .await
             .map_err(|error| match error {
-                RawSendError::Core(error) => Status::failed_precondition(error.to_string()),
-                RawSendError::RuntimeStopped => Status::unavailable(error.to_string()),
+                OwnerSendError::Core(error) => Status::failed_precondition(error.to_string()),
+                OwnerSendError::RuntimeStopped => Status::unavailable(error.to_string()),
             })?;
         // The dispatch is queued; wait (bounded) for the connector to report
         // the native id. On timeout the send still proceeds — the outgoing row
@@ -288,9 +288,7 @@ pub fn bearer_auth(token: Option<String>) -> impl tonic::service::Interceptor + 
 mod tests {
     use super::*;
     use tokio_stream::StreamExt;
-    use wuphf_model::{
-        EventKind, NewMessage, Event, ChatAddress, SourceAddress,
-    };
+    use wuphf_model::{ChatAddress, Event, EventKind, NewMessage, SourceAddress};
     use wuphf_storage::InMemoryStorage;
 
     fn service() -> GrpcObserverService<InMemoryStorage> {

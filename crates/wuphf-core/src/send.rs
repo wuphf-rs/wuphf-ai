@@ -1,7 +1,7 @@
-//! Raw outbound sending: deliver an owner-authored text (e.g. typed in the TUI)
+//! Owner messages: deliver an owner-authored text (e.g. typed in the TUI)
 //! to a platform chat directly, without an inbound event triggering it.
 //!
-//! A raw send reuses the ordinary dispatch pipeline end to end, which is what
+//! An owner message reuses the ordinary dispatch pipeline end to end, which is what
 //! keeps it loop-safe: the direct dispatch is acknowledged like any other, the
 //! acknowledgement records a *sent* copy, and when the platform later reports
 //! the message back as an inbound event the ingest path recognises the copy and
@@ -14,9 +14,9 @@
 
 use crate::{Core, CoreError};
 use wuphf_model::{
-    Alias, ConnectorId, DispatchCommand, Action, Endpoint, EndpointId, Message, MessageId,
-    ChatAddress, RAW_SENDER, RawOutbound, RawSendOutcome, ReplicaSet, ReplicaSetId,
-    ReplyContext, SourceAddress, Dispatch, TargetAddress,
+    Action, Alias, ChatAddress, ConnectorId, Dispatch, DispatchCommand, Endpoint, EndpointId,
+    Message, MessageId, OWNER_AUTHOR, OwnerMessage, OwnerSendOutcome, ReplicaSet, ReplicaSetId,
+    ReplyContext, SourceAddress, TargetAddress,
 };
 use wuphf_storage::Storage;
 
@@ -27,10 +27,13 @@ where
     /// Send an owner-authored text to a platform chat. Enqueues the direct
     /// dispatch (and any mirror fan-out) for delivery; the caller forwards the
     /// returned dispatches to the connectors.
-    pub async fn send_raw(&self, outbound: RawOutbound) -> Result<RawSendOutcome, CoreError> {
+    pub async fn send_owner_message(
+        &self,
+        outbound: OwnerMessage,
+    ) -> Result<OwnerSendOutcome, CoreError> {
         let address = ChatAddress::new(outbound.chat_id.clone(), outbound.thread_id.clone());
         let endpoint_id = self
-            .raw_target_endpoint(&outbound.connector_id, &address)
+            .owner_message_endpoint(&outbound.connector_id, &address)
             .await?;
         let replica_set_id = self
             .storage
@@ -48,7 +51,7 @@ where
         let message = Message {
             id: MessageId::new(),
             replica_set_id,
-            sender: RAW_SENDER.to_owned(),
+            sender: OWNER_AUTHOR.to_owned(),
             participant: None,
             sender_name: None,
             text: Some(outbound.text),
@@ -81,15 +84,15 @@ where
         let mirrored = self
             .fan_out_to_mirrors(message, endpoint_id, replica_set_id, &outbound.chat_id)
             .await?;
-        Ok(RawSendOutcome { direct, mirrored })
+        Ok(OwnerSendOutcome { direct, mirrored })
     }
 
-    /// The endpoint a raw send originates at. A rule-matched chat resolves (and
-    /// lazily mints) through the same path as inbound traffic, so raw sends and
+    /// The endpoint an owner message originates at. A rule-matched chat resolves (and
+    /// lazily mints) through the same path as inbound traffic, so owner messages and
     /// routing agree on the topology; a chat outside every rule gets a
     /// standalone endpoint in its own single-member replica set, which keeps
     /// later inbound resolution working while fanning out to nobody.
-    async fn raw_target_endpoint(
+    async fn owner_message_endpoint(
         &self,
         connector_id: &ConnectorId,
         address: &ChatAddress,
@@ -161,10 +164,10 @@ where
         Ok((Some(parent_id), Some(context)))
     }
 
-    /// Replicate a raw send to the chat's mirrors through the ordinary routing
+    /// Replicate an owner message to the chat's mirrors through the ordinary routing
     /// fan-out. Honors in-flight mirror-thread provisioning the same way ingest
     /// does: while a provision is pending the message is stashed and replayed
-    /// once the thread exists, so a raw send cannot provision a duplicate.
+    /// once the thread exists, so an owner message cannot provision a duplicate.
     async fn fan_out_to_mirrors(
         &self,
         message: Message,
