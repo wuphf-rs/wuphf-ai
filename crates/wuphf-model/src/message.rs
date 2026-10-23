@@ -42,7 +42,7 @@ pub struct MediaBlob {
 
 /// The normalized, platform-agnostic message owned by a [`ReplicaSet`].
 /// This canonical form is copied out to every endpoint in the set as a
-/// [`StoredDispatch`]. `sender` is the chat; `participant` is the individual
+/// [`Dispatch`]. `sender` is the chat; `participant` is the individual
 /// author in a group chat. `reply_to` references the parent by internal id.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Message {
@@ -240,7 +240,7 @@ pub enum ReceiptKind {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SourceAddress {
     pub connector_id: ConnectorId,
-    pub address: PlatformAddress,
+    pub address: ChatAddress,
     /// Optional display name used to title a newly provisioned mirror thread.
     #[serde(default)]
     pub chat_title: Option<String>,

@@ -17,7 +17,7 @@ use wuphf_connector::{Client, Delivery, Failure, Options};
 use wuphf_core::{Core, RoutingConfig};
 use wuphf_model::{
     ConnectorCapabilities, ConnectorId, ConnectorInfo, ConnectorRegistration, EventPayload,
-    InboundMessage, InboundWork, NormalizedEvent, Platform, PlatformAddress, RoutingRule,
+    InboundMessage, InboundWork, NormalizedEvent, Platform, ChatAddress, RoutingRule,
     RoutingRuleFlow, RuleChat, RuleId,
 };
 use wuphf_proto::connector as pb;
@@ -148,7 +148,7 @@ fn wa_event(native_id: &str, text: &str) -> NormalizedEvent {
     NormalizedEvent {
         source: wuphf_model::SourceAddress {
             connector_id: ConnectorId(WA.into()),
-            address: PlatformAddress::new("wa-chat", None),
+            address: ChatAddress::new("wa-chat", None),
             chat_title: None,
         },
         payload: EventPayload::MessageCreate(InboundMessage {
@@ -168,8 +168,8 @@ fn wa_event(native_id: &str, text: &str) -> NormalizedEvent {
 async fn wait_for_dispatch_state(
     storage: &InMemoryStorage,
     dispatch_id: &wuphf_model::DispatchId,
-    predicate: impl Fn(&wuphf_model::StoredDispatch) -> bool,
-) -> wuphf_model::StoredDispatch {
+    predicate: impl Fn(&wuphf_model::Dispatch) -> bool,
+) -> wuphf_model::Dispatch {
     for _ in 0..100 {
         if let Some(dispatch) = storage.dispatch(*dispatch_id).await.unwrap()
             && predicate(&dispatch)

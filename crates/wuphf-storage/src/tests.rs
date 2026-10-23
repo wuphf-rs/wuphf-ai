@@ -1,6 +1,6 @@
 use super::*;
 use wuphf_model::{
-    Attachment, AttachmentKind, DedupKey, DispatchPayload, DispatchState, MediaBlob, MediaId,
+    Attachment, AttachmentKind, DedupKey, Action, DispatchState, MediaBlob, MediaId,
     MessageCopy, ObservedDirection, ObservedMessage, Platform,
 };
 
@@ -33,7 +33,7 @@ async fn sqlite_persists_copy_state_and_releases_blocked_reply() {
 /// backend can assert they survive a reopen.
 async fn copy_state_and_blocked_reply_released<S: Storage>(
     storage: S,
-) -> (Vec<StoredDispatch>, EndpointId) {
+) -> (Vec<Dispatch>, EndpointId) {
     let parent_id = MessageId::new();
     let reply_id = MessageId::new();
     let endpoint_id = EndpointId::new();
@@ -53,7 +53,7 @@ async fn copy_state_and_blocked_reply_released<S: Storage>(
         .await
         .unwrap();
     assert_eq!(released.len(), 1);
-    let DispatchPayload::MessageCreate { reply_context, .. } = &released[0].command.payload else {
+    let Action::MessageCreate { reply_context, .. } = &released[0].command.payload else {
         panic!("released dispatch should be a message create");
     };
     let reply_context = reply_context
@@ -281,7 +281,7 @@ async fn acknowledging_create_binds_blocked_edit<S: Storage>(storage: S) {
         .await
         .unwrap();
     assert_eq!(released.len(), 1);
-    let DispatchPayload::MessageEdit {
+    let Action::MessageEdit {
         target_platform_message_id,
         ..
     } = &released[0].command.payload
@@ -327,7 +327,7 @@ async fn settling_a_signal_dispatch_records_no_copy<S: Storage>(storage: S) {
         .unwrap();
 
     let signals = [
-        DispatchPayload::Reaction {
+        Action::Reaction {
             message_id,
             replica_set_id,
             target_platform_message_id: "origin-1".into(),
@@ -335,12 +335,12 @@ async fn settling_a_signal_dispatch_records_no_copy<S: Storage>(storage: S) {
             reactor_name: None,
             emoji: Some("👍".into()),
         },
-        DispatchPayload::DeliveryAck {
+        Action::DeliveryAck {
             message_id,
             replica_set_id,
             target_platform_message_id: "origin-1".into(),
         },
-        DispatchPayload::SeenReceipt {
+        Action::SeenReceipt {
             message_id,
             replica_set_id,
             target_platform_message_id: "origin-1".into(),
@@ -636,10 +636,10 @@ fn command(message_id: MessageId, endpoint_id: EndpointId) -> DispatchCommand {
         target_endpoint: endpoint_id,
         target_connector: ConnectorId("telegram".into()),
         target: wuphf_model::TargetAddress {
-            address: wuphf_model::PlatformAddress::new("-100", Some("7".into())),
+            address: wuphf_model::ChatAddress::new("-100", Some("7".into())),
             provision_thread: None,
         },
-        payload: DispatchPayload::MessageCreate {
+        payload: Action::MessageCreate {
             message: message(message_id),
             reply_context: None,
         },
@@ -651,10 +651,10 @@ fn edit_command(message_id: MessageId, endpoint_id: EndpointId) -> DispatchComma
         target_endpoint: endpoint_id,
         target_connector: ConnectorId("telegram".into()),
         target: wuphf_model::TargetAddress {
-            address: wuphf_model::PlatformAddress::new("-100", Some("7".into())),
+            address: wuphf_model::ChatAddress::new("-100", Some("7".into())),
             provision_thread: None,
         },
-        payload: DispatchPayload::MessageEdit {
+        payload: Action::MessageEdit {
             message: message(message_id),
             target_platform_message_id: String::new(),
         },
@@ -781,8 +781,8 @@ async fn sqlite_address_links_resolve_from_either_side() {
 /// since rule matching reads this to decide whether a chat is listed.
 async fn address_links_resolve_from_either_side<S: Storage>(storage: S) {
     let connector = ConnectorId("whatsapp-main".into());
-    let phone = PlatformAddress::new("15550001111@s.whatsapp.net", None);
-    let lid = PlatformAddress::new("88887777@lid", None);
+    let phone = ChatAddress::new("15550001111@s.whatsapp.net", None);
+    let lid = ChatAddress::new("88887777@lid", None);
     let link = AddressLink {
         connector_id: connector.clone(),
         address: phone.clone(),
@@ -810,7 +810,7 @@ async fn address_links_resolve_from_either_side<S: Storage>(storage: S) {
     // A chat with no reported counterpart has no forms but its own.
     assert!(
         storage
-            .linked_addresses(&connector, &PlatformAddress::new("111@g.us", None))
+            .linked_addresses(&connector, &ChatAddress::new("111@g.us", None))
             .await
             .unwrap()
             .is_empty()

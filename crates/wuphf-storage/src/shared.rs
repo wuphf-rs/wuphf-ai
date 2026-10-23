@@ -2,8 +2,8 @@
 //! dispatch-queue semantics stay identical across them.
 
 use wuphf_model::{
-    DispatchCommand, DispatchPayload, DispatchState, Message, MessageCopy, MessageId, ReplyContext,
-    StoredDispatch,
+    DispatchCommand, Action, DispatchState, Message, MessageCopy, MessageId, ReplyContext,
+    Dispatch,
 };
 
 /// The state a freshly enqueued dispatch starts in: blocked while it waits for a
@@ -37,7 +37,7 @@ pub(crate) fn acknowledged_copy(
 /// Release a dispatch that was blocked on its now-delivered parent: bind the
 /// parent's native id into it and make it ready to send.
 pub(crate) fn release_blocked(
-    dispatch: &mut StoredDispatch,
+    dispatch: &mut Dispatch,
     parent: Message,
     platform_message_id: String,
 ) {
@@ -50,7 +50,7 @@ pub(crate) fn release_blocked(
 /// id of the copy it must revise at the target endpoint.
 fn bind_native_parent(command: &mut DispatchCommand, parent: Message, platform_message_id: String) {
     match &mut command.payload {
-        DispatchPayload::MessageCreate { reply_context, .. } => {
+        Action::MessageCreate { reply_context, .. } => {
             *reply_context = Some(ReplyContext {
                 message_id: parent.id,
                 platform_message_id,
@@ -64,28 +64,28 @@ fn bind_native_parent(command: &mut DispatchCommand, parent: Message, platform_m
                 authored_by_bridge: true,
             })
         }
-        DispatchPayload::MessageEdit {
+        Action::MessageEdit {
             target_platform_message_id,
             ..
         }
-        | DispatchPayload::MessageDelete {
+        | Action::MessageDelete {
             target_platform_message_id,
             ..
         }
-        | DispatchPayload::Reaction {
+        | Action::Reaction {
             target_platform_message_id,
             ..
         }
-        | DispatchPayload::DeliveryAck {
+        | Action::DeliveryAck {
             target_platform_message_id,
             ..
         }
-        | DispatchPayload::SeenReceipt {
+        | Action::SeenReceipt {
             target_platform_message_id,
             ..
         } => *target_platform_message_id = platform_message_id,
         // A retitle is never blocked on a parent message, so it is never
         // released with one.
-        DispatchPayload::RetitleThread { .. } => {}
+        Action::RetitleThread { .. } => {}
     }
 }

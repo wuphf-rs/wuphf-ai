@@ -9,8 +9,8 @@ use tonic::transport::Server;
 use wuphf_core::RoutingConfig;
 use wuphf_model::{
     ConnectorCapabilities, ConnectorId, ConnectorInfo, ConnectorInput, ConnectorOutput,
-    ConnectorRegistration, DispatchPayload, EventPayload, InboundMessage, IngestOutcome, Platform,
-    PlatformAddress, RoutingRule, RoutingRuleFlow, RuleChat, RuleChatsFilter, RuleId,
+    ConnectorRegistration, Action, EventPayload, InboundMessage, IngestOutcome, Platform,
+    ChatAddress, RoutingRule, RoutingRuleFlow, RuleChat, RuleChatsFilter, RuleId,
 };
 use wuphf_proto::connector as pb;
 use wuphf_proto::connector::connector_transport_client::ConnectorTransportClient;
@@ -123,7 +123,7 @@ fn mirror_core(storage: Arc<InMemoryStorage>) -> Arc<Core<InMemoryStorage>> {
 fn wa_group_event(native_id: &str) -> NormalizedEvent {
     source_event(
         ConnectorId(WA.into()),
-        PlatformAddress::new("wa-group", None),
+        ChatAddress::new("wa-group", None),
         native_id,
         None,
     )
@@ -188,8 +188,8 @@ async fn migration_before_event_is_applied_first_on_one_connector() {
         .inbound
         .send(InboundWork::Migration {
             connector_id: ConnectorId(WA.into()),
-            old: PlatformAddress::new("wa-chat", None),
-            new: PlatformAddress::new("wa-chat-migrated", None),
+            old: ChatAddress::new("wa-chat", None),
+            new: ChatAddress::new("wa-chat-migrated", None),
         })
         .await
         .unwrap();
@@ -197,7 +197,7 @@ async fn migration_before_event_is_applied_first_on_one_connector() {
         &channels,
         source_event(
             ConnectorId(WA.into()),
-            PlatformAddress::new("wa-chat-migrated", None),
+            ChatAddress::new("wa-chat-migrated", None),
             "wa-2",
             None,
         ),
@@ -223,7 +223,7 @@ async fn acknowledgement_releases_reply_with_target_native_parent_id() {
 
     channels
         .acknowledgements
-        .send(DispatchAcknowledgement {
+        .send(DispatchAck {
             dispatch_id: parent_dispatch.id,
             platform_message_id: "tg-parent".into(),
             thread_id: None,
@@ -234,7 +234,7 @@ async fn acknowledgement_releases_reply_with_target_native_parent_id() {
     // to the released reply create among the dispatches.
     let reply_context = loop {
         let dispatch = channels.dispatches.recv().await.unwrap();
-        if let DispatchPayload::MessageCreate { reply_context, .. } = dispatch.command.payload {
+        if let Action::MessageCreate { reply_context, .. } = dispatch.command.payload {
             break reply_context.expect("reply context set on release");
         }
     };
@@ -337,7 +337,7 @@ async fn only_the_assigned_session_may_fail_a_dispatch() {
     // needed to observe it.
     telegram
         .input
-        .send(ConnectorInput::Acknowledgement(DispatchAcknowledgement {
+        .send(ConnectorInput::Acknowledgement(DispatchAck {
             dispatch_id: wuphf_model::DispatchId::new(),
             platform_message_id: "ghost".into(),
             thread_id: None,
@@ -423,7 +423,7 @@ async fn connector_sessions_route_dispatches_and_authorize_inputs() {
     // An acknowledgement for a dispatch never assigned to the session is rejected.
     telegram
         .input
-        .send(ConnectorInput::Acknowledgement(DispatchAcknowledgement {
+        .send(ConnectorInput::Acknowledgement(DispatchAck {
             dispatch_id: wuphf_model::DispatchId::new(),
             platform_message_id: "ghost".into(),
             thread_id: None,
@@ -461,7 +461,7 @@ async fn connector_sessions_route_dispatches_and_authorize_inputs() {
         .unwrap();
     telegram
         .input
-        .send(ConnectorInput::Acknowledgement(DispatchAcknowledgement {
+        .send(ConnectorInput::Acknowledgement(DispatchAck {
             dispatch_id: parent_dispatch.id,
             platform_message_id: "tg-parent".into(),
             thread_id: None,
@@ -472,7 +472,7 @@ async fn connector_sessions_route_dispatches_and_authorize_inputs() {
         panic!("Telegram should receive released reply dispatch");
     };
     let reply_dispatch = *reply_dispatch;
-    let DispatchPayload::MessageCreate { reply_context, .. } = reply_dispatch.command.payload
+    let Action::MessageCreate { reply_context, .. } = reply_dispatch.command.payload
     else {
         panic!("released reply should be a message create");
     };
@@ -686,7 +686,7 @@ async fn send_event(channels: &RuntimeChannels, event: NormalizedEvent) {
 fn wa_event(native_id: &str, reply_to: Option<&str>) -> NormalizedEvent {
     source_event(
         ConnectorId(WA.into()),
-        PlatformAddress::new("wa-chat", None),
+        ChatAddress::new("wa-chat", None),
         native_id,
         reply_to,
     )
@@ -695,7 +695,7 @@ fn wa_event(native_id: &str, reply_to: Option<&str>) -> NormalizedEvent {
 fn tg_event(native_id: &str, reply_to: Option<&str>) -> NormalizedEvent {
     source_event(
         ConnectorId(TG.into()),
-        PlatformAddress::new("tg-chat", Some("topic".into())),
+        ChatAddress::new("tg-chat", Some("topic".into())),
         native_id,
         reply_to,
     )
@@ -703,7 +703,7 @@ fn tg_event(native_id: &str, reply_to: Option<&str>) -> NormalizedEvent {
 
 fn source_event(
     connector_id: ConnectorId,
-    address: PlatformAddress,
+    address: ChatAddress,
     native_id: &str,
     reply_to: Option<&str>,
 ) -> NormalizedEvent {
@@ -765,7 +765,7 @@ async fn raw_send_travels_the_dispatch_loop_and_settles_an_outgoing_observation(
 
     channels
         .acknowledgements
-        .send(DispatchAcknowledgement {
+        .send(DispatchAck {
             dispatch_id: direct.id,
             platform_message_id: "wa-raw-1".into(),
             thread_id: None,
@@ -812,7 +812,7 @@ async fn observer_service_send_message_returns_the_acknowledged_native_id() {
         while let Some(dispatch) = dispatches.recv().await {
             if dispatch.command.target_connector == ConnectorId(WA.into()) {
                 acknowledgements
-                    .send(DispatchAcknowledgement {
+                    .send(DispatchAck {
                         dispatch_id: dispatch.id,
                         platform_message_id: "wa-raw-9".into(),
                         thread_id: None,

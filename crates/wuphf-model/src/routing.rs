@@ -34,8 +34,8 @@ pub struct Endpoint {
 }
 
 impl Endpoint {
-    pub fn address(&self) -> PlatformAddress {
-        PlatformAddress {
+    pub fn address(&self) -> ChatAddress {
+        ChatAddress {
             chat_id: self.chat_id.clone(),
             thread_id: self.thread_id.clone(),
         }
@@ -54,12 +54,12 @@ pub struct ReplicaSet {
 /// A platform-native chat coordinate. `chat_id` identifies the chat/peer/group;
 /// `thread_id` selects a thread/topic within it when the platform supports one.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub struct PlatformAddress {
+pub struct ChatAddress {
     pub chat_id: String,
     pub thread_id: Option<String>,
 }
 
-impl PlatformAddress {
+impl ChatAddress {
     pub fn new(chat_id: impl Into<String>, thread_id: Option<String>) -> Self {
         Self {
             chat_id: chat_id.into(),
@@ -79,14 +79,14 @@ impl PlatformAddress {
 /// matter which form the user wrote or the connector reported.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AddressSet {
-    primary: PlatformAddress,
-    alternates: Vec<PlatformAddress>,
+    primary: ChatAddress,
+    alternates: Vec<ChatAddress>,
 }
 
 impl AddressSet {
     /// A set with no known alternates. Every connector that hands out one stable
     /// address per chat resolves through this.
-    pub fn single(primary: PlatformAddress) -> Self {
+    pub fn single(primary: ChatAddress) -> Self {
         Self {
             primary,
             alternates: Vec::new(),
@@ -95,7 +95,7 @@ impl AddressSet {
 
     /// A set of known-equivalent forms. `alternates` may repeat the primary or
     /// each other; duplicates are dropped so callers can pass a raw closure.
-    pub fn new(primary: PlatformAddress, alternates: Vec<PlatformAddress>) -> Self {
+    pub fn new(primary: ChatAddress, alternates: Vec<ChatAddress>) -> Self {
         let mut set = Self::single(primary);
         for address in alternates {
             set.insert(address);
@@ -104,7 +104,7 @@ impl AddressSet {
     }
 
     /// Add an equivalent form, ignoring one already in the set.
-    pub fn insert(&mut self, address: PlatformAddress) {
+    pub fn insert(&mut self, address: ChatAddress) {
         if address != self.primary && !self.alternates.contains(&address) {
             self.alternates.push(address);
         }
@@ -112,18 +112,18 @@ impl AddressSet {
 
     /// The address the event arrived on. This is the form the core stores and
     /// routes with; the alternates only widen matching.
-    pub fn primary(&self) -> &PlatformAddress {
+    pub fn primary(&self) -> &ChatAddress {
         &self.primary
     }
 
     /// Every form in the set, primary first.
-    pub fn iter(&self) -> impl Iterator<Item = &PlatformAddress> {
+    pub fn iter(&self) -> impl Iterator<Item = &ChatAddress> {
         std::iter::once(&self.primary).chain(self.alternates.iter())
     }
 }
 
-impl From<PlatformAddress> for AddressSet {
-    fn from(address: PlatformAddress) -> Self {
+impl From<ChatAddress> for AddressSet {
+    fn from(address: ChatAddress) -> Self {
         Self::single(address)
     }
 }
@@ -136,8 +136,8 @@ impl From<PlatformAddress> for AddressSet {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AddressLink {
     pub connector_id: ConnectorId,
-    pub address: PlatformAddress,
-    pub linked_address: PlatformAddress,
+    pub address: ChatAddress,
+    pub linked_address: ChatAddress,
 }
 
 /// A user-declared replication mapping. Rules are the only routing input a user
@@ -194,13 +194,13 @@ impl RuleChat {
         addresses.iter().any(|address| self.names(address))
     }
 
-    fn names(&self, address: &PlatformAddress) -> bool {
+    fn names(&self, address: &ChatAddress) -> bool {
         self.chat_id == address.chat_id
             && (self.thread_id.is_none() || self.thread_id == address.thread_id)
     }
 
-    pub fn address(&self) -> PlatformAddress {
-        PlatformAddress::new(self.chat_id.clone(), self.thread_id.clone())
+    pub fn address(&self) -> ChatAddress {
+        ChatAddress::new(self.chat_id.clone(), self.thread_id.clone())
     }
 }
 
@@ -325,7 +325,7 @@ impl RoutingRuleFlow {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Alias {
     pub connector_id: ConnectorId,
-    pub address: PlatformAddress,
+    pub address: ChatAddress,
     pub endpoint_id: EndpointId,
     pub is_canonical: bool,
 }
@@ -337,7 +337,7 @@ pub struct Conversation {
     pub rule_id: RuleId,
     pub replica_set_id: ReplicaSetId,
     pub source_connector: ConnectorId,
-    pub source_address: PlatformAddress,
+    pub source_address: ChatAddress,
     /// The last source title persisted for this conversation. Tracked so the
     /// core can detect when a source chat is renamed and fan a retitle out to
     /// the mirror threads. `None` until a title is first observed.

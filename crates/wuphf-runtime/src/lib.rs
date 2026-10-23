@@ -6,8 +6,8 @@ use tokio::sync::mpsc;
 use tracing::{debug, info, warn};
 use wuphf_core::{Core, CoreError};
 use wuphf_model::{
-    ConnectorId, DispatchAcknowledgement, DispatchFailure, EventPayload, InboundWork,
-    IngestOutcome, NormalizedEvent, Platform, ReceiptKind, StoredDispatch,
+    ConnectorId, DispatchAck, DispatchFailure, EventPayload, InboundWork,
+    IngestOutcome, NormalizedEvent, Platform, ReceiptKind, Dispatch,
 };
 use wuphf_storage::Storage;
 
@@ -25,9 +25,9 @@ pub struct Runtime<S> {
     core: Arc<Core<S>>,
     observer: Arc<Observer<S>>,
     inbound_rx: mpsc::Receiver<InboundWork>,
-    acknowledgement_rx: mpsc::Receiver<DispatchAcknowledgement>,
+    acknowledgement_rx: mpsc::Receiver<DispatchAck>,
     failure_rx: mpsc::Receiver<DispatchFailure>,
-    dispatch_tx: mpsc::Sender<StoredDispatch>,
+    dispatch_tx: mpsc::Sender<Dispatch>,
     /// Per-connector ingest worker queue depth. Sized to the runtime capacity so
     /// a connector replaying an offline backlog buffers ahead without stalling
     /// the demux that feeds the other connectors' workers.
@@ -36,9 +36,9 @@ pub struct Runtime<S> {
 
 pub struct RuntimeChannels {
     pub inbound: mpsc::Sender<InboundWork>,
-    pub acknowledgements: mpsc::Sender<DispatchAcknowledgement>,
+    pub acknowledgements: mpsc::Sender<DispatchAck>,
     pub failures: mpsc::Sender<DispatchFailure>,
-    pub dispatches: mpsc::Receiver<StoredDispatch>,
+    pub dispatches: mpsc::Receiver<Dispatch>,
 }
 
 impl<S> Runtime<S>
@@ -185,7 +185,7 @@ where
         Ok(())
     }
 
-    async fn send(&self, dispatch: StoredDispatch) -> Result<(), RuntimeError> {
+    async fn send(&self, dispatch: Dispatch) -> Result<(), RuntimeError> {
         self.dispatch_tx
             .send(dispatch)
             .await
@@ -201,7 +201,7 @@ where
 fn spawn_ingest_worker<S>(
     core: Arc<Core<S>>,
     observer: Arc<Observer<S>>,
-    dispatch_tx: mpsc::Sender<StoredDispatch>,
+    dispatch_tx: mpsc::Sender<Dispatch>,
     error_tx: mpsc::Sender<RuntimeError>,
     capacity: usize,
 ) -> mpsc::Sender<InboundWork>
@@ -238,7 +238,7 @@ async fn process_work<S>(
     core: &Core<S>,
     observer: &Observer<S>,
     work: InboundWork,
-) -> Result<Vec<StoredDispatch>, RuntimeError>
+) -> Result<Vec<Dispatch>, RuntimeError>
 where
     S: Storage,
 {

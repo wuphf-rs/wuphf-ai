@@ -10,8 +10,8 @@ use std::str::FromStr;
 use wuphf_model::{
     AddressLink, Alias, ChatSettings, ConnectorId, Contact, Conversation, ConversationId, DedupKey,
     DispatchCommand, DispatchId, DispatchState, Endpoint, EndpointId, MediaBlob, MediaId, Message,
-    MessageCopy, MessageId, ObservedChat, ObservedDirection, ObservedMessage, PlatformAddress,
-    ReplicaSet, ReplicaSetId, StoredDispatch, ThreadMapping,
+    MessageCopy, MessageId, ObservedChat, ObservedDirection, ObservedMessage, ChatAddress,
+    ReplicaSet, ReplicaSetId, Dispatch, ThreadMapping,
 };
 
 pub struct SqliteStorage {
@@ -116,7 +116,7 @@ impl Storage for SqliteStorage {
     async fn resolve_endpoint(
         &self,
         connector_id: &ConnectorId,
-        address: &PlatformAddress,
+        address: &ChatAddress,
     ) -> StorageResult<Option<EndpointId>> {
         let row = sqlx::query(
             "SELECT endpoint_id FROM aliases WHERE connector_id = ? AND chat_id = ? AND thread_key = ?",
@@ -160,8 +160,8 @@ impl Storage for SqliteStorage {
     async fn linked_addresses(
         &self,
         connector_id: &ConnectorId,
-        address: &PlatformAddress,
-    ) -> StorageResult<Vec<PlatformAddress>> {
+        address: &ChatAddress,
+    ) -> StorageResult<Vec<ChatAddress>> {
         let rows = sqlx::query(
             "SELECT linked_chat_id, linked_thread_key FROM address_links
              WHERE connector_id = ? AND chat_id = ? AND thread_key = ?
@@ -176,7 +176,7 @@ impl Storage for SqliteStorage {
             .into_iter()
             .map(|row| {
                 let thread: String = row.get("linked_thread_key");
-                PlatformAddress::new(
+                ChatAddress::new(
                     row.get::<String, _>("linked_chat_id"),
                     (!thread.is_empty()).then_some(thread),
                 )
@@ -220,7 +220,7 @@ impl Storage for SqliteStorage {
         &self,
         rule_id: &wuphf_model::RuleId,
         connector_id: &ConnectorId,
-        address: &PlatformAddress,
+        address: &ChatAddress,
     ) -> StorageResult<Option<Conversation>> {
         let row = sqlx::query(
             "SELECT payload FROM conversations
@@ -481,8 +481,8 @@ impl Storage for SqliteStorage {
         &self,
         command: DispatchCommand,
         waiting_for: Option<MessageId>,
-    ) -> StorageResult<StoredDispatch> {
-        let dispatch = StoredDispatch {
+    ) -> StorageResult<Dispatch> {
+        let dispatch = Dispatch {
             id: DispatchId::new(),
             command,
             state: dispatch_state(waiting_for),
@@ -491,7 +491,7 @@ impl Storage for SqliteStorage {
         Ok(dispatch)
     }
 
-    async fn pending_dispatches(&self) -> StorageResult<Vec<StoredDispatch>> {
+    async fn pending_dispatches(&self) -> StorageResult<Vec<Dispatch>> {
         let rows =
             sqlx::query("SELECT payload FROM dispatches WHERE state = 'pending' ORDER BY rowid")
                 .fetch_all(&self.pool)
@@ -501,7 +501,7 @@ impl Storage for SqliteStorage {
             .collect()
     }
 
-    async fn dispatch(&self, dispatch_id: DispatchId) -> StorageResult<Option<StoredDispatch>> {
+    async fn dispatch(&self, dispatch_id: DispatchId) -> StorageResult<Option<Dispatch>> {
         get_json(&self.pool, "dispatches", "id", dispatch_id.to_string()).await
     }
 
@@ -509,14 +509,14 @@ impl Storage for SqliteStorage {
         &self,
         dispatch_id: DispatchId,
         platform_message_id: String,
-    ) -> StorageResult<Vec<StoredDispatch>> {
+    ) -> StorageResult<Vec<Dispatch>> {
         let mut transaction = self.pool.begin().await?;
         let row = sqlx::query("SELECT payload FROM dispatches WHERE id = ?")
             .bind(dispatch_id.to_string())
             .fetch_optional(&mut *transaction)
             .await?
             .ok_or(StorageError::DispatchNotFound(dispatch_id))?;
-        let mut dispatch: StoredDispatch = serde_json::from_str(row.get("payload"))?;
+        let mut dispatch: Dispatch = serde_json::from_str(row.get("payload"))?;
         dispatch.state = DispatchState::Acknowledged {
             platform_message_id: platform_message_id.clone(),
         };
@@ -566,7 +566,7 @@ impl Storage for SqliteStorage {
             .ok_or(StorageError::MessageNotFound(message_id))?;
         let parent: Message = serde_json::from_str(parent_row.get("payload"))?;
         for row in rows {
-            let mut blocked: StoredDispatch = serde_json::from_str(row.get("payload"))?;
+            let mut blocked: Dispatch = serde_json::from_str(row.get("payload"))?;
             release_blocked(&mut blocked, parent.clone(), platform_message_id.clone());
             sqlx::query(
                 "UPDATE dispatches SET waiting_for = ?, state = ?, payload = ? WHERE id = ?",
@@ -589,7 +589,7 @@ impl Storage for SqliteStorage {
             .fetch_optional(&self.pool)
             .await?
             .ok_or(StorageError::DispatchNotFound(dispatch_id))?;
-        let mut dispatch: StoredDispatch = serde_json::from_str(row.get("payload"))?;
+        let mut dispatch: Dispatch = serde_json::from_str(row.get("payload"))?;
         dispatch.state = DispatchState::Failed { reason };
         sqlx::query("UPDATE dispatches SET waiting_for = ?, state = ?, payload = ? WHERE id = ?")
             .bind(None::<String>)
@@ -967,7 +967,7 @@ async fn update_observed(
     Ok(Some(observed))
 }
 
-fn thread_key(address: &PlatformAddress) -> String {
+fn thread_key(address: &ChatAddress) -> String {
     address.thread_id.clone().unwrap_or_default()
 }
 
@@ -1028,7 +1028,7 @@ async fn get_json<T: serde::de::DeserializeOwned>(
         .map_err(Into::into)
 }
 
-async fn insert_dispatch(pool: &SqlitePool, dispatch: &StoredDispatch) -> StorageResult<()> {
+async fn insert_dispatch(pool: &SqlitePool, dispatch: &Dispatch) -> StorageResult<()> {
     sqlx::query(
         "INSERT INTO dispatches (id, target_endpoint, message_id, waiting_for, state, payload)
          VALUES (?, ?, ?, ?, ?, ?)",
@@ -1044,7 +1044,7 @@ async fn insert_dispatch(pool: &SqlitePool, dispatch: &StoredDispatch) -> Storag
     Ok(())
 }
 
-fn waiting_for(dispatch: &StoredDispatch) -> Option<MessageId> {
+fn waiting_for(dispatch: &Dispatch) -> Option<MessageId> {
     match dispatch.state {
         DispatchState::Blocked { waiting_for } => Some(waiting_for),
         _ => None,

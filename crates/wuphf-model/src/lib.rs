@@ -15,7 +15,7 @@
 //! - [`ReplicaSet`] — the set of endpoints that mirror each other; a
 //!   [`Message`] delivered to one is dispatched to all the others.
 //! - [`Message`] — the normalized, platform-agnostic form copied out to every
-//!   endpoint as a [`StoredDispatch`].
+//!   endpoint as a [`Dispatch`].
 //!
 //! Connectors are thin pipes: they report [`ConnectorInput`]s keyed by raw
 //! platform addresses and execute [`ConnectorOutput`] dispatches. All routing

@@ -45,7 +45,7 @@ uuid_id!(
 );
 uuid_id!(
     DispatchId,
-    "Id of one outbound [`StoredDispatch`] targeting a single endpoint."
+    "Id of one outbound [`Dispatch`] targeting a single endpoint."
 );
 uuid_id!(
     MediaId,

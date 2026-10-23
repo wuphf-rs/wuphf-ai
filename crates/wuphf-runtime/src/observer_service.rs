@@ -289,7 +289,7 @@ mod tests {
     use super::*;
     use tokio_stream::StreamExt;
     use wuphf_model::{
-        EventPayload, InboundMessage, NormalizedEvent, PlatformAddress, SourceAddress,
+        EventPayload, InboundMessage, NormalizedEvent, ChatAddress, SourceAddress,
     };
     use wuphf_storage::InMemoryStorage;
 
@@ -303,7 +303,7 @@ mod tests {
         NormalizedEvent {
             source: SourceAddress {
                 connector_id: ConnectorId("whatsapp".into()),
-                address: PlatformAddress::new(chat, None),
+                address: ChatAddress::new(chat, None),
                 chat_title: Some("Chat".into()),
             },
             payload: EventPayload::MessageCreate(InboundMessage {

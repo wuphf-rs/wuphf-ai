@@ -7,8 +7,8 @@ use tonic::{Request, Response, Status};
 use uuid::Uuid;
 use wuphf_model::{
     Attachment, AttachmentKind, ConnectorCapabilities, ConnectorId, ConnectorInput,
-    ConnectorOutput, ConnectorRegistration, DispatchAcknowledgement, DispatchPayload, EventPayload,
-    InboundMessage, MediaId, NormalizedEvent, NoticeKind, Platform, PlatformAddress,
+    ConnectorOutput, ConnectorRegistration, DispatchAck, Action, EventPayload,
+    InboundMessage, MediaId, NormalizedEvent, NoticeKind, Platform, ChatAddress,
     ProvisionThread, ReceiptKind, ReplyContext, SourceAddress,
 };
 use wuphf_proto::connector as pb;
@@ -116,7 +116,7 @@ fn input_from_proto(
             Ok(ConnectorInput::Event(NormalizedEvent {
                 source: SourceAddress {
                     connector_id: connector_id.clone(),
-                    address: PlatformAddress::new(
+                    address: ChatAddress::new(
                         required_string(event.chat_id, "chat_id")?,
                         event.thread_id,
                     ),
@@ -145,7 +145,7 @@ fn input_from_proto(
             Ok(ConnectorInput::Event(NormalizedEvent {
                 source: SourceAddress {
                     connector_id: connector_id.clone(),
-                    address: PlatformAddress::new(
+                    address: ChatAddress::new(
                         required_string(event.chat_id, "chat_id")?,
                         event.thread_id,
                     ),
@@ -164,7 +164,7 @@ fn input_from_proto(
             Ok(ConnectorInput::Event(NormalizedEvent {
                 source: SourceAddress {
                     connector_id: connector_id.clone(),
-                    address: PlatformAddress::new(
+                    address: ChatAddress::new(
                         required_string(event.chat_id, "chat_id")?,
                         event.thread_id,
                     ),
@@ -179,7 +179,7 @@ fn input_from_proto(
             }))
         }
         Some(pb::client_frame::Body::Acknowledgement(acknowledgement)) => {
-            Ok(ConnectorInput::Acknowledgement(DispatchAcknowledgement {
+            Ok(ConnectorInput::Acknowledgement(DispatchAck {
                 dispatch_id: wuphf_model::DispatchId(parse_uuid(
                     &acknowledgement.dispatch_id,
                     "dispatch_id",
@@ -194,11 +194,11 @@ fn input_from_proto(
         Some(pb::client_frame::Body::IdentityMigrated(migration)) => {
             Ok(ConnectorInput::IdentityMigrated {
                 connector_id: connector_id.clone(),
-                old: PlatformAddress::new(
+                old: ChatAddress::new(
                     required_string(migration.old_chat_id, "old_chat_id")?,
                     migration.old_thread_id,
                 ),
-                new: PlatformAddress::new(
+                new: ChatAddress::new(
                     required_string(migration.new_chat_id, "new_chat_id")?,
                     migration.new_thread_id,
                 ),
@@ -237,7 +237,7 @@ fn input_from_proto(
             Ok(ConnectorInput::Event(NormalizedEvent {
                 source: SourceAddress {
                     connector_id: connector_id.clone(),
-                    address: PlatformAddress::new(
+                    address: ChatAddress::new(
                         required_string(event.chat_id, "chat_id")?,
                         event.thread_id,
                     ),
@@ -269,7 +269,7 @@ fn input_from_proto(
             Ok(ConnectorInput::Event(NormalizedEvent {
                 source: SourceAddress {
                     connector_id: connector_id.clone(),
-                    address: PlatformAddress::new(
+                    address: ChatAddress::new(
                         required_string(event.chat_id, "chat_id")?,
                         event.thread_id,
                     ),
@@ -296,7 +296,7 @@ fn output_to_proto(output: ConnectorOutput) -> pb::ServerFrame {
             let dispatch_id = dispatch.id.to_string();
             let target = dispatch.command.target;
             match dispatch.command.payload {
-                DispatchPayload::MessageCreate {
+                Action::MessageCreate {
                     message,
                     reply_context,
                 } => {
@@ -322,7 +322,7 @@ fn output_to_proto(output: ConnectorOutput) -> pb::ServerFrame {
                         sender_name: message.sender_name,
                     }))
                 }
-                DispatchPayload::MessageEdit {
+                Action::MessageEdit {
                     message,
                     target_platform_message_id,
                 } => pb::server_frame::Body::MessageEdit(pb::MessageEditDispatch {
@@ -334,7 +334,7 @@ fn output_to_proto(output: ConnectorOutput) -> pb::ServerFrame {
                     sender_name: message.sender_name,
                     participant: message.participant,
                 }),
-                DispatchPayload::MessageDelete {
+                Action::MessageDelete {
                     target_platform_message_id,
                     ..
                 } => pb::server_frame::Body::MessageDelete(pb::MessageDeleteDispatch {
@@ -343,7 +343,7 @@ fn output_to_proto(output: ConnectorOutput) -> pb::ServerFrame {
                     target_thread_id: target.address.thread_id,
                     target_platform_message_id,
                 }),
-                DispatchPayload::RetitleThread { title, .. } => {
+                Action::RetitleThread { title, .. } => {
                     pb::server_frame::Body::MessageRetitle(pb::MessageRetitleDispatch {
                         dispatch_id,
                         target_chat_id: target.address.chat_id,
@@ -351,7 +351,7 @@ fn output_to_proto(output: ConnectorOutput) -> pb::ServerFrame {
                         title,
                     })
                 }
-                DispatchPayload::Reaction {
+                Action::Reaction {
                     target_platform_message_id,
                     reactor,
                     reactor_name,
@@ -366,7 +366,7 @@ fn output_to_proto(output: ConnectorOutput) -> pb::ServerFrame {
                     reactor_name,
                     emoji: emoji.unwrap_or_default(),
                 }),
-                DispatchPayload::DeliveryAck {
+                Action::DeliveryAck {
                     target_platform_message_id,
                     ..
                 } => pb::server_frame::Body::DeliveryAck(pb::DeliveryAckDispatch {
@@ -375,7 +375,7 @@ fn output_to_proto(output: ConnectorOutput) -> pb::ServerFrame {
                     target_thread_id: target.address.thread_id,
                     target_platform_message_id,
                 }),
-                DispatchPayload::SeenReceipt {
+                Action::SeenReceipt {
                     target_platform_message_id,
                     ..
                 } => pb::server_frame::Body::SeenReceipt(pb::SeenReceiptDispatch {

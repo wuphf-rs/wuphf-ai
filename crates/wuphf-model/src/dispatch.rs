@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 
 /// The content of an outbound dispatch.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub enum DispatchPayload {
+pub enum Action {
     /// Deliver a new copy. How the copy is rendered (attachments-as-files,
     /// text spillover, and the like) is the target connector's own
     /// configuration, so the dispatch carries only content.
@@ -80,7 +80,7 @@ pub struct ProvisionThread {
 /// reports the resulting thread id back in the acknowledgement.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TargetAddress {
-    pub address: PlatformAddress,
+    pub address: ChatAddress,
     #[serde(default)]
     pub provision_thread: Option<ProvisionThread>,
 }
@@ -92,7 +92,7 @@ pub struct DispatchCommand {
     pub target_endpoint: EndpointId,
     pub target_connector: ConnectorId,
     pub target: TargetAddress,
-    pub payload: DispatchPayload,
+    pub payload: Action,
 }
 
 impl DispatchCommand {
@@ -102,13 +102,13 @@ impl DispatchCommand {
     /// copy to record, so it has no id.
     pub fn message_id(&self) -> Option<MessageId> {
         match &self.payload {
-            DispatchPayload::MessageCreate { message, .. }
-            | DispatchPayload::MessageEdit { message, .. }
-            | DispatchPayload::MessageDelete { message, .. } => Some(message.id),
-            DispatchPayload::Reaction { message_id, .. }
-            | DispatchPayload::DeliveryAck { message_id, .. }
-            | DispatchPayload::SeenReceipt { message_id, .. } => Some(*message_id),
-            DispatchPayload::RetitleThread { .. } => None,
+            Action::MessageCreate { message, .. }
+            | Action::MessageEdit { message, .. }
+            | Action::MessageDelete { message, .. } => Some(message.id),
+            Action::Reaction { message_id, .. }
+            | Action::DeliveryAck { message_id, .. }
+            | Action::SeenReceipt { message_id, .. } => Some(*message_id),
+            Action::RetitleThread { .. } => None,
         }
     }
 
@@ -120,26 +120,26 @@ impl DispatchCommand {
     pub fn records_copy(&self) -> bool {
         matches!(
             self.payload,
-            DispatchPayload::MessageCreate { .. }
-                | DispatchPayload::MessageEdit { .. }
-                | DispatchPayload::MessageDelete { .. }
+            Action::MessageCreate { .. }
+                | Action::MessageEdit { .. }
+                | Action::MessageDelete { .. }
         )
     }
 
     pub fn message_replica_set_id(&self) -> ReplicaSetId {
         match &self.payload {
-            DispatchPayload::MessageCreate { message, .. }
-            | DispatchPayload::MessageEdit { message, .. }
-            | DispatchPayload::MessageDelete { message, .. } => message.replica_set_id,
-            DispatchPayload::Reaction { replica_set_id, .. }
-            | DispatchPayload::DeliveryAck { replica_set_id, .. }
-            | DispatchPayload::SeenReceipt { replica_set_id, .. }
-            | DispatchPayload::RetitleThread { replica_set_id, .. } => *replica_set_id,
+            Action::MessageCreate { message, .. }
+            | Action::MessageEdit { message, .. }
+            | Action::MessageDelete { message, .. } => message.replica_set_id,
+            Action::Reaction { replica_set_id, .. }
+            | Action::DeliveryAck { replica_set_id, .. }
+            | Action::SeenReceipt { replica_set_id, .. }
+            | Action::RetitleThread { replica_set_id, .. } => *replica_set_id,
         }
     }
 }
 
-/// Lifecycle of a [`StoredDispatch`].
+/// Lifecycle of a [`Dispatch`].
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum DispatchState {
     /// Ready to send; redelivered to the connector until acknowledged.
@@ -157,7 +157,7 @@ pub enum DispatchState {
 /// A [`DispatchCommand`] together with its persisted [`DispatchState`] — one
 /// outbound delivery the core tracks to completion.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct StoredDispatch {
+pub struct Dispatch {
     pub id: DispatchId,
     pub command: DispatchCommand,
     pub state: DispatchState,
@@ -166,7 +166,7 @@ pub struct StoredDispatch {
 /// A connector's confirmation that a dispatch was delivered, returned after a
 /// successful send.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct DispatchAcknowledgement {
+pub struct DispatchAck {
     pub dispatch_id: DispatchId,
     pub platform_message_id: String,
     /// The thread/topic the message landed in. Set when the dispatch provisioned
@@ -197,7 +197,7 @@ pub enum IngestOutcome {
     Routed {
         message_id: MessageId,
         routing: RoutingOutcome,
-        dispatches: Vec<StoredDispatch>,
+        dispatches: Vec<Dispatch>,
     },
     /// Held because the conversation's mirror thread is still being
     /// provisioned; the message is replayed once the thread exists.
@@ -208,7 +208,7 @@ pub enum IngestOutcome {
 }
 
 impl IngestOutcome {
-    pub fn dispatches(&self) -> &[StoredDispatch] {
+    pub fn dispatches(&self) -> &[Dispatch] {
         match self {
             Self::Routed { dispatches, .. } => dispatches,
             Self::Deferred { .. } | Self::Ignored(_) => &[],
@@ -256,6 +256,6 @@ pub struct RawOutbound {
 /// and for sends deferred behind mirror-thread provisioning).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct RawSendOutcome {
-    pub direct: StoredDispatch,
-    pub mirrored: Vec<StoredDispatch>,
+    pub direct: Dispatch,
+    pub mirrored: Vec<Dispatch>,
 }

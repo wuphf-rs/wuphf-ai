@@ -167,7 +167,7 @@ where
 mod tests {
     use super::*;
     use wuphf_model::{
-        ConnectorId, InboundMessage, ObservedDirection, PlatformAddress, SourceAddress,
+        ConnectorId, InboundMessage, ObservedDirection, ChatAddress, SourceAddress,
     };
     use wuphf_storage::InMemoryStorage;
 
@@ -175,7 +175,7 @@ mod tests {
         NormalizedEvent {
             source: SourceAddress {
                 connector_id: ConnectorId("whatsapp".into()),
-                address: PlatformAddress::new(chat, None),
+                address: ChatAddress::new(chat, None),
                 chat_title: title.map(Into::into),
             },
             payload: EventPayload::MessageCreate(InboundMessage {
@@ -230,7 +230,7 @@ mod tests {
         let edit = NormalizedEvent {
             source: SourceAddress {
                 connector_id: connector.clone(),
-                address: PlatformAddress::new("alice", None),
+                address: ChatAddress::new("alice", None),
                 chat_title: None,
             },
             payload: EventPayload::MessageEdit {
@@ -249,7 +249,7 @@ mod tests {
         let delete = NormalizedEvent {
             source: SourceAddress {
                 connector_id: connector.clone(),
-                address: PlatformAddress::new("alice", None),
+                address: ChatAddress::new("alice", None),
                 chat_title: None,
             },
             payload: EventPayload::MessageDelete {
@@ -325,7 +325,7 @@ mod tests {
         let edit = NormalizedEvent {
             source: SourceAddress {
                 connector_id: ConnectorId("whatsapp".into()),
-                address: PlatformAddress::new("alice", None),
+                address: ChatAddress::new("alice", None),
                 chat_title: None,
             },
             payload: EventPayload::MessageEdit {

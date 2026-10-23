@@ -14,8 +14,8 @@ use thiserror::Error;
 use wuphf_model::{
     AddressLink, Alias, ChatSettings, ConnectorId, Contact, Conversation, ConversationId, DedupKey,
     DispatchCommand, DispatchId, Endpoint, EndpointId, MediaBlob, MediaId, Message, MessageCopy,
-    MessageId, ObservedChat, ObservedMessage, PlatformAddress, ReplicaSet, ReplicaSetId,
-    StoredDispatch, ThreadMapping,
+    MessageId, ObservedChat, ObservedMessage, ChatAddress, ReplicaSet, ReplicaSetId,
+    Dispatch, ThreadMapping,
 };
 
 #[derive(Debug, Error)]
@@ -60,7 +60,7 @@ pub trait Storage: Send + Sync + 'static {
     async fn resolve_endpoint(
         &self,
         connector_id: &ConnectorId,
-        address: &PlatformAddress,
+        address: &ChatAddress,
     ) -> StorageResult<Option<EndpointId>>;
     /// Record that two addresses on a connector name the same chat. Stored
     /// symmetrically, so a later lookup from either address finds the other.
@@ -73,8 +73,8 @@ pub trait Storage: Send + Sync + 'static {
     async fn linked_addresses(
         &self,
         connector_id: &ConnectorId,
-        address: &PlatformAddress,
-    ) -> StorageResult<Vec<PlatformAddress>>;
+        address: &ChatAddress,
+    ) -> StorageResult<Vec<ChatAddress>>;
     async fn put_conversation(&self, conversation: Conversation) -> StorageResult<()>;
     async fn conversation(
         &self,
@@ -85,7 +85,7 @@ pub trait Storage: Send + Sync + 'static {
         &self,
         rule_id: &wuphf_model::RuleId,
         connector_id: &ConnectorId,
-        address: &PlatformAddress,
+        address: &ChatAddress,
     ) -> StorageResult<Option<Conversation>>;
     /// The conversation backed by this replica set, if any.
     async fn conversation_for_replica_set(
@@ -139,14 +139,14 @@ pub trait Storage: Send + Sync + 'static {
         &self,
         command: DispatchCommand,
         waiting_for: Option<MessageId>,
-    ) -> StorageResult<StoredDispatch>;
-    async fn pending_dispatches(&self) -> StorageResult<Vec<StoredDispatch>>;
-    async fn dispatch(&self, dispatch_id: DispatchId) -> StorageResult<Option<StoredDispatch>>;
+    ) -> StorageResult<Dispatch>;
+    async fn pending_dispatches(&self) -> StorageResult<Vec<Dispatch>>;
+    async fn dispatch(&self, dispatch_id: DispatchId) -> StorageResult<Option<Dispatch>>;
     async fn acknowledge_dispatch(
         &self,
         dispatch_id: DispatchId,
         platform_message_id: String,
-    ) -> StorageResult<Vec<StoredDispatch>>;
+    ) -> StorageResult<Vec<Dispatch>>;
     /// Mark a dispatch as permanently failed so it leaves the pending queue and
     /// is never redelivered. Unlike acknowledgement, it records no sent copy.
     async fn fail_dispatch(&self, dispatch_id: DispatchId, reason: String) -> StorageResult<()>;

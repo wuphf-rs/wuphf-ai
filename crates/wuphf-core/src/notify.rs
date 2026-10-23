@@ -11,7 +11,7 @@
 //! itself offline, and shows up in the observation log like any other message.
 
 use crate::{Core, CoreError};
-use wuphf_model::{ConnectorId, NoticeKind, RawOutbound, StoredDispatch};
+use wuphf_model::{ConnectorId, NoticeKind, RawOutbound, Dispatch};
 use wuphf_storage::Storage;
 
 impl<S> Core<S>
@@ -28,7 +28,7 @@ where
         kind: NoticeKind,
         detail: &str,
         timestamp_ms: i64,
-    ) -> Result<Vec<StoredDispatch>, CoreError> {
+    ) -> Result<Vec<Dispatch>, CoreError> {
         if !self.notice_is_new(&connector_id, kind) {
             return Ok(Vec::new());
         }

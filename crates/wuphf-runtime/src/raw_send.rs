@@ -11,7 +11,7 @@ use thiserror::Error;
 use tokio::sync::{mpsc, oneshot};
 use wuphf_core::{Core, CoreError};
 use wuphf_model::{
-    ObservedDirection, ObservedMessage, Platform, RAW_SENDER, RawOutbound, StoredDispatch,
+    ObservedDirection, ObservedMessage, Platform, RAW_SENDER, RawOutbound, Dispatch,
 };
 use wuphf_storage::Storage;
 
@@ -21,7 +21,7 @@ use crate::Observer;
 pub struct RawMessageSender<S> {
     core: Arc<Core<S>>,
     observer: Arc<Observer<S>>,
-    dispatch_tx: mpsc::Sender<StoredDispatch>,
+    dispatch_tx: mpsc::Sender<Dispatch>,
 }
 
 // Manual impl: `S` itself need not be `Clone` behind the `Arc`s.
@@ -50,7 +50,7 @@ where
     pub(crate) fn new(
         core: Arc<Core<S>>,
         observer: Arc<Observer<S>>,
-        dispatch_tx: mpsc::Sender<StoredDispatch>,
+        dispatch_tx: mpsc::Sender<Dispatch>,
     ) -> Self {
         Self {
             core,
@@ -106,7 +106,7 @@ where
         }
     }
 
-    async fn inject(&self, dispatch: StoredDispatch) -> Result<(), RawSendError> {
+    async fn inject(&self, dispatch: Dispatch) -> Result<(), RawSendError> {
         self.dispatch_tx
             .send(dispatch)
             .await

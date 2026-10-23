@@ -4,8 +4,8 @@
 
 use crate::{Core, CoreError};
 use wuphf_model::{
-    AddressLink, Alias, ConnectorId, DispatchAcknowledgement, DispatchId, EndpointId, MessageCopy,
-    MessageId, PlatformAddress, ReplicaSetId, StoredDispatch,
+    AddressLink, Alias, ConnectorId, DispatchAck, DispatchId, EndpointId, MessageCopy,
+    MessageId, ChatAddress, ReplicaSetId, Dispatch,
 };
 use wuphf_storage::Storage;
 
@@ -31,8 +31,8 @@ where
 
     pub async fn acknowledge_dispatch(
         &self,
-        acknowledgement: DispatchAcknowledgement,
-    ) -> Result<Vec<StoredDispatch>, CoreError> {
+        acknowledgement: DispatchAck,
+    ) -> Result<Vec<Dispatch>, CoreError> {
         let dispatch = self.storage.dispatch(acknowledgement.dispatch_id).await?;
         if let (Some(thread_id), Some(dispatch)) =
             (acknowledgement.thread_id.clone(), dispatch.as_ref())
@@ -63,11 +63,11 @@ where
     /// mirrors each emit one; the signal is idempotent.
     async fn delivery_ack_for(
         &self,
-        dispatch: &StoredDispatch,
-    ) -> Result<Option<StoredDispatch>, CoreError> {
+        dispatch: &Dispatch,
+    ) -> Result<Option<Dispatch>, CoreError> {
         if !matches!(
             dispatch.command.payload,
-            wuphf_model::DispatchPayload::MessageCreate { .. }
+            wuphf_model::Action::MessageCreate { .. }
         ) {
             return Ok(None);
         }
@@ -85,7 +85,7 @@ where
                 address: endpoint.address(),
                 provision_thread: None,
             },
-            payload: wuphf_model::DispatchPayload::DeliveryAck {
+            payload: wuphf_model::Action::DeliveryAck {
                 message_id,
                 replica_set_id: dispatch.command.message_replica_set_id(),
                 target_platform_message_id: origin.platform_message_id,
@@ -100,8 +100,8 @@ where
     /// messages are replayed and their resulting dispatches returned.
     pub(crate) async fn resume_provisioned(
         &self,
-        dispatch: &StoredDispatch,
-    ) -> Result<Vec<StoredDispatch>, CoreError> {
+        dispatch: &Dispatch,
+    ) -> Result<Vec<Dispatch>, CoreError> {
         let replica_set_id = dispatch.command.message_replica_set_id();
         {
             let mut provisioning = self.provisioning.lock().unwrap();
@@ -124,7 +124,7 @@ where
     pub(crate) async fn replay_stash(
         &self,
         replica_set_id: ReplicaSetId,
-    ) -> Result<Vec<StoredDispatch>, CoreError> {
+    ) -> Result<Vec<Dispatch>, CoreError> {
         let stash = self
             .storage
             .drain_provisioning_stash(replica_set_id)
@@ -151,7 +151,7 @@ where
         message_id: MessageId,
         origin_endpoint: EndpointId,
         provision_title: &str,
-    ) -> Result<Vec<StoredDispatch>, CoreError> {
+    ) -> Result<Vec<Dispatch>, CoreError> {
         self.storage
             .stash_provisioning_message(
                 replica_set_id,
@@ -177,7 +177,7 @@ where
     /// replica set with no such dispatch left — its provision was acknowledged or
     /// failed in a previous run, or was lost — is drained and replayed
     /// immediately, and the resulting dispatches returned for delivery.
-    pub async fn recover_provisioning(&self) -> Result<Vec<StoredDispatch>, CoreError> {
+    pub async fn recover_provisioning(&self) -> Result<Vec<Dispatch>, CoreError> {
         let pending = self.storage.pending_dispatches().await?;
         {
             let mut provisioning = self.provisioning.lock().unwrap();
@@ -211,7 +211,7 @@ where
     /// the conversation to the thread.
     async fn persist_provisioned_thread(
         &self,
-        dispatch: &StoredDispatch,
+        dispatch: &Dispatch,
         thread_id: String,
     ) -> Result<(), CoreError> {
         let connector = dispatch.command.target_connector.clone();
@@ -274,8 +274,8 @@ where
     pub async fn migrate_identity(
         &self,
         connector_id: ConnectorId,
-        old: PlatformAddress,
-        new: PlatformAddress,
+        old: ChatAddress,
+        new: ChatAddress,
     ) -> Result<bool, CoreError> {
         self.storage
             .put_address_link(AddressLink {
@@ -310,7 +310,7 @@ where
         Ok(is_canonical)
     }
 
-    pub async fn pending_dispatches(&self) -> Result<Vec<StoredDispatch>, CoreError> {
+    pub async fn pending_dispatches(&self) -> Result<Vec<Dispatch>, CoreError> {
         Ok(self.storage.pending_dispatches().await?)
     }
 
@@ -321,7 +321,7 @@ where
         &self,
         dispatch_id: DispatchId,
         reason: String,
-    ) -> Result<Vec<StoredDispatch>, CoreError> {
+    ) -> Result<Vec<Dispatch>, CoreError> {
         let dispatch = self.storage.dispatch(dispatch_id).await?;
         self.storage.fail_dispatch(dispatch_id, reason).await?;
         // A failed provisioning dispatch must still release the stash, or the

@@ -5,7 +5,7 @@
 use crate::{Core, CoreError};
 use wuphf_model::{
     AddressSet, Alias, ConnectorId, Conversation, ConversationId, Endpoint, EndpointId,
-    PlatformAddress, ReplicaSet, ReplicaSetId, RoutingRuleFlow, RuleEnd, RuleId, SourceAddress,
+    ChatAddress, ReplicaSet, ReplicaSetId, RoutingRuleFlow, RuleEnd, RuleId, SourceAddress,
 };
 use wuphf_storage::Storage;
 
@@ -131,7 +131,7 @@ where
     pub(crate) async fn address_set(
         &self,
         connector_id: &ConnectorId,
-        address: &PlatformAddress,
+        address: &ChatAddress,
     ) -> Result<AddressSet, CoreError> {
         let mut addresses = AddressSet::single(address.clone());
         let mut frontier = vec![address.clone()];
@@ -188,7 +188,7 @@ where
         &self,
         rule_id: &RuleId,
         identity_connector: ConnectorId,
-        identity_address: &PlatformAddress,
+        identity_address: &ChatAddress,
     ) -> Result<Conversation, CoreError> {
         if let Some(existing) = self
             .storage
@@ -225,7 +225,7 @@ where
         conversation: &Conversation,
         flow: &RoutingRuleFlow,
         end: RuleEnd,
-        identity_address: &PlatformAddress,
+        identity_address: &ChatAddress,
     ) -> Result<EndpointId, CoreError> {
         let connector = flow.connector(end).clone();
         let (address, with_alias) = match (flow, end) {
@@ -247,7 +247,7 @@ where
                 },
                 RuleEnd::Destination,
             ) => (
-                PlatformAddress::new(destination_chat.chat_id.clone(), None),
+                ChatAddress::new(destination_chat.chat_id.clone(), None),
                 false,
             ),
         };

@@ -1,10 +1,10 @@
 use super::*;
 use std::collections::HashMap;
 use wuphf_model::{
-    Attachment, AttachmentKind, ConnectorCapabilities, ConnectorInfo, DispatchAcknowledgement,
-    DispatchPayload, InboundMessage, MediaBlob, MediaId, NoticeKind, Platform, PlatformAddress,
+    Attachment, AttachmentKind, ConnectorCapabilities, ConnectorInfo, DispatchAck,
+    Action, InboundMessage, MediaBlob, MediaId, NoticeKind, Platform, ChatAddress,
     RAW_SENDER, RawOutbound, ReceiptKind, RoutingRule, RoutingRuleFlow, RuleChat, RuleChatsFilter,
-    RuleId, SourceAddress, StoredDispatch,
+    RuleId, SourceAddress, Dispatch,
 };
 use wuphf_storage::InMemoryStorage;
 
@@ -102,7 +102,7 @@ fn event_in(
     NormalizedEvent {
         source: SourceAddress {
             connector_id: ConnectorId(connector.into()),
-            address: PlatformAddress::new(chat_id, thread_id.map(str::to_owned)),
+            address: ChatAddress::new(chat_id, thread_id.map(str::to_owned)),
             chat_title: Some("Title".into()),
         },
         payload: EventPayload::MessageCreate(InboundMessage {
@@ -131,7 +131,7 @@ async fn direct_rule_mints_endpoints_and_fans_out_to_the_paired_single() {
     assert_eq!(command.target_connector, ConnectorId(TELEGRAM.into()));
     assert_eq!(
         command.target.address,
-        PlatformAddress::new("-100123", Some("12".into()))
+        ChatAddress::new("-100123", Some("12".into()))
     );
     assert!(command.target.provision_thread.is_none());
 }
@@ -173,7 +173,7 @@ async fn mirror_dispatch_requests_thread_provisioning_then_persists_mapping() {
     assert_eq!(provision.container, "-1001234567");
     assert_eq!(provision.title, "Title");
 
-    core.acknowledge_dispatch(DispatchAcknowledgement {
+    core.acknowledge_dispatch(DispatchAck {
         dispatch_id: dispatch.id,
         platform_message_id: "tg-1".into(),
         thread_id: Some("777".into()),
@@ -204,7 +204,7 @@ async fn mirror_dispatch_requests_thread_provisioning_then_persists_mapping() {
     let resend = &again.dispatches()[0];
     assert_eq!(
         resend.command.target.address,
-        PlatformAddress::new("-1001234567", Some("777".into()))
+        ChatAddress::new("-1001234567", Some("777".into()))
     );
     assert!(resend.command.target.provision_thread.is_none());
 }
@@ -216,7 +216,7 @@ async fn source_rename_retitles_the_provisioned_mirror_thread() {
         .ingest(event(WHATSAPP, "111@g.us", "wa-1", None))
         .await
         .unwrap();
-    core.acknowledge_dispatch(DispatchAcknowledgement {
+    core.acknowledge_dispatch(DispatchAck {
         dispatch_id: first.dispatches()[0].id,
         platform_message_id: "tg-1".into(),
         thread_id: Some("777".into()),
@@ -231,7 +231,7 @@ async fn source_rename_retitles_the_provisioned_mirror_thread() {
         .dispatches()
         .iter()
         .find_map(|stored| match &stored.command.payload {
-            DispatchPayload::RetitleThread { title, .. } => Some((stored, title.clone())),
+            Action::RetitleThread { title, .. } => Some((stored, title.clone())),
             _ => None,
         })
         .expect("a source rename fans out a retitle dispatch");
@@ -242,7 +242,7 @@ async fn source_rename_retitles_the_provisioned_mirror_thread() {
     );
     assert_eq!(
         retitle.command.target.address,
-        PlatformAddress::new("-1001234567", Some("777".into()))
+        ChatAddress::new("-1001234567", Some("777".into()))
     );
 
     // The same title on a later message fans out no further retitle.
@@ -251,7 +251,7 @@ async fn source_rename_retitles_the_provisioned_mirror_thread() {
     let stable = core.ingest(unchanged).await.unwrap();
     assert!(stable.dispatches().iter().all(|stored| !matches!(
         stored.command.payload,
-        DispatchPayload::RetitleThread { .. }
+        Action::RetitleThread { .. }
     )));
 }
 
@@ -263,7 +263,7 @@ async fn first_title_retitles_a_thread_provisioned_without_one() {
     let mut untitled = event(WHATSAPP, "111@g.us", "wa-1", None);
     untitled.source.chat_title = None;
     let first = core.ingest(untitled).await.unwrap();
-    core.acknowledge_dispatch(DispatchAcknowledgement {
+    core.acknowledge_dispatch(DispatchAck {
         dispatch_id: first.dispatches()[0].id,
         platform_message_id: "tg-1".into(),
         thread_id: Some("777".into()),
@@ -278,7 +278,7 @@ async fn first_title_retitles_a_thread_provisioned_without_one() {
         .dispatches()
         .iter()
         .find_map(|stored| match &stored.command.payload {
-            DispatchPayload::RetitleThread { title, .. } => Some(title.clone()),
+            Action::RetitleThread { title, .. } => Some(title.clone()),
             _ => None,
         })
         .expect("the first real title retitles the existing thread");
@@ -313,7 +313,7 @@ async fn concurrent_messages_provision_one_thread_and_replay_the_rest() {
     // Acknowledging the provision replays the stashed message onto the now
     // known thread, without a second provision request.
     let replayed = core
-        .acknowledge_dispatch(DispatchAcknowledgement {
+        .acknowledge_dispatch(DispatchAck {
             dispatch_id: dispatches[0].id,
             platform_message_id: "tg-1".into(),
             thread_id: Some("777".into()),
@@ -327,7 +327,7 @@ async fn concurrent_messages_provision_one_thread_and_replay_the_rest() {
         .find(|dispatch| {
             matches!(
                 dispatch.command.payload,
-                DispatchPayload::MessageCreate { .. }
+                Action::MessageCreate { .. }
             )
         })
         .expect("the stashed message is replayed")
@@ -375,7 +375,7 @@ async fn restart_replays_stash_when_provisioning_settled_while_down() {
     // — the in-memory stash of the old core is gone, so this passes only because
     // the stash persisted and the pending set was rebuilt.
     let replayed = core
-        .acknowledge_dispatch(DispatchAcknowledgement {
+        .acknowledge_dispatch(DispatchAck {
             dispatch_id: provisioning_id,
             platform_message_id: "tg-1".into(),
             thread_id: Some("777".into()),
@@ -387,7 +387,7 @@ async fn restart_replays_stash_when_provisioning_settled_while_down() {
         .find(|dispatch| {
             matches!(
                 dispatch.command.payload,
-                DispatchPayload::MessageCreate { .. }
+                Action::MessageCreate { .. }
             )
         })
         .expect("the stashed message replays after restart");
@@ -434,7 +434,7 @@ async fn failed_provisioning_releases_stashed_messages() {
         .find(|dispatch| {
             matches!(
                 dispatch.command.payload,
-                DispatchPayload::MessageCreate { .. }
+                Action::MessageCreate { .. }
             )
         })
         .expect("the stashed message replays when provisioning fails");
@@ -521,7 +521,7 @@ async fn maps_replies_through_internal_identity_and_target_copy() {
         ))
         .await
         .unwrap();
-    let DispatchPayload::MessageCreate {
+    let Action::MessageCreate {
         message,
         reply_context,
         ..
@@ -575,7 +575,7 @@ async fn migrated_address_resolves_to_the_same_endpoint() {
 
     // Establish the mirror thread so later messages reuse it instead of
     // being held for provisioning.
-    core.acknowledge_dispatch(DispatchAcknowledgement {
+    core.acknowledge_dispatch(DispatchAck {
         dispatch_id: dispatches[0].id,
         platform_message_id: "tg-1".into(),
         thread_id: Some("777".into()),
@@ -586,8 +586,8 @@ async fn migrated_address_resolves_to_the_same_endpoint() {
     assert!(
         core.migrate_identity(
             ConnectorId(WHATSAPP.into()),
-            PlatformAddress::new("111@g.us", None),
-            PlatformAddress::new("111@lid", None),
+            ChatAddress::new("111@g.us", None),
+            ChatAddress::new("111@lid", None),
         )
         .await
         .unwrap()
@@ -676,7 +676,7 @@ fn edit_event(
     NormalizedEvent {
         source: SourceAddress {
             connector_id: ConnectorId(connector.into()),
-            address: PlatformAddress::new(chat_id, thread_id.map(str::to_owned)),
+            address: ChatAddress::new(chat_id, thread_id.map(str::to_owned)),
             chat_title: None,
         },
         payload: EventPayload::MessageEdit {
@@ -720,7 +720,7 @@ async fn edit_after_delivery_revises_the_delivered_copy() {
         dispatch.command.target_connector,
         ConnectorId(TELEGRAM.into())
     );
-    let DispatchPayload::MessageEdit {
+    let Action::MessageEdit {
         message,
         target_platform_message_id,
         ..
@@ -766,7 +766,7 @@ async fn edit_before_delivery_blocks_then_releases_with_native_id() {
     assert_eq!(routing.blocked.len(), 1);
 
     let released = core
-        .acknowledge_dispatch(DispatchAcknowledgement {
+        .acknowledge_dispatch(DispatchAck {
             dispatch_id: create_dispatch.id,
             platform_message_id: "tg-1".into(),
             thread_id: None,
@@ -778,11 +778,11 @@ async fn edit_before_delivery_blocks_then_releases_with_native_id() {
         .find(|dispatch| {
             matches!(
                 dispatch.command.payload,
-                DispatchPayload::MessageEdit { .. }
+                Action::MessageEdit { .. }
             )
         })
         .expect("acknowledging the create releases the blocked edit");
-    let DispatchPayload::MessageEdit {
+    let Action::MessageEdit {
         target_platform_message_id,
         ..
     } = &edit.command.payload
@@ -801,7 +801,7 @@ fn reaction_event(
     NormalizedEvent {
         source: SourceAddress {
             connector_id: ConnectorId(connector.into()),
-            address: PlatformAddress::new(chat_id, None),
+            address: ChatAddress::new(chat_id, None),
             chat_title: None,
         },
         payload: EventPayload::ReactionSet {
@@ -824,7 +824,7 @@ fn receipt_event(
     NormalizedEvent {
         source: SourceAddress {
             connector_id: ConnectorId(connector.into()),
-            address: PlatformAddress::new(chat_id, None),
+            address: ChatAddress::new(chat_id, None),
             chat_title: None,
         },
         payload: EventPayload::ReceiptSet {
@@ -869,7 +869,7 @@ async fn reaction_after_delivery_fans_to_the_delivered_copy() {
         dispatch.command.target_connector,
         ConnectorId(TELEGRAM.into())
     );
-    let DispatchPayload::Reaction {
+    let Action::Reaction {
         target_platform_message_id,
         emoji,
         reactor_name,
@@ -916,7 +916,7 @@ async fn reaction_before_delivery_blocks_then_releases_with_native_id() {
     assert_eq!(routing.blocked.len(), 1);
 
     let released = core
-        .acknowledge_dispatch(DispatchAcknowledgement {
+        .acknowledge_dispatch(DispatchAck {
             dispatch_id: create_dispatch.id,
             platform_message_id: "tg-1".into(),
             thread_id: None,
@@ -925,9 +925,9 @@ async fn reaction_before_delivery_blocks_then_releases_with_native_id() {
         .unwrap();
     let reaction = released
         .iter()
-        .find(|dispatch| matches!(dispatch.command.payload, DispatchPayload::Reaction { .. }))
+        .find(|dispatch| matches!(dispatch.command.payload, Action::Reaction { .. }))
         .expect("acknowledging the create releases the blocked reaction");
-    let DispatchPayload::Reaction {
+    let Action::Reaction {
         target_platform_message_id,
         emoji,
         ..
@@ -950,7 +950,7 @@ async fn acknowledging_a_mirror_create_emits_a_delivery_ack_to_the_origin() {
         panic!("create should route");
     };
     let released = core
-        .acknowledge_dispatch(DispatchAcknowledgement {
+        .acknowledge_dispatch(DispatchAck {
             dispatch_id: dispatches[0].id,
             platform_message_id: "tg-1".into(),
             thread_id: None,
@@ -962,12 +962,12 @@ async fn acknowledging_a_mirror_create_emits_a_delivery_ack_to_the_origin() {
         .find(|dispatch| {
             matches!(
                 dispatch.command.payload,
-                DispatchPayload::DeliveryAck { .. }
+                Action::DeliveryAck { .. }
             )
         })
         .expect("acknowledging the mirror create emits a delivery ack");
     assert_eq!(ack.command.target_connector, ConnectorId(WHATSAPP.into()));
-    let DispatchPayload::DeliveryAck {
+    let Action::DeliveryAck {
         target_platform_message_id,
         ..
     } = &ack.command.payload
@@ -1000,7 +1000,7 @@ async fn read_receipt_on_a_mirror_copy_surfaces_a_seen_receipt_on_the_origin() {
         .ingest(NormalizedEvent {
             source: SourceAddress {
                 connector_id: ConnectorId(TELEGRAM.into()),
-                address: PlatformAddress::new("-100123", Some("12".into())),
+                address: ChatAddress::new("-100123", Some("12".into())),
                 chat_title: None,
             },
             payload: EventPayload::ReceiptSet {
@@ -1017,7 +1017,7 @@ async fn read_receipt_on_a_mirror_copy_surfaces_a_seen_receipt_on_the_origin() {
         dispatch.command.target_connector,
         ConnectorId(WHATSAPP.into())
     );
-    let DispatchPayload::SeenReceipt {
+    let Action::SeenReceipt {
         target_platform_message_id,
         ..
     } = &dispatch.command.payload
@@ -1061,7 +1061,7 @@ async fn receipts_for_a_message_sent_from_another_source_device_surface_on_the_m
         .unwrap();
     let ack = &delivered.dispatches()[0];
     assert_eq!(ack.command.target_connector, ConnectorId(TELEGRAM.into()));
-    let DispatchPayload::DeliveryAck {
+    let Action::DeliveryAck {
         target_platform_message_id,
         ..
     } = &ack.command.payload
@@ -1082,7 +1082,7 @@ async fn receipts_for_a_message_sent_from_another_source_device_surface_on_the_m
         .unwrap();
     let seen = &read.dispatches()[0];
     assert_eq!(seen.command.target_connector, ConnectorId(TELEGRAM.into()));
-    let DispatchPayload::SeenReceipt {
+    let Action::SeenReceipt {
         target_platform_message_id,
         ..
     } = &seen.command.payload
@@ -1185,7 +1185,7 @@ async fn raw_send_echo_is_suppressed_after_acknowledgement() {
         .await
         .unwrap();
     assert!(outcome.mirrored.is_empty());
-    core.acknowledge_dispatch(DispatchAcknowledgement {
+    core.acknowledge_dispatch(DispatchAck {
         dispatch_id: outcome.direct.id,
         platform_message_id: "wa-raw-1".into(),
         thread_id: None,
@@ -1217,7 +1217,7 @@ async fn raw_send_to_a_routed_chat_fans_out_to_the_other_side() {
     assert_eq!(mirror.target.address.chat_id, "-100123");
 
     // The echo stays suppressed on the routed path too.
-    core.acknowledge_dispatch(DispatchAcknowledgement {
+    core.acknowledge_dispatch(DispatchAck {
         dispatch_id: outcome.direct.id,
         platform_message_id: "wa-raw-2".into(),
         thread_id: None,
@@ -1262,7 +1262,7 @@ async fn raw_send_reply_quotes_the_stored_parent_and_degrades_to_plain() {
         .send_raw(raw("12345@s.whatsapp.net", "replying", Some("wa-parent")))
         .await
         .unwrap();
-    let DispatchPayload::MessageCreate {
+    let Action::MessageCreate {
         message,
         reply_context,
         ..
@@ -1281,7 +1281,7 @@ async fn raw_send_reply_quotes_the_stored_parent_and_degrades_to_plain() {
         .send_raw(raw("12345@s.whatsapp.net", "plain", Some("ghost")))
         .await
         .unwrap();
-    let DispatchPayload::MessageCreate {
+    let Action::MessageCreate {
         message,
         reply_context,
         ..
@@ -1337,8 +1337,8 @@ fn chats(chat_id: &str) -> Vec<RuleChat> {
 async fn link_phone_to_lid(core: &Core<InMemoryStorage>) {
     core.migrate_identity(
         ConnectorId(WHATSAPP.into()),
-        PlatformAddress::new("15550001111@s.whatsapp.net", None),
-        PlatformAddress::new("88887777@lid", None),
+        ChatAddress::new("15550001111@s.whatsapp.net", None),
+        ChatAddress::new("88887777@lid", None),
     )
     .await
     .unwrap();
@@ -1428,8 +1428,8 @@ async fn address_forms_chain_across_successive_migrations() {
     // rule's phone-number entry to still name the chat.
     core.migrate_identity(
         ConnectorId(WHATSAPP.into()),
-        PlatformAddress::new("88887777@lid", None),
-        PlatformAddress::new("66665555@lid", None),
+        ChatAddress::new("88887777@lid", None),
+        ChatAddress::new("66665555@lid", None),
     )
     .await
     .unwrap();
@@ -1448,7 +1448,7 @@ async fn a_form_learned_after_the_chat_is_routed_joins_the_same_conversation() {
         .ingest(event(WHATSAPP, "88887777@lid", "wa-1", None))
         .await
         .unwrap();
-    core.acknowledge_dispatch(DispatchAcknowledgement {
+    core.acknowledge_dispatch(DispatchAck {
         dispatch_id: first.dispatches()[0].id,
         platform_message_id: "tg-1".into(),
         thread_id: Some("777".into()),
@@ -1468,7 +1468,7 @@ async fn a_form_learned_after_the_chat_is_routed_joins_the_same_conversation() {
     let dispatch = &under_phone.dispatches()[0];
     assert_eq!(
         dispatch.command.target.address,
-        PlatformAddress::new("-1001234567", Some("777".into()))
+        ChatAddress::new("-1001234567", Some("777".into()))
     );
     assert!(
         dispatch.command.target.provision_thread.is_none(),
@@ -1563,8 +1563,8 @@ async fn migration_heals_a_chat_split_across_the_observation_log() {
 
     core.migrate_identity(
         connector.clone(),
-        PlatformAddress::new(phone, None),
-        PlatformAddress::new(lid, None),
+        ChatAddress::new(phone, None),
+        ChatAddress::new(lid, None),
     )
     .await
     .unwrap();
@@ -1590,7 +1590,7 @@ async fn a_quote_of_a_received_copy_is_not_attributed_to_the_bridge() {
         .ingest(event(WHATSAPP, "12345@s.whatsapp.net", "wa-1", None))
         .await
         .unwrap();
-    core.acknowledge_dispatch(DispatchAcknowledgement {
+    core.acknowledge_dispatch(DispatchAck {
         dispatch_id: inbound.dispatches()[0].id,
         platform_message_id: "tg-1".into(),
         thread_id: None,
@@ -1610,7 +1610,7 @@ async fn a_quote_of_a_received_copy_is_not_attributed_to_the_bridge() {
         ))
         .await
         .unwrap();
-    let DispatchPayload::MessageCreate { reply_context, .. } =
+    let Action::MessageCreate { reply_context, .. } =
         &reply.dispatches()[0].command.payload
     else {
         panic!("reply should dispatch a create");
@@ -1631,7 +1631,7 @@ async fn a_quote_of_a_bridge_sent_copy_is_attributed_to_the_bridge() {
         .ingest(event_in(TELEGRAM, "-100123", Some("12"), "tg-1", None))
         .await
         .unwrap();
-    core.acknowledge_dispatch(DispatchAcknowledgement {
+    core.acknowledge_dispatch(DispatchAck {
         dispatch_id: inbound.dispatches()[0].id,
         platform_message_id: "wa-1".into(),
         thread_id: None,
@@ -1650,7 +1650,7 @@ async fn a_quote_of_a_bridge_sent_copy_is_attributed_to_the_bridge() {
         ))
         .await
         .unwrap();
-    let DispatchPayload::MessageCreate { reply_context, .. } =
+    let Action::MessageCreate { reply_context, .. } =
         &reply.dispatches()[0].command.payload
     else {
         panic!("reply should dispatch a create");
@@ -1678,8 +1678,8 @@ fn notifying_core() -> Core<InMemoryStorage> {
     Core::new(Arc::new(InMemoryStorage::default()), Arc::new(config))
 }
 
-fn notice_text(dispatch: &StoredDispatch) -> String {
-    let DispatchPayload::MessageCreate { message, .. } = &dispatch.command.payload else {
+fn notice_text(dispatch: &Dispatch) -> String {
+    let Action::MessageCreate { message, .. } = &dispatch.command.payload else {
         panic!("a notice should dispatch a message create");
     };
     message.text.clone().expect("a notice carries text")

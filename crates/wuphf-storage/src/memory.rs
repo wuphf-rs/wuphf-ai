@@ -9,8 +9,8 @@ use tokio::sync::RwLock;
 use wuphf_model::{
     AddressLink, Alias, ChatSettings, ConnectorId, Contact, Conversation, ConversationId, DedupKey,
     DispatchCommand, DispatchId, DispatchState, Endpoint, EndpointId, MediaBlob, MediaId, Message,
-    MessageCopy, MessageId, ObservedChat, ObservedDirection, ObservedMessage, PlatformAddress,
-    ReplicaSet, ReplicaSetId, StoredDispatch, ThreadMapping,
+    MessageCopy, MessageId, ObservedChat, ObservedDirection, ObservedMessage, ChatAddress,
+    ReplicaSet, ReplicaSetId, Dispatch, ThreadMapping,
 };
 
 #[derive(Default)]
@@ -22,11 +22,11 @@ pub struct InMemoryStorage {
 struct State {
     endpoints: HashMap<EndpointId, Endpoint>,
     replica_sets: HashMap<ReplicaSetId, ReplicaSet>,
-    aliases: HashMap<(ConnectorId, PlatformAddress), Alias>,
+    aliases: HashMap<(ConnectorId, ChatAddress), Alias>,
     /// Symmetric address equivalences, mirroring the SQLite `address_links`
     /// table. Kept apart from `aliases` because a link exists with or without an
     /// endpoint behind either address.
-    address_links: HashMap<(ConnectorId, PlatformAddress), Vec<PlatformAddress>>,
+    address_links: HashMap<(ConnectorId, ChatAddress), Vec<ChatAddress>>,
     conversations: HashMap<ConversationId, Conversation>,
     thread_mappings: HashMap<(ConversationId, ConnectorId), ThreadMapping>,
     messages: HashMap<MessageId, Message>,
@@ -37,7 +37,7 @@ struct State {
     contacts: HashMap<String, Contact>,
     chat_settings: HashMap<EndpointId, ChatSettings>,
     media: HashMap<MediaId, StoredMedia>,
-    dispatches: HashMap<DispatchId, StoredDispatch>,
+    dispatches: HashMap<DispatchId, Dispatch>,
     /// Provisioning stash, keyed by replica set, insertion-ordered. Mirrors the
     /// SQLite `provisioning_stash` table; the message body is resolved from
     /// `messages` on drain.
@@ -123,7 +123,7 @@ impl Storage for InMemoryStorage {
     async fn resolve_endpoint(
         &self,
         connector_id: &ConnectorId,
-        address: &PlatformAddress,
+        address: &ChatAddress,
     ) -> StorageResult<Option<EndpointId>> {
         Ok(self
             .state
@@ -157,8 +157,8 @@ impl Storage for InMemoryStorage {
     async fn linked_addresses(
         &self,
         connector_id: &ConnectorId,
-        address: &PlatformAddress,
-    ) -> StorageResult<Vec<PlatformAddress>> {
+        address: &ChatAddress,
+    ) -> StorageResult<Vec<ChatAddress>> {
         Ok(self
             .state
             .read()
@@ -195,7 +195,7 @@ impl Storage for InMemoryStorage {
         &self,
         rule_id: &wuphf_model::RuleId,
         connector_id: &ConnectorId,
-        address: &PlatformAddress,
+        address: &ChatAddress,
     ) -> StorageResult<Option<Conversation>> {
         Ok(self
             .state
@@ -410,8 +410,8 @@ impl Storage for InMemoryStorage {
         &self,
         command: DispatchCommand,
         waiting_for: Option<MessageId>,
-    ) -> StorageResult<StoredDispatch> {
-        let dispatch = StoredDispatch {
+    ) -> StorageResult<Dispatch> {
+        let dispatch = Dispatch {
             id: DispatchId::new(),
             command,
             state: dispatch_state(waiting_for),
@@ -424,7 +424,7 @@ impl Storage for InMemoryStorage {
         Ok(dispatch)
     }
 
-    async fn pending_dispatches(&self) -> StorageResult<Vec<StoredDispatch>> {
+    async fn pending_dispatches(&self) -> StorageResult<Vec<Dispatch>> {
         Ok(self
             .state
             .read()
@@ -436,7 +436,7 @@ impl Storage for InMemoryStorage {
             .collect())
     }
 
-    async fn dispatch(&self, dispatch_id: DispatchId) -> StorageResult<Option<StoredDispatch>> {
+    async fn dispatch(&self, dispatch_id: DispatchId) -> StorageResult<Option<Dispatch>> {
         Ok(self
             .state
             .read()
@@ -450,7 +450,7 @@ impl Storage for InMemoryStorage {
         &self,
         dispatch_id: DispatchId,
         platform_message_id: String,
-    ) -> StorageResult<Vec<StoredDispatch>> {
+    ) -> StorageResult<Vec<Dispatch>> {
         let mut state = self.state.write().await;
         let dispatch = state
             .dispatches

@@ -5,7 +5,7 @@
 use crate::{Core, CoreError};
 use wuphf_model::{
     DedupKey, Endpoint, EndpointId, IgnoreReason, IngestOutcome, Message, MessageCopy, MessageId,
-    ReplicaSetId, RoutingOutcome, SourceAddress, StoredDispatch,
+    ReplicaSetId, RoutingOutcome, SourceAddress, Dispatch,
 };
 use wuphf_storage::Storage;
 
@@ -143,7 +143,7 @@ where
         origin: &Endpoint,
         replica_set_id: ReplicaSetId,
         new_title: Option<&str>,
-    ) -> Result<Vec<StoredDispatch>, CoreError> {
+    ) -> Result<Vec<Dispatch>, CoreError> {
         let Some(new_title) = new_title.map(str::trim).filter(|title| !title.is_empty()) else {
             return Ok(Vec::new());
         };
@@ -199,7 +199,7 @@ where
     async fn enqueue_outcome(
         &self,
         routing: &RoutingOutcome,
-    ) -> Result<Vec<StoredDispatch>, CoreError> {
+    ) -> Result<Vec<Dispatch>, CoreError> {
         let mut dispatches = Vec::new();
         for command in routing.dispatches.iter().cloned() {
             dispatches.push(self.storage.enqueue_dispatch(command, None).await?);
@@ -222,7 +222,7 @@ where
         message: &Message,
         origin_endpoint: EndpointId,
         provision_title: &str,
-    ) -> Result<(RoutingOutcome, Vec<StoredDispatch>), CoreError> {
+    ) -> Result<(RoutingOutcome, Vec<Dispatch>), CoreError> {
         let routing = self
             .router
             .route(message, origin_endpoint, provision_title)

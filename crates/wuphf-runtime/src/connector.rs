@@ -4,7 +4,7 @@ use tokio::sync::{mpsc, oneshot};
 use tracing::{debug, info, warn};
 use wuphf_model::InboundWork;
 use wuphf_model::{
-    ConnectorId, ConnectorInput, ConnectorOutput, ConnectorRegistration, DispatchId, StoredDispatch,
+    ConnectorId, ConnectorInput, ConnectorOutput, ConnectorRegistration, DispatchId, Dispatch,
 };
 
 pub struct ConnectorConnection {
@@ -51,8 +51,8 @@ pub struct ConnectorHub {
     inbound_rx: mpsc::Receiver<(ConnectorId, ConnectorInput)>,
     allowed: HashMap<ConnectorId, ConnectorRegistration>,
     sessions: HashMap<ConnectorId, Session>,
-    assigned: HashMap<DispatchId, (ConnectorId, StoredDispatch)>,
-    held: Vec<StoredDispatch>,
+    assigned: HashMap<DispatchId, (ConnectorId, Dispatch)>,
+    held: Vec<Dispatch>,
 }
 
 struct Session {
@@ -235,7 +235,7 @@ impl ConnectorHub {
         }
     }
 
-    async fn deliver_or_hold(&mut self, dispatch: StoredDispatch) {
+    async fn deliver_or_hold(&mut self, dispatch: Dispatch) {
         let connector_id = dispatch.command.target_connector.clone();
         let Some(session) = self.sessions.get(&connector_id) else {
             debug!(

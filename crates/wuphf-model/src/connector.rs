@@ -77,8 +77,8 @@ pub enum InboundWork {
     Event(NormalizedEvent),
     Migration {
         connector_id: ConnectorId,
-        old: PlatformAddress,
-        new: PlatformAddress,
+        old: ChatAddress,
+        new: ChatAddress,
     },
     /// The connector reported on its own health. It shares the queue so a
     /// notice lands in the order the connector raised it, after whatever it had
@@ -116,14 +116,14 @@ pub struct ConnectorRegistration {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ConnectorInput {
     Event(NormalizedEvent),
-    Acknowledgement(DispatchAcknowledgement),
+    Acknowledgement(DispatchAck),
     /// The platform reported that a chat address changed (e.g. WhatsApp
     /// phone-to-LID). Both addresses remain resolvable; the new one becomes
     /// canonical for outbound sends.
     IdentityMigrated {
         connector_id: ConnectorId,
-        old: PlatformAddress,
-        new: PlatformAddress,
+        old: ChatAddress,
+        new: ChatAddress,
     },
     /// The connector reported a dispatch can never succeed, so the core should
     /// dead-letter it instead of redelivering on the next session.
@@ -145,7 +145,7 @@ pub enum ConnectorInput {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ConnectorOutput {
     /// A dispatch to execute, then acknowledge.
-    Dispatch(Box<StoredDispatch>),
+    Dispatch(Box<Dispatch>),
     /// The core refused the connector's last input (e.g. unknown registration).
     Rejected { reason: String },
 }

@@ -14,9 +14,9 @@
 
 use crate::{Core, CoreError};
 use wuphf_model::{
-    Alias, ConnectorId, DispatchCommand, DispatchPayload, Endpoint, EndpointId, Message, MessageId,
-    PlatformAddress, RAW_SENDER, RawOutbound, RawSendOutcome, ReplicaSet, ReplicaSetId,
-    ReplyContext, SourceAddress, StoredDispatch, TargetAddress,
+    Alias, ConnectorId, DispatchCommand, Action, Endpoint, EndpointId, Message, MessageId,
+    ChatAddress, RAW_SENDER, RawOutbound, RawSendOutcome, ReplicaSet, ReplicaSetId,
+    ReplyContext, SourceAddress, Dispatch, TargetAddress,
 };
 use wuphf_storage::Storage;
 
@@ -28,7 +28,7 @@ where
     /// dispatch (and any mirror fan-out) for delivery; the caller forwards the
     /// returned dispatches to the connectors.
     pub async fn send_raw(&self, outbound: RawOutbound) -> Result<RawSendOutcome, CoreError> {
-        let address = PlatformAddress::new(outbound.chat_id.clone(), outbound.thread_id.clone());
+        let address = ChatAddress::new(outbound.chat_id.clone(), outbound.thread_id.clone());
         let endpoint_id = self
             .raw_target_endpoint(&outbound.connector_id, &address)
             .await?;
@@ -69,7 +69,7 @@ where
                         address,
                         provision_thread: None,
                     },
-                    payload: DispatchPayload::MessageCreate {
+                    payload: Action::MessageCreate {
                         message: message.clone(),
                         reply_context,
                     },
@@ -92,7 +92,7 @@ where
     async fn raw_target_endpoint(
         &self,
         connector_id: &ConnectorId,
-        address: &PlatformAddress,
+        address: &ChatAddress,
     ) -> Result<EndpointId, CoreError> {
         let source = SourceAddress {
             connector_id: connector_id.clone(),
@@ -171,7 +171,7 @@ where
         origin_endpoint: EndpointId,
         replica_set_id: ReplicaSetId,
         chat_id: &str,
-    ) -> Result<Vec<StoredDispatch>, CoreError> {
+    ) -> Result<Vec<Dispatch>, CoreError> {
         let provision_title = match self
             .storage
             .conversation_for_replica_set(replica_set_id)

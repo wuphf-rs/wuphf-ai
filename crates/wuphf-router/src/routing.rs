@@ -5,8 +5,8 @@
 
 use crate::{Router, RouterError, is_mirror_side};
 use wuphf_model::{
-    BlockedDispatch, ConnectorId, Conversation, DispatchCommand, DispatchPayload, Endpoint,
-    EndpointId, Message, PlatformAddress, ProvisionThread, ReceiptKind, ReplyContext,
+    BlockedDispatch, ConnectorId, Conversation, DispatchCommand, Action, Endpoint,
+    EndpointId, Message, ChatAddress, ProvisionThread, ReceiptKind, ReplyContext,
     RoutingOutcome, TargetAddress,
 };
 use wuphf_storage::Storage;
@@ -74,7 +74,7 @@ where
                                     target_endpoint: endpoint_id,
                                     target_connector: target_connector.clone(),
                                     target: target.clone(),
-                                    payload: DispatchPayload::MessageCreate {
+                                    payload: Action::MessageCreate {
                                         message: message.clone(),
                                         reply_context: None,
                                     },
@@ -92,7 +92,7 @@ where
                 target_endpoint: endpoint_id,
                 target_connector,
                 target,
-                payload: DispatchPayload::MessageCreate {
+                payload: Action::MessageCreate {
                     message: message.clone(),
                     reply_context,
                 },
@@ -112,7 +112,7 @@ where
         origin_endpoint: EndpointId,
     ) -> Result<RoutingOutcome, RouterError> {
         self.fan_out_to_copies(message, origin_endpoint, |_connector, native_id| {
-            DispatchPayload::MessageEdit {
+            Action::MessageEdit {
                 message: message.clone(),
                 target_platform_message_id: native_id,
             }
@@ -126,7 +126,7 @@ where
         origin_endpoint: EndpointId,
     ) -> Result<RoutingOutcome, RouterError> {
         self.fan_out_to_copies(message, origin_endpoint, |_connector, native_id| {
-            DispatchPayload::MessageDelete {
+            Action::MessageDelete {
                 message: message.clone(),
                 target_platform_message_id: native_id,
             }
@@ -147,7 +147,7 @@ where
         emoji: Option<String>,
     ) -> Result<RoutingOutcome, RouterError> {
         self.fan_out_to_copies(message, origin_endpoint, |_connector, native_id| {
-            DispatchPayload::Reaction {
+            Action::Reaction {
                 message_id: message.id,
                 replica_set_id: message.replica_set_id,
                 target_platform_message_id: native_id,
@@ -177,12 +177,12 @@ where
             message,
             observer_endpoint,
             |_connector, native_id| match kind {
-                ReceiptKind::Delivered => DispatchPayload::DeliveryAck {
+                ReceiptKind::Delivered => Action::DeliveryAck {
                     message_id: message.id,
                     replica_set_id: message.replica_set_id,
                     target_platform_message_id: native_id,
                 },
-                ReceiptKind::Read => DispatchPayload::SeenReceipt {
+                ReceiptKind::Read => Action::SeenReceipt {
                     message_id: message.id,
                     replica_set_id: message.replica_set_id,
                     target_platform_message_id: native_id,
@@ -201,7 +201,7 @@ where
         &self,
         message: &Message,
         origin_endpoint: EndpointId,
-        payload_for: impl Fn(&ConnectorId, String) -> DispatchPayload,
+        payload_for: impl Fn(&ConnectorId, String) -> Action,
     ) -> Result<RoutingOutcome, RouterError> {
         let replica_set = self.storage.replica_set(message.replica_set_id).await?;
         if !replica_set.endpoints.contains(&origin_endpoint) {
@@ -278,10 +278,10 @@ where
                 target_endpoint: endpoint_id,
                 target_connector: endpoint.connector_id.clone(),
                 target: TargetAddress {
-                    address: PlatformAddress::new(endpoint.chat_id.clone(), Some(thread)),
+                    address: ChatAddress::new(endpoint.chat_id.clone(), Some(thread)),
                     provision_thread: None,
                 },
-                payload: DispatchPayload::RetitleThread {
+                payload: Action::RetitleThread {
                     replica_set_id: conversation.replica_set_id,
                     title: title.to_owned(),
                 },
@@ -310,11 +310,11 @@ where
                     .await?
                 {
                     Some(thread) => TargetAddress {
-                        address: PlatformAddress::new(endpoint.chat_id.clone(), Some(thread)),
+                        address: ChatAddress::new(endpoint.chat_id.clone(), Some(thread)),
                         provision_thread: None,
                     },
                     None => TargetAddress {
-                        address: PlatformAddress::new(endpoint.chat_id.clone(), None),
+                        address: ChatAddress::new(endpoint.chat_id.clone(), None),
                         provision_thread: Some(ProvisionThread {
                             container: endpoint.chat_id.clone(),
                             title: provision_title.to_owned(),
