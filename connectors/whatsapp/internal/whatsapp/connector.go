@@ -63,7 +63,9 @@ func (c Connector) Run(ctx context.Context) error {
 	defer fns.Close()
 	converter := functions.MediaConverter{Functions: fns, Media: media, Timeout: c.cfg.MediaConvertTimeout()}
 	inputs := make(chan *wuphfpb.ClientFrame, 128)
-	normalizer := NewNormalizer(inputs, NewMediaCodec(media, client), newChatNamer(client), newIdentityResolver(client), client)
+	identity := newIdentityResolver(client)
+	addresses := newAddressBook(identity, whatsmeowAccount{client: client})
+	normalizer := NewNormalizer(inputs, NewMediaCodec(media, client), newChatNamer(client), identity, client, addresses)
 	eventErrors := make(chan error, 1)
 	client.AddEventHandler(func(raw any) {
 		var err error
@@ -107,7 +109,7 @@ func (c Connector) Run(ctx context.Context) error {
 			Platform:            wuphfpb.Platform_PLATFORM_WHATSAPP,
 			SupportsThreads:     c.cfg.SupportsThreads,
 			SupportsTopicCreate: c.cfg.SupportsTopicCreate,
-		}, c.logger).Run(ctx, NewSender(client, media, converter, ownJID, c.cfg.StickerMetadata(), c.cfg.Rendering), inputs)
+		}, c.logger).Run(ctx, NewSender(client, media, converter, addresses, c.cfg.StickerMetadata(), c.cfg.Rendering), inputs)
 	}()
 	select {
 	case <-ctx.Done():

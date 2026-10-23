@@ -41,6 +41,10 @@ type Normalizer struct {
 	// every message. It is a pointer so the shared gate survives the value
 	// receiver copies the normalizer is invoked through.
 	migrations *migrationGate
+	// addresses learns the form (phone JID or LID) each chat arrives in, so
+	// the sender can address the chat the same way. Nil in tests that do not
+	// exercise it.
+	addresses addressRecorder
 }
 
 func NewNormalizer(
@@ -49,6 +53,7 @@ func NewNormalizer(
 	namer ChatNamer,
 	identity identityResolver,
 	decryptor reactionDecryptor,
+	addresses addressRecorder,
 ) Normalizer {
 	return Normalizer{
 		inputs:     inputs,
@@ -56,6 +61,7 @@ func NewNormalizer(
 		namer:      namer,
 		identity:   identity,
 		decryptor:  decryptor,
+		addresses:  addresses,
 		migrations: newMigrationGate(),
 	}
 }
@@ -76,6 +82,9 @@ func (n Normalizer) Handle(ctx context.Context, message *events.Message) error {
 	// creates, edits, and deletes for one peer always carry the same chat id no
 	// matter which address form WhatsApp used for this particular message.
 	chat := n.canonical(ctx, message.Info.Chat)
+	if n.addresses != nil {
+		n.addresses.Observe(chat, message.Info.MessageSource)
+	}
 	// View-once photos and videos arrive wrapped in a container; unwrap to the
 	// inner media so they bridge as the ordinary attachment they hold.
 	message.Message = unwrapViewOnce(message.Message)

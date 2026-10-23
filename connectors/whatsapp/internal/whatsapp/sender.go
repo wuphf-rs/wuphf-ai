@@ -30,29 +30,31 @@ type StickerConverter interface {
 }
 
 type Sender struct {
-	client      SendClient
-	media       MediaBroker
-	converter   StickerConverter
-	ownJID      types.JID
+	client    SendClient
+	media     MediaBroker
+	converter StickerConverter
+	// addressing translates the canonical addresses dispatches carry into the
+	// form each chat is addressed in on WhatsApp.
+	addressing  Addressing
 	stickerMeta config.StickerMetadata
 	// rendering is this connector's own policy for how mirrored copies are
 	// rendered; the core dispatches content only.
 	rendering config.RenderingOptions
 }
 
-func NewSender(client SendClient, media MediaBroker, converter StickerConverter, ownJID types.JID, stickerMeta config.StickerMetadata, rendering config.RenderingOptions) Sender {
-	return Sender{client: client, media: media, converter: converter, ownJID: ownJID, stickerMeta: stickerMeta, rendering: rendering}
+func NewSender(client SendClient, media MediaBroker, converter StickerConverter, addressing Addressing, stickerMeta config.StickerMetadata, rendering config.RenderingOptions) Sender {
+	return Sender{client: client, media: media, converter: converter, addressing: addressing, stickerMeta: stickerMeta, rendering: rendering}
 }
 
 // SendMessage delivers a dispatch to the target WhatsApp chat. WhatsApp has no
 // threads, so the dispatch never carries a thread target and the returned
 // threadID is always empty.
 func (s Sender) SendMessage(ctx context.Context, dispatch *wuphfpb.MessageCreateDispatch) (string, string, error) {
-	chat, err := types.ParseJID(dispatch.GetTargetChatId())
+	chat, mode, err := s.target(ctx, dispatch.GetTargetChatId())
 	if err != nil {
-		return "", "", coreclient.Permanent(fmt.Errorf("parse WhatsApp target chat %q: %w", dispatch.GetTargetChatId(), err))
+		return "", "", err
 	}
-	contextInfo, err := s.quotedContext(dispatch)
+	contextInfo, err := s.quotedContext(ctx, dispatch, mode)
 	if err != nil {
 		return "", "", err
 	}
@@ -142,9 +144,9 @@ func attachmentGroupError(err error, index int) error {
 // original message id across an edit, so the target id is returned unchanged for
 // the acknowledgement.
 func (s Sender) EditMessage(ctx context.Context, dispatch *wuphfpb.MessageEditDispatch) (string, error) {
-	chat, err := types.ParseJID(dispatch.GetTargetChatId())
+	chat, _, err := s.target(ctx, dispatch.GetTargetChatId())
 	if err != nil {
-		return "", coreclient.Permanent(fmt.Errorf("parse WhatsApp target chat %q: %w", dispatch.GetTargetChatId(), err))
+		return "", err
 	}
 	edit := s.client.BuildEdit(chat, types.MessageID(dispatch.GetTargetPlatformMessageId()), textMessage(dispatch.GetText()))
 	if _, err := s.client.SendMessage(ctx, chat, edit); err != nil {
@@ -157,9 +159,9 @@ func (s Sender) EditMessage(ctx context.Context, dispatch *wuphfpb.MessageEditDi
 // message id after a revoke, so the target id is returned unchanged for the
 // acknowledgement. The empty sender JID revokes our own (bridge-authored) copy.
 func (s Sender) DeleteMessage(ctx context.Context, dispatch *wuphfpb.MessageDeleteDispatch) (string, error) {
-	chat, err := types.ParseJID(dispatch.GetTargetChatId())
+	chat, _, err := s.target(ctx, dispatch.GetTargetChatId())
 	if err != nil {
-		return "", coreclient.Permanent(fmt.Errorf("parse WhatsApp target chat %q: %w", dispatch.GetTargetChatId(), err))
+		return "", err
 	}
 	revoke := s.client.BuildRevoke(chat, types.EmptyJID, types.MessageID(dispatch.GetTargetPlatformMessageId()))
 	if _, err := s.client.SendMessage(ctx, chat, revoke); err != nil {
@@ -172,7 +174,7 @@ func (s Sender) DeleteMessage(ctx context.Context, dispatch *wuphfpb.MessageDele
 // quoted copy is not necessarily one the bridge wrote: the router only skips the
 // *replying* message's origin endpoint, so a reply arriving from another
 // platform can quote a message this chat sent us. The dispatch says which it is.
-func (s Sender) quotedContext(dispatch *wuphfpb.MessageCreateDispatch) (*waE2E.ContextInfo, error) {
+func (s Sender) quotedContext(ctx context.Context, dispatch *wuphfpb.MessageCreateDispatch, mode types.AddressingMode) (*waE2E.ContextInfo, error) {
 	reply := dispatch.GetReplyContext()
 	if reply == nil {
 		if dispatch.GetReplyToPlatformMessageId() != "" {
@@ -180,7 +182,7 @@ func (s Sender) quotedContext(dispatch *wuphfpb.MessageCreateDispatch) (*waE2E.C
 		}
 		return nil, nil
 	}
-	participant, err := s.quotedAuthor(reply)
+	participant, err := s.quotedAuthor(ctx, reply, mode)
 	if err != nil {
 		return nil, err
 	}
@@ -198,21 +200,40 @@ func (s Sender) quotedContext(dispatch *wuphfpb.MessageCreateDispatch) (*waE2E.C
 // A copy the bridge sent into this chat was written by the paired account. A
 // copy the bridge received here came from WhatsApp itself, so the reply context
 // already carries this platform's own ids for its author — the group
-// participant when there is one, the chat peer otherwise — canonicalized by the
-// normalizer, so the form matches the quoted message's.
-func (s Sender) quotedAuthor(reply *wuphfpb.ReplyContext) (string, error) {
+// participant when there is one, the chat peer otherwise. The normalizer reported
+// it in canonical form, which need not be the form the chat is addressed in, so it
+// is translated into the chat's form (mode); so is the paired account's own
+// address, since WhatsApp keys our messages in a LID-addressed chat by our LID.
+func (s Sender) quotedAuthor(ctx context.Context, reply *wuphfpb.ReplyContext, mode types.AddressingMode) (string, error) {
 	if !reply.GetAuthoredByBridge() {
-		if participant := reply.GetParticipant(); participant != "" {
-			return participant, nil
+		author := reply.GetParticipant()
+		if author == "" {
+			author = reply.GetSender()
 		}
-		if sender := reply.GetSender(); sender != "" {
-			return sender, nil
+		if author != "" {
+			jid, err := types.ParseJID(author)
+			if err != nil {
+				return author, nil
+			}
+			return s.addressing.InMode(ctx, jid, mode).String(), nil
 		}
 	}
-	if s.ownJID.IsEmpty() {
+	own := s.addressing.Own(mode)
+	if own.IsEmpty() {
 		return "", coreclient.Permanent(errors.New("outbound WhatsApp reply requires a paired account JID"))
 	}
-	return s.ownJID.ToNonAD().String(), nil
+	return own.String(), nil
+}
+
+// target parses a dispatch's canonical chat id and returns the chat in the form
+// WhatsApp addresses it in, with that form for the frame's other addresses.
+func (s Sender) target(ctx context.Context, chatID string) (types.JID, types.AddressingMode, error) {
+	chat, err := types.ParseJID(chatID)
+	if err != nil {
+		return types.EmptyJID, "", coreclient.Permanent(fmt.Errorf("parse WhatsApp target chat %q: %w", chatID, err))
+	}
+	mode := s.addressing.Mode(ctx, chat)
+	return s.addressing.InMode(ctx, chat, mode), mode, nil
 }
 
 // quotedBody renders the parent message for the WhatsApp quote preview. The

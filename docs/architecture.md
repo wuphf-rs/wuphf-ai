@@ -52,6 +52,16 @@ across both forms.
 A rule can only recognize a chat by a form the platform has actually reported.
 Where no counterpart is known — the LID store has no mapping and WhatsApp sends
 no alternate address — a chat listed under the other form stays unmatched.
+
+Canonical forms are for identity only. On the way out, the WhatsApp connector
+puts every address back into the form the chat is addressed in, because WhatsApp
+keys a chat's messages by that form: a quote naming its author in the other form
+arrives unlinked from its parent. A group's form is the addressing mode its
+messages carry (or, before any arrives, its metadata); a direct chat's is the
+form its messages arrive on, except that an account WhatsApp has migrated to LIDs
+sends every direct message to the LID. The dispatch target, the quoted author
+(including the paired account itself, which a LID chat knows by its LID) and the
+chat in edit and delete keys all follow it.
 ## Routing Rules
 
 Rules are the only routing input a user writes; conversations and endpoints

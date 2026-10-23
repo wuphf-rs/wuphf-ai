@@ -16,7 +16,7 @@ import (
 
 func TestNormalizeGroupTextAndReply(t *testing.T) {
 	t.Parallel()
-	normalizer := NewNormalizer(make(chan *wuphfpb.ClientFrame), MediaCodec{}, nil, nil, nil)
+	normalizer := NewNormalizer(make(chan *wuphfpb.ClientFrame), MediaCodec{}, nil, nil, nil, nil)
 	event, ok, err := normalizer.normalize(context.Background(), &events.Message{
 		Info: types.MessageInfo{
 			MessageSource: types.MessageSource{
@@ -57,7 +57,7 @@ func (s stubNamer) PersonName(_ context.Context, jid types.JID, pushHint string)
 
 func TestNormalizeSetsChatTitleFromNamer(t *testing.T) {
 	t.Parallel()
-	normalizer := NewNormalizer(make(chan *wuphfpb.ClientFrame), MediaCodec{}, stubNamer{title: "Family Group"}, nil, nil)
+	normalizer := NewNormalizer(make(chan *wuphfpb.ClientFrame), MediaCodec{}, stubNamer{title: "Family Group"}, nil, nil, nil)
 	event, ok, err := normalizer.normalize(context.Background(), &events.Message{
 		Info: types.MessageInfo{
 			MessageSource: types.MessageSource{
@@ -80,7 +80,7 @@ func TestNormalizeSetsChatTitleFromNamer(t *testing.T) {
 func TestHandleQueuesMessageCreateFrame(t *testing.T) {
 	t.Parallel()
 	inputs := make(chan *wuphfpb.ClientFrame, 1)
-	normalizer := NewNormalizer(inputs, MediaCodec{}, nil, nil, nil)
+	normalizer := NewNormalizer(inputs, MediaCodec{}, nil, nil, nil, nil)
 	if err := normalizer.Handle(context.Background(), &events.Message{
 		Info: types.MessageInfo{
 			MessageSource: types.MessageSource{
@@ -100,7 +100,7 @@ func TestHandleQueuesMessageCreateFrame(t *testing.T) {
 
 func TestNormalizeIncludesOwnUserMessagesForCoreEchoDecision(t *testing.T) {
 	t.Parallel()
-	normalizer := NewNormalizer(make(chan *wuphfpb.ClientFrame), MediaCodec{}, nil, nil, nil)
+	normalizer := NewNormalizer(make(chan *wuphfpb.ClientFrame), MediaCodec{}, nil, nil, nil, nil)
 	event, ok, err := normalizer.normalize(context.Background(), &events.Message{
 		Info: types.MessageInfo{
 			MessageSource: types.MessageSource{
@@ -119,7 +119,7 @@ func TestNormalizeIncludesOwnUserMessagesForCoreEchoDecision(t *testing.T) {
 
 func TestNormalizeDirectChatCarriesParticipant(t *testing.T) {
 	t.Parallel()
-	normalizer := NewNormalizer(make(chan *wuphfpb.ClientFrame), MediaCodec{}, stubNamer{}, nil, nil)
+	normalizer := NewNormalizer(make(chan *wuphfpb.ClientFrame), MediaCodec{}, stubNamer{}, nil, nil, nil)
 	event, ok, err := normalizer.normalize(context.Background(), &events.Message{
 		Info: types.MessageInfo{
 			MessageSource: types.MessageSource{
@@ -144,7 +144,7 @@ func TestNormalizeDirectChatCarriesParticipant(t *testing.T) {
 
 func TestNormalizeLabelsOwnMessagesAsMe(t *testing.T) {
 	t.Parallel()
-	normalizer := NewNormalizer(make(chan *wuphfpb.ClientFrame), MediaCodec{}, stubNamer{}, nil, nil)
+	normalizer := NewNormalizer(make(chan *wuphfpb.ClientFrame), MediaCodec{}, stubNamer{}, nil, nil, nil)
 	event, ok, err := normalizer.normalize(context.Background(), &events.Message{
 		Info: types.MessageInfo{
 			MessageSource: types.MessageSource{
@@ -166,7 +166,7 @@ func TestNormalizeLabelsOwnMessagesAsMe(t *testing.T) {
 
 func TestNormalizeTagsOwnLinkedDeviceMessages(t *testing.T) {
 	t.Parallel()
-	normalizer := NewNormalizer(make(chan *wuphfpb.ClientFrame), MediaCodec{}, stubNamer{}, nil, nil)
+	normalizer := NewNormalizer(make(chan *wuphfpb.ClientFrame), MediaCodec{}, stubNamer{}, nil, nil, nil)
 	event, ok, err := normalizer.normalize(context.Background(), &events.Message{
 		Info: types.MessageInfo{
 			MessageSource: types.MessageSource{
@@ -188,7 +188,7 @@ func TestNormalizeTagsOwnLinkedDeviceMessages(t *testing.T) {
 
 func TestNormalizeTagsPeerLinkedDeviceMessages(t *testing.T) {
 	t.Parallel()
-	normalizer := NewNormalizer(make(chan *wuphfpb.ClientFrame), MediaCodec{}, stubNamer{}, nil, nil)
+	normalizer := NewNormalizer(make(chan *wuphfpb.ClientFrame), MediaCodec{}, stubNamer{}, nil, nil, nil)
 	event, ok, err := normalizer.normalize(context.Background(), &events.Message{
 		Info: types.MessageInfo{
 			MessageSource: types.MessageSource{
@@ -244,7 +244,7 @@ func TestHandleCanonicalizesChatAndEmitsMigrationOnce(t *testing.T) {
 	lid := types.NewJID("88887777", types.HiddenUserServer)
 	identity := fakeIdentity{lids: map[string]types.JID{phone.String(): lid}}
 	inputs := make(chan *wuphfpb.ClientFrame, 8)
-	normalizer := NewNormalizer(inputs, MediaCodec{}, stubNamer{}, identity, nil)
+	normalizer := NewNormalizer(inputs, MediaCodec{}, stubNamer{}, identity, nil, nil)
 	message := &events.Message{
 		Info: types.MessageInfo{
 			MessageSource: types.MessageSource{Chat: phone, Sender: phone},
@@ -281,7 +281,7 @@ func TestHandleCanonicalizesChatAndEmitsMigrationOnce(t *testing.T) {
 
 func TestNormalizeStripsSenderDeviceFromIdentity(t *testing.T) {
 	t.Parallel()
-	normalizer := NewNormalizer(make(chan *wuphfpb.ClientFrame), MediaCodec{}, stubNamer{}, nil, nil)
+	normalizer := NewNormalizer(make(chan *wuphfpb.ClientFrame), MediaCodec{}, stubNamer{}, nil, nil, nil)
 	event, ok, err := normalizer.normalize(context.Background(), &events.Message{
 		Info: types.MessageInfo{
 			MessageSource: types.MessageSource{
@@ -302,7 +302,7 @@ func TestNormalizeStripsSenderDeviceFromIdentity(t *testing.T) {
 
 func TestNormalizeReactionEmitsToggle(t *testing.T) {
 	t.Parallel()
-	normalizer := NewNormalizer(make(chan *wuphfpb.ClientFrame), MediaCodec{}, stubNamer{}, nil, nil)
+	normalizer := NewNormalizer(make(chan *wuphfpb.ClientFrame), MediaCodec{}, stubNamer{}, nil, nil, nil)
 	message := &events.Message{
 		Info: types.MessageInfo{
 			MessageSource: types.MessageSource{
@@ -335,7 +335,7 @@ func TestNormalizeReactionEmitsToggle(t *testing.T) {
 
 func TestNormalizeReactionClearedHasEmptyEmoji(t *testing.T) {
 	t.Parallel()
-	normalizer := NewNormalizer(make(chan *wuphfpb.ClientFrame), MediaCodec{}, stubNamer{}, nil, nil)
+	normalizer := NewNormalizer(make(chan *wuphfpb.ClientFrame), MediaCodec{}, stubNamer{}, nil, nil, nil)
 	message := &events.Message{
 		Info: types.MessageInfo{
 			MessageSource: types.MessageSource{
@@ -371,7 +371,7 @@ func TestHandleReceiptEmitsReceiptForDM(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			inputs := make(chan *wuphfpb.ClientFrame, 4)
-			normalizer := NewNormalizer(inputs, MediaCodec{}, stubNamer{}, nil, nil)
+			normalizer := NewNormalizer(inputs, MediaCodec{}, stubNamer{}, nil, nil, nil)
 			err := normalizer.HandleReceipt(context.Background(), &events.Receipt{
 				MessageSource: types.MessageSource{
 					Chat:   types.NewJID("15550001111", types.DefaultUserServer),
@@ -397,7 +397,7 @@ func TestHandleReceiptEmitsReceiptForDM(t *testing.T) {
 func TestHandleReceiptSkipsGroupAndUnsurfaced(t *testing.T) {
 	t.Parallel()
 	inputs := make(chan *wuphfpb.ClientFrame, 4)
-	normalizer := NewNormalizer(inputs, MediaCodec{}, stubNamer{}, nil, nil)
+	normalizer := NewNormalizer(inputs, MediaCodec{}, stubNamer{}, nil, nil, nil)
 	// A group receipt is per-participant noise, not a DM signal.
 	if err := normalizer.HandleReceipt(context.Background(), &events.Receipt{
 		MessageSource: types.MessageSource{Chat: types.NewJID("1", types.GroupServer), IsGroup: true},
@@ -518,7 +518,7 @@ func TestHandleReportsThePhoneFormOfALIDAddressedChat(t *testing.T) {
 	lid := types.NewJID("88887777", types.HiddenUserServer)
 	identity := fakeIdentity{lids: map[string]types.JID{phone.String(): lid}}
 	inputs := make(chan *wuphfpb.ClientFrame, 8)
-	normalizer := NewNormalizer(inputs, MediaCodec{}, stubNamer{}, identity, nil)
+	normalizer := NewNormalizer(inputs, MediaCodec{}, stubNamer{}, identity, nil, nil)
 	message := &events.Message{
 		Info: types.MessageInfo{
 			MessageSource: types.MessageSource{
@@ -586,7 +586,7 @@ func TestNormalizeReactionDecryptsGroupReaction(t *testing.T) {
 		Key:  &waCommon.MessageKey{ID: proto.String("wa-target")},
 		Text: proto.String("🔥"),
 	}}
-	normalizer := NewNormalizer(make(chan *wuphfpb.ClientFrame), MediaCodec{}, stubNamer{}, nil, decryptor)
+	normalizer := NewNormalizer(make(chan *wuphfpb.ClientFrame), MediaCodec{}, stubNamer{}, nil, decryptor, nil)
 	message := encryptedReaction()
 	chat := normalizer.canonical(context.Background(), message.Info.Chat)
 	event, ok := normalizer.normalizeReaction(context.Background(), message, chat)
@@ -606,7 +606,7 @@ func TestNormalizeReactionSkipsUndecryptableReaction(t *testing.T) {
 	}
 	for name, decryptor := range cases {
 		t.Run(name, func(t *testing.T) {
-			normalizer := NewNormalizer(make(chan *wuphfpb.ClientFrame), MediaCodec{}, stubNamer{}, nil, decryptor)
+			normalizer := NewNormalizer(make(chan *wuphfpb.ClientFrame), MediaCodec{}, stubNamer{}, nil, decryptor, nil)
 			message := encryptedReaction()
 			chat := normalizer.canonical(context.Background(), message.Info.Chat)
 			if event, ok := normalizer.normalizeReaction(context.Background(), message, chat); ok {
