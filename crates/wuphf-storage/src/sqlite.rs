@@ -316,7 +316,7 @@ impl Storage for SqliteStorage {
         )
         .bind(serde_json::to_string(&key.platform)?)
         .bind(key.chat_id)
-        .bind(key.platform_message_id)
+        .bind(key.native_id)
         .execute(&self.pool)
         .await?;
         Ok(result.rows_affected() == 1)
@@ -523,7 +523,7 @@ impl Storage for SqliteStorage {
             .ok_or(StorageError::DispatchNotFound(dispatch_id))?;
         let mut dispatch: Dispatch = serde_json::from_str(row.get("payload"))?;
         dispatch.state = DispatchState::Acknowledged {
-            platform_message_id: platform_message_id.clone(),
+            native_id: platform_message_id.clone(),
         };
         sqlx::query("UPDATE dispatches SET waiting_for = ?, state = ?, payload = ? WHERE id = ?")
             .bind(None::<String>)
@@ -547,7 +547,7 @@ impl Storage for SqliteStorage {
         )
         .bind(copy.message_id.to_string())
         .bind(copy.endpoint_id.to_string())
-        .bind(&copy.platform_message_id)
+        .bind(&copy.native_id)
         .bind(serde_json::to_string(&copy)?)
         .execute(&mut *transaction)
         .await?;
@@ -688,7 +688,7 @@ impl Storage for SqliteStorage {
         )
         .bind(observed.connector_id.to_string())
         .bind(&observed.chat_id)
-        .bind(&observed.platform_message_id)
+        .bind(&observed.native_id)
         .fetch_optional(&mut *transaction)
         .await?;
         if let Some(row) = existing_message {
@@ -707,7 +707,7 @@ impl Storage for SqliteStorage {
         )
         .bind(observed.connector_id.to_string())
         .bind(&observed.chat_id)
-        .bind(&observed.platform_message_id)
+        .bind(&observed.native_id)
         .bind(observed.timestamp_ms)
         .bind(serde_json::to_string(&observed)?)
         .execute(&mut *transaction)
@@ -834,7 +834,7 @@ impl Storage for SqliteStorage {
             )
             .bind(connector_id.to_string())
             .bind(to_chat_id)
-            .bind(&observed.platform_message_id)
+            .bind(&observed.native_id)
             .bind(observed.timestamp_ms)
             .bind(serde_json::to_string(&observed)?)
             .execute(&mut *transaction)
@@ -993,7 +993,7 @@ async fn put_sqlite_copy(pool: &SqlitePool, copy: MessageCopy, sent: bool) -> St
     )
     .bind(copy.message_id.to_string())
     .bind(copy.endpoint_id.to_string())
-    .bind(&copy.platform_message_id)
+    .bind(&copy.native_id)
     .bind(i64::from(sent))
     .bind(serde_json::to_string(&copy)?)
     .execute(pool)

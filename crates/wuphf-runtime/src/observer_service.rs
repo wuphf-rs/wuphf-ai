@@ -165,7 +165,7 @@ where
                 chat_id: request.chat_id,
                 thread_id: request.thread_id,
                 text: request.text,
-                reply_to_platform_message_id: request.reply_to_platform_message_id,
+                reply_to_native_id: request.reply_to_platform_message_id,
                 timestamp_ms: owner_send::now_ms(),
             })
             .await
@@ -178,7 +178,7 @@ where
         // reaches subscribers whenever the acknowledgement lands.
         match tokio::time::timeout(SEND_ACK_TIMEOUT, settled).await {
             Ok(Ok(observed)) => Ok(Response::new(pb::SendMessageResponse {
-                platform_message_id: observed.platform_message_id,
+                platform_message_id: observed.native_id,
             })),
             // The runtime dropped the tracker: the dispatch failed permanently.
             Ok(Err(_)) => Err(Status::aborted("the connector rejected the send")),
@@ -220,9 +220,9 @@ fn observed_message_to_proto(observed: ObservedMessage) -> pb::ObservedMessage {
         platform: platform_to_proto(&observed.platform).into(),
         chat_id: observed.chat_id,
         thread_id: observed.thread_id,
-        platform_message_id: observed.platform_message_id,
-        sender: observed.sender,
-        sender_name: observed.sender_name,
+        platform_message_id: observed.native_id,
+        sender: observed.author_id,
+        sender_name: observed.author_name,
         participant: observed.participant,
         text: observed.text,
         attachments: observed
@@ -230,7 +230,7 @@ fn observed_message_to_proto(observed: ObservedMessage) -> pb::ObservedMessage {
             .into_iter()
             .map(attachment_to_proto)
             .collect(),
-        reply_to_platform_message_id: observed.reply_to_platform_message_id,
+        reply_to_platform_message_id: observed.reply_to_native_id,
         direction: direction_to_proto(observed.direction).into(),
         timestamp_ms: observed.timestamp_ms,
         deleted: observed.deleted,
@@ -304,14 +304,14 @@ mod tests {
                 address: ChatAddress::new(chat, None),
                 chat_title: Some("Chat".into()),
             },
-            payload: EventKind::MessageCreate(NewMessage {
-                platform_message_id: id.into(),
-                sender: "peer".into(),
+            payload: EventKind::NewMessage(NewMessage {
+                native_id: id.into(),
+                author_id: "peer".into(),
                 participant: None,
-                sender_name: Some("Peer".into()),
+                author_name: Some("Peer".into()),
                 text: Some(text.into()),
                 attachments: vec![],
-                reply_to_platform_message_id: None,
+                reply_to_native_id: None,
                 timestamp_ms: 100,
             }),
         }

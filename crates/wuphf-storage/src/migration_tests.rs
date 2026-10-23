@@ -185,9 +185,9 @@ fn sample_message() -> Message {
     Message {
         id: message_id(),
         replica_set_id: replica_set_id(),
-        sender: "15550001111@s.whatsapp.net".into(),
+        author_id: "15550001111@s.whatsapp.net".into(),
         participant: Some("15550001111@s.whatsapp.net".into()),
-        sender_name: Some("Alice".into()),
+        author_name: Some("Alice".into()),
         text: Some("hello".into()),
         attachments: vec![attachment()],
         reply_to: Some(MessageId(Uuid::from_u128(5))),
@@ -200,17 +200,17 @@ fn sample_copy() -> MessageCopy {
     MessageCopy {
         message_id: message_id(),
         endpoint_id: endpoint_id(),
-        platform_message_id: "tg-1".into(),
+        native_id: "tg-1".into(),
     }
 }
 
-fn command(action: Action, provision_thread: Option<ProvisionThread>) -> DispatchCommand {
+fn command(action: Action, create_thread: Option<ProvisionThread>) -> DispatchCommand {
     DispatchCommand {
         target_endpoint: endpoint_id(),
         target_connector: ConnectorId("telegram".into()),
         target: TargetAddress {
             address: ChatAddress::new("-100", Some("7".into())),
-            provision_thread,
+            create_thread,
         },
         payload: action,
     }
@@ -228,12 +228,12 @@ fn sample_dispatches() -> Vec<Dispatch> {
     let create = Dispatch {
         id: DispatchId(Uuid::from_u128(100)),
         command: command(
-            Action::MessageCreate {
+            Action::Send {
                 message: sample_message(),
-                reply_context: Some(ReplyContext {
+                reply: Some(ReplyContext {
                     message_id: MessageId(Uuid::from_u128(5)),
-                    platform_message_id: "tg-parent".into(),
-                    sender: "15550002222@s.whatsapp.net".into(),
+                    native_id: "tg-parent".into(),
+                    author_id: "15550002222@s.whatsapp.net".into(),
                     participant: None,
                     text: Some("parent".into()),
                     attachments: Vec::new(),
@@ -246,30 +246,30 @@ fn sample_dispatches() -> Vec<Dispatch> {
             }),
         ),
         state: DispatchState::Acknowledged {
-            platform_message_id: "tg-1".into(),
+            native_id: "tg-1".into(),
         },
     };
     vec![
         create,
         dispatch(
             1,
-            Action::MessageEdit {
+            Action::Edit {
                 message: sample_message(),
-                target_platform_message_id: "tg-1".into(),
+                native_id: "tg-1".into(),
             },
             DispatchState::Pending,
         ),
         dispatch(
             2,
-            Action::MessageDelete {
+            Action::Delete {
                 message: sample_message(),
-                target_platform_message_id: "tg-1".into(),
+                native_id: "tg-1".into(),
             },
             DispatchState::Pending,
         ),
         dispatch(
             3,
-            Action::RetitleThread {
+            Action::RenameThread {
                 replica_set_id: replica_set_id(),
                 title: "Alice (renamed)".into(),
             },
@@ -277,10 +277,10 @@ fn sample_dispatches() -> Vec<Dispatch> {
         ),
         dispatch(
             4,
-            Action::Reaction {
+            Action::React {
                 message_id: message_id(),
                 replica_set_id: replica_set_id(),
-                target_platform_message_id: "tg-1".into(),
+                native_id: "tg-1".into(),
                 reactor: "15550002222@s.whatsapp.net".into(),
                 reactor_name: Some("Bob".into()),
                 emoji: Some("👍".into()),
@@ -292,7 +292,7 @@ fn sample_dispatches() -> Vec<Dispatch> {
             Action::DeliveryAck {
                 message_id: message_id(),
                 replica_set_id: replica_set_id(),
-                target_platform_message_id: "wa-1".into(),
+                native_id: "wa-1".into(),
             },
             DispatchState::Pending,
         ),
@@ -301,7 +301,7 @@ fn sample_dispatches() -> Vec<Dispatch> {
             Action::SeenReceipt {
                 message_id: message_id(),
                 replica_set_id: replica_set_id(),
-                target_platform_message_id: "wa-1".into(),
+                native_id: "wa-1".into(),
             },
             DispatchState::Pending,
         ),
@@ -314,13 +314,13 @@ fn sample_observed() -> ObservedMessage {
         platform: Platform::WhatsApp,
         chat_id: "wa-chat".into(),
         thread_id: Some("thread".into()),
-        platform_message_id: "wa-1".into(),
-        sender: "15550001111@s.whatsapp.net".into(),
-        sender_name: Some("Alice".into()),
+        native_id: "wa-1".into(),
+        author_id: "15550001111@s.whatsapp.net".into(),
+        author_name: Some("Alice".into()),
         participant: Some("15550001111@s.whatsapp.net".into()),
         text: Some("hello".into()),
         attachments: vec![attachment()],
-        reply_to_platform_message_id: Some("wa-0".into()),
+        reply_to_native_id: Some("wa-0".into()),
         direction: ObservedDirection::Incoming,
         timestamp_ms: 1000,
         deleted: true,

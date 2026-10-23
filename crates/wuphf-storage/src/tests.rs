@@ -53,14 +53,18 @@ async fn copy_state_and_blocked_reply_released<S: Storage>(
         .await
         .unwrap();
     assert_eq!(released.len(), 1);
-    let Action::MessageCreate { reply_context, .. } = &released[0].command.payload else {
+    let Action::Send {
+        reply: reply_context,
+        ..
+    } = &released[0].command.payload
+    else {
         panic!("released dispatch should be a message create");
     };
     let reply_context = reply_context
         .as_ref()
         .expect("reply context set on release");
     assert_eq!(reply_context.message_id, parent_id);
-    assert_eq!(reply_context.platform_message_id, "telegram-parent");
+    assert_eq!(reply_context.native_id, "telegram-parent");
     assert!(
         storage
             .is_sent_copy(endpoint_id, "telegram-parent")
@@ -150,9 +154,9 @@ async fn prunes_only_expired_unreferenced_media<S: Storage>(storage: S) {
         .put_message(Message {
             id: MessageId::new(),
             replica_set_id: ReplicaSetId::new(),
-            sender: "test".into(),
+            author_id: "test".into(),
             participant: None,
-            sender_name: None,
+            author_name: None,
             text: None,
             attachments: vec![referenced.clone()],
             reply_to: None,
@@ -188,7 +192,7 @@ async fn claim_event_dedups_repeat_events<S: Storage>(storage: S) {
     let key = DedupKey {
         platform: Platform::WhatsApp,
         chat_id: "chat".into(),
-        platform_message_id: "m-1".into(),
+        native_id: "m-1".into(),
     };
     assert!(storage.claim_event(key.clone()).await.unwrap());
     assert!(!storage.claim_event(key.clone()).await.unwrap());
@@ -196,7 +200,7 @@ async fn claim_event_dedups_repeat_events<S: Storage>(storage: S) {
     let other = DedupKey {
         platform: Platform::WhatsApp,
         chat_id: "chat".into(),
-        platform_message_id: "m-2".into(),
+        native_id: "m-2".into(),
     };
     assert!(storage.claim_event(other).await.unwrap());
 }
@@ -224,7 +228,7 @@ async fn sent_copy_detection_and_reverse_lookup<S: Storage>(storage: S) {
         .record_sent_copy(MessageCopy {
             message_id,
             endpoint_id,
-            platform_message_id: "native-1".into(),
+            native_id: "native-1".into(),
         })
         .await
         .unwrap();
@@ -281,14 +285,10 @@ async fn acknowledging_create_binds_blocked_edit<S: Storage>(storage: S) {
         .await
         .unwrap();
     assert_eq!(released.len(), 1);
-    let Action::MessageEdit {
-        target_platform_message_id,
-        ..
-    } = &released[0].command.payload
-    else {
+    let Action::Edit { native_id, .. } = &released[0].command.payload else {
         panic!("released dispatch should be an edit");
     };
-    assert_eq!(target_platform_message_id, "native-1");
+    assert_eq!(native_id, "native-1");
 }
 
 #[tokio::test]
@@ -317,7 +317,7 @@ async fn settling_a_signal_dispatch_records_no_copy<S: Storage>(storage: S) {
         .put_received_copy(MessageCopy {
             message_id,
             endpoint_id,
-            platform_message_id: "origin-1".into(),
+            native_id: "origin-1".into(),
         })
         .await
         .unwrap();
@@ -327,10 +327,10 @@ async fn settling_a_signal_dispatch_records_no_copy<S: Storage>(storage: S) {
         .unwrap();
 
     let signals = [
-        Action::Reaction {
+        Action::React {
             message_id,
             replica_set_id,
-            target_platform_message_id: "origin-1".into(),
+            native_id: "origin-1".into(),
             reactor: "someone".into(),
             reactor_name: None,
             emoji: Some("👍".into()),
@@ -338,12 +338,12 @@ async fn settling_a_signal_dispatch_records_no_copy<S: Storage>(storage: S) {
         Action::DeliveryAck {
             message_id,
             replica_set_id,
-            target_platform_message_id: "origin-1".into(),
+            native_id: "origin-1".into(),
         },
         Action::SeenReceipt {
             message_id,
             replica_set_id,
-            target_platform_message_id: "origin-1".into(),
+            native_id: "origin-1".into(),
         },
     ];
     for payload in signals {
@@ -491,9 +491,9 @@ fn message(message_id: MessageId) -> Message {
     Message {
         id: message_id,
         replica_set_id: ReplicaSetId::new(),
-        sender: "test".into(),
+        author_id: "test".into(),
         participant: None,
-        sender_name: None,
+        author_name: None,
         text: Some("test".into()),
         attachments: vec![],
         reply_to: None,
@@ -558,7 +558,7 @@ async fn observation_log_roundtrips<S: Storage>(storage: S) {
         .unwrap();
     assert_eq!(
         page.iter()
-            .map(|m| m.platform_message_id.as_str())
+            .map(|m| m.native_id.as_str())
             .collect::<Vec<_>>(),
         ["a2", "a1"], // newest first
     );
@@ -568,7 +568,7 @@ async fn observation_log_roundtrips<S: Storage>(storage: S) {
         .await
         .unwrap();
     assert_eq!(older.len(), 1);
-    assert_eq!(older[0].platform_message_id, "a1");
+    assert_eq!(older[0].native_id, "a1");
 
     let edited = storage
         .mark_observed_edited(&whatsapp, "alice", "a1", Some("first (edited)".into()))
@@ -599,9 +599,9 @@ async fn observation_log_roundtrips<S: Storage>(storage: S) {
         .observed_messages(&whatsapp, "alice", None, 10)
         .await
         .unwrap();
-    let a1 = page.iter().find(|m| m.platform_message_id == "a1").unwrap();
+    let a1 = page.iter().find(|m| m.native_id == "a1").unwrap();
     assert!(a1.edited && a1.text.as_deref() == Some("first (edited)"));
-    let a2 = page.iter().find(|m| m.platform_message_id == "a2").unwrap();
+    let a2 = page.iter().find(|m| m.native_id == "a2").unwrap();
     assert!(a2.deleted);
 }
 
@@ -617,13 +617,13 @@ fn observed(
         platform: Platform::WhatsApp,
         chat_id: chat_id.into(),
         thread_id: None,
-        platform_message_id: platform_message_id.into(),
-        sender: "sender".into(),
-        sender_name: None,
+        native_id: platform_message_id.into(),
+        author_id: "sender".into(),
+        author_name: None,
         participant: None,
         text: text.map(Into::into),
         attachments: vec![],
-        reply_to_platform_message_id: None,
+        reply_to_native_id: None,
         direction: ObservedDirection::Incoming,
         timestamp_ms,
         deleted: false,
@@ -637,11 +637,11 @@ fn command(message_id: MessageId, endpoint_id: EndpointId) -> DispatchCommand {
         target_connector: ConnectorId("telegram".into()),
         target: wuphf_model::TargetAddress {
             address: wuphf_model::ChatAddress::new("-100", Some("7".into())),
-            provision_thread: None,
+            create_thread: None,
         },
-        payload: Action::MessageCreate {
+        payload: Action::Send {
             message: message(message_id),
-            reply_context: None,
+            reply: None,
         },
     }
 }
@@ -652,11 +652,11 @@ fn edit_command(message_id: MessageId, endpoint_id: EndpointId) -> DispatchComma
         target_connector: ConnectorId("telegram".into()),
         target: wuphf_model::TargetAddress {
             address: wuphf_model::ChatAddress::new("-100", Some("7".into())),
-            provision_thread: None,
+            create_thread: None,
         },
-        payload: Action::MessageEdit {
+        payload: Action::Edit {
             message: message(message_id),
-            target_platform_message_id: String::new(),
+            native_id: String::new(),
         },
     }
 }

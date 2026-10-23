@@ -85,25 +85,25 @@ where
             .ok_or(CoreError::OriginWithoutReplicaSet(origin_endpoint))?;
 
         match event.payload {
-            EventKind::MessageCreate(inbound) => {
+            EventKind::NewMessage(inbound) => {
                 self.ingest_create(source, origin_endpoint, origin, replica_set_id, inbound)
                     .await
             }
-            EventKind::MessageEdit {
-                platform_message_id,
+            EventKind::Edit {
+                native_id: platform_message_id,
                 text,
             } => {
                 self.ingest_edit(origin_endpoint, platform_message_id, text)
                     .await
             }
-            EventKind::MessageDelete {
-                platform_message_id,
+            EventKind::Delete {
+                native_id: platform_message_id,
             } => {
                 self.ingest_delete(origin_endpoint, platform_message_id)
                     .await
             }
-            EventKind::ReactionSet {
-                platform_message_id,
+            EventKind::Reaction {
+                native_id: platform_message_id,
                 reactor,
                 reactor_name,
                 emoji,
@@ -121,8 +121,8 @@ where
                 )
                 .await
             }
-            EventKind::ReceiptSet {
-                platform_message_id,
+            EventKind::Receipt {
+                native_id: platform_message_id,
                 observer: _,
                 from_me,
                 kind,

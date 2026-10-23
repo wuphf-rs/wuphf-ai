@@ -9,7 +9,7 @@ are thin pipes.
 
 - **Logical message** — every message has a core-owned `MessageId`. Each
   delivered or received platform representation is a `MessageCopy` keyed by
-  `(MessageId, EndpointId, platform_message_id)`.
+  `(MessageId, EndpointId, native_id)`.
 - **Endpoint** — an internal handle for one chat (optionally one thread) on one
   connector. Connectors never see endpoint ids; they report raw platform
   addresses, and the core resolves an address to an endpoint through an

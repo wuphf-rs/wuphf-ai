@@ -154,7 +154,7 @@ where
                         debug!(dispatch_id = %acknowledgement.dispatch_id, "dispatch acknowledged");
                         let (dispatch_id, platform_message_id) = (
                             acknowledgement.dispatch_id,
-                            acknowledgement.platform_message_id.clone(),
+                            acknowledgement.native_id.clone(),
                         );
                         for dispatch in self.core.acknowledge_dispatch(acknowledgement).await? {
                             self.send(dispatch).await?;
@@ -295,15 +295,15 @@ where
     let connector = event.source.connector_id.0.clone();
     let chat = event.source.address.chat_id.clone();
     let kind = match &event.payload {
-        EventKind::MessageCreate(_) => "create",
-        EventKind::MessageEdit { .. } => "edit",
-        EventKind::MessageDelete { .. } => "delete",
-        EventKind::ReactionSet { .. } => "reaction",
-        EventKind::ReceiptSet {
+        EventKind::NewMessage(_) => "create",
+        EventKind::Edit { .. } => "edit",
+        EventKind::Delete { .. } => "delete",
+        EventKind::Reaction { .. } => "reaction",
+        EventKind::Receipt {
             kind: ReceiptKind::Delivered,
             ..
         } => "delivery_receipt",
-        EventKind::ReceiptSet {
+        EventKind::Receipt {
             kind: ReceiptKind::Read,
             ..
         } => "read_receipt",

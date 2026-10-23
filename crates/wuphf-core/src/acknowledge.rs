@@ -23,7 +23,7 @@ where
             .record_sent_copy(MessageCopy {
                 message_id,
                 endpoint_id: target_endpoint,
-                platform_message_id: platform_message_id.into(),
+                native_id: platform_message_id.into(),
             })
             .await?;
         Ok(())
@@ -41,10 +41,7 @@ where
         }
         let mut dispatches = self
             .storage
-            .acknowledge_dispatch(
-                acknowledgement.dispatch_id,
-                acknowledgement.platform_message_id,
-            )
+            .acknowledge_dispatch(acknowledgement.dispatch_id, acknowledgement.native_id)
             .await?;
         if let Some(dispatch) = dispatch {
             if let Some(ack) = self.delivery_ack_for(&dispatch).await? {
@@ -62,10 +59,7 @@ where
     /// how to surface it (Telegram reacts 👍; sources ignore it). Multiple
     /// mirrors each emit one; the signal is idempotent.
     async fn delivery_ack_for(&self, dispatch: &Dispatch) -> Result<Option<Dispatch>, CoreError> {
-        if !matches!(
-            dispatch.command.payload,
-            wuphf_model::Action::MessageCreate { .. }
-        ) {
+        if !matches!(dispatch.command.payload, wuphf_model::Action::Send { .. }) {
             return Ok(None);
         }
         let Some(message_id) = dispatch.command.message_id() else {
@@ -80,12 +74,12 @@ where
             target_connector: endpoint.connector_id.clone(),
             target: wuphf_model::TargetAddress {
                 address: endpoint.address(),
-                provision_thread: None,
+                create_thread: None,
             },
             payload: wuphf_model::Action::DeliveryAck {
                 message_id,
                 replica_set_id: dispatch.command.message_replica_set_id(),
-                target_platform_message_id: origin.platform_message_id,
+                native_id: origin.native_id,
             },
         };
         Ok(Some(self.storage.enqueue_dispatch(command, None).await?))
@@ -179,7 +173,7 @@ where
         {
             let mut provisioning = self.provisioning.lock().unwrap();
             for dispatch in &pending {
-                if dispatch.command.target.provision_thread.is_some() {
+                if dispatch.command.target.create_thread.is_some() {
                     provisioning
                         .entry(dispatch.command.message_replica_set_id())
                         .or_default()
@@ -212,7 +206,7 @@ where
         thread_id: String,
     ) -> Result<(), CoreError> {
         let connector = dispatch.command.target_connector.clone();
-        let container = match &dispatch.command.target.provision_thread {
+        let container = match &dispatch.command.target.create_thread {
             Some(provision) => provision.container.clone(),
             None => dispatch.command.target.address.chat_id.clone(),
         };

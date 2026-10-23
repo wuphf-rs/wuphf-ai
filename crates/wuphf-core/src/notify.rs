@@ -47,7 +47,7 @@ where
                     chat_id: target.chat_id,
                     thread_id: target.thread_id,
                     text: text.clone(),
-                    reply_to_platform_message_id: None,
+                    reply_to_native_id: None,
                     timestamp_ms,
                 })
                 .await?;

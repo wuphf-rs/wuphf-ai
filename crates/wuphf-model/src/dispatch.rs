@@ -10,43 +10,37 @@ pub enum Action {
     /// Deliver a new copy. How the copy is rendered (attachments-as-files,
     /// text spillover, and the like) is the target connector's own
     /// configuration, so the dispatch carries only content.
-    MessageCreate {
+    Send {
         message: Message,
-        reply_context: Option<ReplyContext>,
+        reply: Option<ReplyContext>,
     },
-    /// Revise an already-delivered copy. `target_platform_message_id` is the
-    /// native id of the copy to edit at the target endpoint; it is empty while
+    /// Revise an already-delivered copy. `native_id` is the native id of the
+    /// copy to edit at the target endpoint; it is empty while
     /// the dispatch is blocked and filled in when the original create is
     /// acknowledged.
-    MessageEdit {
-        message: Message,
-        target_platform_message_id: String,
-    },
-    /// Revoke an already-delivered copy. `target_platform_message_id` is the
-    /// native id of the copy to delete at the target endpoint; it is empty while
+    Edit { message: Message, native_id: String },
+    /// Revoke an already-delivered copy. `native_id` is the native id of the
+    /// copy to delete at the target endpoint; it is empty while
     /// the dispatch is blocked and filled in when the original create is
     /// acknowledged.
-    MessageDelete {
-        message: Message,
-        target_platform_message_id: String,
-    },
+    Delete { message: Message, native_id: String },
     /// Rename an already-provisioned mirror thread when its source
     /// conversation's title changes. Carries no message because a retitle is a
     /// conversation property, not a per-message operation; the target thread is
     /// addressed by the resolved [`TargetAddress`].
-    RetitleThread {
+    RenameThread {
         replica_set_id: ReplicaSetId,
         title: String,
     },
     /// Reflect a reaction change on an already-delivered copy. The core only
     /// routes the signal; the connector decides how to render it (e.g. Telegram
-    /// shows text rather than a native reaction). `target_platform_message_id`
-    /// is the native id of the reacted copy at the target endpoint — empty while
-    /// the dispatch is blocked, filled when the parent create is acknowledged.
-    Reaction {
+    /// shows text rather than a native reaction). `native_id` is the native id
+    /// of the reacted copy at the target endpoint — empty while the dispatch is
+    /// blocked, filled when the parent create is acknowledged.
+    React {
         message_id: MessageId,
         replica_set_id: ReplicaSetId,
-        target_platform_message_id: String,
+        native_id: String,
         reactor: String,
         reactor_name: Option<String>,
         emoji: Option<String>,
@@ -56,14 +50,14 @@ pub enum Action {
     DeliveryAck {
         message_id: MessageId,
         replica_set_id: ReplicaSetId,
-        target_platform_message_id: String,
+        native_id: String,
     },
     /// Signal the origin copy that its message was read on a mirror. The
     /// connector decides how to surface it (e.g. a 👀 reaction in DMs).
     SeenReceipt {
         message_id: MessageId,
         replica_set_id: ReplicaSetId,
-        target_platform_message_id: String,
+        native_id: String,
     },
 }
 
@@ -76,13 +70,13 @@ pub struct ProvisionThread {
 }
 
 /// The resolved platform destination for a dispatch. The connector sends to
-/// `address`; if `provision_thread` is set it first creates the thread and
+/// `address`; if `create_thread` is set it first creates the thread and
 /// reports the resulting thread id back in the acknowledgement.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TargetAddress {
     pub address: ChatAddress,
     #[serde(default)]
-    pub provision_thread: Option<ProvisionThread>,
+    pub create_thread: Option<ProvisionThread>,
 }
 
 /// A fully resolved instruction to deliver one payload to one endpoint on one
@@ -102,13 +96,13 @@ impl DispatchCommand {
     /// copy to record, so it has no id.
     pub fn message_id(&self) -> Option<MessageId> {
         match &self.payload {
-            Action::MessageCreate { message, .. }
-            | Action::MessageEdit { message, .. }
-            | Action::MessageDelete { message, .. } => Some(message.id),
-            Action::Reaction { message_id, .. }
+            Action::Send { message, .. }
+            | Action::Edit { message, .. }
+            | Action::Delete { message, .. } => Some(message.id),
+            Action::React { message_id, .. }
             | Action::DeliveryAck { message_id, .. }
             | Action::SeenReceipt { message_id, .. } => Some(*message_id),
-            Action::RetitleThread { .. } => None,
+            Action::RenameThread { .. } => None,
         }
     }
 
@@ -120,21 +114,19 @@ impl DispatchCommand {
     pub fn records_copy(&self) -> bool {
         matches!(
             self.payload,
-            Action::MessageCreate { .. }
-                | Action::MessageEdit { .. }
-                | Action::MessageDelete { .. }
+            Action::Send { .. } | Action::Edit { .. } | Action::Delete { .. }
         )
     }
 
     pub fn message_replica_set_id(&self) -> ReplicaSetId {
         match &self.payload {
-            Action::MessageCreate { message, .. }
-            | Action::MessageEdit { message, .. }
-            | Action::MessageDelete { message, .. } => message.replica_set_id,
-            Action::Reaction { replica_set_id, .. }
+            Action::Send { message, .. }
+            | Action::Edit { message, .. }
+            | Action::Delete { message, .. } => message.replica_set_id,
+            Action::React { replica_set_id, .. }
             | Action::DeliveryAck { replica_set_id, .. }
             | Action::SeenReceipt { replica_set_id, .. }
-            | Action::RetitleThread { replica_set_id, .. } => *replica_set_id,
+            | Action::RenameThread { replica_set_id, .. } => *replica_set_id,
         }
     }
 }
@@ -148,7 +140,7 @@ pub enum DispatchState {
     /// quote the parent's native id.
     Blocked { waiting_for: MessageId },
     /// Delivered; carries the native id the connector assigned.
-    Acknowledged { platform_message_id: String },
+    Acknowledged { native_id: String },
     /// The connector reported the dispatch can never succeed. It is retained for
     /// observability but is no longer pending, so it is never redelivered.
     Failed { reason: String },
@@ -168,7 +160,7 @@ pub struct Dispatch {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DispatchAck {
     pub dispatch_id: DispatchId,
-    pub platform_message_id: String,
+    pub native_id: String,
     /// The thread/topic the message landed in. Set when the dispatch provisioned
     /// a new thread, so the core can persist the conversation thread mapping.
     #[serde(default)]
@@ -230,9 +222,9 @@ pub enum IgnoreReason {
     RedundantDelete,
 }
 
-/// The sender identity stamped on owner messages. Platforms deliver
-/// the message from the owner's own account, so this label only surfaces in the
-/// bridge's own records and mirror renderings.
+/// The `author_id` stamped on owner messages. Platforms deliver the message
+/// from the owner's own account, so this label only surfaces in the bridge's
+/// own records and mirror renderings.
 pub const OWNER_AUTHOR: &str = "me";
 
 /// An owner-authored outbound text addressed by raw platform coordinates.
@@ -245,7 +237,7 @@ pub struct OwnerMessage {
     /// Native id of the message this send replies to, when known. Resolved
     /// best-effort: a reply to a message the bridge never stored sends as a
     /// plain message rather than failing.
-    pub reply_to_platform_message_id: Option<String>,
+    pub reply_to_native_id: Option<String>,
     /// Send time in epoch milliseconds, supplied by the caller so the core
     /// stays clock-free.
     pub timestamp_ms: i64,

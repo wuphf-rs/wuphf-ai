@@ -150,14 +150,14 @@ fn wa_event(native_id: &str, text: &str) -> Event {
             address: ChatAddress::new("wa-chat", None),
             chat_title: None,
         },
-        payload: EventKind::MessageCreate(NewMessage {
-            platform_message_id: native_id.into(),
-            sender: "sender".into(),
+        payload: EventKind::NewMessage(NewMessage {
+            native_id: native_id.into(),
+            author_id: "sender".into(),
             participant: None,
-            sender_name: None,
+            author_name: None,
             text: Some(text.into()),
             attachments: vec![],
-            reply_to_platform_message_id: None,
+            reply_to_native_id: None,
             timestamp_ms: 1,
         }),
     }

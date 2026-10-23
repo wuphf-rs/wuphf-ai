@@ -42,19 +42,20 @@ pub struct MediaBlob {
 
 /// The normalized, platform-agnostic message owned by a [`ReplicaSet`].
 /// This canonical form is copied out to every endpoint in the set as a
-/// [`Dispatch`]. `sender` is the chat; `participant` is the individual
-/// author in a group chat. `reply_to` references the parent by internal id.
+/// [`Dispatch`]. `author_id` is the platform id of whoever wrote the message;
+/// `participant` is set when a mirror should label the message with its
+/// author. `reply_to` references the parent by internal id.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Message {
     pub id: MessageId,
     pub replica_set_id: ReplicaSetId,
-    pub sender: String,
+    pub author_id: String,
     pub participant: Option<String>,
     /// Human-readable display name of the author, resolved by the source
     /// connector. Used to label the author when mirroring into a shared chat;
     /// absent when the platform did not supply a name.
     #[serde(default)]
-    pub sender_name: Option<String>,
+    pub author_name: Option<String>,
     pub text: Option<String>,
     pub attachments: Vec<Attachment>,
     pub reply_to: Option<MessageId>,
@@ -69,7 +70,7 @@ pub struct Message {
 impl Message {
     /// Promote a resolved inbound message to the canonical logical form,
     /// minting its internal id. `reply_to` is the already-resolved parent;
-    /// native addressing (`platform_message_id`) stays behind in the copy
+    /// native addressing (`native_id`) stays behind in the copy
     /// tables.
     pub fn from_inbound(
         inbound: NewMessage,
@@ -79,9 +80,9 @@ impl Message {
         Self {
             id: MessageId::new(),
             replica_set_id,
-            sender: inbound.sender,
+            author_id: inbound.author_id,
             participant: inbound.participant,
-            sender_name: inbound.sender_name,
+            author_name: inbound.author_name,
             text: inbound.text,
             attachments: inbound.attachments,
             reply_to,
@@ -98,7 +99,7 @@ impl Message {
 pub struct MessageCopy {
     pub message_id: MessageId,
     pub endpoint_id: EndpointId,
-    pub platform_message_id: String,
+    pub native_id: String,
 }
 
 /// The quoted parent of a reply, denormalized so a connector can render a quote
@@ -107,8 +108,8 @@ pub struct MessageCopy {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ReplyContext {
     pub message_id: MessageId,
-    pub platform_message_id: String,
-    pub sender: String,
+    pub native_id: String,
+    pub author_id: String,
     pub participant: Option<String>,
     pub text: Option<String>,
     pub attachments: Vec<Attachment>,
@@ -118,7 +119,7 @@ pub struct ReplyContext {
     /// It decides who a platform is told authored the quoted message. When the
     /// bridge sent that copy the author is the bridge's own account; when the
     /// copy was received there, the target *is* the message's origin, so
-    /// `sender`/`participant` are already that platform's own ids and name the
+    /// `author_id`/`participant` are already that platform's own ids and name the
     /// real author. Platforms that address a quote by author (WhatsApp needs a
     /// participant alongside the quoted id) attribute it wrongly without this.
     #[serde(default)]
@@ -129,12 +130,12 @@ impl ReplyContext {
     /// Quote a stored parent message under the native id its copy carries at
     /// the target endpoint. `authored_by_bridge` reports whether that copy is
     /// one the bridge sent, which is what tells a connector whether to
-    /// attribute the quote to its own account or to `participant`/`sender`.
-    pub fn quoting(parent: Message, platform_message_id: String, authored_by_bridge: bool) -> Self {
+    /// attribute the quote to its own account or to `participant`/`author_id`.
+    pub fn quoting(parent: Message, native_id: String, authored_by_bridge: bool) -> Self {
         Self {
             message_id: parent.id,
-            platform_message_id,
-            sender: parent.sender,
+            native_id,
+            author_id: parent.author_id,
             participant: parent.participant,
             text: parent.text,
             attachments: parent.attachments,
@@ -149,11 +150,11 @@ impl ReplyContext {
 pub struct DedupKey {
     pub platform: Platform,
     pub chat_id: String,
-    pub platform_message_id: String,
+    pub native_id: String,
 }
 
-/// Cached display-name fields for a sender, used to label mirrored messages and
-/// newly provisioned threads.
+/// Cached display-name fields for an author, used to label mirrored messages
+/// and newly provisioned threads.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Contact {
     pub id: String,
@@ -172,39 +173,39 @@ pub struct ChatSettings {
 }
 
 /// A new message as normalized by a connector, before the core resolves it to an
-/// endpoint and group. Addresses are still native (`platform_message_id`,
-/// `reply_to_platform_message_id`).
+/// endpoint and group. Addresses are still native (`native_id`,
+/// `reply_to_native_id`).
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct NewMessage {
-    pub platform_message_id: String,
-    pub sender: String,
+    pub native_id: String,
+    pub author_id: String,
     pub participant: Option<String>,
     /// Display name of the author as known to the source platform, if any.
-    pub sender_name: Option<String>,
+    pub author_name: Option<String>,
     pub text: Option<String>,
     pub attachments: Vec<Attachment>,
-    pub reply_to_platform_message_id: Option<String>,
+    pub reply_to_native_id: Option<String>,
     pub timestamp_ms: i64,
 }
 
 /// The kind of inbound event a connector reports for a chat.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum EventKind {
-    MessageCreate(NewMessage),
-    MessageEdit {
-        platform_message_id: String,
+    NewMessage(NewMessage),
+    Edit {
+        native_id: String,
         text: Option<String>,
     },
-    MessageDelete {
-        platform_message_id: String,
+    Delete {
+        native_id: String,
     },
     /// A reactor set or cleared their reaction on a message (reactions are
-    /// toggles). `platform_message_id` is the reacted message's native id,
-    /// resolved to the logical message like an edit; `emoji` is `None` when the
-    /// reactor cleared theirs; `from_me` flags the account owner so the core can
-    /// recognise a reaction it applied being echoed back.
-    ReactionSet {
-        platform_message_id: String,
+    /// toggles). `native_id` is the reacted message, resolved to the logical
+    /// message like an edit; `emoji` is `None` when the reactor cleared theirs;
+    /// `from_me` flags the account owner so the core can recognise a reaction
+    /// it applied being echoed back.
+    Reaction {
+        native_id: String,
         reactor: String,
         reactor_name: Option<String>,
         emoji: Option<String>,
@@ -212,13 +213,13 @@ pub enum EventKind {
     },
     /// A delivery or read receipt observed on the source platform. Surfaced on
     /// the message's other copies (a 👍 for delivered, 👀 for read in DMs).
-    /// `platform_message_id` is the receipted message's native id; `observer` is
-    /// the peer that delivered/read it; `from_me` flags the owner's own receipt,
-    /// which the core ignores. The same path serves messages the bridge sent and
+    /// `native_id` names the receipted message; `observer` is the peer that
+    /// delivered/read it; `from_me` flags the owner's own receipt, which the
+    /// core ignores. The same path serves messages the bridge sent and
     /// messages the owner sent from another device, since the peer's receipt
     /// names the message regardless of which device authored it.
-    ReceiptSet {
-        platform_message_id: String,
+    Receipt {
+        native_id: String,
         observer: String,
         from_me: bool,
         kind: ReceiptKind,

@@ -18,7 +18,7 @@ pub enum ObservedDirection {
 }
 
 /// One message captured in the observation log, keyed by its native coordinates
-/// (`connector_id`, `chat_id`, `platform_message_id`). Holds enough to render a
+/// (`connector_id`, `chat_id`, `native_id`). Holds enough to render a
 /// timeline without touching the routing tables; attachments reference media by
 /// id through the shared media store, and are metadata only (bytes are fetched
 /// separately when a consumer needs them).
@@ -28,13 +28,13 @@ pub struct ObservedMessage {
     pub platform: Platform,
     pub chat_id: String,
     pub thread_id: Option<String>,
-    pub platform_message_id: String,
-    pub sender: String,
-    pub sender_name: Option<String>,
+    pub native_id: String,
+    pub author_id: String,
+    pub author_name: Option<String>,
     pub participant: Option<String>,
     pub text: Option<String>,
     pub attachments: Vec<Attachment>,
-    pub reply_to_platform_message_id: Option<String>,
+    pub reply_to_native_id: Option<String>,
     pub direction: ObservedDirection,
     pub timestamp_ms: i64,
     #[serde(default)]
@@ -57,13 +57,13 @@ impl ObservedMessage {
             platform,
             chat_id: source.address.chat_id.clone(),
             thread_id: source.address.thread_id.clone(),
-            platform_message_id: inbound.platform_message_id.clone(),
-            sender: inbound.sender.clone(),
-            sender_name: inbound.sender_name.clone(),
+            native_id: inbound.native_id.clone(),
+            author_id: inbound.author_id.clone(),
+            author_name: inbound.author_name.clone(),
             participant: inbound.participant.clone(),
             text: inbound.text.clone(),
             attachments: inbound.attachments.clone(),
-            reply_to_platform_message_id: inbound.reply_to_platform_message_id.clone(),
+            reply_to_native_id: inbound.reply_to_native_id.clone(),
             direction: ObservedDirection::Incoming,
             timestamp_ms: inbound.timestamp_ms,
             deleted: false,

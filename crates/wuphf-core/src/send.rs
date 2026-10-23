@@ -42,18 +42,15 @@ where
             .ok_or(CoreError::OriginWithoutReplicaSet(endpoint_id))?;
 
         let (reply_to, reply_context) = self
-            .resolve_reply(
-                endpoint_id,
-                outbound.reply_to_platform_message_id.as_deref(),
-            )
+            .resolve_reply(endpoint_id, outbound.reply_to_native_id.as_deref())
             .await?;
 
         let message = Message {
             id: MessageId::new(),
             replica_set_id,
-            sender: OWNER_AUTHOR.to_owned(),
+            author_id: OWNER_AUTHOR.to_owned(),
             participant: None,
-            sender_name: None,
+            author_name: None,
             text: Some(outbound.text),
             attachments: Vec::new(),
             reply_to,
@@ -70,11 +67,11 @@ where
                     target_connector: outbound.connector_id.clone(),
                     target: TargetAddress {
                         address,
-                        provision_thread: None,
+                        create_thread: None,
                     },
-                    payload: Action::MessageCreate {
+                    payload: Action::Send {
                         message: message.clone(),
-                        reply_context,
+                        reply: reply_context,
                     },
                 },
                 None,

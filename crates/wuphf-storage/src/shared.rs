@@ -29,7 +29,7 @@ pub(crate) fn acknowledged_copy(
     Some(MessageCopy {
         message_id: command.message_id()?,
         endpoint_id: command.target_endpoint,
-        platform_message_id: platform_message_id.to_owned(),
+        native_id: platform_message_id.to_owned(),
     })
 }
 
@@ -49,11 +49,14 @@ pub(crate) fn release_blocked(
 /// id of the copy it must revise at the target endpoint.
 fn bind_native_parent(command: &mut DispatchCommand, parent: Message, platform_message_id: String) {
     match &mut command.payload {
-        Action::MessageCreate { reply_context, .. } => {
+        Action::Send {
+            reply: reply_context,
+            ..
+        } => {
             *reply_context = Some(ReplyContext {
                 message_id: parent.id,
-                platform_message_id,
-                sender: parent.sender,
+                native_id: platform_message_id,
+                author_id: parent.author_id,
                 participant: parent.participant,
                 text: parent.text,
                 attachments: parent.attachments,
@@ -63,28 +66,13 @@ fn bind_native_parent(command: &mut DispatchCommand, parent: Message, platform_m
                 authored_by_bridge: true,
             })
         }
-        Action::MessageEdit {
-            target_platform_message_id,
-            ..
-        }
-        | Action::MessageDelete {
-            target_platform_message_id,
-            ..
-        }
-        | Action::Reaction {
-            target_platform_message_id,
-            ..
-        }
-        | Action::DeliveryAck {
-            target_platform_message_id,
-            ..
-        }
-        | Action::SeenReceipt {
-            target_platform_message_id,
-            ..
-        } => *target_platform_message_id = platform_message_id,
+        Action::Edit { native_id, .. }
+        | Action::Delete { native_id, .. }
+        | Action::React { native_id, .. }
+        | Action::DeliveryAck { native_id, .. }
+        | Action::SeenReceipt { native_id, .. } => *native_id = platform_message_id,
         // A retitle is never blocked on a parent message, so it is never
         // released with one.
-        Action::RetitleThread { .. } => {}
+        Action::RenameThread { .. } => {}
     }
 }

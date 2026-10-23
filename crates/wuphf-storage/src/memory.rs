@@ -346,7 +346,7 @@ impl Storage for InMemoryStorage {
                 *copy_message_id == message_id
                     && !state
                         .sent_copies
-                        .contains(&(copy.endpoint_id, copy.platform_message_id.clone()))
+                        .contains(&(copy.endpoint_id, copy.native_id.clone()))
             })
             .map(|(_, copy)| copy.clone()))
     }
@@ -457,7 +457,7 @@ impl Storage for InMemoryStorage {
             .get_mut(&dispatch_id)
             .ok_or(StorageError::DispatchNotFound(dispatch_id))?;
         dispatch.state = DispatchState::Acknowledged {
-            platform_message_id: platform_message_id.clone(),
+            native_id: platform_message_id.clone(),
         };
         let Some(copy) = acknowledged_copy(&dispatch.command, &platform_message_id) else {
             return Ok(Vec::new());
@@ -567,7 +567,7 @@ impl Storage for InMemoryStorage {
         let message_key = (
             observed.connector_id.clone(),
             observed.chat_id.clone(),
-            observed.platform_message_id.clone(),
+            observed.native_id.clone(),
         );
         // A row already recorded as outgoing stays outgoing: the platform
         // reporting our own send back must not relabel it as incoming.
@@ -749,12 +749,11 @@ fn put_copy(state: &mut State, copy: MessageCopy, sent: bool) {
     if sent {
         state
             .sent_copies
-            .insert((copy.endpoint_id, copy.platform_message_id.clone()));
+            .insert((copy.endpoint_id, copy.native_id.clone()));
     }
-    state.copy_ids.insert(
-        (copy.endpoint_id, copy.platform_message_id.clone()),
-        copy.message_id,
-    );
+    state
+        .copy_ids
+        .insert((copy.endpoint_id, copy.native_id.clone()), copy.message_id);
     state
         .copies
         .insert((copy.message_id, copy.endpoint_id), copy);

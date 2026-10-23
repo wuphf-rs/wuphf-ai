@@ -59,11 +59,11 @@ where
                             // told wrote the quoted message.
                             let authored_by_bridge = self
                                 .storage
-                                .is_sent_copy(endpoint_id, &copy.platform_message_id)
+                                .is_sent_copy(endpoint_id, &copy.native_id)
                                 .await?;
                             Some(ReplyContext::quoting(
                                 parent,
-                                copy.platform_message_id,
+                                copy.native_id,
                                 authored_by_bridge,
                             ))
                         }
@@ -73,9 +73,9 @@ where
                                     target_endpoint: endpoint_id,
                                     target_connector: target_connector.clone(),
                                     target: target.clone(),
-                                    payload: Action::MessageCreate {
+                                    payload: Action::Send {
                                         message: message.clone(),
-                                        reply_context: None,
+                                        reply: None,
                                     },
                                 },
                                 waiting_for_message: parent_id,
@@ -91,9 +91,9 @@ where
                 target_endpoint: endpoint_id,
                 target_connector,
                 target,
-                payload: Action::MessageCreate {
+                payload: Action::Send {
                     message: message.clone(),
-                    reply_context,
+                    reply: reply_context,
                 },
             });
         }
@@ -111,9 +111,9 @@ where
         origin_endpoint: EndpointId,
     ) -> Result<RoutingOutcome, RouterError> {
         self.fan_out_to_copies(message, origin_endpoint, |_connector, native_id| {
-            Action::MessageEdit {
+            Action::Edit {
                 message: message.clone(),
-                target_platform_message_id: native_id,
+                native_id,
             }
         })
         .await
@@ -125,9 +125,9 @@ where
         origin_endpoint: EndpointId,
     ) -> Result<RoutingOutcome, RouterError> {
         self.fan_out_to_copies(message, origin_endpoint, |_connector, native_id| {
-            Action::MessageDelete {
+            Action::Delete {
                 message: message.clone(),
-                target_platform_message_id: native_id,
+                native_id,
             }
         })
         .await
@@ -146,10 +146,10 @@ where
         emoji: Option<String>,
     ) -> Result<RoutingOutcome, RouterError> {
         self.fan_out_to_copies(message, origin_endpoint, |_connector, native_id| {
-            Action::Reaction {
+            Action::React {
                 message_id: message.id,
                 replica_set_id: message.replica_set_id,
-                target_platform_message_id: native_id,
+                native_id,
                 reactor: reactor.clone(),
                 reactor_name: reactor_name.clone(),
                 emoji: emoji.clone(),
@@ -179,12 +179,12 @@ where
                 ReceiptKind::Delivered => Action::DeliveryAck {
                     message_id: message.id,
                     replica_set_id: message.replica_set_id,
-                    target_platform_message_id: native_id,
+                    native_id,
                 },
                 ReceiptKind::Read => Action::SeenReceipt {
                     message_id: message.id,
                     replica_set_id: message.replica_set_id,
-                    target_platform_message_id: native_id,
+                    native_id,
                 },
             },
         )
@@ -216,7 +216,7 @@ where
             let endpoint = self.storage.endpoint(endpoint_id).await?;
             let target = TargetAddress {
                 address: endpoint.address(),
-                provision_thread: None,
+                create_thread: None,
             };
             let target_connector = endpoint.connector_id.clone();
             match self
@@ -226,7 +226,7 @@ where
             {
                 Some(copy) => outcome.dispatches.push(DispatchCommand {
                     target_endpoint: endpoint_id,
-                    payload: payload_for(&target_connector, copy.platform_message_id),
+                    payload: payload_for(&target_connector, copy.native_id),
                     target_connector,
                     target,
                 }),
@@ -278,9 +278,9 @@ where
                 target_connector: endpoint.connector_id.clone(),
                 target: TargetAddress {
                     address: ChatAddress::new(endpoint.chat_id.clone(), Some(thread)),
-                    provision_thread: None,
+                    create_thread: None,
                 },
-                payload: Action::RetitleThread {
+                payload: Action::RenameThread {
                     replica_set_id: conversation.replica_set_id,
                     title: title.to_owned(),
                 },
@@ -310,11 +310,11 @@ where
                 {
                     Some(thread) => TargetAddress {
                         address: ChatAddress::new(endpoint.chat_id.clone(), Some(thread)),
-                        provision_thread: None,
+                        create_thread: None,
                     },
                     None => TargetAddress {
                         address: ChatAddress::new(endpoint.chat_id.clone(), None),
-                        provision_thread: Some(ProvisionThread {
+                        create_thread: Some(ProvisionThread {
                             container: endpoint.chat_id.clone(),
                             title: provision_title.to_owned(),
                         }),
@@ -324,7 +324,7 @@ where
         }
         Ok(TargetAddress {
             address: endpoint.address(),
-            provision_thread: None,
+            create_thread: None,
         })
     }
 }

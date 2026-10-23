@@ -23,7 +23,7 @@ where
     ) -> Result<IngestOutcome, CoreError> {
         if self
             .storage
-            .is_sent_copy(origin_endpoint, &inbound.platform_message_id)
+            .is_sent_copy(origin_endpoint, &inbound.native_id)
             .await?
         {
             return Ok(IngestOutcome::Ignored(IgnoreReason::SentMessageEcho));
@@ -32,7 +32,7 @@ where
         // Resolve the reply parent best-effort: a reply to a message the bridge
         // never saw (sent before startup, or never mirrored) simply loses its
         // reply linkage rather than failing the whole message.
-        let reply_to = match inbound.reply_to_platform_message_id.as_deref() {
+        let reply_to = match inbound.reply_to_native_id.as_deref() {
             Some(platform_message_id) => {
                 self.storage
                     .message_id_for_copy(origin_endpoint, platform_message_id)
@@ -55,7 +55,7 @@ where
         let dedup_key = DedupKey {
             platform: origin.platform.clone(),
             chat_id: origin.chat_id.clone(),
-            platform_message_id: inbound.platform_message_id.clone(),
+            native_id: inbound.native_id.clone(),
         };
         if !self.storage.claim_event(dedup_key).await? {
             return Ok(IngestOutcome::Ignored(IgnoreReason::DuplicateEvent));
@@ -63,14 +63,14 @@ where
 
         // The native id outlives the inbound form: the message drops it on
         // promotion, but the received copy is keyed by it.
-        let platform_message_id = inbound.platform_message_id.clone();
+        let platform_message_id = inbound.native_id.clone();
         let message = Message::from_inbound(inbound, replica_set_id, reply_to);
         self.storage.put_message(message.clone()).await?;
         self.storage
             .put_received_copy(MessageCopy {
                 message_id: message.id,
                 endpoint_id: origin_endpoint,
-                platform_message_id,
+                native_id: platform_message_id,
             })
             .await?;
 
@@ -227,7 +227,7 @@ where
         let mut dispatches = Vec::new();
         let mut provisioning_ids = Vec::new();
         for command in routing.dispatches.iter().cloned() {
-            let provisions = command.target.provision_thread.is_some();
+            let provisions = command.target.create_thread.is_some();
             let stored = self.storage.enqueue_dispatch(command, None).await?;
             if provisions {
                 provisioning_ids.push(stored.id);

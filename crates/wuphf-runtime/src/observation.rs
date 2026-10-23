@@ -74,7 +74,7 @@ where
         let connector_id = &event.source.connector_id;
         let chat_id = &event.source.address.chat_id;
         let captured = match &event.payload {
-            EventKind::MessageCreate(inbound) => {
+            EventKind::NewMessage(inbound) => {
                 let observed = ObservedMessage::incoming(&event.source, platform, inbound);
                 // Broadcast the row as stored, not as constructed: an echo of
                 // our own owner message keeps its outgoing direction in storage, and
@@ -85,22 +85,22 @@ where
                         .await?,
                 )
             }
-            EventKind::MessageEdit {
-                platform_message_id,
+            EventKind::Edit {
+                native_id: platform_message_id,
                 text,
             } => {
                 self.storage
                     .mark_observed_edited(connector_id, chat_id, platform_message_id, text.clone())
                     .await?
             }
-            EventKind::MessageDelete {
-                platform_message_id,
+            EventKind::Delete {
+                native_id: platform_message_id,
             } => {
                 self.storage
                     .mark_observed_deleted(connector_id, chat_id, platform_message_id)
                     .await?
             }
-            EventKind::ReactionSet { .. } | EventKind::ReceiptSet { .. } => None,
+            EventKind::Reaction { .. } | EventKind::Receipt { .. } => None,
         };
         if let Some(observed) = captured {
             // A send error means no live subscribers; history is already
@@ -143,7 +143,7 @@ where
         let Some(mut pending) = self.pending_outbound.lock().unwrap().remove(&dispatch_id) else {
             return Ok(());
         };
-        pending.observed.platform_message_id = platform_message_id.to_owned();
+        pending.observed.native_id = platform_message_id.to_owned();
         let stored = self.storage.log_observed(pending.observed, None).await?;
         if let Some(notify) = pending.notify.take() {
             let _ = notify.send(stored.clone());
@@ -172,14 +172,14 @@ mod tests {
                 address: ChatAddress::new(chat, None),
                 chat_title: title.map(Into::into),
             },
-            payload: EventKind::MessageCreate(NewMessage {
-                platform_message_id: id.into(),
-                sender: "peer".into(),
+            payload: EventKind::NewMessage(NewMessage {
+                native_id: id.into(),
+                author_id: "peer".into(),
                 participant: None,
-                sender_name: Some("Peer".into()),
+                author_name: Some("Peer".into()),
                 text: Some(text.into()),
                 attachments: vec![],
-                reply_to_platform_message_id: None,
+                reply_to_native_id: None,
                 timestamp_ms: 100,
             }),
         }
@@ -198,7 +198,7 @@ mod tests {
             .unwrap();
 
         let broadcast = live.try_recv().expect("live message delivered");
-        assert_eq!(broadcast.platform_message_id, "a1");
+        assert_eq!(broadcast.native_id, "a1");
 
         let chats = observer.storage().list_observed_chats().await.unwrap();
         assert_eq!(chats.len(), 1);
@@ -227,8 +227,8 @@ mod tests {
                 address: ChatAddress::new("alice", None),
                 chat_title: None,
             },
-            payload: EventKind::MessageEdit {
-                platform_message_id: "a1".into(),
+            payload: EventKind::Edit {
+                native_id: "a1".into(),
                 text: Some("hello".into()),
             },
         };
@@ -246,8 +246,8 @@ mod tests {
                 address: ChatAddress::new("alice", None),
                 chat_title: None,
             },
-            payload: EventKind::MessageDelete {
-                platform_message_id: "a1".into(),
+            payload: EventKind::Delete {
+                native_id: "a1".into(),
             },
         };
         observer.observe(&delete, Platform::WhatsApp).await.unwrap();
@@ -279,13 +279,13 @@ mod tests {
             platform: Platform::WhatsApp,
             chat_id: "alice".into(),
             thread_id: None,
-            platform_message_id: String::new(),
-            sender: "me".into(),
-            sender_name: None,
+            native_id: String::new(),
+            author_id: "me".into(),
+            author_name: None,
             participant: None,
             text: Some("mine".into()),
             attachments: vec![],
-            reply_to_platform_message_id: None,
+            reply_to_native_id: None,
             direction: ObservedDirection::Outgoing,
             timestamp_ms: 42,
             deleted: false,
@@ -295,9 +295,9 @@ mod tests {
         let settled = observer.track_outbound(dispatch_id, template.clone());
         observer.settle_outbound(dispatch_id, "wa-1").await.unwrap();
         let row = settled.await.unwrap();
-        assert_eq!(row.platform_message_id, "wa-1");
+        assert_eq!(row.native_id, "wa-1");
         assert_eq!(row.direction, ObservedDirection::Outgoing);
-        assert_eq!(live.try_recv().unwrap().platform_message_id, "wa-1");
+        assert_eq!(live.try_recv().unwrap().native_id, "wa-1");
         let page = observer
             .storage()
             .observed_messages(&ConnectorId("whatsapp".into()), "alice", None, 10)
@@ -322,8 +322,8 @@ mod tests {
                 address: ChatAddress::new("alice", None),
                 chat_title: None,
             },
-            payload: EventKind::MessageEdit {
-                platform_message_id: "ghost".into(),
+            payload: EventKind::Edit {
+                native_id: "ghost".into(),
                 text: Some("x".into()),
             },
         };

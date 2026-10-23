@@ -225,7 +225,7 @@ async fn acknowledgement_releases_reply_with_target_native_parent_id() {
         .acknowledgements
         .send(DispatchAck {
             dispatch_id: parent_dispatch.id,
-            platform_message_id: "tg-parent".into(),
+            native_id: "tg-parent".into(),
             thread_id: None,
         })
         .await
@@ -234,11 +234,15 @@ async fn acknowledgement_releases_reply_with_target_native_parent_id() {
     // to the released reply create among the dispatches.
     let reply_context = loop {
         let dispatch = channels.dispatches.recv().await.unwrap();
-        if let Action::MessageCreate { reply_context, .. } = dispatch.command.payload {
+        if let Action::Send {
+            reply: reply_context,
+            ..
+        } = dispatch.command.payload
+        {
             break reply_context.expect("reply context set on release");
         }
     };
-    assert_eq!(reply_context.platform_message_id, "tg-parent");
+    assert_eq!(reply_context.native_id, "tg-parent");
     drop(channels.inbound);
     task.await.unwrap().unwrap();
 }
@@ -339,7 +343,7 @@ async fn only_the_assigned_session_may_fail_a_dispatch() {
         .input
         .send(ConnectorInput::Acknowledgement(DispatchAck {
             dispatch_id: wuphf_model::DispatchId::new(),
-            platform_message_id: "ghost".into(),
+            native_id: "ghost".into(),
             thread_id: None,
         }))
         .await
@@ -374,7 +378,7 @@ async fn restart_with_orphaned_stash_replays_immediately() {
         let core = mirror_core(Arc::clone(&storage));
         let first = core.ingest(wa_group_event("wa-1")).await.unwrap();
         let provision = &first.dispatches()[0];
-        assert!(provision.command.target.provision_thread.is_some());
+        assert!(provision.command.target.create_thread.is_some());
         let provision_id = provision.id;
         let deferred = core.ingest(wa_group_event("wa-2")).await.unwrap();
         assert!(matches!(deferred, IngestOutcome::Deferred { .. }));
@@ -394,7 +398,7 @@ async fn restart_with_orphaned_stash_replays_immediately() {
     let task = tokio::spawn(runtime.run());
     let replayed = channels.dispatches.recv().await.unwrap();
     assert!(
-        replayed.command.target.provision_thread.is_some(),
+        replayed.command.target.create_thread.is_some(),
         "the orphaned stash replays and re-attempts provisioning at startup",
     );
     drop(channels.inbound);
@@ -425,7 +429,7 @@ async fn connector_sessions_route_dispatches_and_authorize_inputs() {
         .input
         .send(ConnectorInput::Acknowledgement(DispatchAck {
             dispatch_id: wuphf_model::DispatchId::new(),
-            platform_message_id: "ghost".into(),
+            native_id: "ghost".into(),
             thread_id: None,
         }))
         .await
@@ -463,7 +467,7 @@ async fn connector_sessions_route_dispatches_and_authorize_inputs() {
         .input
         .send(ConnectorInput::Acknowledgement(DispatchAck {
             dispatch_id: parent_dispatch.id,
-            platform_message_id: "tg-parent".into(),
+            native_id: "tg-parent".into(),
             thread_id: None,
         }))
         .await
@@ -472,11 +476,15 @@ async fn connector_sessions_route_dispatches_and_authorize_inputs() {
         panic!("Telegram should receive released reply dispatch");
     };
     let reply_dispatch = *reply_dispatch;
-    let Action::MessageCreate { reply_context, .. } = reply_dispatch.command.payload else {
+    let Action::Send {
+        reply: reply_context,
+        ..
+    } = reply_dispatch.command.payload
+    else {
         panic!("released reply should be a message create");
     };
     let reply_context = reply_context.expect("reply context set on release");
-    assert_eq!(reply_context.platform_message_id, "tg-parent");
+    assert_eq!(reply_context.native_id, "tg-parent");
 
     hub_task.abort();
     runtime_task.abort();
@@ -712,14 +720,14 @@ fn source_event(
             address,
             chat_title: None,
         },
-        payload: EventKind::MessageCreate(NewMessage {
-            platform_message_id: native_id.into(),
-            sender: "sender".into(),
+        payload: EventKind::NewMessage(NewMessage {
+            native_id: native_id.into(),
+            author_id: "sender".into(),
             participant: None,
-            sender_name: None,
+            author_name: None,
             text: Some("message".into()),
             attachments: vec![],
-            reply_to_platform_message_id: reply_to.map(str::to_owned),
+            reply_to_native_id: reply_to.map(str::to_owned),
             timestamp_ms: 1,
         }),
     }
@@ -731,7 +739,7 @@ fn owner_message(chat_id: &str, text: &str) -> wuphf_model::OwnerMessage {
         chat_id: chat_id.into(),
         thread_id: None,
         text: text.into(),
-        reply_to_platform_message_id: None,
+        reply_to_native_id: None,
         timestamp_ms: 42,
     }
 }
@@ -766,7 +774,7 @@ async fn owner_message_travels_the_dispatch_loop_and_settles_an_outgoing_observa
         .acknowledgements
         .send(DispatchAck {
             dispatch_id: direct.id,
-            platform_message_id: "wa-raw-1".into(),
+            native_id: "wa-raw-1".into(),
             thread_id: None,
         })
         .await
@@ -775,10 +783,10 @@ async fn owner_message_travels_the_dispatch_loop_and_settles_an_outgoing_observa
     // The acknowledgement settles the observation: waiter, live feed, and log
     // all carry the outgoing row stamped with the native id.
     let observed = settled.await.unwrap();
-    assert_eq!(observed.platform_message_id, "wa-raw-1");
+    assert_eq!(observed.native_id, "wa-raw-1");
     assert_eq!(observed.direction, wuphf_model::ObservedDirection::Outgoing);
     let broadcast = live.recv().await.unwrap();
-    assert_eq!(broadcast.platform_message_id, "wa-raw-1");
+    assert_eq!(broadcast.native_id, "wa-raw-1");
     let page = observer
         .storage()
         .observed_messages(&ConnectorId(WA.into()), "wa-chat", None, 10)
@@ -814,7 +822,7 @@ async fn observer_service_send_message_returns_the_acknowledged_native_id() {
                 acknowledgements
                     .send(DispatchAck {
                         dispatch_id: dispatch.id,
-                        platform_message_id: "wa-raw-9".into(),
+                        native_id: "wa-raw-9".into(),
                         thread_id: None,
                     })
                     .await
