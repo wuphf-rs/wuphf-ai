@@ -1,0 +1,152 @@
+syntax = "proto3";
+
+package wuphf.connector.v1;
+
+option go_package = "github.com/akshettrj/wuphf/proto/go/connector/v1;wuphfpb";
+
+// Remote functions. A provider process registers named functions over a
+// ProviderTransport session; any client calls them through FunctionTransport.
+// The core only brokers calls; it never calls a function itself. Bodies are
+// UTF-8 JSON capped by the core; bulky data travels as media ids through
+// MediaTransport.
+service FunctionTransport {
+  // Call a function. When no provider is connected the call waits for one
+  // until its deadline: the caller's gRPC deadline, capped by the core, or the
+  // core's default when the caller sets none. NOT_FOUND when no configured
+  // provider may serve the name.
+  rpc Invoke(InvokeRequest) returns (InvokeResponse);
+  // Every function with a provider, queued calls, or call history, with its
+  // provider, load and counters.
+  rpc ListFunctions(ListFunctionsRequest) returns (ListFunctionsResponse);
+}
+
+// The provider side of remote functions. Providers dial the core; they never
+// listen.
+service ProviderTransport {
+  // The first client frame must be a ProviderHello. Authenticated with the
+  // provider's own token as `authorization: Bearer <token>`. A second session
+  // with the same provider id replaces the first; a provider id claiming a
+  // function another provider id serves is rejected with ALREADY_EXISTS.
+  rpc OpenProviderSession(stream ProviderClientFrame) returns (stream ProviderServerFrame);
+}
+
+message FunctionRef {
+  // Lowercase dotted name, e.g. "media.convert".
+  string name = 1;
+  // Major version, >= 1. A breaking change to the body format is a new major.
+  uint32 major = 2;
+}
+
+message InvokeRequest {
+  FunctionRef function = 1;
+  // UTF-8 JSON.
+  bytes args = 2;
+  repeated string media_ids = 3;
+  // Free-form caller label for logs (e.g. a connector id). Not authenticated.
+  string caller = 4;
+}
+
+message InvokeResponse {
+  // UTF-8 JSON.
+  bytes result = 1;
+  repeated string media_ids = 2;
+  string provider_id = 3;
+}
+
+message FunctionDeclaration {
+  FunctionRef function = 1;
+  // JSON Schema documents describing args and result. Listed, not enforced.
+  string request_schema = 2;
+  string response_schema = 3;
+  // Safe to run again if the provider is lost mid-call; such calls are
+  // re-queued instead of failed.
+  bool idempotent = 4;
+  // Calls this provider runs at once for this function; 0 means 1, at most 1024.
+  uint32 max_concurrency = 5;
+  // Suggested default deadline. Core configuration overrides it and the core
+  // maximum caps it.
+  optional uint32 default_deadline_ms = 6;
+}
+
+message ProviderHello {
+  string provider_id = 1;
+  repeated FunctionDeclaration functions = 2;
+}
+
+message ProviderClientFrame {
+  oneof body {
+    ProviderHello hello = 1;
+    CallResult result = 2;
+  }
+}
+
+message ProviderServerFrame {
+  oneof body {
+    ProviderCall call = 1;
+    CancelCall cancel = 2;
+  }
+}
+
+message ProviderCall {
+  string call_id = 1;
+  FunctionRef function = 2;
+  bytes args = 3;
+  repeated string media_ids = 4;
+  // The provider should give up after this instant (Unix epoch milliseconds).
+  int64 deadline_unix_ms = 5;
+  string caller = 6;
+}
+
+// The caller gave up or its deadline passed; stop working on the call. A
+// result sent afterwards is ignored.
+message CancelCall {
+  string call_id = 1;
+}
+
+enum CallErrorCode {
+  // Treated as FAILED.
+  CALL_ERROR_CODE_UNSPECIFIED = 0;
+  CALL_ERROR_CODE_INVALID_ARGUMENT = 1;
+  CALL_ERROR_CODE_UNSUPPORTED = 2;
+  CALL_ERROR_CODE_FAILED = 3;
+}
+
+message CallError {
+  CallErrorCode code = 1;
+  string message = 2;
+}
+
+message CallSuccess {
+  // UTF-8 JSON.
+  bytes result = 1;
+  repeated string media_ids = 2;
+}
+
+message CallResult {
+  string call_id = 1;
+  oneof outcome {
+    CallSuccess success = 2;
+    CallError error = 3;
+  }
+}
+
+message ListFunctionsRequest {}
+
+message FunctionStatus {
+  FunctionRef function = 1;
+  // Empty when no provider is connected (calls are queued, waiting).
+  string provider_id = 2;
+  // Unset when no provider is connected.
+  FunctionDeclaration declaration = 3;
+  uint32 in_flight = 4;
+  uint32 queued = 5;
+  // Effective limit after core configuration; 0 when no provider.
+  uint32 max_concurrency = 6;
+  uint64 completed = 7;
+  uint64 failed = 8;
+  uint64 abandoned = 9;
+}
+
+message ListFunctionsResponse {
+  repeated FunctionStatus functions = 1;
+}
