@@ -53,7 +53,7 @@ where
         // by its fixed source chat, a many-to-one rule by the actual source
         // chat this event arrived on.
         let identity_address = match &rule.flow {
-            RuleKind::OneToOne { source_chat, .. } => source_chat.address(),
+            RuleKind::OneToOne { source_chat, .. } => source_chat.clone(),
             RuleKind::ManyToOne { .. } => source.address.clone(),
         };
         let identity_connector = rule.flow.connector(RuleEnd::Source).clone();
@@ -228,14 +228,14 @@ where
         let connector = flow.connector(end).clone();
         let (address, with_alias) = match (flow, end) {
             (RuleKind::OneToOne { source_chat, .. }, RuleEnd::Source) => {
-                (source_chat.address(), true)
+                (source_chat.clone(), true)
             }
             (
                 RuleKind::OneToOne {
                     destination_chat, ..
                 },
                 RuleEnd::Destination,
-            ) => (destination_chat.address(), true),
+            ) => (destination_chat.clone(), true),
             (RuleKind::ManyToOne { .. }, RuleEnd::Source) => (identity_address.clone(), true),
             (
                 RuleKind::ManyToOne {

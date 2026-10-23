@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use wuphf_model::{
     Action, Attachment, AttachmentKind, ChatAddress, ChatFilter, ConnectorCapabilities,
     ConnectorInfo, Dispatch, DispatchAck, MediaBlob, MediaId, NewMessage, NoticeKind, OWNER_AUTHOR,
-    OwnerMessage, Platform, ReceiptKind, Rule, RuleChat, RuleId, RuleKind, SourceAddress,
+    OwnerMessage, Platform, ReceiptKind, Rule, RuleId, RuleKind, SourceAddress,
 };
 use wuphf_storage::InMemoryStorage;
 
@@ -37,12 +37,12 @@ fn direct_rule() -> Rule {
         id: RuleId("direct".into()),
         flow: RuleKind::OneToOne {
             source_connector: ConnectorId(WHATSAPP.into()),
-            source_chat: RuleChat {
+            source_chat: ChatAddress {
                 chat_id: "12345@s.whatsapp.net".into(),
                 thread_id: None,
             },
             destination_connector: ConnectorId(TELEGRAM.into()),
-            destination_chat: RuleChat {
+            destination_chat: ChatAddress {
                 chat_id: "-100123".into(),
                 thread_id: Some("12".into()),
             },
@@ -56,13 +56,13 @@ fn mirror_rule() -> Rule {
         flow: RuleKind::ManyToOne {
             source_connector: ConnectorId(WHATSAPP.into()),
             source_chats_filter: ChatFilter::Only {
-                chats: vec![RuleChat {
+                chats: vec![ChatAddress {
                     chat_id: "111@g.us".into(),
                     thread_id: None,
                 }],
             },
             destination_connector: ConnectorId(TELEGRAM.into()),
-            destination_chat: RuleChat {
+            destination_chat: ChatAddress {
                 chat_id: "-1001234567".into(),
                 thread_id: None,
             },
@@ -1269,7 +1269,7 @@ fn phone_listed_mirror_rule(filter: ChatFilter) -> Rule {
             source_connector: ConnectorId(WHATSAPP.into()),
             source_chats_filter: filter,
             destination_connector: ConnectorId(TELEGRAM.into()),
-            destination_chat: RuleChat {
+            destination_chat: ChatAddress {
                 chat_id: "-1001234567".into(),
                 thread_id: None,
             },
@@ -1277,8 +1277,8 @@ fn phone_listed_mirror_rule(filter: ChatFilter) -> Rule {
     }
 }
 
-fn chats(chat_id: &str) -> Vec<RuleChat> {
-    vec![RuleChat {
+fn chats(chat_id: &str) -> Vec<ChatAddress> {
+    vec![ChatAddress {
         chat_id: chat_id.into(),
         thread_id: None,
     }]

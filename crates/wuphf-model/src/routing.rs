@@ -56,6 +56,7 @@ pub struct ReplicaSet {
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct ChatAddress {
     pub chat_id: String,
+    #[serde(default)]
     pub thread_id: Option<String>,
 }
 
@@ -65,6 +66,18 @@ impl ChatAddress {
             chat_id: chat_id.into(),
             thread_id,
         }
+    }
+
+    /// Whether this address, used as a rule's chat selector, names the chat
+    /// known by any of `addresses`. Chat ids must match; a selector with no
+    /// thread names the whole chat, one with a thread names only that thread.
+    /// Any form in the set counts, so a rule written with one of a chat's
+    /// addresses still names it when the platform reports another.
+    pub fn selects(&self, addresses: &AddressSet) -> bool {
+        addresses.iter().any(|address| {
+            self.chat_id == address.chat_id
+                && (self.thread_id.is_none() || self.thread_id == address.thread_id)
+        })
     }
 }
 
@@ -157,10 +170,10 @@ pub enum RuleKind {
     /// One fixed source chat mirrored into one fixed destination chat.
     OneToOne {
         source_connector: ConnectorId,
-        source_chat: RuleChat,
+        source_chat: ChatAddress,
 
         destination_connector: ConnectorId,
-        destination_chat: RuleChat,
+        destination_chat: ChatAddress,
     },
     /// Every chat on the source connector that passes the filter, each mirrored
     /// into its own thread auto-created inside the destination container chat.
@@ -172,36 +185,8 @@ pub enum RuleKind {
         source_chats_filter: ChatFilter,
 
         destination_connector: ConnectorId,
-        destination_chat: RuleChat,
+        destination_chat: ChatAddress,
     },
-}
-
-/// A platform chat named by a rule (optionally one thread within it).
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct RuleChat {
-    pub chat_id: String,
-    #[serde(default)]
-    pub thread_id: Option<String>,
-}
-
-impl RuleChat {
-    /// Whether this rule chat names the chat: chat ids must match, and a
-    /// thread-scoped rule chat only matches that thread while an unscoped one
-    /// matches the whole chat. Any form in the set counts, so a rule written
-    /// with one of a chat's addresses still names it when the platform reports
-    /// another.
-    pub fn matches(&self, addresses: &AddressSet) -> bool {
-        addresses.iter().any(|address| self.names(address))
-    }
-
-    fn names(&self, address: &ChatAddress) -> bool {
-        self.chat_id == address.chat_id
-            && (self.thread_id.is_none() || self.thread_id == address.thread_id)
-    }
-
-    pub fn address(&self) -> ChatAddress {
-        ChatAddress::new(self.chat_id.clone(), self.thread_id.clone())
-    }
 }
 
 /// Which source chats a many-to-one rule covers. Struct variants (not tuples)
@@ -213,10 +198,10 @@ pub enum ChatFilter {
     #[default]
     All,
     Only {
-        chats: Vec<RuleChat>,
+        chats: Vec<ChatAddress>,
     },
     Not {
-        chats: Vec<RuleChat>,
+        chats: Vec<ChatAddress>,
     },
 }
 
@@ -229,8 +214,8 @@ impl ChatFilter {
     pub fn accepts(&self, addresses: &AddressSet) -> bool {
         match self {
             ChatFilter::All => true,
-            ChatFilter::Only { chats } => chats.iter().any(|chat| chat.matches(addresses)),
-            ChatFilter::Not { chats } => !chats.iter().any(|chat| chat.matches(addresses)),
+            ChatFilter::Only { chats } => chats.iter().any(|chat| chat.selects(addresses)),
+            ChatFilter::Not { chats } => !chats.iter().any(|chat| chat.selects(addresses)),
         }
     }
 }
@@ -292,14 +277,14 @@ impl RuleKind {
         }
         match (self, end) {
             (RuleKind::OneToOne { source_chat, .. }, RuleEnd::Source) => {
-                source_chat.matches(addresses)
+                source_chat.selects(addresses)
             }
             (
                 RuleKind::OneToOne {
                     destination_chat, ..
                 },
                 RuleEnd::Destination,
-            ) => destination_chat.matches(addresses),
+            ) => destination_chat.selects(addresses),
             (
                 RuleKind::ManyToOne {
                     source_chats_filter,

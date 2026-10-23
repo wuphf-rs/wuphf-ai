@@ -17,7 +17,7 @@ use wuphf_connector::{Client, Delivery, Failure, Options};
 use wuphf_core::{Core, RoutingConfig};
 use wuphf_model::{
     ChatAddress, Connector, ConnectorCapabilities, ConnectorId, ConnectorInfo, Event, EventKind,
-    InboundWork, NewMessage, Platform, Rule, RuleChat, RuleId, RuleKind,
+    InboundWork, NewMessage, Platform, Rule, RuleId, RuleKind,
 };
 use wuphf_proto::connector as pb;
 use wuphf_runtime::Runtime;
@@ -51,12 +51,12 @@ fn routing() -> RoutingConfig {
         id: RuleId("direct".into()),
         flow: RuleKind::OneToOne {
             source_connector: ConnectorId(WA.into()),
-            source_chat: RuleChat {
+            source_chat: ChatAddress {
                 chat_id: "wa-chat".into(),
                 thread_id: None,
             },
             destination_connector: ConnectorId(TG.into()),
-            destination_chat: RuleChat {
+            destination_chat: ChatAddress {
                 chat_id: "tg-chat".into(),
                 thread_id: Some("topic".into()),
             },

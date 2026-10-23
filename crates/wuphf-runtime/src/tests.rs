@@ -9,8 +9,8 @@ use tonic::transport::Server;
 use wuphf_core::RoutingConfig;
 use wuphf_model::{
     Action, ChatAddress, ChatFilter, Connector, ConnectorCapabilities, ConnectorId, ConnectorInfo,
-    ConnectorInput, ConnectorOutput, EventKind, IngestOutcome, NewMessage, Platform, Rule,
-    RuleChat, RuleId, RuleKind,
+    ConnectorInput, ConnectorOutput, EventKind, IngestOutcome, NewMessage, Platform, Rule, RuleId,
+    RuleKind,
 };
 use wuphf_proto::connector as pb;
 use wuphf_proto::connector::connector_transport_client::ConnectorTransportClient;
@@ -28,12 +28,12 @@ fn rules() -> Vec<Rule> {
         id: RuleId("direct".into()),
         flow: RuleKind::OneToOne {
             source_connector: ConnectorId(WA.into()),
-            source_chat: RuleChat {
+            source_chat: ChatAddress {
                 chat_id: "wa-chat".into(),
                 thread_id: None,
             },
             destination_connector: ConnectorId(TG.into()),
-            destination_chat: RuleChat {
+            destination_chat: ChatAddress {
                 chat_id: "tg-chat".into(),
                 thread_id: Some("topic".into()),
             },
@@ -101,13 +101,13 @@ fn mirror_rules() -> Vec<Rule> {
         flow: RuleKind::ManyToOne {
             source_connector: ConnectorId(WA.into()),
             source_chats_filter: ChatFilter::Only {
-                chats: vec![RuleChat {
+                chats: vec![ChatAddress {
                     chat_id: "wa-group".into(),
                     thread_id: None,
                 }],
             },
             destination_connector: ConnectorId(TG.into()),
-            destination_chat: RuleChat {
+            destination_chat: ChatAddress {
                 chat_id: "tg-group".into(),
                 thread_id: None,
             },
