@@ -43,7 +43,7 @@ code).
 | 023 | Consolidate similar model types behind shared constructors | P3 | S-M | — (020 soft) | DONE |
 | 024 | SPIKE: real-time WhatsApp↔Telegram call forwarding | P3 | M (impl XL) | — | TODO |
 | 025 | Rust WhatsApp connector on whatsapp-rust | P2 | L | — | DONE |
-| 026 | Rename the wuphf-model types to plain names (type names only) | P2 | M | 019 (soft) | TODO |
+| 026 | Rename the wuphf-model types to plain names (type names only) | P2 | M | 019 (soft) | DONE |
 | 027 | Rename model fields and variants, keeping old stored JSON readable | P2 | M | 026 | TODO |
 | 028 | Delete dead and duplicate model types | P2 | M | 026, 027 | TODO |
 | 029 | Fold the wuphf-router crate into wuphf-core | P3 | S | 028 (soft) | TODO |
@@ -145,6 +145,13 @@ Rust) by the owner's decision.
   028 adds migration `0011`; 030 changes the stored dispatch shape behind a
   legacy decoder (no migration); 031 adds migration `0012` and needs a human
   to run its pre-deploy query on a copy of the real database.
+- **026 done 2026-10-23** (`advisor/026-model-type-renames`): no drift beyond
+  019's storage edits. Beyond the listed renames, the remaining "raw send"
+  wording was also renamed to "owner message": doc comments, the private
+  `raw_target_endpoint` (now `owner_message_endpoint`), and the test names and
+  helpers. Test string literals such as `"wa-raw-1"` were kept. The
+  `cargo fmt` reflow from the shorter names landed in the Step 4 commit.
+  Workspace: 113 tests passing, clippy clean.
 - **021 must be re-planned after 031.** 028 performs 021's deletion of
   `put_contact`/`put_chat_settings`, and 031 replaces seven of the trait
   methods 021 groups into role traits.
