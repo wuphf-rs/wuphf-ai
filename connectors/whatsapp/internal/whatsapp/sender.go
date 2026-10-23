@@ -7,7 +7,6 @@ import (
 	"path"
 	"unicode/utf8"
 
-	"github.com/akshettrj/wuphf/connectors/mediaconv"
 	coreclient "github.com/akshettrj/wuphf/connectors/shared/coreclient"
 	"github.com/akshettrj/wuphf/connectors/whatsapp/internal/config"
 	wuphfpb "github.com/akshettrj/wuphf/proto/go/connector/v1"
@@ -24,9 +23,16 @@ type SendClient interface {
 	BuildRevoke(chat, sender types.JID, id types.MessageID) *waE2E.Message
 }
 
+// StickerConverter converts stored media to another format (in production,
+// functions.MediaConverter calling media.convert@1 on the core).
+type StickerConverter interface {
+	Convert(ctx context.Context, mediaID, sourceMime, sourceName, targetMime string) ([]byte, error)
+}
+
 type Sender struct {
 	client      SendClient
 	media       MediaBroker
+	converter   StickerConverter
 	ownJID      types.JID
 	stickerMeta config.StickerMetadata
 	// rendering is this connector's own policy for how mirrored copies are
@@ -34,8 +40,8 @@ type Sender struct {
 	rendering config.RenderingOptions
 }
 
-func NewSender(client SendClient, media MediaBroker, ownJID types.JID, stickerMeta config.StickerMetadata, rendering config.RenderingOptions) Sender {
-	return Sender{client: client, media: media, ownJID: ownJID, stickerMeta: stickerMeta, rendering: rendering}
+func NewSender(client SendClient, media MediaBroker, converter StickerConverter, ownJID types.JID, stickerMeta config.StickerMetadata, rendering config.RenderingOptions) Sender {
+	return Sender{client: client, media: media, converter: converter, ownJID: ownJID, stickerMeta: stickerMeta, rendering: rendering}
 }
 
 // SendMessage delivers a dispatch to the target WhatsApp chat. WhatsApp has no
@@ -353,8 +359,9 @@ func (s Sender) attachmentMessage(
 // WebP (animated stickers are animated WebP), so an animated sticker arriving in
 // another format — chiefly a Telegram WebM video sticker — is transcoded to
 // animated WebP first. A static sticker (already WebP) is uploaded unchanged.
-// When the transcode cannot run (a Lottie .tgs has no raster form, or the tools
-// are missing) the original is delivered as a file so the message is not lost.
+// The transcode runs on the core's media.convert provider; when no provider is
+// available or the conversion fails, the original is delivered as a file so the
+// message is not lost.
 func (s Sender) stickerMessage(
 	ctx context.Context,
 	attachment *wuphfpb.Attachment,
@@ -362,7 +369,7 @@ func (s Sender) stickerMessage(
 	mimeType string,
 ) (*waE2E.Message, error) {
 	if attachment.GetAnimated() && mimeType != "image/webp" {
-		converted, err := animatedStickerWebP(ctx, attachment, data, mimeType)
+		converted, err := s.animatedStickerWebP(ctx, attachment, mimeType)
 		if err != nil {
 			return s.documentMessage(ctx, data, mimeType, stickerFileName(attachment), "")
 		}
@@ -388,19 +395,13 @@ func (s Sender) stickerMessage(
 }
 
 // animatedStickerWebP converts an animated sticker from another platform into the
-// animated WebP a WhatsApp sticker needs, dispatching on the source format: a
-// Telegram Lottie sticker (.tgs) is rasterized by a vector renderer, while any
-// video sticker (chiefly a Telegram WebM) is transcoded by ffmpeg.
-func animatedStickerWebP(
-	ctx context.Context,
-	attachment *wuphfpb.Attachment,
-	data []byte,
-	mimeType string,
-) ([]byte, error) {
-	if mimeType == "application/x-tgsticker" || stickerSourceExt(attachment) == ".tgs" {
-		return tgsToAnimatedWebP(data)
-	}
-	return mediaconv.ToAnimatedWebP(ctx, data, stickerSourceExt(attachment))
+// animated WebP a WhatsApp sticker needs, through media.convert. The provider
+// picks the conversion from the source format: a Telegram Lottie sticker (.tgs)
+// is rasterized, while a video sticker (chiefly a Telegram WebM) is transcoded.
+// mimeType is the type stickerMessage resolved for the source, which the
+// provider dispatches on.
+func (s Sender) animatedStickerWebP(ctx context.Context, attachment *wuphfpb.Attachment, mimeType string) ([]byte, error) {
+	return s.converter.Convert(ctx, attachment.GetMediaId(), mimeType, attachment.GetFileName(), "image/webp")
 }
 
 // documentMessage uploads bytes as a WhatsApp document, the generic file form

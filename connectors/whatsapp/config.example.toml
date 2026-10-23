@@ -22,6 +22,18 @@ log_level = "info"
 # defaults to "android". Experimental, and only applied at the next fresh pairing.
 client_mode = "android_business"
 
+# Animated stickers from other platforms (Telegram WebM video stickers and
+# Lottie .tgs stickers) are converted to animated WebP by the core's
+# media.convert function, served by the providers/mediaconv process. Without it
+# they arrive as files.
+#
+# Environment variable holding the core's invoke token, when the core sets
+# [functions] invoke_token_env.
+# functions_token_env = "WUPHF_INVOKE_TOKEN"
+# Bound on one sticker conversion, including waiting for the converter. This
+# connector delivers in order, so later messages wait behind it.
+# media_convert_timeout_ms = 20000
+
 # Sticker-pack metadata embedded in stickers bridged to WhatsApp, shown in
 # WhatsApp's sticker info. Any field left blank falls back to the defaults shown
 # here. WhatsApp has no link field for received stickers, so the link is appended

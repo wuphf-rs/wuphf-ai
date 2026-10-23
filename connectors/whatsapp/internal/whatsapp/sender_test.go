@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"testing"
 
 	coreclient "github.com/akshettrj/wuphf/connectors/shared/coreclient"
@@ -59,7 +60,7 @@ func (s *stubBroker) Download(context.Context, string) ([]byte, error) {
 func TestSendFileDispatch(t *testing.T) {
 	t.Parallel()
 	client := &stubSendClient{}
-	sender := NewSender(client, &stubBroker{bytes: []byte("data")}, types.JID{}, config.StickerMetadata{}, config.RenderingOptions{})
+	sender := NewSender(client, &stubBroker{bytes: []byte("data")}, stubConverter{}, types.JID{}, config.StickerMetadata{}, config.RenderingOptions{})
 	text := "caption"
 	fileName := "receipt.pdf"
 	mime := "application/pdf"
@@ -88,7 +89,7 @@ func TestSendFileDispatch(t *testing.T) {
 func TestSendAttachmentsAsFilesForcesDocument(t *testing.T) {
 	t.Parallel()
 	client := &stubSendClient{}
-	sender := NewSender(client, &stubBroker{bytes: []byte("data")}, types.JID{}, config.StickerMetadata{}, config.RenderingOptions{AttachmentsAsFiles: true})
+	sender := NewSender(client, &stubBroker{bytes: []byte("data")}, stubConverter{}, types.JID{}, config.StickerMetadata{}, config.RenderingOptions{AttachmentsAsFiles: true})
 	mime := "image/jpeg"
 	_, _, err := sender.SendMessage(context.Background(), &wuphfpb.MessageCreateDispatch{
 		TargetChatId: "123@s.whatsapp.net",
@@ -112,7 +113,7 @@ func TestSendAttachmentsAsFilesForcesDocument(t *testing.T) {
 func TestSendOverLengthTextAsFile(t *testing.T) {
 	t.Parallel()
 	client := &stubSendClient{}
-	sender := NewSender(client, &stubBroker{}, types.JID{}, config.StickerMetadata{}, config.RenderingOptions{MaxMessageLength: 5})
+	sender := NewSender(client, &stubBroker{}, stubConverter{}, types.JID{}, config.StickerMetadata{}, config.RenderingOptions{MaxMessageLength: 5})
 	text := "hello world"
 	_, _, err := sender.SendMessage(context.Background(), &wuphfpb.MessageCreateDispatch{
 		TargetChatId: "123@s.whatsapp.net",
@@ -133,7 +134,7 @@ func TestSendOverLengthTextAsFile(t *testing.T) {
 func TestSendWithinLengthLimitStaysInline(t *testing.T) {
 	t.Parallel()
 	client := &stubSendClient{}
-	sender := NewSender(client, &stubBroker{}, types.JID{}, config.StickerMetadata{}, config.RenderingOptions{MaxMessageLength: 5})
+	sender := NewSender(client, &stubBroker{}, stubConverter{}, types.JID{}, config.StickerMetadata{}, config.RenderingOptions{MaxMessageLength: 5})
 	text := "hi"
 	_, _, err := sender.SendMessage(context.Background(), &wuphfpb.MessageCreateDispatch{
 		TargetChatId: "123@s.whatsapp.net",
@@ -174,7 +175,7 @@ func TestSendOutboundReplyBuildsQuotedContext(t *testing.T) {
 	t.Parallel()
 	client := &stubSendClient{}
 	ownJID := types.NewJID("15550001111", types.DefaultUserServer)
-	sender := NewSender(client, &stubBroker{}, ownJID, config.StickerMetadata{}, config.RenderingOptions{})
+	sender := NewSender(client, &stubBroker{}, stubConverter{}, ownJID, config.StickerMetadata{}, config.RenderingOptions{})
 	text := "child reply"
 	parentText := "parent body"
 	parentID := "parent-stanza-id"
@@ -212,7 +213,7 @@ func TestSendOutboundReplyQuotesMediaParent(t *testing.T) {
 	t.Parallel()
 	client := &stubSendClient{}
 	ownJID := types.NewJID("15550001111", types.DefaultUserServer)
-	sender := NewSender(client, &stubBroker{}, ownJID, config.StickerMetadata{}, config.RenderingOptions{})
+	sender := NewSender(client, &stubBroker{}, stubConverter{}, ownJID, config.StickerMetadata{}, config.RenderingOptions{})
 	text := "look at this"
 	parentCaption := "parent photo"
 	mime := "image/jpeg"
@@ -249,7 +250,7 @@ func TestSendOutboundReplyQuotesMediaParent(t *testing.T) {
 func TestSendDeliversToCanonicalLIDTarget(t *testing.T) {
 	t.Parallel()
 	client := &stubSendClient{}
-	sender := NewSender(client, &stubBroker{}, types.JID{}, config.StickerMetadata{}, config.RenderingOptions{})
+	sender := NewSender(client, &stubBroker{}, stubConverter{}, types.JID{}, config.StickerMetadata{}, config.RenderingOptions{})
 	lid := types.NewJID("88887777", types.HiddenUserServer)
 	text := "reply to lid chat"
 	messageID, _, err := sender.SendMessage(context.Background(), &wuphfpb.MessageCreateDispatch{
@@ -270,7 +271,7 @@ func TestSendDeliversToCanonicalLIDTarget(t *testing.T) {
 func TestEditMessageRevisesTargetInPlace(t *testing.T) {
 	t.Parallel()
 	client := &stubSendClient{}
-	sender := NewSender(client, &stubBroker{}, types.JID{}, config.StickerMetadata{}, config.RenderingOptions{})
+	sender := NewSender(client, &stubBroker{}, stubConverter{}, types.JID{}, config.StickerMetadata{}, config.RenderingOptions{})
 	text := "revised text"
 	messageID, err := sender.EditMessage(context.Background(), &wuphfpb.MessageEditDispatch{
 		TargetChatId:            "123@s.whatsapp.net",
@@ -294,7 +295,7 @@ func TestEditMessageRevisesTargetInPlace(t *testing.T) {
 func TestSendRejectsLegacyReplyWithoutContext(t *testing.T) {
 	t.Parallel()
 	client := &stubSendClient{}
-	sender := NewSender(client, &stubBroker{}, types.JID{}, config.StickerMetadata{}, config.RenderingOptions{})
+	sender := NewSender(client, &stubBroker{}, stubConverter{}, types.JID{}, config.StickerMetadata{}, config.RenderingOptions{})
 	reply := "parent-id"
 	_, _, err := sender.SendMessage(context.Background(), &wuphfpb.MessageCreateDispatch{
 		TargetChatId:             "123@s.whatsapp.net",
@@ -340,7 +341,7 @@ func imageAttachments(n int) []*wuphfpb.Attachment {
 func TestSendMultipleAttachmentsCaptionsOnlyTheFirst(t *testing.T) {
 	t.Parallel()
 	client := &recordingSendClient{}
-	sender := NewSender(client, &stubBroker{bytes: []byte("data")}, types.JID{}, config.StickerMetadata{}, config.RenderingOptions{})
+	sender := NewSender(client, &stubBroker{bytes: []byte("data")}, stubConverter{}, types.JID{}, config.StickerMetadata{}, config.RenderingOptions{})
 	text := "caption"
 	id, _, err := sender.SendMessage(context.Background(), &wuphfpb.MessageCreateDispatch{
 		TargetChatId: "123@s.whatsapp.net",
@@ -371,7 +372,7 @@ func TestSendMultipleAttachmentsCaptionsOnlyTheFirst(t *testing.T) {
 func TestSendMultipleAttachmentsDeadLettersAfterPartialDelivery(t *testing.T) {
 	t.Parallel()
 	client := &recordingSendClient{failAt: 1, err: errors.New("upstream refused")}
-	sender := NewSender(client, &stubBroker{bytes: []byte("data")}, types.JID{}, config.StickerMetadata{}, config.RenderingOptions{})
+	sender := NewSender(client, &stubBroker{bytes: []byte("data")}, stubConverter{}, types.JID{}, config.StickerMetadata{}, config.RenderingOptions{})
 	_, _, err := sender.SendMessage(context.Background(), &wuphfpb.MessageCreateDispatch{
 		TargetChatId: "123@s.whatsapp.net",
 		Attachments:  imageAttachments(3),
@@ -393,7 +394,7 @@ func TestSendMultipleAttachmentsDeadLettersAfterPartialDelivery(t *testing.T) {
 func TestSendFirstAttachmentFailureStaysRetryable(t *testing.T) {
 	t.Parallel()
 	client := &recordingSendClient{failAt: 0, err: errors.New("transient")}
-	sender := NewSender(client, &stubBroker{bytes: []byte("data")}, types.JID{}, config.StickerMetadata{}, config.RenderingOptions{})
+	sender := NewSender(client, &stubBroker{bytes: []byte("data")}, stubConverter{}, types.JID{}, config.StickerMetadata{}, config.RenderingOptions{})
 	_, _, err := sender.SendMessage(context.Background(), &wuphfpb.MessageCreateDispatch{
 		TargetChatId: "123@s.whatsapp.net",
 		Attachments:  imageAttachments(2),
@@ -439,7 +440,7 @@ func TestQuotedAuthorAttributesTheRealSender(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			sender := NewSender(&stubSendClient{}, &stubBroker{}, own, config.StickerMetadata{}, config.RenderingOptions{})
+			sender := NewSender(&stubSendClient{}, &stubBroker{}, stubConverter{}, own, config.StickerMetadata{}, config.RenderingOptions{})
 			got, err := sender.quotedAuthor(tc.reply)
 			if err != nil {
 				t.Fatalf("quotedAuthor() error = %v", err)
@@ -448,5 +449,102 @@ func TestQuotedAuthorAttributesTheRealSender(t *testing.T) {
 				t.Fatalf("quotedAuthor() = %q, want %q", got, tc.want)
 			}
 		})
+	}
+}
+
+// stubConverter fails every conversion; senders under test that never convert
+// use it.
+type stubConverter struct{}
+
+func (stubConverter) Convert(context.Context, string, string, string, string) ([]byte, error) {
+	return nil, errors.New("no converter in this test")
+}
+
+// recordingConverter records each conversion request and answers with fixed
+// bytes or an error.
+type recordingConverter struct {
+	calls  []convertCall
+	output []byte
+	err    error
+}
+
+type convertCall struct {
+	mediaID, sourceMime, sourceName, targetMime string
+}
+
+func (r *recordingConverter) Convert(_ context.Context, mediaID, sourceMime, sourceName, targetMime string) ([]byte, error) {
+	r.calls = append(r.calls, convertCall{mediaID, sourceMime, sourceName, targetMime})
+	return r.output, r.err
+}
+
+// sendSticker dispatches one animated sticker with the given source type and
+// returns the message WhatsApp was sent.
+func sendSticker(t *testing.T, converter StickerConverter, mimeType, fileName string, animated bool) *waE2E.Message {
+	t.Helper()
+	client := &stubSendClient{}
+	sender := NewSender(client, &stubBroker{bytes: []byte("source")}, converter, types.JID{}, config.StickerMetadata{}, config.RenderingOptions{})
+	if _, _, err := sender.SendMessage(context.Background(), &wuphfpb.MessageCreateDispatch{
+		TargetChatId: "123@s.whatsapp.net",
+		Attachments: []*wuphfpb.Attachment{{
+			MediaId:  "media-1",
+			Kind:     wuphfpb.Attachment_KIND_STICKER,
+			MimeType: &mimeType,
+			FileName: &fileName,
+			Animated: animated,
+		}},
+	}); err != nil {
+		t.Fatalf("SendMessage() error = %v", err)
+	}
+	return client.sent
+}
+
+func TestAnimatedStickerIsConvertedToWebP(t *testing.T) {
+	t.Parallel()
+	converter := &recordingConverter{output: []byte("animated webp")}
+	sent := sendSticker(t, converter, "video/webm", "sticker.webm", true)
+	want := []convertCall{{"media-1", "video/webm", "sticker.webm", "image/webp"}}
+	if !slices.Equal(converter.calls, want) {
+		t.Fatalf("converter calls = %+v, want %+v", converter.calls, want)
+	}
+	if got := sent.GetStickerMessage().GetMimetype(); got != "image/webp" {
+		t.Fatalf("sticker mimetype = %q, want image/webp (message %v)", got, sent)
+	}
+}
+
+func TestTGSStickerIsConvertedToWebP(t *testing.T) {
+	t.Parallel()
+	converter := &recordingConverter{output: []byte("animated webp")}
+	sent := sendSticker(t, converter, "application/x-tgsticker", "sticker.tgs", true)
+	if len(converter.calls) != 1 || converter.calls[0].sourceMime != "application/x-tgsticker" {
+		t.Fatalf("converter calls = %+v, want one with the Lottie source mime", converter.calls)
+	}
+	if sent.GetStickerMessage() == nil {
+		t.Fatalf("sent %v, want a sticker", sent)
+	}
+}
+
+func TestStickerConversionFailureFallsBackToDocument(t *testing.T) {
+	t.Parallel()
+	converter := &recordingConverter{err: errors.New("no provider for media.convert@1 connected")}
+	sent := sendSticker(t, converter, "video/webm", "sticker.webm", true)
+	if sent.GetDocumentMessage() == nil || sent.GetStickerMessage() != nil {
+		t.Fatalf("sent %v, want the original as a document", sent)
+	}
+	if got := sent.GetDocumentMessage().GetFileName(); got != "sticker.webm" {
+		t.Fatalf("document name = %q, want the source name", got)
+	}
+}
+
+func TestStaticWebPStickerSkipsConversion(t *testing.T) {
+	t.Parallel()
+	converter := &recordingConverter{}
+	for _, animated := range []bool{false, true} {
+		sent := sendSticker(t, converter, "image/webp", "sticker.webp", animated)
+		if sent.GetStickerMessage() == nil {
+			t.Fatalf("animated=%v: sent %v, want a sticker", animated, sent)
+		}
+	}
+	if len(converter.calls) != 0 {
+		t.Fatalf("converter called %d times, want 0 for a WebP source", len(converter.calls))
 	}
 }

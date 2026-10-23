@@ -4,12 +4,9 @@ go 1.25.0
 
 replace github.com/akshettrj/wuphf/proto/go => ../../proto/go
 
-replace github.com/akshettrj/wuphf/connectors/mediaconv => ../mediaconv
-
 replace github.com/akshettrj/wuphf/connectors/shared => ../shared
 
 require (
-	github.com/akshettrj/wuphf/connectors/mediaconv v0.0.0-00010101000000-000000000000
 	github.com/akshettrj/wuphf/connectors/shared v0.0.0-00010101000000-000000000000
 	github.com/akshettrj/wuphf/proto/go v0.0.0-00010101000000-000000000000
 	github.com/mattn/go-sqlite3 v1.14.44

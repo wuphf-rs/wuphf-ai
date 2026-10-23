@@ -7,6 +7,7 @@ import (
 	"os"
 
 	coreclient "github.com/akshettrj/wuphf/connectors/shared/coreclient"
+	"github.com/akshettrj/wuphf/connectors/shared/functions"
 	"github.com/akshettrj/wuphf/connectors/whatsapp/internal/config"
 	wuphfpb "github.com/akshettrj/wuphf/proto/go/connector/v1"
 	_ "github.com/mattn/go-sqlite3"
@@ -51,6 +52,16 @@ func (c Connector) Run(ctx context.Context) error {
 		return err
 	}
 	defer media.Close()
+	var functionsToken string
+	if c.cfg.FunctionsTokenEnv != "" {
+		functionsToken = os.Getenv(c.cfg.FunctionsTokenEnv)
+	}
+	fns, err := functions.Dial(c.cfg.CoreAddress, functionsToken, c.cfg.ConnectorID)
+	if err != nil {
+		return err
+	}
+	defer fns.Close()
+	converter := functions.MediaConverter{Functions: fns, Media: media, Timeout: c.cfg.MediaConvertTimeout()}
 	inputs := make(chan *wuphfpb.ClientFrame, 128)
 	normalizer := NewNormalizer(inputs, NewMediaCodec(media, client), newChatNamer(client), newIdentityResolver(client), client)
 	eventErrors := make(chan error, 1)
@@ -96,7 +107,7 @@ func (c Connector) Run(ctx context.Context) error {
 			Platform:            wuphfpb.Platform_PLATFORM_WHATSAPP,
 			SupportsThreads:     c.cfg.SupportsThreads,
 			SupportsTopicCreate: c.cfg.SupportsTopicCreate,
-		}, c.logger).Run(ctx, NewSender(client, media, ownJID, c.cfg.StickerMetadata(), c.cfg.Rendering), inputs)
+		}, c.logger).Run(ctx, NewSender(client, media, converter, ownJID, c.cfg.StickerMetadata(), c.cfg.Rendering), inputs)
 	}()
 	select {
 	case <-ctx.Done():
