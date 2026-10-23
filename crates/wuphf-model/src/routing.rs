@@ -1,5 +1,5 @@
 //! Routing topology: how rules select chats and how those resolve to the
-//! endpoints, replica sets, and conversations a message fans out across.
+//! endpoints and conversations a message fans out across.
 
 use crate::*;
 use serde::{Deserialize, Serialize};
@@ -20,7 +20,7 @@ pub enum Platform {
 }
 
 /// A concrete delivery destination on one connector: a chat, optionally a
-/// thread within it. Endpoints are members of a [`ReplicaSet`] and are
+/// thread within it. Endpoints are members of a [`Conversation`] and are
 /// derived from rules at runtime, never hand-configured. `chat_id`/`thread_id`
 /// hold the canonical platform address; other addresses for the same endpoint
 /// are reachable through [`Alias`]es.
@@ -40,15 +40,6 @@ impl Endpoint {
             thread_id: self.thread_id.clone(),
         }
     }
-}
-
-/// The set of endpoints that mirror each other. A [`Message`] delivered to any
-/// member is dispatched to all the others. One replica set backs one
-/// [`Conversation`].
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ReplicaSet {
-    pub id: ReplicaSetId,
-    pub endpoints: Vec<EndpointId>,
 }
 
 /// A platform-native chat coordinate. `chat_id` identifies the chat/peer/group;
@@ -163,8 +154,8 @@ pub struct AddressLink {
 }
 
 /// A user-declared replication mapping. Rules are the only routing input a user
-/// writes; conversations, endpoints, and replica sets are derived from them
-/// lazily at runtime. The flow names which side owns conversation identity (the
+/// writes; conversations and endpoints are derived from them lazily at
+/// runtime. The flow names which side owns conversation identity (the
 /// source); replication itself stays two-way.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Rule {
@@ -324,26 +315,22 @@ pub struct Alias {
     pub is_canonical: bool,
 }
 
-/// The abstract unit a rule pairs across sides, backed by one replica set.
+/// A set of chats that mirror each other: the unit a rule creates for one
+/// source chat. A [`Message`] arriving at any endpoint is dispatched to all the
+/// others, never back to the origin.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Conversation {
     pub id: ConversationId,
-    pub rule_id: RuleId,
-    pub replica_set_id: ReplicaSetId,
-    pub source_connector: ConnectorId,
-    pub source_address: ChatAddress,
+    /// The rule that created it. `None` for a chat outside every rule that the
+    /// owner sent a message to directly.
+    pub rule_id: Option<RuleId>,
+    /// The chat the conversation is named after: the rule's source chat, or
+    /// the chat the owner sent to.
+    pub source: ChatRef,
+    pub endpoints: Vec<EndpointId>,
     /// The last source title persisted for this conversation. Tracked so the
-    /// core can detect when a source chat is renamed and fan a retitle out to
+    /// core can detect when a source chat is renamed and fan a rename out to
     /// the mirror threads. `None` until a title is first observed.
     #[serde(default)]
     pub title: Option<String>,
-}
-
-/// Records the mirror thread created for a conversation in a container.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ThreadMapping {
-    pub conversation_id: ConversationId,
-    pub connector_id: ConnectorId,
-    pub container: String,
-    pub thread_id: String,
 }

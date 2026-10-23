@@ -4,8 +4,8 @@
 
 use crate::{Core, CoreError};
 use wuphf_model::{
-    DedupKey, Dispatch, Endpoint, EndpointId, IgnoreReason, IngestOutcome, Message, MessageCopy,
-    MessageId, ReplicaSetId, SourceAddress,
+    ConversationId, DedupKey, Dispatch, Endpoint, EndpointId, IgnoreReason, IngestOutcome, Message,
+    MessageCopy, MessageId, SourceAddress,
 };
 use wuphf_storage::Storage;
 
@@ -18,7 +18,7 @@ where
         source: SourceAddress,
         origin_endpoint: EndpointId,
         origin: Endpoint,
-        replica_set_id: ReplicaSetId,
+        conversation_id: ConversationId,
         inbound: wuphf_model::NewMessage,
     ) -> Result<IngestOutcome, CoreError> {
         if self
@@ -64,7 +64,7 @@ where
         // The native id outlives the inbound form: the message drops it on
         // promotion, but the received copy is keyed by it.
         let platform_message_id = inbound.native_id.clone();
-        let message = Message::from_inbound(inbound, replica_set_id, reply_to);
+        let message = Message::from_inbound(inbound, conversation_id, reply_to);
         self.storage.put_message(message.clone()).await?;
         self.storage
             .put_received_copy(MessageCopy {
@@ -86,13 +86,13 @@ where
         let provisioning = {
             let provisioning = self.provisioning.lock().unwrap();
             provisioning
-                .get(&replica_set_id)
+                .get(&conversation_id)
                 .is_some_and(|state| !state.pending.is_empty())
         };
         if provisioning {
             let replayed = self
                 .stash_deferred(
-                    replica_set_id,
+                    conversation_id,
                     message.id,
                     origin_endpoint,
                     &provision_title,
@@ -117,7 +117,7 @@ where
             .route_and_record(&message, origin_endpoint, &provision_title)
             .await?;
         dispatches.extend(
-            self.maybe_retitle(&origin, replica_set_id, source.chat_title.as_deref())
+            self.maybe_retitle(&origin, conversation_id, source.chat_title.as_deref())
                 .await?,
         );
         Ok(IngestOutcome::Routed {
@@ -141,29 +141,27 @@ where
     async fn maybe_retitle(
         &self,
         origin: &Endpoint,
-        replica_set_id: ReplicaSetId,
+        conversation_id: ConversationId,
         new_title: Option<&str>,
     ) -> Result<Vec<Dispatch>, CoreError> {
         let Some(new_title) = new_title.map(str::trim).filter(|title| !title.is_empty()) else {
             return Ok(Vec::new());
         };
-        let Some(mut conversation) = self
-            .storage
-            .conversation_for_replica_set(replica_set_id)
-            .await?
-        else {
+        let Some(mut conversation) = self.storage.conversation(conversation_id).await? else {
             return Ok(Vec::new());
         };
-        if conversation.source_connector != origin.connector_id
-            || conversation.source_address.chat_id != origin.chat_id
+        if conversation.source.connector_id != origin.connector_id
+            || conversation.source.address.chat_id != origin.chat_id
         {
             return Ok(Vec::new());
         }
         if conversation.title.as_deref() == Some(new_title) {
             return Ok(Vec::new());
         }
+        self.storage
+            .set_conversation_title(conversation.id, new_title)
+            .await?;
         conversation.title = Some(new_title.to_owned());
-        self.storage.put_conversation(conversation.clone()).await?;
         let dispatches = self.router.route_retitle(&conversation, new_title).await?;
         let (pending, _) = self.save_dispatches(dispatches).await?;
         Ok(pending)
@@ -240,7 +238,7 @@ where
         if !provisioning_ids.is_empty() {
             let mut provisioning = self.provisioning.lock().unwrap();
             provisioning
-                .entry(message.replica_set_id)
+                .entry(message.conversation_id)
                 .or_default()
                 .pending
                 .extend(provisioning_ids);

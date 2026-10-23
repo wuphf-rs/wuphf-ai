@@ -1178,15 +1178,25 @@ async fn owner_message_to_a_routed_chat_fans_out_to_the_other_side() {
 }
 
 #[tokio::test]
-async fn owner_message_to_an_unrouted_chat_keeps_later_inbound_ingestible() {
-    let core = core(vec![direct_rule()]);
+async fn owner_message_to_an_unrouted_chat_gets_a_rule_less_conversation() {
+    let storage = Arc::new(InMemoryStorage::default());
+    let core = core_over(Arc::clone(&storage), vec![direct_rule()]);
     let outcome = core
         .send_owner_message(owner_message("unrouted@s.whatsapp.net", "hello", None))
         .await
         .unwrap();
     assert!(outcome.mirrored.is_empty());
+    // The chat gets a conversation of its own with no rule behind it.
+    let endpoint_id = outcome.direct.to.endpoint_id;
+    let conversation = storage
+        .conversation_for_endpoint(endpoint_id)
+        .await
+        .unwrap()
+        .expect("the standalone chat has a conversation");
+    assert_eq!(conversation.rule_id, None);
+    assert_eq!(conversation.endpoints, vec![endpoint_id]);
     // A later peer message in the standalone chat resolves cleanly and fans
-    // out to nobody instead of erroring on a missing replica set.
+    // out to nobody, rather than being dropped as no longer covered by a rule.
     match core
         .ingest(event(WHATSAPP, "unrouted@s.whatsapp.net", "wa-5", None))
         .await

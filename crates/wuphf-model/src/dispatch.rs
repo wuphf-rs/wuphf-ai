@@ -10,8 +10,8 @@ pub struct Dispatch {
     pub id: DispatchId,
     pub state: DispatchState,
     pub to: Target,
-    /// The replica set the dispatch belongs to. Keys thread provisioning.
-    pub replica_set_id: ReplicaSetId,
+    /// The conversation the dispatch belongs to. Keys thread provisioning.
+    pub conversation_id: ConversationId,
     pub action: Action,
 }
 
@@ -20,7 +20,7 @@ impl Dispatch {
     /// delivered to the same endpoint.
     pub fn new(
         to: Target,
-        replica_set_id: ReplicaSetId,
+        conversation_id: ConversationId,
         action: Action,
         waiting_for: Option<MessageId>,
     ) -> Self {
@@ -31,7 +31,7 @@ impl Dispatch {
                 None => DispatchState::Pending,
             },
             to,
-            replica_set_id,
+            conversation_id,
             action,
         }
     }
@@ -150,7 +150,7 @@ pub struct DispatchAck {
     pub dispatch_id: DispatchId,
     pub native_id: String,
     /// The thread/topic the message landed in. Set when the dispatch provisioned
-    /// a new thread, so the core can persist the conversation thread mapping.
+    /// a new thread, so the core can stamp the thread onto the mirror endpoint.
     #[serde(default)]
     pub thread_id: Option<String>,
 }
@@ -243,7 +243,7 @@ mod tests {
     fn message() -> Message {
         Message {
             id: MessageId::new(),
-            replica_set_id: ReplicaSetId::new(),
+            conversation_id: ConversationId::new(),
             author_id: "alice".into(),
             participant: None,
             author_name: None,
@@ -312,11 +312,11 @@ mod tests {
         let action = || Action::RenameThread {
             title: "title".into(),
         };
-        let ready = Dispatch::new(target(), ReplicaSetId::new(), action(), None);
+        let ready = Dispatch::new(target(), ConversationId::new(), action(), None);
         assert!(ready.is_pending());
 
         let parent = MessageId::new();
-        let blocked = Dispatch::new(target(), ReplicaSetId::new(), action(), Some(parent));
+        let blocked = Dispatch::new(target(), ConversationId::new(), action(), Some(parent));
         assert!(!blocked.is_pending());
         assert_eq!(
             blocked.state,
@@ -329,7 +329,7 @@ mod tests {
     #[test]
     fn only_sends_edits_and_deletes_record_a_copy() {
         for (action, records) in actions() {
-            let dispatch = Dispatch::new(target(), ReplicaSetId::new(), action, None);
+            let dispatch = Dispatch::new(target(), ConversationId::new(), action, None);
             assert_eq!(dispatch.records_copy(), records, "{:?}", dispatch.action);
         }
     }
@@ -338,7 +338,7 @@ mod tests {
     fn only_a_thread_rename_has_no_message() {
         for (action, _) in actions() {
             let renames = matches!(action, Action::RenameThread { .. });
-            let dispatch = Dispatch::new(target(), ReplicaSetId::new(), action, None);
+            let dispatch = Dispatch::new(target(), ConversationId::new(), action, None);
             assert_eq!(
                 dispatch.message_id().is_none(),
                 renames,

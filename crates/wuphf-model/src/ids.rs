@@ -36,10 +36,6 @@ uuid_id!(
     "Stable internal id of a normalized [`Message`]. Native platform message ids map to it via [`MessageCopy`]."
 );
 uuid_id!(
-    ReplicaSetId,
-    "Id of a [`ReplicaSet`] — the set of endpoints a message fans out to."
-);
-uuid_id!(
     EndpointId,
     "Stable internal id of an [`Endpoint`]. Platform addresses resolve to it through [`Alias`]es, never by equality."
 );
@@ -53,7 +49,7 @@ uuid_id!(
 );
 uuid_id!(
     ConversationId,
-    "Id of a [`Conversation`] — the unit a [`Rule`] pairs across its ends."
+    "Id of a [`Conversation`] — the set of endpoints a message fans out to."
 );
 
 // User-chosen string ids have no `new()`/`Default`: they come from config or a

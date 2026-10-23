@@ -1,21 +1,19 @@
 //! Lazy topology resolution: turn a raw inbound address into its endpoint,
-//! minting the endpoint, conversation, and replica set on first sighting when a
-//! rule matches.
+//! minting the endpoint and conversation on first sighting when a rule matches.
 
 use crate::{Core, CoreError};
 use wuphf_model::{
-    AddressSet, Alias, ChatAddress, ConnectorId, Conversation, ConversationId, Endpoint,
-    EndpointId, ReplicaSet, ReplicaSetId, RuleEnd, RuleId, RuleKind, SourceAddress,
+    AddressSet, Alias, ChatAddress, ChatRef, ConnectorId, Conversation, ConversationId, Endpoint,
+    EndpointId, RuleEnd, RuleId, RuleKind, SourceAddress,
 };
-use wuphf_storage::Storage;
+use wuphf_storage::{Storage, StorageError};
 
 impl<S> Core<S>
 where
     S: Storage,
 {
     /// Resolve a raw inbound address to its endpoint, lazily minting the
-    /// endpoint, conversation, and replica set on first sighting when a rule
-    /// matches. Returns `None` when the address matches no rule, or matches
+    /// endpoint and conversation on first sighting when a rule matches. Returns `None` when the address matches no rule, or matches
     /// only a many-to-one destination with no provisioned thread (an unmapped
     /// topic in the container).
     pub(crate) async fn resolve_origin(
@@ -89,27 +87,23 @@ where
     /// meaning what it says instead of only applying to chats the core had
     /// never seen when the list was written.
     ///
-    /// Endpoints with no conversation behind them are exempt: those are the
-    /// standalone chats an owner message mints outside every rule, and they have to
-    /// stay resolvable so their echoes are recognized.
+    /// Endpoints in a conversation with no rule are exempt: those are the
+    /// standalone chats an owner message mints outside every rule, and they
+    /// have to stay resolvable so their echoes are recognized.
     async fn still_covered(
         &self,
         endpoint_id: EndpointId,
         source: &SourceAddress,
     ) -> Result<Option<EndpointId>, CoreError> {
-        let Some(replica_set_id) = self.storage.replica_set_for_endpoint(endpoint_id).await? else {
+        let Some(conversation) = self.storage.conversation_for_endpoint(endpoint_id).await? else {
             return Ok(Some(endpoint_id));
         };
-        let Some(conversation) = self
-            .storage
-            .conversation_for_replica_set(replica_set_id)
-            .await?
-        else {
+        let Some(rule_id) = &conversation.rule_id else {
             return Ok(Some(endpoint_id));
         };
         // A conversation whose rule is gone from the config is no longer
         // covered by anything, so it stops replicating.
-        let Some(rule) = self.config.rule(&conversation.rule_id) else {
+        let Some(rule) = self.config.rule(rule_id) else {
             return Ok(None);
         };
         let addresses = self
@@ -180,8 +174,8 @@ where
         Ok(())
     }
 
-    /// Get the conversation backing this rule's identity address, creating it
-    /// (with an empty replica set) on first sighting.
+    /// Get the conversation for this rule's identity address, creating it (with
+    /// no endpoints yet) on first sighting.
     async fn ensure_conversation(
         &self,
         rule_id: &RuleId,
@@ -195,19 +189,14 @@ where
         {
             return Ok(existing);
         }
-        let replica_set_id = ReplicaSetId::new();
-        self.storage
-            .put_replica_set(ReplicaSet {
-                id: replica_set_id,
-                endpoints: Vec::new(),
-            })
-            .await?;
         let conversation = Conversation {
             id: ConversationId::new(),
-            rule_id: rule_id.clone(),
-            replica_set_id,
-            source_connector: identity_connector,
-            source_address: identity_address.clone(),
+            rule_id: Some(rule_id.clone()),
+            source: ChatRef {
+                connector_id: identity_connector,
+                address: identity_address.clone(),
+            },
+            endpoints: Vec::new(),
             title: None,
         };
         self.storage.put_conversation(conversation.clone()).await?;
@@ -215,9 +204,9 @@ where
     }
 
     /// Get or mint the endpoint for one end of a rule's flow, joining it to the
-    /// conversation's replica set. Fixed chats and many-to-one sources record a
-    /// canonical alias; a many-to-one destination gets no alias until its
-    /// thread is provisioned, so it is found through the replica set instead.
+    /// conversation. Fixed chats and many-to-one sources record a canonical
+    /// alias; a many-to-one destination gets no alias until its thread is
+    /// provisioned, so it is found through the conversation instead.
     async fn ensure_end_endpoint(
         &self,
         conversation: &Conversation,
@@ -253,7 +242,7 @@ where
                 return Ok(endpoint);
             }
         } else if let Some(endpoint) = self
-            .endpoint_in_replica_set(conversation.replica_set_id, &connector)
+            .endpoint_in_conversation(conversation.id, &connector)
             .await?
         {
             return Ok(endpoint);
@@ -281,24 +270,26 @@ where
                 })
                 .await?;
         }
-        let mut replica_set = self
-            .storage
-            .replica_set(conversation.replica_set_id)
+        self.storage
+            .add_conversation_endpoint(conversation.id, endpoint.id)
             .await?;
-        if !replica_set.endpoints.contains(&endpoint.id) {
-            replica_set.endpoints.push(endpoint.id);
-            self.storage.put_replica_set(replica_set).await?;
-        }
         Ok(endpoint.id)
     }
 
-    async fn endpoint_in_replica_set(
+    /// The conversation's endpoint on a connector, if it has one. Reads the
+    /// conversation afresh: the caller's copy is a snapshot taken before
+    /// endpoints were added earlier in the same resolution.
+    async fn endpoint_in_conversation(
         &self,
-        replica_set_id: ReplicaSetId,
+        conversation_id: ConversationId,
         connector: &ConnectorId,
     ) -> Result<Option<EndpointId>, CoreError> {
-        let replica_set = self.storage.replica_set(replica_set_id).await?;
-        for endpoint_id in replica_set.endpoints {
+        let conversation = self
+            .storage
+            .conversation(conversation_id)
+            .await?
+            .ok_or(StorageError::ConversationNotFound(conversation_id))?;
+        for endpoint_id in conversation.endpoints {
             let endpoint = self.storage.endpoint(endpoint_id).await?;
             if endpoint.connector_id == *connector {
                 return Ok(Some(endpoint_id));

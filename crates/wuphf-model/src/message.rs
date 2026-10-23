@@ -40,7 +40,7 @@ pub struct MediaBlob {
     pub bytes: Vec<u8>,
 }
 
-/// The normalized, platform-agnostic message owned by a [`ReplicaSet`].
+/// The normalized, platform-agnostic message owned by a [`Conversation`].
 /// This canonical form is copied out to every endpoint in the set as a
 /// [`Dispatch`]. `author_id` is the platform id of whoever wrote the message;
 /// `participant` is set when a mirror should label the message with its
@@ -48,7 +48,7 @@ pub struct MediaBlob {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Message {
     pub id: MessageId,
-    pub replica_set_id: ReplicaSetId,
+    pub conversation_id: ConversationId,
     pub author_id: String,
     pub participant: Option<String>,
     /// Human-readable display name of the author, resolved by the source
@@ -74,12 +74,12 @@ impl Message {
     /// tables.
     pub fn from_inbound(
         inbound: NewMessage,
-        replica_set_id: ReplicaSetId,
+        conversation_id: ConversationId,
         reply_to: Option<MessageId>,
     ) -> Self {
         Self {
             id: MessageId::new(),
-            replica_set_id,
+            conversation_id,
             author_id: inbound.author_id,
             participant: inbound.participant,
             author_name: inbound.author_name,

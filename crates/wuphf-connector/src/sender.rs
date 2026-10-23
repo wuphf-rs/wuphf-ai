@@ -32,7 +32,7 @@ impl Failure {
 
 /// The result of a successful message create: the platform message id, plus
 /// the thread id when the send provisioned a new thread, so the core can
-/// persist the conversation-to-thread mapping.
+/// stamp the new thread onto the mirror endpoint.
 #[derive(Debug)]
 pub struct Delivery {
     pub message_id: String,

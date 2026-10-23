@@ -10,10 +10,9 @@
 //!   connector, identified internally by an [`EndpointId`]. Platform addresses
 //!   resolve to it through an [`Alias`], never by equality, so an address can
 //!   migrate without changing identity.
-//! - [`Conversation`] — the abstract unit a rule pairs across its two ends (one
-//!   per source chat). Backed by one [`ReplicaSet`].
-//! - [`ReplicaSet`] — the set of endpoints that mirror each other; a
-//!   [`Message`] delivered to one is dispatched to all the others.
+//! - [`Conversation`] — the chats that mirror each other, one per source chat a
+//!   rule matches; a [`Message`] delivered to one endpoint is dispatched to all
+//!   the others.
 //! - [`Message`] — the normalized, platform-agnostic form copied out to every
 //!   endpoint as a [`Dispatch`].
 //!

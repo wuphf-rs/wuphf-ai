@@ -460,7 +460,7 @@ fn required_string(value: String, name: &str) -> Result<String, WireError> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use wuphf_model::{Dispatch, EndpointId, Message, MessageId, ReplicaSetId, Target};
+    use wuphf_model::{ConversationId, Dispatch, EndpointId, Message, MessageId, Target};
 
     fn dispatch(action: Action, create_thread: Option<String>) -> Dispatch {
         Dispatch::new(
@@ -470,7 +470,7 @@ mod tests {
                 address: ChatAddress::new("tg-chat", None),
                 create_thread,
             },
-            ReplicaSetId::new(),
+            ConversationId::new(),
             action,
             None,
         )
@@ -512,7 +512,7 @@ mod tests {
     fn a_thread_to_create_is_provisioned_inside_the_target_chat() {
         let message = Message {
             id: MessageId::new(),
-            replica_set_id: ReplicaSetId::new(),
+            conversation_id: ConversationId::new(),
             author_id: "priya".into(),
             participant: None,
             author_name: None,

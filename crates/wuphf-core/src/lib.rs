@@ -2,8 +2,8 @@ use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
 use thiserror::Error;
 use wuphf_model::{
-    ConnectorId, DispatchId, EndpointId, Event, EventKind, IgnoreReason, IngestOutcome, MediaId,
-    MessageId, NoticeKind, Platform, ReplicaSetId,
+    ConnectorId, ConversationId, DispatchId, EndpointId, Event, EventKind, IgnoreReason,
+    IngestOutcome, MediaId, MessageId, NoticeKind, Platform,
 };
 use wuphf_storage::{Storage, StorageError};
 
@@ -23,14 +23,13 @@ pub struct Core<S> {
     storage: Arc<S>,
     router: Router<S>,
     config: Arc<RoutingConfig>,
-    /// Conversations whose mirror thread is mid-provisioning, keyed by replica
-    /// set, holding the dispatch ids whose acknowledgement establishes the
+    /// Conversations whose mirror thread is mid-provisioning, holding the dispatch ids whose acknowledgement establishes the
     /// thread. Guards against a burst of messages each provisioning a duplicate
     /// thread before the first provision settles. This is a rebuildable cache of
     /// storage (see [`Core::recover_provisioning`]); the messages held until the
     /// thread exists live in the durable `provisioning_stash` table, not here, so
     /// a crash cannot lose them. The lock is never held across an await.
-    provisioning: Mutex<HashMap<ReplicaSetId, ProvisionState>>,
+    provisioning: Mutex<HashMap<ConversationId, ProvisionState>>,
     /// The last health state each connector reported, so a connector repeating
     /// itself does not page the owner over and over. See
     /// [`Core::notify_owners`]. Deliberately in memory: a restart re-notifies
@@ -81,15 +80,16 @@ where
             return Ok(IngestOutcome::Ignored(IgnoreReason::Unmatched));
         };
         let origin = self.storage.endpoint(origin_endpoint).await?;
-        let replica_set_id = self
+        let conversation_id = self
             .storage
-            .replica_set_for_endpoint(origin_endpoint)
+            .conversation_for_endpoint(origin_endpoint)
             .await?
-            .ok_or(CoreError::OriginWithoutReplicaSet(origin_endpoint))?;
+            .ok_or(CoreError::OriginWithoutConversation(origin_endpoint))?
+            .id;
 
         match event.payload {
             EventKind::NewMessage(inbound) => {
-                self.ingest_create(source, origin_endpoint, origin, replica_set_id, inbound)
+                self.ingest_create(source, origin_endpoint, origin, conversation_id, inbound)
                     .await
             }
             EventKind::Edit {
@@ -143,8 +143,8 @@ pub enum CoreError {
     Storage(#[from] StorageError),
     #[error(transparent)]
     Router(#[from] RouterError),
-    #[error("origin endpoint {0} resolved to no replica set")]
-    OriginWithoutReplicaSet(EndpointId),
+    #[error("origin endpoint {0} belongs to no conversation")]
+    OriginWithoutConversation(EndpointId),
     #[error("rule references connector {0} which is not registered")]
     UnknownConnector(ConnectorId),
     #[error("deleted message {0} maps from a copy but is not stored")]

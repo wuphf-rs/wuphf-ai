@@ -14,9 +14,9 @@
 
 use crate::{Core, CoreError};
 use wuphf_model::{
-    Action, Alias, ChatAddress, ConnectorId, Dispatch, Endpoint, EndpointId, Message, MessageId,
-    OWNER_AUTHOR, OwnerMessage, OwnerSendOutcome, ReplicaSet, ReplicaSetId, ReplyContext,
-    SourceAddress, Target,
+    Action, Alias, ChatAddress, ChatRef, ConnectorId, Conversation, ConversationId, Dispatch,
+    Endpoint, EndpointId, Message, MessageId, OWNER_AUTHOR, OwnerMessage, OwnerSendOutcome,
+    ReplyContext, SourceAddress, Target,
 };
 use wuphf_storage::Storage;
 
@@ -35,11 +35,12 @@ where
         let endpoint_id = self
             .owner_message_endpoint(&outbound.connector_id, &address)
             .await?;
-        let replica_set_id = self
+        let conversation = self
             .storage
-            .replica_set_for_endpoint(endpoint_id)
+            .conversation_for_endpoint(endpoint_id)
             .await?
-            .ok_or(CoreError::OriginWithoutReplicaSet(endpoint_id))?;
+            .ok_or(CoreError::OriginWithoutConversation(endpoint_id))?;
+        let conversation_id = conversation.id;
 
         let (reply_to, reply_context) = self
             .resolve_reply(endpoint_id, outbound.reply_to_native_id.as_deref())
@@ -47,7 +48,7 @@ where
 
         let message = Message {
             id: MessageId::new(),
-            replica_set_id,
+            conversation_id,
             author_id: OWNER_AUTHOR.to_owned(),
             participant: None,
             author_name: None,
@@ -66,7 +67,7 @@ where
                 address,
                 create_thread: None,
             },
-            replica_set_id,
+            conversation_id,
             Action::Send {
                 message: message.clone(),
                 reply: reply_context,
@@ -76,7 +77,7 @@ where
         self.storage.enqueue_dispatch(&direct).await?;
 
         let mirrored = self
-            .fan_out_to_mirrors(message, endpoint_id, replica_set_id, &outbound.chat_id)
+            .fan_out_to_mirrors(message, endpoint_id, conversation, &outbound.chat_id)
             .await?;
         Ok(OwnerSendOutcome { direct, mirrored })
     }
@@ -84,7 +85,7 @@ where
     /// The endpoint an owner message originates at. A rule-matched chat resolves (and
     /// lazily mints) through the same path as inbound traffic, so owner messages and
     /// routing agree on the topology; a chat outside every rule gets a
-    /// standalone endpoint in its own single-member replica set, which keeps
+    /// standalone endpoint in its own rule-less conversation, which keeps
     /// later inbound resolution working while fanning out to nobody.
     async fn owner_message_endpoint(
         &self,
@@ -120,9 +121,15 @@ where
             })
             .await?;
         self.storage
-            .put_replica_set(ReplicaSet {
-                id: ReplicaSetId::new(),
+            .put_conversation(Conversation {
+                id: ConversationId::new(),
+                rule_id: None,
+                source: ChatRef {
+                    connector_id: connector_id.clone(),
+                    address: address.clone(),
+                },
                 endpoints: vec![endpoint.id],
+                title: None,
             })
             .await?;
         Ok(endpoint.id)
@@ -166,21 +173,15 @@ where
         &self,
         message: Message,
         origin_endpoint: EndpointId,
-        replica_set_id: ReplicaSetId,
+        conversation: Conversation,
         chat_id: &str,
     ) -> Result<Vec<Dispatch>, CoreError> {
-        let provision_title = match self
-            .storage
-            .conversation_for_replica_set(replica_set_id)
-            .await?
-        {
-            Some(conversation) => conversation.title.unwrap_or_else(|| chat_id.to_owned()),
-            None => chat_id.to_owned(),
-        };
+        let conversation_id = conversation.id;
+        let provision_title = conversation.title.unwrap_or_else(|| chat_id.to_owned());
         let provisioning = {
             let provisioning = self.provisioning.lock().unwrap();
             provisioning
-                .get(&replica_set_id)
+                .get(&conversation_id)
                 .is_some_and(|state| !state.pending.is_empty())
         };
         if provisioning {
@@ -188,7 +189,7 @@ where
             // provision settled while we stashed, otherwise the message waits.
             return self
                 .stash_deferred(
-                    replica_set_id,
+                    conversation_id,
                     message.id,
                     origin_endpoint,
                     &provision_title,

@@ -14,15 +14,15 @@ use thiserror::Error;
 use wuphf_model::{
     AddressLink, Alias, ChatAddress, ConnectorId, Conversation, ConversationId, DedupKey, Dispatch,
     DispatchId, Endpoint, EndpointId, MediaBlob, MediaId, Message, MessageCopy, MessageId,
-    ObservedChat, ObservedMessage, ReplicaSet, ReplicaSetId, ThreadMapping,
+    ObservedChat, ObservedMessage, RuleId,
 };
 
 #[derive(Debug, Error)]
 pub enum StorageError {
     #[error("endpoint {0} is not configured")]
     EndpointNotFound(EndpointId),
-    #[error("replica set {0} is not configured")]
-    ReplicaSetNotFound(ReplicaSetId),
+    #[error("conversation {0} is not stored")]
+    ConversationNotFound(ConversationId),
     #[error("dispatch {0} is not configured")]
     DispatchNotFound(DispatchId),
     #[error("media {0} is not stored")]
@@ -45,13 +45,6 @@ pub type StorageResult<T> = Result<T, StorageError>;
 pub trait Storage: Send + Sync + 'static {
     async fn put_endpoint(&self, endpoint: Endpoint) -> StorageResult<()>;
     async fn endpoint(&self, endpoint_id: EndpointId) -> StorageResult<Endpoint>;
-    async fn put_replica_set(&self, replica_set: ReplicaSet) -> StorageResult<()>;
-    async fn replica_set(&self, replica_set_id: ReplicaSetId) -> StorageResult<ReplicaSet>;
-    /// The replica set that contains the endpoint, if any.
-    async fn replica_set_for_endpoint(
-        &self,
-        endpoint_id: EndpointId,
-    ) -> StorageResult<Option<ReplicaSetId>>;
     /// Insert or update an alias. Inserting a canonical alias clears the
     /// canonical flag on the endpoint's other aliases.
     async fn put_alias(&self, alias: Alias) -> StorageResult<()>;
@@ -74,38 +67,38 @@ pub trait Storage: Send + Sync + 'static {
         connector_id: &ConnectorId,
         address: &ChatAddress,
     ) -> StorageResult<Vec<ChatAddress>>;
+    /// Insert or replace a conversation, including its endpoint list. Only for
+    /// creating one: later changes go through the narrow writers below, so two
+    /// workers updating different parts cannot overwrite each other.
     async fn put_conversation(&self, conversation: Conversation) -> StorageResult<()>;
     async fn conversation(
         &self,
         conversation_id: ConversationId,
     ) -> StorageResult<Option<Conversation>>;
-    /// The conversation whose identity source is this address, if any.
+    /// The conversation an endpoint belongs to, if any. Indexed.
+    async fn conversation_for_endpoint(
+        &self,
+        endpoint_id: EndpointId,
+    ) -> StorageResult<Option<Conversation>>;
+    /// The conversation a rule created for this source chat, if any.
     async fn conversation_for_source(
         &self,
-        rule_id: &wuphf_model::RuleId,
+        rule_id: &RuleId,
         connector_id: &ConnectorId,
         address: &ChatAddress,
     ) -> StorageResult<Option<Conversation>>;
-    /// The conversation backed by this replica set, if any.
-    async fn conversation_for_replica_set(
-        &self,
-        replica_set_id: ReplicaSetId,
-    ) -> StorageResult<Option<Conversation>>;
-    async fn put_thread_mapping(&self, mapping: ThreadMapping) -> StorageResult<()>;
-    /// The thread provisioned for a conversation in the given connector's
-    /// container, if one exists yet.
-    async fn thread_for_conversation(
+    /// Append an endpoint to a conversation. Atomic and idempotent.
+    async fn add_conversation_endpoint(
         &self,
         conversation_id: ConversationId,
-        connector_id: &ConnectorId,
-    ) -> StorageResult<Option<String>>;
-    /// Reverse lookup for a message typed directly into a mirror topic.
-    async fn conversation_for_thread(
+        endpoint_id: EndpointId,
+    ) -> StorageResult<()>;
+    /// Change only a conversation's title, leaving its endpoints untouched.
+    async fn set_conversation_title(
         &self,
-        connector_id: &ConnectorId,
-        container: &str,
-        thread_id: &str,
-    ) -> StorageResult<Option<ConversationId>>;
+        conversation_id: ConversationId,
+        title: &str,
+    ) -> StorageResult<()>;
     async fn claim_event(&self, key: DedupKey) -> StorageResult<bool>;
     async fn put_message(&self, message: Message) -> StorageResult<()>;
     async fn message(&self, message_id: MessageId) -> StorageResult<Option<Message>>;
@@ -149,23 +142,23 @@ pub trait Storage: Send + Sync + 'static {
 
     /// Persist one provisioning-deferred message for later replay, so a crash
     /// while a mirror thread is being provisioned cannot lose it. Idempotent on
-    /// `(replica_set_id, message_id)`.
+    /// `(conversation_id, message_id)`.
     async fn stash_provisioning_message(
         &self,
-        replica_set_id: ReplicaSetId,
+        conversation_id: ConversationId,
         message_id: MessageId,
         origin_endpoint: EndpointId,
         provision_title: &str,
     ) -> StorageResult<()>;
-    /// Remove and return the stashed messages for a replica set, in insertion
+    /// Remove and return the stashed messages for a conversation, in insertion
     /// order, resolved back to full messages (rows whose message is no longer
     /// stored are dropped). The removal and the read are one atomic step.
     async fn drain_provisioning_stash(
         &self,
-        replica_set_id: ReplicaSetId,
+        conversation_id: ConversationId,
     ) -> StorageResult<Vec<(Message, EndpointId, String)>>;
-    /// Replica sets that still have stashed messages, for startup recovery.
-    async fn stashed_replica_sets(&self) -> StorageResult<Vec<ReplicaSetId>>;
+    /// Conversations that still have stashed messages, for startup recovery.
+    async fn stashed_conversations(&self) -> StorageResult<Vec<ConversationId>>;
 
     /// Record a message in the observation log, upserting both the message row
     /// and its chat summary, and return the row as stored. Idempotent on the

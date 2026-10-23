@@ -11,8 +11,7 @@ use std::str::FromStr;
 use wuphf_model::{
     AddressLink, Alias, ChatAddress, ConnectorId, Conversation, ConversationId, DedupKey, Dispatch,
     DispatchId, DispatchState, Endpoint, EndpointId, MediaBlob, MediaId, Message, MessageCopy,
-    MessageId, ObservedChat, ObservedDirection, ObservedMessage, ReplicaSet, ReplicaSetId,
-    ThreadMapping,
+    MessageId, ObservedChat, ObservedDirection, ObservedMessage, RuleId,
 };
 
 /// The schema migrations, embedded at build time. Shared with the migration
@@ -52,44 +51,6 @@ impl Storage for SqliteStorage {
         get_json(&self.pool, "endpoints", "id", endpoint_id.to_string())
             .await?
             .ok_or(StorageError::EndpointNotFound(endpoint_id))
-    }
-
-    async fn put_replica_set(&self, replica_set: ReplicaSet) -> StorageResult<()> {
-        upsert_json(
-            &self.pool,
-            "replica_sets",
-            "id",
-            replica_set.id.to_string(),
-            &replica_set,
-        )
-        .await
-    }
-
-    async fn replica_set(&self, replica_set_id: ReplicaSetId) -> StorageResult<ReplicaSet> {
-        get_json(&self.pool, "replica_sets", "id", replica_set_id.to_string())
-            .await?
-            .ok_or(StorageError::ReplicaSetNotFound(replica_set_id))
-    }
-
-    async fn replica_set_for_endpoint(
-        &self,
-        endpoint_id: EndpointId,
-    ) -> StorageResult<Option<ReplicaSetId>> {
-        let needle = endpoint_id.to_string();
-        let rows = sqlx::query("SELECT payload FROM replica_sets")
-            .fetch_all(&self.pool)
-            .await?;
-        for row in rows {
-            let replica_set: ReplicaSet = serde_json::from_str(row.get("payload"))?;
-            if replica_set
-                .endpoints
-                .iter()
-                .any(|id| id.to_string() == needle)
-            {
-                return Ok(Some(replica_set.id));
-            }
-        }
-        Ok(None)
     }
 
     async fn put_alias(&self, alias: Alias) -> StorageResult<()> {
@@ -190,21 +151,29 @@ impl Storage for SqliteStorage {
     }
 
     async fn put_conversation(&self, conversation: Conversation) -> StorageResult<()> {
+        let mut transaction = self.pool.begin().await?;
         sqlx::query(
             "INSERT INTO conversations
-               (id, rule_id, replica_set_id, source_connector, source_chat_id, source_thread_key, payload)
-             VALUES (?, ?, ?, ?, ?, ?, ?)
+               (id, rule_id, source_connector, source_chat_id, source_thread_key, payload)
+             VALUES (?, ?, ?, ?, ?, ?)
              ON CONFLICT(id) DO UPDATE SET payload = excluded.payload",
         )
         .bind(conversation.id.to_string())
-        .bind(conversation.rule_id.to_string())
-        .bind(conversation.replica_set_id.to_string())
-        .bind(conversation.source_connector.to_string())
-        .bind(&conversation.source_address.chat_id)
-        .bind(thread_key(&conversation.source_address))
+        .bind(conversation.rule_id.as_ref().map(ToString::to_string))
+        .bind(conversation.source.connector_id.to_string())
+        .bind(&conversation.source.address.chat_id)
+        .bind(thread_key(&conversation.source.address))
         .bind(serde_json::to_string(&conversation)?)
-        .execute(&self.pool)
+        .execute(&mut *transaction)
         .await?;
+        sqlx::query("DELETE FROM conversation_endpoints WHERE conversation_id = ?")
+            .bind(conversation.id.to_string())
+            .execute(&mut *transaction)
+            .await?;
+        for endpoint_id in &conversation.endpoints {
+            insert_conversation_endpoint(&mut transaction, conversation.id, *endpoint_id).await?;
+        }
+        transaction.commit().await?;
         Ok(())
     }
 
@@ -221,9 +190,27 @@ impl Storage for SqliteStorage {
         .await
     }
 
+    async fn conversation_for_endpoint(
+        &self,
+        endpoint_id: EndpointId,
+    ) -> StorageResult<Option<Conversation>> {
+        let row = sqlx::query(
+            "SELECT conversations.payload
+             FROM conversation_endpoints
+             JOIN conversations ON conversations.id = conversation_endpoints.conversation_id
+             WHERE conversation_endpoints.endpoint_id = ?",
+        )
+        .bind(endpoint_id.to_string())
+        .fetch_optional(&self.pool)
+        .await?;
+        row.map(|row| serde_json::from_str(row.get("payload")))
+            .transpose()
+            .map_err(Into::into)
+    }
+
     async fn conversation_for_source(
         &self,
-        rule_id: &wuphf_model::RuleId,
+        rule_id: &RuleId,
         connector_id: &ConnectorId,
         address: &ChatAddress,
     ) -> StorageResult<Option<Conversation>> {
@@ -242,72 +229,33 @@ impl Storage for SqliteStorage {
             .map_err(Into::into)
     }
 
-    async fn conversation_for_replica_set(
+    async fn add_conversation_endpoint(
         &self,
-        replica_set_id: ReplicaSetId,
-    ) -> StorageResult<Option<Conversation>> {
-        let row = sqlx::query("SELECT payload FROM conversations WHERE replica_set_id = ?")
-            .bind(replica_set_id.to_string())
-            .fetch_optional(&self.pool)
-            .await?;
-        row.map(|row| serde_json::from_str(row.get("payload")))
-            .transpose()
-            .map_err(Into::into)
-    }
-
-    async fn put_thread_mapping(&self, mapping: ThreadMapping) -> StorageResult<()> {
-        sqlx::query(
-            "INSERT INTO thread_mappings (conversation_id, connector_id, container, thread_id)
-             VALUES (?, ?, ?, ?)
-             ON CONFLICT(conversation_id, connector_id) DO UPDATE SET
-               container = excluded.container,
-               thread_id = excluded.thread_id",
-        )
-        .bind(mapping.conversation_id.to_string())
-        .bind(mapping.connector_id.to_string())
-        .bind(&mapping.container)
-        .bind(&mapping.thread_id)
-        .execute(&self.pool)
-        .await?;
+        conversation_id: ConversationId,
+        endpoint_id: EndpointId,
+    ) -> StorageResult<()> {
+        let mut transaction = self.pool.begin().await?;
+        let mut conversation = conversation_in(&mut transaction, conversation_id).await?;
+        if !conversation.endpoints.contains(&endpoint_id) {
+            conversation.endpoints.push(endpoint_id);
+            update_conversation_payload(&mut transaction, &conversation).await?;
+        }
+        insert_conversation_endpoint(&mut transaction, conversation_id, endpoint_id).await?;
+        transaction.commit().await?;
         Ok(())
     }
 
-    async fn thread_for_conversation(
+    async fn set_conversation_title(
         &self,
         conversation_id: ConversationId,
-        connector_id: &ConnectorId,
-    ) -> StorageResult<Option<String>> {
-        let row = sqlx::query(
-            "SELECT thread_id FROM thread_mappings WHERE conversation_id = ? AND connector_id = ?",
-        )
-        .bind(conversation_id.to_string())
-        .bind(connector_id.to_string())
-        .fetch_optional(&self.pool)
-        .await?;
-        Ok(row.map(|row| row.get::<String, _>("thread_id")))
-    }
-
-    async fn conversation_for_thread(
-        &self,
-        connector_id: &ConnectorId,
-        container: &str,
-        thread_id: &str,
-    ) -> StorageResult<Option<ConversationId>> {
-        let row = sqlx::query(
-            "SELECT conversation_id FROM thread_mappings
-             WHERE connector_id = ? AND container = ? AND thread_id = ?",
-        )
-        .bind(connector_id.to_string())
-        .bind(container)
-        .bind(thread_id)
-        .fetch_optional(&self.pool)
-        .await?;
-        row.map(|row| {
-            uuid::Uuid::parse_str(row.get("conversation_id"))
-                .map(ConversationId)
-                .map_err(|err| StorageError::Identifier(err.to_string()))
-        })
-        .transpose()
+        title: &str,
+    ) -> StorageResult<()> {
+        let mut transaction = self.pool.begin().await?;
+        let mut conversation = conversation_in(&mut transaction, conversation_id).await?;
+        conversation.title = Some(title.to_owned());
+        update_conversation_payload(&mut transaction, &conversation).await?;
+        transaction.commit().await?;
+        Ok(())
     }
 
     async fn claim_event(&self, key: DedupKey) -> StorageResult<bool> {
@@ -583,18 +531,18 @@ impl Storage for SqliteStorage {
 
     async fn stash_provisioning_message(
         &self,
-        replica_set_id: ReplicaSetId,
+        conversation_id: ConversationId,
         message_id: MessageId,
         origin_endpoint: EndpointId,
         provision_title: &str,
     ) -> StorageResult<()> {
         sqlx::query(
             "INSERT INTO provisioning_stash
-                 (replica_set_id, message_id, origin_endpoint, provision_title)
+                 (conversation_id, message_id, origin_endpoint, provision_title)
              VALUES (?, ?, ?, ?)
-             ON CONFLICT(replica_set_id, message_id) DO NOTHING",
+             ON CONFLICT(conversation_id, message_id) DO NOTHING",
         )
-        .bind(replica_set_id.to_string())
+        .bind(conversation_id.to_string())
         .bind(message_id.to_string())
         .bind(origin_endpoint.to_string())
         .bind(provision_title)
@@ -605,7 +553,7 @@ impl Storage for SqliteStorage {
 
     async fn drain_provisioning_stash(
         &self,
-        replica_set_id: ReplicaSetId,
+        conversation_id: ConversationId,
     ) -> StorageResult<Vec<(Message, EndpointId, String)>> {
         let mut transaction = self.pool.begin().await?;
         // Join the message body back on; ORDER BY rowid preserves insertion
@@ -614,14 +562,14 @@ impl Storage for SqliteStorage {
             "SELECT stash.origin_endpoint, stash.provision_title, messages.payload AS message
              FROM provisioning_stash AS stash
              JOIN messages ON messages.id = stash.message_id
-             WHERE stash.replica_set_id = ?
+             WHERE stash.conversation_id = ?
              ORDER BY stash.rowid",
         )
-        .bind(replica_set_id.to_string())
+        .bind(conversation_id.to_string())
         .fetch_all(&mut *transaction)
         .await?;
-        sqlx::query("DELETE FROM provisioning_stash WHERE replica_set_id = ?")
-            .bind(replica_set_id.to_string())
+        sqlx::query("DELETE FROM provisioning_stash WHERE conversation_id = ?")
+            .bind(conversation_id.to_string())
             .execute(&mut *transaction)
             .await?;
         transaction.commit().await?;
@@ -636,14 +584,14 @@ impl Storage for SqliteStorage {
         Ok(drained)
     }
 
-    async fn stashed_replica_sets(&self) -> StorageResult<Vec<ReplicaSetId>> {
-        let rows = sqlx::query("SELECT DISTINCT replica_set_id FROM provisioning_stash")
+    async fn stashed_conversations(&self) -> StorageResult<Vec<ConversationId>> {
+        let rows = sqlx::query("SELECT DISTINCT conversation_id FROM provisioning_stash")
             .fetch_all(&self.pool)
             .await?;
         rows.into_iter()
             .map(|row| {
-                uuid::Uuid::parse_str(row.get("replica_set_id"))
-                    .map(ReplicaSetId)
+                uuid::Uuid::parse_str(row.get("conversation_id"))
+                    .map(ConversationId)
                     .map_err(|err| StorageError::Identifier(err.to_string()))
             })
             .collect()
@@ -1038,4 +986,51 @@ fn state_name(state: &DispatchState) -> &'static str {
         DispatchState::Acknowledged { .. } => "acknowledged",
         DispatchState::Failed { .. } => "failed",
     }
+}
+
+type Transaction<'a> = sqlx::Transaction<'a, sqlx::Sqlite>;
+
+/// Read a conversation inside a transaction, for a read-modify-write that must
+/// not race another writer.
+async fn conversation_in(
+    transaction: &mut Transaction<'_>,
+    conversation_id: ConversationId,
+) -> StorageResult<Conversation> {
+    let row = sqlx::query("SELECT payload FROM conversations WHERE id = ?")
+        .bind(conversation_id.to_string())
+        .fetch_optional(&mut **transaction)
+        .await?
+        .ok_or(StorageError::ConversationNotFound(conversation_id))?;
+    Ok(serde_json::from_str(row.get("payload"))?)
+}
+
+/// Rewrite a conversation's payload only. Its identity columns never change
+/// after creation.
+async fn update_conversation_payload(
+    transaction: &mut Transaction<'_>,
+    conversation: &Conversation,
+) -> StorageResult<()> {
+    sqlx::query("UPDATE conversations SET payload = ? WHERE id = ?")
+        .bind(serde_json::to_string(conversation)?)
+        .bind(conversation.id.to_string())
+        .execute(&mut **transaction)
+        .await?;
+    Ok(())
+}
+
+/// Index an endpoint under its conversation. Idempotent.
+async fn insert_conversation_endpoint(
+    transaction: &mut Transaction<'_>,
+    conversation_id: ConversationId,
+    endpoint_id: EndpointId,
+) -> StorageResult<()> {
+    sqlx::query(
+        "INSERT INTO conversation_endpoints (endpoint_id, conversation_id) VALUES (?, ?)
+         ON CONFLICT(endpoint_id) DO UPDATE SET conversation_id = excluded.conversation_id",
+    )
+    .bind(endpoint_id.to_string())
+    .bind(conversation_id.to_string())
+    .execute(&mut **transaction)
+    .await?;
+    Ok(())
 }

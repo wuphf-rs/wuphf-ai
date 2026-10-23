@@ -147,7 +147,7 @@ async fn prunes_only_expired_unreferenced_media<S: Storage>(storage: S) {
     storage
         .put_message(Message {
             id: MessageId::new(),
-            replica_set_id: ReplicaSetId::new(),
+            conversation_id: ConversationId::new(),
             author_id: "test".into(),
             participant: None,
             author_name: None,
@@ -298,7 +298,7 @@ async fn sqlite_settling_a_signal_dispatch_records_no_copy() {
 async fn settling_a_signal_dispatch_records_no_copy<S: Storage>(storage: S) {
     let message_id = MessageId::new();
     let endpoint_id = EndpointId::new();
-    let replica_set_id = message(message_id).replica_set_id;
+    let conversation_id = message(message_id).conversation_id;
     storage.put_endpoint(endpoint(endpoint_id)).await.unwrap();
     storage.put_message(message(message_id)).await.unwrap();
     storage
@@ -337,7 +337,7 @@ async fn settling_a_signal_dispatch_records_no_copy<S: Storage>(storage: S) {
     for action in signals {
         let signal = enqueue(
             &storage,
-            Dispatch::new(target(endpoint_id), replica_set_id, action, None),
+            Dispatch::new(target(endpoint_id), conversation_id, action, None),
         )
         .await;
         let released = storage
@@ -402,48 +402,122 @@ async fn fail_dispatch_removes_from_pending<S: Storage>(storage: S) {
 }
 
 #[tokio::test]
-async fn memory_replica_set_for_endpoint_resolves_membership() {
-    replica_set_for_endpoint_resolves_membership(InMemoryStorage::default()).await;
+async fn memory_conversation_endpoints_are_indexed_and_added_idempotently() {
+    conversation_endpoints_are_indexed_and_added_idempotently(InMemoryStorage::default()).await;
 }
 
 #[tokio::test]
-async fn sqlite_replica_set_for_endpoint_resolves_membership() {
+async fn sqlite_conversation_endpoints_are_indexed_and_added_idempotently() {
     let path = std::env::temp_dir().join(format!("wuphf-set-{}.sqlite", DispatchId::new()));
     let url = format!("sqlite://{}", path.display());
-    replica_set_for_endpoint_resolves_membership(SqliteStorage::connect(&url).await.unwrap()).await;
+    conversation_endpoints_are_indexed_and_added_idempotently(
+        SqliteStorage::connect(&url).await.unwrap(),
+    )
+    .await;
 }
 
-/// `replica_set_for_endpoint` returns the set that contains an endpoint and
-/// `None` for an endpoint in no set.
-async fn replica_set_for_endpoint_resolves_membership<S: Storage>(storage: S) {
+/// `conversation_for_endpoint` finds the conversation listing an endpoint,
+/// whether it was listed at creation or added later, and adding the same
+/// endpoint twice leaves one entry.
+async fn conversation_endpoints_are_indexed_and_added_idempotently<S: Storage>(storage: S) {
     let endpoint_a = EndpointId::new();
     let endpoint_b = EndpointId::new();
-    let set_id = ReplicaSetId::new();
-    storage.put_endpoint(endpoint(endpoint_a)).await.unwrap();
-    storage.put_endpoint(endpoint(endpoint_b)).await.unwrap();
+    let conversation = conversation(vec![endpoint_a]);
     storage
-        .put_replica_set(ReplicaSet {
-            id: set_id,
-            endpoints: vec![endpoint_a, endpoint_b],
-        })
+        .put_conversation(conversation.clone())
         .await
         .unwrap();
 
-    assert_eq!(
-        storage.replica_set_for_endpoint(endpoint_a).await.unwrap(),
-        Some(set_id)
-    );
-    assert_eq!(
-        storage.replica_set_for_endpoint(endpoint_b).await.unwrap(),
-        Some(set_id)
-    );
+    storage
+        .add_conversation_endpoint(conversation.id, endpoint_b)
+        .await
+        .unwrap();
+    storage
+        .add_conversation_endpoint(conversation.id, endpoint_b)
+        .await
+        .unwrap();
+
+    for endpoint_id in [endpoint_a, endpoint_b] {
+        let found = storage
+            .conversation_for_endpoint(endpoint_id)
+            .await
+            .unwrap()
+            .expect("the endpoint belongs to the conversation");
+        assert_eq!(found.id, conversation.id);
+        assert_eq!(found.endpoints, vec![endpoint_a, endpoint_b]);
+    }
     assert_eq!(
         storage
-            .replica_set_for_endpoint(EndpointId::new())
+            .conversation_for_endpoint(EndpointId::new())
             .await
             .unwrap(),
         None
     );
+}
+
+#[tokio::test]
+async fn memory_setting_a_title_keeps_the_endpoints() {
+    setting_a_title_keeps_the_endpoints(InMemoryStorage::default()).await;
+}
+
+#[tokio::test]
+async fn sqlite_setting_a_title_keeps_the_endpoints() {
+    let path = std::env::temp_dir().join(format!("wuphf-title-{}.sqlite", DispatchId::new()));
+    let url = format!("sqlite://{}", path.display());
+    setting_a_title_keeps_the_endpoints(SqliteStorage::connect(&url).await.unwrap()).await;
+}
+
+/// A title update writes only the title, so an endpoint added since the
+/// caller read the conversation survives it. Both narrow writers reject an
+/// unknown conversation.
+async fn setting_a_title_keeps_the_endpoints<S: Storage>(storage: S) {
+    let endpoint_a = EndpointId::new();
+    let endpoint_b = EndpointId::new();
+    let conversation = conversation(vec![endpoint_a]);
+    storage
+        .put_conversation(conversation.clone())
+        .await
+        .unwrap();
+    storage
+        .add_conversation_endpoint(conversation.id, endpoint_b)
+        .await
+        .unwrap();
+
+    storage
+        .set_conversation_title(conversation.id, "Priya")
+        .await
+        .unwrap();
+
+    let stored = storage
+        .conversation(conversation.id)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(stored.title.as_deref(), Some("Priya"));
+    assert_eq!(stored.endpoints, vec![endpoint_a, endpoint_b]);
+
+    let missing = ConversationId::new();
+    assert!(matches!(
+        storage.set_conversation_title(missing, "x").await,
+        Err(StorageError::ConversationNotFound(id)) if id == missing
+    ));
+    assert!(matches!(
+        storage.add_conversation_endpoint(missing, endpoint_a).await,
+        Err(StorageError::ConversationNotFound(id)) if id == missing
+    ));
+}
+
+fn conversation(endpoints: Vec<EndpointId>) -> Conversation {
+    Conversation {
+        id: ConversationId::new(),
+        rule_id: Some(wuphf_model::RuleId("mirror".into())),
+        source: wuphf_model::ChatRef {
+            connector_id: ConnectorId("whatsapp".into()),
+            address: wuphf_model::ChatAddress::new("wa-chat", None),
+        },
+        endpoints,
+        title: None,
+    }
 }
 
 fn attachment() -> Attachment {
@@ -470,7 +544,7 @@ fn endpoint(endpoint_id: EndpointId) -> Endpoint {
 fn message(message_id: MessageId) -> Message {
     Message {
         id: message_id,
-        replica_set_id: ReplicaSetId::new(),
+        conversation_id: ConversationId::new(),
         author_id: "test".into(),
         participant: None,
         author_name: None,
@@ -634,7 +708,7 @@ fn send(
     let message = message(message_id);
     Dispatch::new(
         target(endpoint_id),
-        message.replica_set_id,
+        message.conversation_id,
         Action::Send {
             message,
             reply: None,
@@ -651,7 +725,7 @@ fn edit(
     let message = message(message_id);
     Dispatch::new(
         target(endpoint_id),
-        message.replica_set_id,
+        message.conversation_id,
         Action::Edit {
             message,
             native_id: String::new(),
@@ -710,9 +784,9 @@ async fn sqlite_provisioning_stash_drains_in_insertion_order() {
 
 /// Stashed messages drain in insertion order resolved back to full messages;
 /// stashing the same message twice is a no-op; a second drain is empty; and
-/// `stashed_replica_sets` lists the set before the drain and not after.
+/// `stashed_conversations` lists the conversation before the drain and not after.
 async fn provisioning_stash_drains_in_insertion_order<S: Storage>(storage: S) {
-    let replica_set_id = ReplicaSetId::new();
+    let conversation_id = ConversationId::new();
     let endpoint_id = EndpointId::new();
     let first = MessageId::new();
     let second = MessageId::new();
@@ -720,26 +794,26 @@ async fn provisioning_stash_drains_in_insertion_order<S: Storage>(storage: S) {
     storage.put_message(message(second)).await.unwrap();
 
     storage
-        .stash_provisioning_message(replica_set_id, first, endpoint_id, "Title")
+        .stash_provisioning_message(conversation_id, first, endpoint_id, "Title")
         .await
         .unwrap();
     // A duplicate stash of the same message must not add a second row.
     storage
-        .stash_provisioning_message(replica_set_id, first, endpoint_id, "Title")
+        .stash_provisioning_message(conversation_id, first, endpoint_id, "Title")
         .await
         .unwrap();
     storage
-        .stash_provisioning_message(replica_set_id, second, endpoint_id, "Title")
+        .stash_provisioning_message(conversation_id, second, endpoint_id, "Title")
         .await
         .unwrap();
 
     assert_eq!(
-        storage.stashed_replica_sets().await.unwrap(),
-        vec![replica_set_id]
+        storage.stashed_conversations().await.unwrap(),
+        vec![conversation_id]
     );
 
     let drained = storage
-        .drain_provisioning_stash(replica_set_id)
+        .drain_provisioning_stash(conversation_id)
         .await
         .unwrap();
     assert_eq!(
@@ -755,12 +829,12 @@ async fn provisioning_stash_drains_in_insertion_order<S: Storage>(storage: S) {
     // The drain removed the rows: a second drain is empty and the set is gone.
     assert!(
         storage
-            .drain_provisioning_stash(replica_set_id)
+            .drain_provisioning_stash(conversation_id)
             .await
             .unwrap()
             .is_empty()
     );
-    assert!(storage.stashed_replica_sets().await.unwrap().is_empty());
+    assert!(storage.stashed_conversations().await.unwrap().is_empty());
 }
 
 #[tokio::test]

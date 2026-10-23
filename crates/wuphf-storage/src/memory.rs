@@ -9,8 +9,7 @@ use tokio::sync::RwLock;
 use wuphf_model::{
     AddressLink, Alias, ChatAddress, ConnectorId, Conversation, ConversationId, DedupKey, Dispatch,
     DispatchId, DispatchState, Endpoint, EndpointId, MediaBlob, MediaId, Message, MessageCopy,
-    MessageId, ObservedChat, ObservedDirection, ObservedMessage, ReplicaSet, ReplicaSetId,
-    ThreadMapping,
+    MessageId, ObservedChat, ObservedDirection, ObservedMessage, RuleId,
 };
 
 #[derive(Default)]
@@ -21,14 +20,12 @@ pub struct InMemoryStorage {
 #[derive(Default)]
 struct State {
     endpoints: HashMap<EndpointId, Endpoint>,
-    replica_sets: HashMap<ReplicaSetId, ReplicaSet>,
     aliases: HashMap<(ConnectorId, ChatAddress), Alias>,
     /// Symmetric address equivalences, mirroring the SQLite `address_links`
     /// table. Kept apart from `aliases` because a link exists with or without an
     /// endpoint behind either address.
     address_links: HashMap<(ConnectorId, ChatAddress), Vec<ChatAddress>>,
     conversations: HashMap<ConversationId, Conversation>,
-    thread_mappings: HashMap<(ConversationId, ConnectorId), ThreadMapping>,
     messages: HashMap<MessageId, Message>,
     copies: HashMap<(MessageId, EndpointId), MessageCopy>,
     copy_ids: HashMap<(EndpointId, String), MessageId>,
@@ -36,10 +33,10 @@ struct State {
     seen_events: HashSet<DedupKey>,
     media: HashMap<MediaId, StoredMedia>,
     dispatches: HashMap<DispatchId, Dispatch>,
-    /// Provisioning stash, keyed by replica set, insertion-ordered. Mirrors the
+    /// Provisioning stash, keyed by conversation, insertion-ordered. Mirrors the
     /// SQLite `provisioning_stash` table; the message body is resolved from
     /// `messages` on drain.
-    provisioning_stash: HashMap<ReplicaSetId, Vec<(MessageId, EndpointId, String)>>,
+    provisioning_stash: HashMap<ConversationId, Vec<(MessageId, EndpointId, String)>>,
     observed_messages: HashMap<(ConnectorId, String, String), ObservedMessage>,
     observed_chats: HashMap<(ConnectorId, String), ObservedChat>,
 }
@@ -68,39 +65,6 @@ impl Storage for InMemoryStorage {
             .get(&endpoint_id)
             .cloned()
             .ok_or(StorageError::EndpointNotFound(endpoint_id))
-    }
-
-    async fn put_replica_set(&self, replica_set: ReplicaSet) -> StorageResult<()> {
-        self.state
-            .write()
-            .await
-            .replica_sets
-            .insert(replica_set.id, replica_set);
-        Ok(())
-    }
-
-    async fn replica_set(&self, replica_set_id: ReplicaSetId) -> StorageResult<ReplicaSet> {
-        self.state
-            .read()
-            .await
-            .replica_sets
-            .get(&replica_set_id)
-            .cloned()
-            .ok_or(StorageError::ReplicaSetNotFound(replica_set_id))
-    }
-
-    async fn replica_set_for_endpoint(
-        &self,
-        endpoint_id: EndpointId,
-    ) -> StorageResult<Option<ReplicaSetId>> {
-        Ok(self
-            .state
-            .read()
-            .await
-            .replica_sets
-            .values()
-            .find(|replica_set| replica_set.endpoints.contains(&endpoint_id))
-            .map(|replica_set| replica_set.id))
     }
 
     async fn put_alias(&self, alias: Alias) -> StorageResult<()> {
@@ -189,9 +153,23 @@ impl Storage for InMemoryStorage {
             .cloned())
     }
 
+    async fn conversation_for_endpoint(
+        &self,
+        endpoint_id: EndpointId,
+    ) -> StorageResult<Option<Conversation>> {
+        Ok(self
+            .state
+            .read()
+            .await
+            .conversations
+            .values()
+            .find(|conversation| conversation.endpoints.contains(&endpoint_id))
+            .cloned())
+    }
+
     async fn conversation_for_source(
         &self,
-        rule_id: &wuphf_model::RuleId,
+        rule_id: &RuleId,
         connector_id: &ConnectorId,
         address: &ChatAddress,
     ) -> StorageResult<Option<Conversation>> {
@@ -202,67 +180,42 @@ impl Storage for InMemoryStorage {
             .conversations
             .values()
             .find(|conversation| {
-                conversation.rule_id == *rule_id
-                    && conversation.source_connector == *connector_id
-                    && conversation.source_address == *address
+                conversation.rule_id.as_ref() == Some(rule_id)
+                    && conversation.source.connector_id == *connector_id
+                    && conversation.source.address == *address
             })
             .cloned())
     }
 
-    async fn conversation_for_replica_set(
+    async fn add_conversation_endpoint(
         &self,
-        replica_set_id: ReplicaSetId,
-    ) -> StorageResult<Option<Conversation>> {
-        Ok(self
-            .state
-            .read()
-            .await
+        conversation_id: ConversationId,
+        endpoint_id: EndpointId,
+    ) -> StorageResult<()> {
+        let mut state = self.state.write().await;
+        let conversation = state
             .conversations
-            .values()
-            .find(|conversation| conversation.replica_set_id == replica_set_id)
-            .cloned())
-    }
-
-    async fn put_thread_mapping(&self, mapping: ThreadMapping) -> StorageResult<()> {
-        self.state.write().await.thread_mappings.insert(
-            (mapping.conversation_id, mapping.connector_id.clone()),
-            mapping,
-        );
+            .get_mut(&conversation_id)
+            .ok_or(StorageError::ConversationNotFound(conversation_id))?;
+        if !conversation.endpoints.contains(&endpoint_id) {
+            conversation.endpoints.push(endpoint_id);
+        }
         Ok(())
     }
 
-    async fn thread_for_conversation(
+    async fn set_conversation_title(
         &self,
         conversation_id: ConversationId,
-        connector_id: &ConnectorId,
-    ) -> StorageResult<Option<String>> {
-        Ok(self
-            .state
-            .read()
+        title: &str,
+    ) -> StorageResult<()> {
+        self.state
+            .write()
             .await
-            .thread_mappings
-            .get(&(conversation_id, connector_id.clone()))
-            .map(|mapping| mapping.thread_id.clone()))
-    }
-
-    async fn conversation_for_thread(
-        &self,
-        connector_id: &ConnectorId,
-        container: &str,
-        thread_id: &str,
-    ) -> StorageResult<Option<ConversationId>> {
-        Ok(self
-            .state
-            .read()
-            .await
-            .thread_mappings
-            .values()
-            .find(|mapping| {
-                mapping.connector_id == *connector_id
-                    && mapping.container == container
-                    && mapping.thread_id == thread_id
-            })
-            .map(|mapping| mapping.conversation_id))
+            .conversations
+            .get_mut(&conversation_id)
+            .ok_or(StorageError::ConversationNotFound(conversation_id))?
+            .title = Some(title.to_owned());
+        Ok(())
     }
 
     async fn claim_event(&self, key: DedupKey) -> StorageResult<bool> {
@@ -480,14 +433,14 @@ impl Storage for InMemoryStorage {
 
     async fn stash_provisioning_message(
         &self,
-        replica_set_id: ReplicaSetId,
+        conversation_id: ConversationId,
         message_id: MessageId,
         origin_endpoint: EndpointId,
         provision_title: &str,
     ) -> StorageResult<()> {
         let mut state = self.state.write().await;
-        let entries = state.provisioning_stash.entry(replica_set_id).or_default();
-        // Idempotent on (replica_set_id, message_id), matching the SQLite PK.
+        let entries = state.provisioning_stash.entry(conversation_id).or_default();
+        // Idempotent on (conversation_id, message_id), matching the SQLite PK.
         if entries.iter().any(|(id, _, _)| *id == message_id) {
             return Ok(());
         }
@@ -497,10 +450,10 @@ impl Storage for InMemoryStorage {
 
     async fn drain_provisioning_stash(
         &self,
-        replica_set_id: ReplicaSetId,
+        conversation_id: ConversationId,
     ) -> StorageResult<Vec<(Message, EndpointId, String)>> {
         let mut state = self.state.write().await;
-        let Some(entries) = state.provisioning_stash.remove(&replica_set_id) else {
+        let Some(entries) = state.provisioning_stash.remove(&conversation_id) else {
             return Ok(Vec::new());
         };
         // Resolve each row back to its message body, dropping any whose message
@@ -518,7 +471,7 @@ impl Storage for InMemoryStorage {
         Ok(drained)
     }
 
-    async fn stashed_replica_sets(&self) -> StorageResult<Vec<ReplicaSetId>> {
+    async fn stashed_conversations(&self) -> StorageResult<Vec<ConversationId>> {
         Ok(self
             .state
             .read()

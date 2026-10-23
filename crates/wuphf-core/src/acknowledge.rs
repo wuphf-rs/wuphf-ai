@@ -4,8 +4,8 @@
 
 use crate::{Core, CoreError};
 use wuphf_model::{
-    AddressLink, Alias, ChatAddress, ConnectorId, Dispatch, DispatchAck, DispatchId, EndpointId,
-    MessageCopy, MessageId, ReplicaSetId,
+    AddressLink, Alias, ChatAddress, ConnectorId, ConversationId, Dispatch, DispatchAck,
+    DispatchId, EndpointId, MessageCopy, MessageId,
 };
 use wuphf_storage::Storage;
 
@@ -76,7 +76,7 @@ where
                 address: endpoint.address(),
                 create_thread: None,
             },
-            dispatch.replica_set_id,
+            dispatch.conversation_id,
             wuphf_model::Action::Receipt {
                 message_id,
                 native_id: origin.native_id,
@@ -96,32 +96,32 @@ where
         &self,
         dispatch: &Dispatch,
     ) -> Result<Vec<Dispatch>, CoreError> {
-        let replica_set_id = dispatch.replica_set_id;
+        let conversation_id = dispatch.conversation_id;
         {
             let mut provisioning = self.provisioning.lock().unwrap();
-            let Some(state) = provisioning.get_mut(&replica_set_id) else {
+            let Some(state) = provisioning.get_mut(&conversation_id) else {
                 return Ok(Vec::new());
             };
             state.pending.remove(&dispatch.id);
             if !state.pending.is_empty() {
                 return Ok(Vec::new());
             }
-            provisioning.remove(&replica_set_id);
+            provisioning.remove(&conversation_id);
         }
-        self.replay_stash(replica_set_id).await
+        self.replay_stash(conversation_id).await
     }
 
-    /// Drain the durable provisioning stash for a replica set and re-route each
+    /// Drain the durable provisioning stash for a conversation and re-route each
     /// held message, returning the resulting dispatches. Replay re-attempts
     /// provisioning if the thread still does not exist (a failed provision), so
     /// the conversation is not stranded.
     pub(crate) async fn replay_stash(
         &self,
-        replica_set_id: ReplicaSetId,
+        conversation_id: ConversationId,
     ) -> Result<Vec<Dispatch>, CoreError> {
         let stash = self
             .storage
-            .drain_provisioning_stash(replica_set_id)
+            .drain_provisioning_stash(conversation_id)
             .await?;
         let mut dispatches = Vec::new();
         for (message, origin_endpoint, provision_title) in stash {
@@ -141,14 +141,14 @@ where
     /// race, otherwise empty (the message waits for the provision to settle).
     pub(crate) async fn stash_deferred(
         &self,
-        replica_set_id: ReplicaSetId,
+        conversation_id: ConversationId,
         message_id: MessageId,
         origin_endpoint: EndpointId,
         provision_title: &str,
     ) -> Result<Vec<Dispatch>, CoreError> {
         self.storage
             .stash_provisioning_message(
-                replica_set_id,
+                conversation_id,
                 message_id,
                 origin_endpoint,
                 provision_title,
@@ -156,19 +156,19 @@ where
             .await?;
         let settled = {
             let provisioning = self.provisioning.lock().unwrap();
-            !provisioning.contains_key(&replica_set_id)
+            !provisioning.contains_key(&conversation_id)
         };
         if settled {
-            self.replay_stash(replica_set_id).await
+            self.replay_stash(conversation_id).await
         } else {
             Ok(Vec::new())
         }
     }
 
     /// Rebuild the provisioning cache from storage after a restart: every pending
-    /// dispatch that provisions a thread re-registers its replica set, so a later
+    /// dispatch that provisions a thread re-registers its conversation, so a later
     /// acknowledgement finds the set and drains its durable stash. Any stashed
-    /// replica set with no such dispatch left — its provision was acknowledged or
+    /// conversation with no such dispatch left — its provision was acknowledged or
     /// failed in a previous run, or was lost — is drained and replayed
     /// immediately, and the resulting dispatches returned for delivery.
     pub async fn recover_provisioning(&self) -> Result<Vec<Dispatch>, CoreError> {
@@ -178,7 +178,7 @@ where
             for dispatch in &pending {
                 if dispatch.to.create_thread.is_some() {
                     provisioning
-                        .entry(dispatch.replica_set_id)
+                        .entry(dispatch.conversation_id)
                         .or_default()
                         .pending
                         .insert(dispatch.id);
@@ -186,60 +186,39 @@ where
             }
         }
         let mut dispatches = Vec::new();
-        for replica_set_id in self.storage.stashed_replica_sets().await? {
+        for conversation_id in self.storage.stashed_conversations().await? {
             let outstanding = {
                 let provisioning = self.provisioning.lock().unwrap();
                 provisioning
-                    .get(&replica_set_id)
+                    .get(&conversation_id)
                     .is_some_and(|state| !state.pending.is_empty())
             };
             if !outstanding {
-                dispatches.extend(self.replay_stash(replica_set_id).await?);
+                dispatches.extend(self.replay_stash(conversation_id).await?);
             }
         }
         Ok(dispatches)
     }
 
     /// Record the thread a mirror dispatch created: stamp it onto the endpoint,
-    /// register an alias so replies typed into the topic resolve back, and map
-    /// the conversation to the thread.
+    /// which is where routing reads it from, and register an alias so replies
+    /// typed into the topic resolve back.
     async fn persist_provisioned_thread(
         &self,
         dispatch: &Dispatch,
         thread_id: String,
     ) -> Result<(), CoreError> {
-        let connector = dispatch.to.connector_id.clone();
-        // A thread is always created inside the target chat, so that chat is
-        // the thread's container.
-        let container = dispatch.to.address.chat_id.clone();
-
         let mut endpoint = self.storage.endpoint(dispatch.to.endpoint_id).await?;
-        endpoint.thread_id = Some(thread_id.clone());
+        endpoint.thread_id = Some(thread_id);
         self.storage.put_endpoint(endpoint.clone()).await?;
         self.storage
             .put_alias(Alias {
-                connector_id: connector.clone(),
+                connector_id: dispatch.to.connector_id.clone(),
                 address: endpoint.address(),
                 endpoint_id: endpoint.id,
                 is_canonical: true,
             })
             .await?;
-
-        let replica_set_id = dispatch.replica_set_id;
-        if let Some(conversation) = self
-            .storage
-            .conversation_for_replica_set(replica_set_id)
-            .await?
-        {
-            self.storage
-                .put_thread_mapping(wuphf_model::ThreadMapping {
-                    conversation_id: conversation.id,
-                    connector_id: connector,
-                    container,
-                    thread_id,
-                })
-                .await?;
-        }
         Ok(())
     }
 

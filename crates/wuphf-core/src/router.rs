@@ -7,7 +7,7 @@ use crate::config::RoutingConfig;
 use std::sync::Arc;
 use thiserror::Error;
 use wuphf_model::{
-    Action, ChatAddress, ConnectorId, Conversation, Dispatch, Endpoint, EndpointId, Message,
+    Action, ConnectorId, Conversation, ConversationId, Dispatch, Endpoint, EndpointId, Message,
     MessageId, ReceiptKind, ReplyContext, Rule, RuleKind, Target,
 };
 use wuphf_storage::{Storage, StorageError};
@@ -41,8 +41,10 @@ fn is_mirror_side(rule: &Rule, connector: &ConnectorId, container: &str) -> bool
 pub enum RouterError {
     #[error(transparent)]
     Storage(#[from] StorageError),
-    #[error("origin endpoint {0} is not a member of the replica set")]
-    OriginOutsideReplicaSet(EndpointId),
+    #[error("message conversation {0} is not stored")]
+    ConversationNotFound(ConversationId),
+    #[error("origin endpoint {0} is not a member of the conversation")]
+    OriginOutsideConversation(EndpointId),
     #[error("reply parent message {0} is not stored")]
     MessageNotFound(MessageId),
 }
@@ -51,7 +53,7 @@ impl<S> Router<S>
 where
     S: Storage,
 {
-    /// Fan a new message out to every other endpoint in its replica set. A
+    /// Fan a new message out to every other endpoint in its conversation. A
     /// reply whose parent has no copy at a target yet is blocked on the parent
     /// there, and gains the quote when the parent is delivered.
     pub async fn route(
@@ -60,24 +62,18 @@ where
         origin_endpoint: EndpointId,
         provision_title: &str,
     ) -> Result<Vec<Dispatch>, RouterError> {
-        let replica_set = self.storage.replica_set(message.replica_set_id).await?;
-        if !replica_set.endpoints.contains(&origin_endpoint) {
-            return Err(RouterError::OriginOutsideReplicaSet(origin_endpoint));
-        }
-        let conversation = self
-            .storage
-            .conversation_for_replica_set(message.replica_set_id)
-            .await?;
+        let conversation = self.origin_conversation(message, origin_endpoint).await?;
 
         let mut dispatches = Vec::new();
-        for endpoint_id in replica_set
+        for endpoint_id in conversation
             .endpoints
-            .into_iter()
+            .iter()
+            .copied()
             .filter(|endpoint_id| *endpoint_id != origin_endpoint)
         {
             let endpoint = self.storage.endpoint(endpoint_id).await?;
             let target = self
-                .resolve_target(&endpoint, conversation.as_ref(), provision_title)
+                .resolve_target(&endpoint, &conversation, provision_title)
                 .await?;
 
             let (reply, waiting_for) = match message.reply_to {
@@ -112,7 +108,7 @@ where
 
             dispatches.push(Dispatch::new(
                 target,
-                message.replica_set_id,
+                message.conversation_id,
                 Action::Send {
                     message: message.clone(),
                     reply,
@@ -124,7 +120,7 @@ where
     }
 
     /// Fan an edit of an already-routed message out to every other endpoint in
-    /// the replica set. A target whose copy already exists is dispatched
+    /// the conversation. A target whose copy already exists is dispatched
     /// immediately, carrying that copy's native id to edit; a target whose
     /// send has not been acknowledged yet is blocked on the message and gains
     /// its native id when the send is acknowledged.
@@ -196,7 +192,7 @@ where
     }
 
     /// Fan an operation on an existing message out to every other endpoint in
-    /// the replica set. Each target either carries the native id of its copy or
+    /// the conversation. Each target either carries the native id of its copy or
     /// is blocked on the message until that copy is delivered. `action_for`
     /// builds the per-target action from the native id — empty while blocked
     /// and bound on release.
@@ -206,13 +202,10 @@ where
         origin_endpoint: EndpointId,
         action_for: impl Fn(String) -> Action,
     ) -> Result<Vec<Dispatch>, RouterError> {
-        let replica_set = self.storage.replica_set(message.replica_set_id).await?;
-        if !replica_set.endpoints.contains(&origin_endpoint) {
-            return Err(RouterError::OriginOutsideReplicaSet(origin_endpoint));
-        }
+        let conversation = self.origin_conversation(message, origin_endpoint).await?;
 
         let mut dispatches = Vec::new();
-        for endpoint_id in replica_set
+        for endpoint_id in conversation
             .endpoints
             .into_iter()
             .filter(|endpoint_id| *endpoint_id != origin_endpoint)
@@ -234,7 +227,7 @@ where
             };
             dispatches.push(Dispatch::new(
                 target,
-                message.replica_set_id,
+                message.conversation_id,
                 action_for(native_id),
                 waiting_for,
             ));
@@ -251,34 +244,20 @@ where
         conversation: &Conversation,
         title: &str,
     ) -> Result<Vec<Dispatch>, RouterError> {
-        let replica_set = self
-            .storage
-            .replica_set(conversation.replica_set_id)
-            .await?;
-        let Some(rule) = self.config.rule(&conversation.rule_id) else {
-            return Ok(Vec::new());
-        };
         let mut dispatches = Vec::new();
-        for endpoint_id in replica_set.endpoints {
-            let endpoint = self.storage.endpoint(endpoint_id).await?;
-            if !is_mirror_side(rule, &endpoint.connector_id, &endpoint.chat_id) {
+        for endpoint_id in &conversation.endpoints {
+            let endpoint = self.storage.endpoint(*endpoint_id).await?;
+            if endpoint.thread_id.is_none() || !self.is_mirror(conversation, &endpoint) {
                 continue;
             }
-            let Some(thread) = self
-                .storage
-                .thread_for_conversation(conversation.id, &endpoint.connector_id)
-                .await?
-            else {
-                continue;
-            };
             dispatches.push(Dispatch::new(
                 Target {
-                    endpoint_id,
+                    endpoint_id: endpoint.id,
                     connector_id: endpoint.connector_id.clone(),
-                    address: ChatAddress::new(endpoint.chat_id.clone(), Some(thread)),
+                    address: endpoint.address(),
                     create_thread: None,
                 },
-                conversation.replica_set_id,
+                conversation.id,
                 Action::RenameThread {
                     title: title.to_owned(),
                 },
@@ -288,35 +267,50 @@ where
         Ok(dispatches)
     }
 
-    /// Resolve the platform destination for one target endpoint. Mirror
-    /// endpoints either reuse their provisioned thread or ask the connector to
-    /// create one inside the mirror chat; all other endpoints send to their
-    /// canonical address.
+    /// The conversation a message belongs to, checked to contain the endpoint
+    /// it is being routed from.
+    async fn origin_conversation(
+        &self,
+        message: &Message,
+        origin_endpoint: EndpointId,
+    ) -> Result<Conversation, RouterError> {
+        let conversation = self
+            .storage
+            .conversation(message.conversation_id)
+            .await?
+            .ok_or(RouterError::ConversationNotFound(message.conversation_id))?;
+        if !conversation.endpoints.contains(&origin_endpoint) {
+            return Err(RouterError::OriginOutsideConversation(origin_endpoint));
+        }
+        Ok(conversation)
+    }
+
+    /// Whether the endpoint is the mirror side of its conversation's rule: a
+    /// many-to-one destination, where each conversation gets its own thread.
+    fn is_mirror(&self, conversation: &Conversation, endpoint: &Endpoint) -> bool {
+        conversation
+            .rule_id
+            .as_ref()
+            .and_then(|rule_id| self.config.rule(rule_id))
+            .is_some_and(|rule| is_mirror_side(rule, &endpoint.connector_id, &endpoint.chat_id))
+    }
+
+    /// Resolve the platform destination for one target endpoint. A mirror
+    /// endpoint reuses the thread stamped on it once provisioned, or asks the
+    /// connector to create one inside the mirror chat; every other endpoint
+    /// sends to its canonical address.
     async fn resolve_target(
         &self,
         endpoint: &Endpoint,
-        conversation: Option<&Conversation>,
+        conversation: &Conversation,
         provision_title: &str,
     ) -> Result<Target, RouterError> {
-        let mut target = Target {
+        let needs_thread = endpoint.thread_id.is_none() && self.is_mirror(conversation, endpoint);
+        Ok(Target {
             endpoint_id: endpoint.id,
             connector_id: endpoint.connector_id.clone(),
             address: endpoint.address(),
-            create_thread: None,
-        };
-        if let Some(conversation) = conversation
-            && let Some(rule) = self.config.rule(&conversation.rule_id)
-            && is_mirror_side(rule, &endpoint.connector_id, &endpoint.chat_id)
-        {
-            let thread = self
-                .storage
-                .thread_for_conversation(conversation.id, &endpoint.connector_id)
-                .await?;
-            if thread.is_none() {
-                target.create_thread = Some(provision_title.to_owned());
-            }
-            target.address = ChatAddress::new(endpoint.chat_id.clone(), thread);
-        }
-        Ok(target)
+            create_thread: needs_thread.then(|| provision_title.to_owned()),
+        })
     }
 }
