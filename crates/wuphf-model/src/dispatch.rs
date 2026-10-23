@@ -226,3 +226,125 @@ pub struct OwnerSendOutcome {
     pub direct: Dispatch,
     pub mirrored: Vec<Dispatch>,
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn target() -> Target {
+        Target {
+            endpoint_id: EndpointId::new(),
+            connector_id: ConnectorId("telegram".into()),
+            address: ChatAddress::new("-100", None),
+            create_thread: None,
+        }
+    }
+
+    fn message() -> Message {
+        Message {
+            id: MessageId::new(),
+            replica_set_id: ReplicaSetId::new(),
+            author_id: "alice".into(),
+            participant: None,
+            author_name: None,
+            text: Some("hi".into()),
+            attachments: Vec::new(),
+            reply_to: None,
+            timestamp_ms: 0,
+            deleted: false,
+        }
+    }
+
+    /// One action of every kind, paired with whether it records a copy.
+    fn actions() -> Vec<(Action, bool)> {
+        let message = message();
+        vec![
+            (
+                Action::Send {
+                    message: message.clone(),
+                    reply: None,
+                },
+                true,
+            ),
+            (
+                Action::Edit {
+                    message: message.clone(),
+                    native_id: String::new(),
+                },
+                true,
+            ),
+            (
+                Action::Delete {
+                    message_id: message.id,
+                    native_id: String::new(),
+                },
+                true,
+            ),
+            (
+                Action::React {
+                    message_id: message.id,
+                    native_id: String::new(),
+                    reactor: "bob".into(),
+                    reactor_name: None,
+                    emoji: None,
+                },
+                false,
+            ),
+            (
+                Action::Receipt {
+                    message_id: message.id,
+                    native_id: String::new(),
+                    kind: ReceiptKind::Delivered,
+                },
+                false,
+            ),
+            (
+                Action::RenameThread {
+                    title: "title".into(),
+                },
+                false,
+            ),
+        ]
+    }
+
+    #[test]
+    fn new_dispatch_is_pending_unless_it_waits_for_a_message() {
+        let action = || Action::RenameThread {
+            title: "title".into(),
+        };
+        let ready = Dispatch::new(target(), ReplicaSetId::new(), action(), None);
+        assert!(ready.is_pending());
+
+        let parent = MessageId::new();
+        let blocked = Dispatch::new(target(), ReplicaSetId::new(), action(), Some(parent));
+        assert!(!blocked.is_pending());
+        assert_eq!(
+            blocked.state,
+            DispatchState::Blocked {
+                waiting_for: parent
+            }
+        );
+    }
+
+    #[test]
+    fn only_sends_edits_and_deletes_record_a_copy() {
+        for (action, records) in actions() {
+            let dispatch = Dispatch::new(target(), ReplicaSetId::new(), action, None);
+            assert_eq!(dispatch.records_copy(), records, "{:?}", dispatch.action);
+        }
+    }
+
+    #[test]
+    fn only_a_thread_rename_has_no_message() {
+        for (action, _) in actions() {
+            let renames = matches!(action, Action::RenameThread { .. });
+            let dispatch = Dispatch::new(target(), ReplicaSetId::new(), action, None);
+            assert_eq!(
+                dispatch.message_id().is_none(),
+                renames,
+                "{:?}",
+                dispatch.action
+            );
+        }
+    }
+}

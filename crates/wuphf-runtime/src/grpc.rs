@@ -456,3 +456,88 @@ fn required_string(value: String, name: &str) -> Result<String, WireError> {
         Ok(value)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use wuphf_model::{Dispatch, EndpointId, Message, MessageId, ReplicaSetId, Target};
+
+    fn dispatch(action: Action, create_thread: Option<String>) -> Dispatch {
+        Dispatch::new(
+            Target {
+                endpoint_id: EndpointId::new(),
+                connector_id: ConnectorId("telegram".into()),
+                address: ChatAddress::new("tg-chat", None),
+                create_thread,
+            },
+            ReplicaSetId::new(),
+            action,
+            None,
+        )
+    }
+
+    fn body(dispatch: Dispatch) -> pb::server_frame::Body {
+        output_to_proto(ConnectorOutput::Dispatch(Box::new(dispatch)))
+            .body
+            .unwrap()
+    }
+
+    fn receipt(kind: ReceiptKind) -> Action {
+        Action::Receipt {
+            message_id: MessageId::new(),
+            native_id: "wa-1".into(),
+            kind,
+        }
+    }
+
+    /// The model folds delivery acks and seen receipts into one action; the
+    /// wire keeps a frame for each, chosen by the receipt kind.
+    #[test]
+    fn receipts_map_to_their_own_frames() {
+        let pb::server_frame::Body::DeliveryAck(ack) =
+            body(dispatch(receipt(ReceiptKind::Delivered), None))
+        else {
+            panic!("a delivered receipt is a DeliveryAck frame");
+        };
+        assert_eq!(ack.target_platform_message_id, "wa-1");
+        assert!(matches!(
+            body(dispatch(receipt(ReceiptKind::Read), None)),
+            pb::server_frame::Body::SeenReceipt(_)
+        ));
+    }
+
+    /// A thread to create travels as a title in the model; the wire frame names
+    /// its container too, which is always the target chat.
+    #[test]
+    fn a_thread_to_create_is_provisioned_inside_the_target_chat() {
+        let message = Message {
+            id: MessageId::new(),
+            replica_set_id: ReplicaSetId::new(),
+            author_id: "priya".into(),
+            participant: None,
+            author_name: None,
+            text: Some("hi".into()),
+            attachments: Vec::new(),
+            reply_to: None,
+            timestamp_ms: 0,
+            deleted: false,
+        };
+        let send = Action::Send {
+            message,
+            reply: None,
+        };
+        let pb::server_frame::Body::MessageCreate(create) =
+            body(dispatch(send, Some("Priya".into())))
+        else {
+            panic!("a send is a MessageCreate frame");
+        };
+        assert_eq!(create.target_chat_id, "tg-chat");
+        assert_eq!(
+            create.provision_thread,
+            Some(pb::ProvisionThread {
+                container: "tg-chat".into(),
+                title: "Priya".into(),
+            })
+        );
+    }
+}
