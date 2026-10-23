@@ -46,7 +46,7 @@ code).
 | 026 | Rename the wuphf-model types to plain names (type names only) | P2 | M | 019 (soft) | DONE |
 | 027 | Rename model fields and variants, keeping old stored JSON readable | P2 | M | 026 | DONE (migration 0011, not serde aliases) |
 | 028 | Delete dead and duplicate model types | P2 | M | 026, 027 | DONE (migration 0012) |
-| 029 | Fold the wuphf-router crate into wuphf-core | P3 | S | 028 (soft) | TODO |
+| 029 | Fold the wuphf-router crate into wuphf-core | P3 | S | 028 (soft) | DONE |
 | 030 | Collapse the dispatch types into one `Dispatch` | P2 | M–L | 019, 026–029 | TODO |
 | 031 | Merge ReplicaSet and ThreadMapping into Conversation | P2 | M–L | 030 | TODO |
 | 032 | Add a remote function broker to the core (`wuphf-functions`) | P2 | L | — | TODO |
@@ -190,6 +190,10 @@ Rust) by the owner's decision.
   - The `NoticeTarget` doc comment moved onto `RoutingConfig::notice_targets`.
 
   Workspace: 115 tests passing, clippy clean.
+- **029 done 2026-10-23** (`advisor/029-fold-router-into-core`): no drift.
+  Done as planned: the moved code is verbatim, `Router` is `pub(crate)`, and
+  `wuphf_core::{RoutingConfig, MatchedRule, RouterError}` are re-exported.
+  `crates/wuphf-router` is gone. Workspace: 115 tests passing, clippy clean.
 - **021 must be re-planned after 031.** 028 performs 021's deletion of
   `put_contact`/`put_chat_settings`, and 031 replaces seven of the trait
   methods 021 groups into role traits.
