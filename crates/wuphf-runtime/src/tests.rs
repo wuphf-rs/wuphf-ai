@@ -9,7 +9,7 @@ use tonic::transport::Server;
 use wuphf_core::RoutingConfig;
 use wuphf_model::{
     ConnectorCapabilities, ConnectorId, ConnectorInfo, ConnectorInput, ConnectorOutput,
-    ConnectorRegistration, Action, EventPayload, InboundMessage, IngestOutcome, Platform,
+    ConnectorRegistration, Action, EventKind, NewMessage, IngestOutcome, Platform,
     ChatAddress, RoutingRule, RoutingRuleFlow, RuleChat, RuleChatsFilter, RuleId,
 };
 use wuphf_proto::connector as pb;
@@ -120,7 +120,7 @@ fn mirror_core(storage: Arc<InMemoryStorage>) -> Arc<Core<InMemoryStorage>> {
     Arc::new(Core::new(storage, config))
 }
 
-fn wa_group_event(native_id: &str) -> NormalizedEvent {
+fn wa_group_event(native_id: &str) -> Event {
     source_event(
         ConnectorId(WA.into()),
         ChatAddress::new("wa-group", None),
@@ -675,7 +675,7 @@ fn registration_frame(
     }
 }
 
-async fn send_event(channels: &RuntimeChannels, event: NormalizedEvent) {
+async fn send_event(channels: &RuntimeChannels, event: Event) {
     channels
         .inbound
         .send(InboundWork::Event(event))
@@ -683,7 +683,7 @@ async fn send_event(channels: &RuntimeChannels, event: NormalizedEvent) {
         .unwrap();
 }
 
-fn wa_event(native_id: &str, reply_to: Option<&str>) -> NormalizedEvent {
+fn wa_event(native_id: &str, reply_to: Option<&str>) -> Event {
     source_event(
         ConnectorId(WA.into()),
         ChatAddress::new("wa-chat", None),
@@ -692,7 +692,7 @@ fn wa_event(native_id: &str, reply_to: Option<&str>) -> NormalizedEvent {
     )
 }
 
-fn tg_event(native_id: &str, reply_to: Option<&str>) -> NormalizedEvent {
+fn tg_event(native_id: &str, reply_to: Option<&str>) -> Event {
     source_event(
         ConnectorId(TG.into()),
         ChatAddress::new("tg-chat", Some("topic".into())),
@@ -706,14 +706,14 @@ fn source_event(
     address: ChatAddress,
     native_id: &str,
     reply_to: Option<&str>,
-) -> NormalizedEvent {
-    NormalizedEvent {
+) -> Event {
+    Event {
         source: wuphf_model::SourceAddress {
             connector_id,
             address,
             chat_title: None,
         },
-        payload: EventPayload::MessageCreate(InboundMessage {
+        payload: EventKind::MessageCreate(NewMessage {
             platform_message_id: native_id.into(),
             sender: "sender".into(),
             participant: None,

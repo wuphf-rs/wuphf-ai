@@ -16,8 +16,8 @@ use tonic::transport::Server;
 use wuphf_connector::{Client, Delivery, Failure, Options};
 use wuphf_core::{Core, RoutingConfig};
 use wuphf_model::{
-    ConnectorCapabilities, ConnectorId, ConnectorInfo, ConnectorRegistration, EventPayload,
-    InboundMessage, InboundWork, NormalizedEvent, Platform, ChatAddress, RoutingRule,
+    ConnectorCapabilities, ConnectorId, ConnectorInfo, ConnectorRegistration, EventKind,
+    NewMessage, InboundWork, Event, Platform, ChatAddress, RoutingRule,
     RoutingRuleFlow, RuleChat, RuleId,
 };
 use wuphf_proto::connector as pb;
@@ -144,14 +144,14 @@ fn sdk_client(address: &str) -> Client {
     })
 }
 
-fn wa_event(native_id: &str, text: &str) -> NormalizedEvent {
-    NormalizedEvent {
+fn wa_event(native_id: &str, text: &str) -> Event {
+    Event {
         source: wuphf_model::SourceAddress {
             connector_id: ConnectorId(WA.into()),
             address: ChatAddress::new("wa-chat", None),
             chat_title: None,
         },
-        payload: EventPayload::MessageCreate(InboundMessage {
+        payload: EventKind::MessageCreate(NewMessage {
             platform_message_id: native_id.into(),
             sender: "sender".into(),
             participant: None,

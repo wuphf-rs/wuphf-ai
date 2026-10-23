@@ -7,7 +7,7 @@
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use tokio::sync::{broadcast, oneshot};
-use wuphf_model::{DispatchId, EventPayload, NormalizedEvent, ObservedMessage, Platform};
+use wuphf_model::{DispatchId, EventKind, Event, ObservedMessage, Platform};
 use wuphf_storage::{Storage, StorageError};
 
 /// How many recent observed messages the live broadcast retains for a lagging
@@ -72,13 +72,13 @@ where
     /// ingest.
     pub async fn observe(
         &self,
-        event: &NormalizedEvent,
+        event: &Event,
         platform: Platform,
     ) -> Result<(), StorageError> {
         let connector_id = &event.source.connector_id;
         let chat_id = &event.source.address.chat_id;
         let captured = match &event.payload {
-            EventPayload::MessageCreate(inbound) => {
+            EventKind::MessageCreate(inbound) => {
                 let observed = ObservedMessage::incoming(&event.source, platform, inbound);
                 // Broadcast the row as stored, not as constructed: an echo of
                 // our own raw send keeps its outgoing direction in storage, and
@@ -89,7 +89,7 @@ where
                         .await?,
                 )
             }
-            EventPayload::MessageEdit {
+            EventKind::MessageEdit {
                 platform_message_id,
                 text,
             } => {
@@ -97,14 +97,14 @@ where
                     .mark_observed_edited(connector_id, chat_id, platform_message_id, text.clone())
                     .await?
             }
-            EventPayload::MessageDelete {
+            EventKind::MessageDelete {
                 platform_message_id,
             } => {
                 self.storage
                     .mark_observed_deleted(connector_id, chat_id, platform_message_id)
                     .await?
             }
-            EventPayload::ReactionSet { .. } | EventPayload::ReceiptSet { .. } => None,
+            EventKind::ReactionSet { .. } | EventKind::ReceiptSet { .. } => None,
         };
         if let Some(observed) = captured {
             // A send error means no live subscribers; history is already
@@ -167,18 +167,18 @@ where
 mod tests {
     use super::*;
     use wuphf_model::{
-        ConnectorId, InboundMessage, ObservedDirection, ChatAddress, SourceAddress,
+        ConnectorId, NewMessage, ObservedDirection, ChatAddress, SourceAddress,
     };
     use wuphf_storage::InMemoryStorage;
 
-    fn create_event(chat: &str, id: &str, text: &str, title: Option<&str>) -> NormalizedEvent {
-        NormalizedEvent {
+    fn create_event(chat: &str, id: &str, text: &str, title: Option<&str>) -> Event {
+        Event {
             source: SourceAddress {
                 connector_id: ConnectorId("whatsapp".into()),
                 address: ChatAddress::new(chat, None),
                 chat_title: title.map(Into::into),
             },
-            payload: EventPayload::MessageCreate(InboundMessage {
+            payload: EventKind::MessageCreate(NewMessage {
                 platform_message_id: id.into(),
                 sender: "peer".into(),
                 participant: None,
@@ -227,13 +227,13 @@ mod tests {
             .await
             .unwrap();
 
-        let edit = NormalizedEvent {
+        let edit = Event {
             source: SourceAddress {
                 connector_id: connector.clone(),
                 address: ChatAddress::new("alice", None),
                 chat_title: None,
             },
-            payload: EventPayload::MessageEdit {
+            payload: EventKind::MessageEdit {
                 platform_message_id: "a1".into(),
                 text: Some("hello".into()),
             },
@@ -246,13 +246,13 @@ mod tests {
             .unwrap();
         assert!(page[0].edited && page[0].text.as_deref() == Some("hello"));
 
-        let delete = NormalizedEvent {
+        let delete = Event {
             source: SourceAddress {
                 connector_id: connector.clone(),
                 address: ChatAddress::new("alice", None),
                 chat_title: None,
             },
-            payload: EventPayload::MessageDelete {
+            payload: EventKind::MessageDelete {
                 platform_message_id: "a1".into(),
             },
         };
@@ -322,13 +322,13 @@ mod tests {
     async fn observe_ignores_events_without_a_known_message() {
         let observer = Observer::new(Arc::new(InMemoryStorage::default()));
         // An edit for a message that was never observed is a no-op, not an error.
-        let edit = NormalizedEvent {
+        let edit = Event {
             source: SourceAddress {
                 connector_id: ConnectorId("whatsapp".into()),
                 address: ChatAddress::new("alice", None),
                 chat_title: None,
             },
-            payload: EventPayload::MessageEdit {
+            payload: EventKind::MessageEdit {
                 platform_message_id: "ghost".into(),
                 text: Some("x".into()),
             },

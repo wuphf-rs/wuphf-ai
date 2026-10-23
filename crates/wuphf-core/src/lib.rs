@@ -2,8 +2,8 @@ use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
 use thiserror::Error;
 use wuphf_model::{
-    ConnectorId, DispatchId, EndpointId, EventPayload, IgnoreReason, IngestOutcome, MediaId,
-    MessageId, NormalizedEvent, NoticeKind, Platform, ReplicaSetId,
+    ConnectorId, DispatchId, EndpointId, EventKind, IgnoreReason, IngestOutcome, MediaId,
+    MessageId, Event, NoticeKind, Platform, ReplicaSetId,
 };
 use wuphf_router::{Router, RouterError};
 use wuphf_storage::{Storage, StorageError};
@@ -72,7 +72,7 @@ where
             .map(|info| info.platform.clone())
     }
 
-    pub async fn ingest(&self, event: NormalizedEvent) -> Result<IngestOutcome, CoreError> {
+    pub async fn ingest(&self, event: Event) -> Result<IngestOutcome, CoreError> {
         let source = event.source;
         let Some(origin_endpoint) = self.resolve_origin(&source).await? else {
             return Ok(IngestOutcome::Ignored(IgnoreReason::Unmatched));
@@ -85,24 +85,24 @@ where
             .ok_or(CoreError::OriginWithoutReplicaSet(origin_endpoint))?;
 
         match event.payload {
-            EventPayload::MessageCreate(inbound) => {
+            EventKind::MessageCreate(inbound) => {
                 self.ingest_create(source, origin_endpoint, origin, replica_set_id, inbound)
                     .await
             }
-            EventPayload::MessageEdit {
+            EventKind::MessageEdit {
                 platform_message_id,
                 text,
             } => {
                 self.ingest_edit(origin_endpoint, platform_message_id, text)
                     .await
             }
-            EventPayload::MessageDelete {
+            EventKind::MessageDelete {
                 platform_message_id,
             } => {
                 self.ingest_delete(origin_endpoint, platform_message_id)
                     .await
             }
-            EventPayload::ReactionSet {
+            EventKind::ReactionSet {
                 platform_message_id,
                 reactor,
                 reactor_name,
@@ -121,7 +121,7 @@ where
                 )
                 .await
             }
-            EventPayload::ReceiptSet {
+            EventKind::ReceiptSet {
                 platform_message_id,
                 observer: _,
                 from_me,

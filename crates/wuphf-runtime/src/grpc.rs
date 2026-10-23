@@ -7,8 +7,8 @@ use tonic::{Request, Response, Status};
 use uuid::Uuid;
 use wuphf_model::{
     Attachment, AttachmentKind, ConnectorCapabilities, ConnectorId, ConnectorInput,
-    ConnectorOutput, ConnectorRegistration, DispatchAck, Action, EventPayload,
-    InboundMessage, MediaId, NormalizedEvent, NoticeKind, Platform, ChatAddress,
+    ConnectorOutput, ConnectorRegistration, DispatchAck, Action, EventKind,
+    NewMessage, MediaId, Event, NoticeKind, Platform, ChatAddress,
     ProvisionThread, ReceiptKind, ReplyContext, SourceAddress,
 };
 use wuphf_proto::connector as pb;
@@ -113,7 +113,7 @@ fn input_from_proto(
 ) -> Result<ConnectorInput, WireError> {
     match frame.body {
         Some(pb::client_frame::Body::MessageCreate(event)) => {
-            Ok(ConnectorInput::Event(NormalizedEvent {
+            Ok(ConnectorInput::Event(Event {
                 source: SourceAddress {
                     connector_id: connector_id.clone(),
                     address: ChatAddress::new(
@@ -122,7 +122,7 @@ fn input_from_proto(
                     ),
                     chat_title: event.chat_title,
                 },
-                payload: EventPayload::MessageCreate(InboundMessage {
+                payload: EventKind::MessageCreate(NewMessage {
                     platform_message_id: required_string(
                         event.platform_message_id,
                         "platform_message_id",
@@ -142,7 +142,7 @@ fn input_from_proto(
             }))
         }
         Some(pb::client_frame::Body::MessageEdit(event)) => {
-            Ok(ConnectorInput::Event(NormalizedEvent {
+            Ok(ConnectorInput::Event(Event {
                 source: SourceAddress {
                     connector_id: connector_id.clone(),
                     address: ChatAddress::new(
@@ -151,7 +151,7 @@ fn input_from_proto(
                     ),
                     chat_title: None,
                 },
-                payload: EventPayload::MessageEdit {
+                payload: EventKind::MessageEdit {
                     platform_message_id: required_string(
                         event.platform_message_id,
                         "platform_message_id",
@@ -161,7 +161,7 @@ fn input_from_proto(
             }))
         }
         Some(pb::client_frame::Body::MessageDelete(event)) => {
-            Ok(ConnectorInput::Event(NormalizedEvent {
+            Ok(ConnectorInput::Event(Event {
                 source: SourceAddress {
                     connector_id: connector_id.clone(),
                     address: ChatAddress::new(
@@ -170,7 +170,7 @@ fn input_from_proto(
                     ),
                     chat_title: None,
                 },
-                payload: EventPayload::MessageDelete {
+                payload: EventKind::MessageDelete {
                     platform_message_id: required_string(
                         event.platform_message_id,
                         "platform_message_id",
@@ -234,7 +234,7 @@ fn input_from_proto(
             Err(WireError("registration already completed".into()))
         }
         Some(pb::client_frame::Body::Reaction(event)) => {
-            Ok(ConnectorInput::Event(NormalizedEvent {
+            Ok(ConnectorInput::Event(Event {
                 source: SourceAddress {
                     connector_id: connector_id.clone(),
                     address: ChatAddress::new(
@@ -243,7 +243,7 @@ fn input_from_proto(
                     ),
                     chat_title: None,
                 },
-                payload: EventPayload::ReactionSet {
+                payload: EventKind::ReactionSet {
                     platform_message_id: required_string(
                         event.platform_message_id,
                         "platform_message_id",
@@ -266,7 +266,7 @@ fn input_from_proto(
                     return Err(WireError("receipt kind required".into()));
                 }
             };
-            Ok(ConnectorInput::Event(NormalizedEvent {
+            Ok(ConnectorInput::Event(Event {
                 source: SourceAddress {
                     connector_id: connector_id.clone(),
                     address: ChatAddress::new(
@@ -275,7 +275,7 @@ fn input_from_proto(
                     ),
                     chat_title: None,
                 },
-                payload: EventPayload::ReceiptSet {
+                payload: EventKind::ReceiptSet {
                     platform_message_id: required_string(
                         event.platform_message_id,
                         "platform_message_id",

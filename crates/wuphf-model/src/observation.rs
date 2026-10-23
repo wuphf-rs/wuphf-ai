@@ -51,7 +51,7 @@ impl ObservedMessage {
     /// Capture an inbound create as an observation-log row: incoming, not yet
     /// edited or deleted. Borrows because the ingest path still owns the event
     /// afterwards.
-    pub fn incoming(source: &SourceAddress, platform: Platform, inbound: &InboundMessage) -> Self {
+    pub fn incoming(source: &SourceAddress, platform: Platform, inbound: &NewMessage) -> Self {
         Self {
             connector_id: source.connector_id.clone(),
             platform,

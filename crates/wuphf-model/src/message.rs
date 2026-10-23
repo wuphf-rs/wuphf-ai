@@ -72,7 +72,7 @@ impl Message {
     /// native addressing (`platform_message_id`) stays behind in the copy
     /// tables.
     pub fn from_inbound(
-        inbound: InboundMessage,
+        inbound: NewMessage,
         replica_set_id: ReplicaSetId,
         reply_to: Option<MessageId>,
     ) -> Self {
@@ -175,7 +175,7 @@ pub struct ChatSettings {
 /// endpoint and group. Addresses are still native (`platform_message_id`,
 /// `reply_to_platform_message_id`).
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct InboundMessage {
+pub struct NewMessage {
     pub platform_message_id: String,
     pub sender: String,
     pub participant: Option<String>,
@@ -189,8 +189,8 @@ pub struct InboundMessage {
 
 /// The kind of inbound event a connector reports for a chat.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub enum EventPayload {
-    MessageCreate(InboundMessage),
+pub enum EventKind {
+    MessageCreate(NewMessage),
     MessageEdit {
         platform_message_id: String,
         text: Option<String>,
@@ -249,7 +249,7 @@ pub struct SourceAddress {
 /// A connector event paired with its origin coordinates, ready for the core to
 /// resolve against the alias table and rules.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct NormalizedEvent {
+pub struct Event {
     pub source: SourceAddress,
-    pub payload: EventPayload,
+    pub payload: EventKind,
 }

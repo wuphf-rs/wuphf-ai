@@ -74,7 +74,7 @@ pub struct NoticeTarget {
 /// before that message is ingested, so the message cannot mint a fresh endpoint
 /// under an address the migration was meant to rebind.
 pub enum InboundWork {
-    Event(NormalizedEvent),
+    Event(Event),
     Migration {
         connector_id: ConnectorId,
         old: ChatAddress,
@@ -115,7 +115,7 @@ pub struct ConnectorRegistration {
 /// A frame a connector sends up to the core.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ConnectorInput {
-    Event(NormalizedEvent),
+    Event(Event),
     Acknowledgement(DispatchAck),
     /// The platform reported that a chat address changed (e.g. WhatsApp
     /// phone-to-LID). Both addresses remain resolvable; the new one becomes

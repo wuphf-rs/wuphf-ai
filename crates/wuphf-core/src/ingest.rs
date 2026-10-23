@@ -19,7 +19,7 @@ where
         origin_endpoint: EndpointId,
         origin: Endpoint,
         replica_set_id: ReplicaSetId,
-        inbound: wuphf_model::InboundMessage,
+        inbound: wuphf_model::NewMessage,
     ) -> Result<IngestOutcome, CoreError> {
         if self
             .storage

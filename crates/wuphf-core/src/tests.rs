@@ -2,7 +2,7 @@ use super::*;
 use std::collections::HashMap;
 use wuphf_model::{
     Attachment, AttachmentKind, ConnectorCapabilities, ConnectorInfo, DispatchAck,
-    Action, InboundMessage, MediaBlob, MediaId, NoticeKind, Platform, ChatAddress,
+    Action, NewMessage, MediaBlob, MediaId, NoticeKind, Platform, ChatAddress,
     RAW_SENDER, RawOutbound, ReceiptKind, RoutingRule, RoutingRuleFlow, RuleChat, RuleChatsFilter,
     RuleId, SourceAddress, Dispatch,
 };
@@ -88,7 +88,7 @@ fn event(
     chat_id: &str,
     native_id: &str,
     reply_to: Option<&str>,
-) -> NormalizedEvent {
+) -> Event {
     event_in(connector, chat_id, None, native_id, reply_to)
 }
 
@@ -98,14 +98,14 @@ fn event_in(
     thread_id: Option<&str>,
     native_id: &str,
     reply_to: Option<&str>,
-) -> NormalizedEvent {
-    NormalizedEvent {
+) -> Event {
+    Event {
         source: SourceAddress {
             connector_id: ConnectorId(connector.into()),
             address: ChatAddress::new(chat_id, thread_id.map(str::to_owned)),
             chat_title: Some("Title".into()),
         },
-        payload: EventPayload::MessageCreate(InboundMessage {
+        payload: EventKind::MessageCreate(NewMessage {
             platform_message_id: native_id.into(),
             sender: "alice".into(),
             participant: None,
@@ -628,7 +628,7 @@ async fn rejects_unknown_or_modified_media_before_claiming_event() {
     };
     let media_event = |attachment: Attachment| {
         let mut event = event(WHATSAPP, "12345@s.whatsapp.net", "wa-media", None);
-        let EventPayload::MessageCreate(inbound) = &mut event.payload else {
+        let EventKind::MessageCreate(inbound) = &mut event.payload else {
             unreachable!();
         };
         inbound.attachments = vec![attachment];
@@ -672,14 +672,14 @@ fn edit_event(
     thread_id: Option<&str>,
     native_id: &str,
     text: Option<&str>,
-) -> NormalizedEvent {
-    NormalizedEvent {
+) -> Event {
+    Event {
         source: SourceAddress {
             connector_id: ConnectorId(connector.into()),
             address: ChatAddress::new(chat_id, thread_id.map(str::to_owned)),
             chat_title: None,
         },
-        payload: EventPayload::MessageEdit {
+        payload: EventKind::MessageEdit {
             platform_message_id: native_id.into(),
             text: text.map(str::to_owned),
         },
@@ -797,14 +797,14 @@ fn reaction_event(
     chat_id: &str,
     native_id: &str,
     emoji: Option<&str>,
-) -> NormalizedEvent {
-    NormalizedEvent {
+) -> Event {
+    Event {
         source: SourceAddress {
             connector_id: ConnectorId(connector.into()),
             address: ChatAddress::new(chat_id, None),
             chat_title: None,
         },
-        payload: EventPayload::ReactionSet {
+        payload: EventKind::ReactionSet {
             platform_message_id: native_id.into(),
             reactor: "reactor-1".into(),
             reactor_name: Some("Alice".into()),
@@ -820,14 +820,14 @@ fn receipt_event(
     native_id: &str,
     kind: ReceiptKind,
     from_me: bool,
-) -> NormalizedEvent {
-    NormalizedEvent {
+) -> Event {
+    Event {
         source: SourceAddress {
             connector_id: ConnectorId(connector.into()),
             address: ChatAddress::new(chat_id, None),
             chat_title: None,
         },
-        payload: EventPayload::ReceiptSet {
+        payload: EventKind::ReceiptSet {
             platform_message_id: native_id.into(),
             observer: "peer".into(),
             from_me,
@@ -997,13 +997,13 @@ async fn read_receipt_on_a_mirror_copy_surfaces_a_seen_receipt_on_the_origin() {
         .unwrap();
 
     let seen = core
-        .ingest(NormalizedEvent {
+        .ingest(Event {
             source: SourceAddress {
                 connector_id: ConnectorId(TELEGRAM.into()),
                 address: ChatAddress::new("-100123", Some("12".into())),
                 chat_title: None,
             },
-            payload: EventPayload::ReceiptSet {
+            payload: EventKind::ReceiptSet {
                 platform_message_id: "tg-1".into(),
                 observer: "peer".into(),
                 from_me: false,

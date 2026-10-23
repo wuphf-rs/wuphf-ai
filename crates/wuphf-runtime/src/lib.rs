@@ -6,8 +6,8 @@ use tokio::sync::mpsc;
 use tracing::{debug, info, warn};
 use wuphf_core::{Core, CoreError};
 use wuphf_model::{
-    ConnectorId, DispatchAck, DispatchFailure, EventPayload, InboundWork,
-    IngestOutcome, NormalizedEvent, Platform, ReceiptKind, Dispatch,
+    ConnectorId, DispatchAck, DispatchFailure, EventKind, InboundWork,
+    IngestOutcome, Event, Platform, ReceiptKind, Dispatch,
 };
 use wuphf_storage::Storage;
 
@@ -287,7 +287,7 @@ where
 async fn ingest_event<S>(
     core: &Core<S>,
     observer: &Observer<S>,
-    event: NormalizedEvent,
+    event: Event,
 ) -> Result<IngestOutcome, RuntimeError>
 where
     S: Storage,
@@ -295,15 +295,15 @@ where
     let connector = event.source.connector_id.0.clone();
     let chat = event.source.address.chat_id.clone();
     let kind = match &event.payload {
-        EventPayload::MessageCreate(_) => "create",
-        EventPayload::MessageEdit { .. } => "edit",
-        EventPayload::MessageDelete { .. } => "delete",
-        EventPayload::ReactionSet { .. } => "reaction",
-        EventPayload::ReceiptSet {
+        EventKind::MessageCreate(_) => "create",
+        EventKind::MessageEdit { .. } => "edit",
+        EventKind::MessageDelete { .. } => "delete",
+        EventKind::ReactionSet { .. } => "reaction",
+        EventKind::ReceiptSet {
             kind: ReceiptKind::Delivered,
             ..
         } => "delivery_receipt",
-        EventPayload::ReceiptSet {
+        EventKind::ReceiptSet {
             kind: ReceiptKind::Read,
             ..
         } => "read_receipt",
