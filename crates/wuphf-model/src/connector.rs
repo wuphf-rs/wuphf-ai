@@ -54,22 +54,11 @@ impl NoticeKind {
     }
 }
 
-/// Where an owner notice is delivered: a chat on a connector that is expected to
-/// still be working. Several may be configured, since the point is to reach the
-/// owner somewhere other than the connector in trouble.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct NoticeTarget {
-    pub connector_id: ConnectorId,
-    pub chat_id: String,
-    #[serde(default)]
-    pub thread_id: Option<String>,
-}
-
 /// Ordered inbound work from one connector: a normalized event, an identity
-/// migration or a health notice. All travel one per-connector path so the connector's frame order
-/// is preserved end to end. A migration that precedes a message is applied
-/// before that message is ingested, so the message cannot mint a fresh endpoint
-/// under an address the migration was meant to rebind.
+/// migration or a health notice. All travel one per-connector path so the
+/// connector's frame order is preserved end to end. A migration that precedes
+/// a message is applied before that message is ingested, so the message cannot
+/// mint a fresh endpoint under an address the migration was meant to rebind.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum InboundWork {
     Event(Event),

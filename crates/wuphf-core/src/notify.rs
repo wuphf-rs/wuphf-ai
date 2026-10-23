@@ -44,8 +44,8 @@ where
             let outcome = self
                 .send_owner_message(OwnerMessage {
                     connector_id: target.connector_id,
-                    chat_id: target.chat_id,
-                    thread_id: target.thread_id,
+                    chat_id: target.address.chat_id,
+                    thread_id: target.address.thread_id,
                     text: text.clone(),
                     reply_to_native_id: None,
                     timestamp_ms,

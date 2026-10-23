@@ -1618,15 +1618,13 @@ async fn a_quote_of_a_bridge_sent_copy_is_attributed_to_the_bridge() {
 /// notices must skip when WhatsApp is the connector in trouble.
 fn notifying_core() -> Core<InMemoryStorage> {
     let config = RoutingConfig::new(vec![], connectors()).with_notice_targets(vec![
-        wuphf_model::NoticeTarget {
+        wuphf_model::ChatRef {
             connector_id: ConnectorId(TELEGRAM.into()),
-            chat_id: "-100999".into(),
-            thread_id: None,
+            address: ChatAddress::new("-100999", None),
         },
-        wuphf_model::NoticeTarget {
+        wuphf_model::ChatRef {
             connector_id: ConnectorId(WHATSAPP.into()),
-            chat_id: "99999@s.whatsapp.net".into(),
-            thread_id: None,
+            address: ChatAddress::new("99999@s.whatsapp.net", None),
         },
     ]);
     Core::new(Arc::new(InMemoryStorage::default()), Arc::new(config))

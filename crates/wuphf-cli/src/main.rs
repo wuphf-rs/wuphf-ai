@@ -4,7 +4,7 @@ use serde::Deserialize;
 use std::{net::SocketAddr, path::PathBuf, sync::Arc, time::Duration};
 use tonic::transport::Server;
 use wuphf_core::{Core, RoutingConfig};
-use wuphf_model::{Connector, ConnectorCapabilities, ConnectorId, NoticeTarget, Platform, Rule};
+use wuphf_model::{ChatRef, Connector, ConnectorCapabilities, ConnectorId, Platform, Rule};
 use wuphf_proto::connector::connector_transport_server::ConnectorTransportServer;
 use wuphf_proto::connector::media_transport_server::MediaTransportServer;
 use wuphf_proto::connector::observer_transport_server::ObserverTransportServer;
@@ -53,7 +53,7 @@ struct Configuration {
     /// raised it, so listing targets on more than one connector is what keeps
     /// the owner reachable when one platform is down.
     #[serde(default)]
-    notify: Vec<NoticeTarget>,
+    notify: Vec<ChatRef>,
 }
 
 fn default_max_media_bytes() -> usize {
@@ -189,6 +189,16 @@ mod tests {
             assert_eq!(*source_chats_filter, ChatFilter::All);
             assert_eq!(destination_chat.chat_id, "telegram:channel:2060340733");
         }
+        assert_eq!(configuration.notify.len(), 1);
+        assert_eq!(
+            configuration.notify[0].connector_id,
+            ConnectorId("telegram-main".into())
+        );
+        assert_eq!(
+            configuration.notify[0].address.chat_id,
+            "telegram:user:704338780"
+        );
+        assert_eq!(configuration.notify[0].address.thread_id, None);
     }
 
     #[test]

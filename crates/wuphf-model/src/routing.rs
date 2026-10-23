@@ -81,6 +81,15 @@ impl ChatAddress {
     }
 }
 
+/// A chat on a specific connector. Flattened when (de)serialized, so config
+/// spells it as `connector_id`, `chat_id` and `thread_id` side by side.
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct ChatRef {
+    pub connector_id: ConnectorId,
+    #[serde(flatten)]
+    pub address: ChatAddress,
+}
+
 /// Every platform address known to name one chat: the address an event actually
 /// arrived on (the primary) plus the equivalent forms the platform has reported
 /// for it, as recorded by [`AddressLink`].
