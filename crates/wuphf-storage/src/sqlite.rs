@@ -4,6 +4,7 @@
 use crate::shared::{acknowledged_copy, dispatch_state, release_blocked};
 use crate::{Storage, StorageError, StorageResult};
 use async_trait::async_trait;
+use sqlx::migrate::Migrator;
 use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
 use sqlx::{Row, SqlitePool};
 use std::str::FromStr;
@@ -13,6 +14,10 @@ use wuphf_model::{
     EndpointId, MediaBlob, MediaId, Message, MessageCopy, MessageId, ObservedChat,
     ObservedDirection, ObservedMessage, ReplicaSet, ReplicaSetId, ThreadMapping,
 };
+
+/// The schema migrations, embedded at build time. Shared with the migration
+/// tests so they can stop partway and seed rows in an older shape.
+pub(crate) static MIGRATOR: Migrator = sqlx::migrate!("../../migrations");
 
 pub struct SqliteStorage {
     pool: SqlitePool,
@@ -25,7 +30,7 @@ impl SqliteStorage {
             .max_connections(1)
             .connect_with(options)
             .await?;
-        sqlx::migrate!("../../migrations").run(&pool).await?;
+        MIGRATOR.run(&pool).await?;
         Ok(Self { pool })
     }
 }

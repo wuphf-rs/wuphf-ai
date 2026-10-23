@@ -230,3 +230,6 @@ pub trait Storage: Send + Sync + 'static {
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod migration_tests;
