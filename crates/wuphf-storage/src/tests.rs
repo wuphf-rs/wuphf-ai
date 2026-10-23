@@ -1,7 +1,7 @@
 use super::*;
 use wuphf_model::{
     Action, Attachment, AttachmentKind, DedupKey, DispatchState, MediaBlob, MediaId, MessageCopy,
-    ObservedDirection, ObservedMessage, Platform,
+    ObservedDirection, ObservedMessage, Platform, ReceiptKind, Target,
 };
 
 #[tokio::test]
@@ -40,14 +40,8 @@ async fn copy_state_and_blocked_reply_released<S: Storage>(
 
     storage.put_endpoint(endpoint(endpoint_id)).await.unwrap();
     storage.put_message(message(parent_id)).await.unwrap();
-    let parent = storage
-        .enqueue_dispatch(command(parent_id, endpoint_id), None)
-        .await
-        .unwrap();
-    storage
-        .enqueue_dispatch(command(reply_id, endpoint_id), Some(parent_id))
-        .await
-        .unwrap();
+    let parent = enqueue(&storage, send(parent_id, endpoint_id, None)).await;
+    enqueue(&storage, send(reply_id, endpoint_id, Some(parent_id))).await;
     let released = storage
         .acknowledge_dispatch(parent.id, "telegram-parent".into())
         .await
@@ -56,7 +50,7 @@ async fn copy_state_and_blocked_reply_released<S: Storage>(
     let Action::Send {
         reply: reply_context,
         ..
-    } = &released[0].command.payload
+    } = &released[0].action
     else {
         panic!("released dispatch should be a message create");
     };
@@ -271,21 +265,15 @@ async fn acknowledging_create_binds_blocked_edit<S: Storage>(storage: S) {
     let endpoint_id = EndpointId::new();
     storage.put_endpoint(endpoint(endpoint_id)).await.unwrap();
     storage.put_message(message(message_id)).await.unwrap();
-    let create = storage
-        .enqueue_dispatch(command(message_id, endpoint_id), None)
-        .await
-        .unwrap();
-    storage
-        .enqueue_dispatch(edit_command(message_id, endpoint_id), Some(message_id))
-        .await
-        .unwrap();
+    let create = enqueue(&storage, send(message_id, endpoint_id, None)).await;
+    enqueue(&storage, edit(message_id, endpoint_id, Some(message_id))).await;
 
     let released = storage
         .acknowledge_dispatch(create.id, "native-1".into())
         .await
         .unwrap();
     assert_eq!(released.len(), 1);
-    let Action::Edit { native_id, .. } = &released[0].command.payload else {
+    let Action::Edit { native_id, .. } = &released[0].action else {
         panic!("released dispatch should be an edit");
     };
     assert_eq!(native_id, "native-1");
@@ -321,42 +309,37 @@ async fn settling_a_signal_dispatch_records_no_copy<S: Storage>(storage: S) {
         })
         .await
         .unwrap();
-    let blocked = storage
-        .enqueue_dispatch(command(MessageId::new(), endpoint_id), Some(message_id))
-        .await
-        .unwrap();
+    let blocked = enqueue(
+        &storage,
+        send(MessageId::new(), endpoint_id, Some(message_id)),
+    )
+    .await;
 
     let signals = [
         Action::React {
             message_id,
-            replica_set_id,
             native_id: "origin-1".into(),
             reactor: "someone".into(),
             reactor_name: None,
             emoji: Some("👍".into()),
         },
-        Action::DeliveryAck {
+        Action::Receipt {
             message_id,
-            replica_set_id,
             native_id: "origin-1".into(),
+            kind: ReceiptKind::Delivered,
         },
-        Action::SeenReceipt {
+        Action::Receipt {
             message_id,
-            replica_set_id,
             native_id: "origin-1".into(),
+            kind: ReceiptKind::Read,
         },
     ];
-    for payload in signals {
-        let signal = storage
-            .enqueue_dispatch(
-                DispatchCommand {
-                    payload,
-                    ..command(message_id, endpoint_id)
-                },
-                None,
-            )
-            .await
-            .unwrap();
+    for action in signals {
+        let signal = enqueue(
+            &storage,
+            Dispatch::new(target(endpoint_id), replica_set_id, action, None),
+        )
+        .await;
         let released = storage
             .acknowledge_dispatch(signal.id, "origin-1".into())
             .await
@@ -401,10 +384,7 @@ async fn fail_dispatch_removes_from_pending<S: Storage>(storage: S) {
     let endpoint_id = EndpointId::new();
     storage.put_endpoint(endpoint(endpoint_id)).await.unwrap();
     storage.put_message(message(message_id)).await.unwrap();
-    let dispatch = storage
-        .enqueue_dispatch(command(message_id, endpoint_id), None)
-        .await
-        .unwrap();
+    let dispatch = enqueue(&storage, send(message_id, endpoint_id, None)).await;
     assert_eq!(storage.pending_dispatches().await.unwrap().len(), 1);
 
     storage
@@ -631,34 +611,53 @@ fn observed(
     }
 }
 
-fn command(message_id: MessageId, endpoint_id: EndpointId) -> DispatchCommand {
-    DispatchCommand {
-        target_endpoint: endpoint_id,
-        target_connector: ConnectorId("telegram".into()),
-        target: wuphf_model::TargetAddress {
-            address: wuphf_model::ChatAddress::new("-100", Some("7".into())),
-            create_thread: None,
-        },
-        payload: Action::Send {
-            message: message(message_id),
-            reply: None,
-        },
+/// Save a dispatch and hand it back, for tests that go on to settle it.
+async fn enqueue<S: Storage>(storage: &S, dispatch: Dispatch) -> Dispatch {
+    storage.enqueue_dispatch(&dispatch).await.unwrap();
+    dispatch
+}
+
+fn target(endpoint_id: EndpointId) -> Target {
+    Target {
+        endpoint_id,
+        connector_id: ConnectorId("telegram".into()),
+        address: wuphf_model::ChatAddress::new("-100", Some("7".into())),
+        create_thread: None,
     }
 }
 
-fn edit_command(message_id: MessageId, endpoint_id: EndpointId) -> DispatchCommand {
-    DispatchCommand {
-        target_endpoint: endpoint_id,
-        target_connector: ConnectorId("telegram".into()),
-        target: wuphf_model::TargetAddress {
-            address: wuphf_model::ChatAddress::new("-100", Some("7".into())),
-            create_thread: None,
+fn send(
+    message_id: MessageId,
+    endpoint_id: EndpointId,
+    waiting_for: Option<MessageId>,
+) -> Dispatch {
+    let message = message(message_id);
+    Dispatch::new(
+        target(endpoint_id),
+        message.replica_set_id,
+        Action::Send {
+            message,
+            reply: None,
         },
-        payload: Action::Edit {
-            message: message(message_id),
+        waiting_for,
+    )
+}
+
+fn edit(
+    message_id: MessageId,
+    endpoint_id: EndpointId,
+    waiting_for: Option<MessageId>,
+) -> Dispatch {
+    let message = message(message_id);
+    Dispatch::new(
+        target(endpoint_id),
+        message.replica_set_id,
+        Action::Edit {
+            message,
             native_id: String::new(),
         },
-    }
+        waiting_for,
+    )
 }
 
 #[tokio::test]

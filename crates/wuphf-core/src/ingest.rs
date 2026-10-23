@@ -5,7 +5,7 @@
 use crate::{Core, CoreError};
 use wuphf_model::{
     DedupKey, Dispatch, Endpoint, EndpointId, IgnoreReason, IngestOutcome, Message, MessageCopy,
-    MessageId, ReplicaSetId, RoutingOutcome, SourceAddress,
+    MessageId, ReplicaSetId, SourceAddress,
 };
 use wuphf_storage::Storage;
 
@@ -113,7 +113,7 @@ where
             });
         }
 
-        let (routing, mut dispatches) = self
+        let (mut dispatches, blocked) = self
             .route_and_record(&message, origin_endpoint, &provision_title)
             .await?;
         dispatches.extend(
@@ -122,8 +122,8 @@ where
         );
         Ok(IngestOutcome::Routed {
             message_id: message.id,
-            blocked: routing.blocked.len(),
             dispatches,
+            blocked,
         })
     }
 
@@ -164,8 +164,9 @@ where
         }
         conversation.title = Some(new_title.to_owned());
         self.storage.put_conversation(conversation.clone()).await?;
-        let routing = self.router.route_retitle(&conversation, new_title).await?;
-        self.enqueue_outcome(&routing).await
+        let dispatches = self.router.route_retitle(&conversation, new_title).await?;
+        let (pending, _) = self.save_dispatches(dispatches).await?;
+        Ok(pending)
     }
 
     /// Resolve the copy an inbound edit/delete/reaction/receipt targets to its
@@ -193,52 +194,49 @@ where
         Ok(Some((message_id, message)))
     }
 
-    /// Persist a routing outcome: enqueue the sendable dispatches and park the
-    /// blocked ones on the message they wait for. Returns only the sendable
-    /// dispatches — blocked ones surface later, when their parent is acknowledged.
-    async fn enqueue_outcome(&self, routing: &RoutingOutcome) -> Result<Vec<Dispatch>, CoreError> {
-        let mut dispatches = Vec::new();
-        for command in routing.dispatches.iter().cloned() {
-            dispatches.push(self.storage.enqueue_dispatch(command, None).await?);
+    /// Persist routed dispatches and return the ones ready to send, with a count
+    /// of the blocked ones. Blocked dispatches are saved and surface later, when
+    /// the message they wait for is acknowledged.
+    async fn save_dispatches(
+        &self,
+        dispatches: Vec<Dispatch>,
+    ) -> Result<(Vec<Dispatch>, usize), CoreError> {
+        let mut pending = Vec::new();
+        let mut blocked = 0;
+        for dispatch in dispatches {
+            self.storage.enqueue_dispatch(&dispatch).await?;
+            if dispatch.is_pending() {
+                pending.push(dispatch);
+            } else {
+                blocked += 1;
+            }
         }
-        for blocked in routing.blocked.iter().cloned() {
-            self.storage
-                .enqueue_dispatch(blocked.command, Some(blocked.waiting_for_message))
-                .await?;
-        }
-        Ok(dispatches)
+        Ok((pending, blocked))
     }
 
     /// Route a message, enqueue its dispatches, and register any thread
     /// provisioning it triggers so that concurrent messages to the same
     /// conversation are stashed (rather than provisioning again) until the
-    /// thread exists. Returns the routing and the immediately-sendable
-    /// dispatches.
+    /// thread exists. Returns the immediately-sendable dispatches and a
+    /// count of the blocked ones.
     pub(crate) async fn route_and_record(
         &self,
         message: &Message,
         origin_endpoint: EndpointId,
         provision_title: &str,
-    ) -> Result<(RoutingOutcome, Vec<Dispatch>), CoreError> {
-        let routing = self
+    ) -> Result<(Vec<Dispatch>, usize), CoreError> {
+        let routed = self
             .router
             .route(message, origin_endpoint, provision_title)
             .await?;
-        let mut dispatches = Vec::new();
-        let mut provisioning_ids = Vec::new();
-        for command in routing.dispatches.iter().cloned() {
-            let provisions = command.target.create_thread.is_some();
-            let stored = self.storage.enqueue_dispatch(command, None).await?;
-            if provisions {
-                provisioning_ids.push(stored.id);
-            }
-            dispatches.push(stored);
-        }
-        for blocked in routing.blocked.iter().cloned() {
-            self.storage
-                .enqueue_dispatch(blocked.command, Some(blocked.waiting_for_message))
-                .await?;
-        }
+        let (dispatches, blocked) = self.save_dispatches(routed).await?;
+        // Only ready dispatches register: a blocked one provisions nothing until
+        // it is released.
+        let provisioning_ids: Vec<_> = dispatches
+            .iter()
+            .filter(|dispatch| dispatch.to.create_thread.is_some())
+            .map(|dispatch| dispatch.id)
+            .collect();
         if !provisioning_ids.is_empty() {
             let mut provisioning = self.provisioning.lock().unwrap();
             provisioning
@@ -247,7 +245,7 @@ where
                 .pending
                 .extend(provisioning_ids);
         }
-        Ok((routing, dispatches))
+        Ok((dispatches, blocked))
     }
 
     /// Apply an inbound edit: revise the canonical message text and fan the
@@ -276,12 +274,12 @@ where
         message.text = text;
         self.storage.put_message(message.clone()).await?;
 
-        let routing = self.router.route_edit(&message, origin_endpoint).await?;
-        let dispatches = self.enqueue_outcome(&routing).await?;
+        let routed = self.router.route_edit(&message, origin_endpoint).await?;
+        let (dispatches, blocked) = self.save_dispatches(routed).await?;
         Ok(IngestOutcome::Routed {
             message_id,
-            blocked: routing.blocked.len(),
             dispatches,
+            blocked,
         })
     }
 
@@ -310,12 +308,12 @@ where
         message.deleted = true;
         self.storage.put_message(message.clone()).await?;
 
-        let routing = self.router.route_delete(&message, origin_endpoint).await?;
-        let dispatches = self.enqueue_outcome(&routing).await?;
+        let routed = self.router.route_delete(&message, origin_endpoint).await?;
+        let (dispatches, blocked) = self.save_dispatches(routed).await?;
         Ok(IngestOutcome::Routed {
             message_id,
-            blocked: routing.blocked.len(),
             dispatches,
+            blocked,
         })
     }
 
@@ -344,15 +342,15 @@ where
             return Ok(IngestOutcome::Ignored(IgnoreReason::Unmatched));
         };
 
-        let routing = self
+        let routed = self
             .router
             .route_reaction(&message, origin_endpoint, reactor, reactor_name, emoji)
             .await?;
-        let dispatches = self.enqueue_outcome(&routing).await?;
+        let (dispatches, blocked) = self.save_dispatches(routed).await?;
         Ok(IngestOutcome::Routed {
             message_id,
-            blocked: routing.blocked.len(),
             dispatches,
+            blocked,
         })
     }
 
@@ -388,15 +386,15 @@ where
             return Ok(IngestOutcome::Ignored(IgnoreReason::Unmatched));
         };
 
-        let routing = self
+        let routed = self
             .router
             .route_receipt(&message, observer_endpoint, kind)
             .await?;
-        let dispatches = self.enqueue_outcome(&routing).await?;
+        let (dispatches, blocked) = self.save_dispatches(routed).await?;
         Ok(IngestOutcome::Routed {
             message_id,
-            blocked: routing.blocked.len(),
             dispatches,
+            blocked,
         })
     }
 }

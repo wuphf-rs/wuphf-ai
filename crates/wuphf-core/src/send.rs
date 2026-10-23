@@ -14,9 +14,9 @@
 
 use crate::{Core, CoreError};
 use wuphf_model::{
-    Action, Alias, ChatAddress, ConnectorId, Dispatch, DispatchCommand, Endpoint, EndpointId,
-    Message, MessageId, OWNER_AUTHOR, OwnerMessage, OwnerSendOutcome, ReplicaSet, ReplicaSetId,
-    ReplyContext, SourceAddress, TargetAddress,
+    Action, Alias, ChatAddress, ConnectorId, Dispatch, Endpoint, EndpointId, Message, MessageId,
+    OWNER_AUTHOR, OwnerMessage, OwnerSendOutcome, ReplicaSet, ReplicaSetId, ReplyContext,
+    SourceAddress, Target,
 };
 use wuphf_storage::Storage;
 
@@ -59,24 +59,21 @@ where
         };
         self.storage.put_message(message.clone()).await?;
 
-        let direct = self
-            .storage
-            .enqueue_dispatch(
-                DispatchCommand {
-                    target_endpoint: endpoint_id,
-                    target_connector: outbound.connector_id.clone(),
-                    target: TargetAddress {
-                        address,
-                        create_thread: None,
-                    },
-                    payload: Action::Send {
-                        message: message.clone(),
-                        reply: reply_context,
-                    },
-                },
-                None,
-            )
-            .await?;
+        let direct = Dispatch::new(
+            Target {
+                endpoint_id,
+                connector_id: outbound.connector_id.clone(),
+                address,
+                create_thread: None,
+            },
+            replica_set_id,
+            Action::Send {
+                message: message.clone(),
+                reply: reply_context,
+            },
+            None,
+        );
+        self.storage.enqueue_dispatch(&direct).await?;
 
         let mirrored = self
             .fan_out_to_mirrors(message, endpoint_id, replica_set_id, &outbound.chat_id)
@@ -198,7 +195,7 @@ where
                 )
                 .await;
         }
-        let (_, dispatches) = self
+        let (dispatches, _) = self
             .route_and_record(&message, origin_endpoint, &provision_title)
             .await?;
         Ok(dispatches)

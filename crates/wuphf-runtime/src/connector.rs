@@ -200,7 +200,7 @@ impl ConnectorHub {
     }
 
     async fn deliver_or_hold(&mut self, dispatch: Dispatch) {
-        let connector_id = dispatch.command.target_connector.clone();
+        let connector_id = dispatch.to.connector_id.clone();
         let Some(session) = self.sessions.get(&connector_id) else {
             debug!(
                 connector = %connector_id.0,

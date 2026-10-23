@@ -8,8 +8,7 @@ use uuid::Uuid;
 use wuphf_model::{
     Action, Attachment, AttachmentKind, ChatAddress, Connector, ConnectorCapabilities, ConnectorId,
     ConnectorInput, ConnectorOutput, DispatchAck, DispatchFailed, Event, EventKind, InboundWork,
-    MediaId, NewMessage, NoticeKind, Platform, ProvisionThread, ReceiptKind, ReplyContext,
-    SourceAddress,
+    MediaId, NewMessage, NoticeKind, Platform, ReceiptKind, ReplyContext, SourceAddress,
 };
 use wuphf_proto::connector as pb;
 use wuphf_proto::connector::connector_transport_server::ConnectorTransport;
@@ -271,12 +270,13 @@ fn output_to_proto(output: ConnectorOutput) -> pb::ServerFrame {
     let body = match output {
         ConnectorOutput::Dispatch(dispatch) => {
             let dispatch_id = dispatch.id.to_string();
-            let target = dispatch.command.target;
-            match dispatch.command.payload {
+            let target = dispatch.to;
+            match dispatch.action {
                 Action::Send {
                     message,
                     reply: reply_context,
                 } => {
+                    let container = target.address.chat_id.clone();
                     let reply_to_platform_message_id = reply_context
                         .as_ref()
                         .map(|context| context.native_id.clone());
@@ -284,7 +284,10 @@ fn output_to_proto(output: ConnectorOutput) -> pb::ServerFrame {
                         dispatch_id,
                         target_chat_id: target.address.chat_id,
                         target_thread_id: target.address.thread_id,
-                        provision_thread: target.create_thread.map(provision_thread_to_proto),
+                        // A thread is always created inside the target chat.
+                        provision_thread: target
+                            .create_thread
+                            .map(|title| pb::ProvisionThread { container, title }),
                         sender: message.author_id,
                         participant: message.participant,
                         text: message.text,
@@ -343,8 +346,9 @@ fn output_to_proto(output: ConnectorOutput) -> pb::ServerFrame {
                     reactor_name,
                     emoji: emoji.unwrap_or_default(),
                 }),
-                Action::DeliveryAck {
+                Action::Receipt {
                     native_id: target_platform_message_id,
+                    kind: ReceiptKind::Delivered,
                     ..
                 } => pb::server_frame::Body::DeliveryAck(pb::DeliveryAckDispatch {
                     dispatch_id,
@@ -352,8 +356,9 @@ fn output_to_proto(output: ConnectorOutput) -> pb::ServerFrame {
                     target_thread_id: target.address.thread_id,
                     target_platform_message_id,
                 }),
-                Action::SeenReceipt {
+                Action::Receipt {
                     native_id: target_platform_message_id,
+                    kind: ReceiptKind::Read,
                     ..
                 } => pb::server_frame::Body::SeenReceipt(pb::SeenReceiptDispatch {
                     dispatch_id,
@@ -368,13 +373,6 @@ fn output_to_proto(output: ConnectorOutput) -> pb::ServerFrame {
         }
     };
     pb::ServerFrame { body: Some(body) }
-}
-
-fn provision_thread_to_proto(provision: ProvisionThread) -> pb::ProvisionThread {
-    pb::ProvisionThread {
-        container: provision.container,
-        title: provision.title,
-    }
 }
 
 fn reply_context_to_proto(context: ReplyContext) -> pb::ReplyContext {

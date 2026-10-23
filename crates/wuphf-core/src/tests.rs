@@ -116,13 +116,10 @@ async fn direct_rule_mints_endpoints_and_fans_out_to_the_paired_single() {
         .unwrap();
     let dispatches = outcome.dispatches();
     assert_eq!(dispatches.len(), 1);
-    let command = &dispatches[0].command;
-    assert_eq!(command.target_connector, ConnectorId(TELEGRAM.into()));
-    assert_eq!(
-        command.target.address,
-        ChatAddress::new("-100123", Some("12".into()))
-    );
-    assert!(command.target.create_thread.is_none());
+    let to = &dispatches[0].to;
+    assert_eq!(to.connector_id, ConnectorId(TELEGRAM.into()));
+    assert_eq!(to.address, ChatAddress::new("-100123", Some("12".into())));
+    assert!(to.create_thread.is_none());
 }
 
 #[tokio::test]
@@ -153,14 +150,13 @@ async fn mirror_dispatch_requests_thread_provisioning_then_persists_mapping() {
         .await
         .unwrap();
     let dispatch = &outcome.dispatches()[0];
-    let provision = dispatch
-        .command
-        .target
+    let title = dispatch
+        .to
         .create_thread
         .as_ref()
         .expect("first mirror send provisions a thread");
-    assert_eq!(provision.container, "-1001234567");
-    assert_eq!(provision.title, "Title");
+    assert_eq!(dispatch.to.address.chat_id, "-1001234567");
+    assert_eq!(title, "Title");
 
     core.acknowledge_dispatch(DispatchAck {
         dispatch_id: dispatch.id,
@@ -182,8 +178,8 @@ async fn mirror_dispatch_requests_thread_provisioning_then_persists_mapping() {
         .await
         .unwrap();
     let back = &reverse.dispatches()[0];
-    assert_eq!(back.command.target_connector, ConnectorId(WHATSAPP.into()));
-    assert_eq!(back.command.target.address.chat_id, "111@g.us");
+    assert_eq!(back.to.connector_id, ConnectorId(WHATSAPP.into()));
+    assert_eq!(back.to.address.chat_id, "111@g.us");
 
     // The next source message reuses the thread without provisioning.
     let again = core
@@ -192,10 +188,10 @@ async fn mirror_dispatch_requests_thread_provisioning_then_persists_mapping() {
         .unwrap();
     let resend = &again.dispatches()[0];
     assert_eq!(
-        resend.command.target.address,
+        resend.to.address,
         ChatAddress::new("-1001234567", Some("777".into()))
     );
-    assert!(resend.command.target.create_thread.is_none());
+    assert!(resend.to.create_thread.is_none());
 }
 
 #[tokio::test]
@@ -219,18 +215,15 @@ async fn source_rename_retitles_the_provisioned_mirror_thread() {
     let (retitle, title) = outcome
         .dispatches()
         .iter()
-        .find_map(|stored| match &stored.command.payload {
+        .find_map(|stored| match &stored.action {
             Action::RenameThread { title, .. } => Some((stored, title.clone())),
             _ => None,
         })
         .expect("a source rename fans out a retitle dispatch");
     assert_eq!(title, "Renamed");
+    assert_eq!(retitle.to.connector_id, ConnectorId(TELEGRAM.into()));
     assert_eq!(
-        retitle.command.target_connector,
-        ConnectorId(TELEGRAM.into())
-    );
-    assert_eq!(
-        retitle.command.target.address,
+        retitle.to.address,
         ChatAddress::new("-1001234567", Some("777".into()))
     );
 
@@ -242,7 +235,7 @@ async fn source_rename_retitles_the_provisioned_mirror_thread() {
         stable
             .dispatches()
             .iter()
-            .all(|stored| !matches!(stored.command.payload, Action::RenameThread { .. }))
+            .all(|stored| !matches!(stored.action, Action::RenameThread { .. }))
     );
 }
 
@@ -268,7 +261,7 @@ async fn first_title_retitles_a_thread_provisioned_without_one() {
     let title = outcome
         .dispatches()
         .iter()
-        .find_map(|stored| match &stored.command.payload {
+        .find_map(|stored| match &stored.action {
             Action::RenameThread { title, .. } => Some(title.clone()),
             _ => None,
         })
@@ -289,7 +282,7 @@ async fn concurrent_messages_provision_one_thread_and_replay_the_rest() {
         panic!("first message routes");
     };
     assert_eq!(dispatches.len(), 1);
-    assert!(dispatches[0].command.target.create_thread.is_some());
+    assert!(dispatches[0].to.create_thread.is_some());
 
     // A second message arriving before the provision is acknowledged must be
     // deferred rather than provisioning a second topic for the same chat.
@@ -313,14 +306,14 @@ async fn concurrent_messages_provision_one_thread_and_replay_the_rest() {
         .unwrap();
     // Acknowledging the create also emits a delivery-ack to the origin, so the
     // replayed stashed message is found among the released dispatches.
-    let command = &replayed
+    let to = &replayed
         .iter()
-        .find(|dispatch| matches!(dispatch.command.payload, Action::Send { .. }))
+        .find(|dispatch| matches!(dispatch.action, Action::Send { .. }))
         .expect("the stashed message is replayed")
-        .command;
-    assert_eq!(command.target_connector, ConnectorId(TELEGRAM.into()));
-    assert!(command.target.create_thread.is_none());
-    assert_eq!(command.target.address.thread_id, Some("777".into()));
+        .to;
+    assert_eq!(to.connector_id, ConnectorId(TELEGRAM.into()));
+    assert!(to.create_thread.is_none());
+    assert_eq!(to.address.thread_id, Some("777".into()));
 }
 
 #[tokio::test]
@@ -337,7 +330,7 @@ async fn restart_replays_stash_when_provisioning_settled_while_down() {
     let IngestOutcome::Routed { dispatches, .. } = first else {
         panic!("first message routes");
     };
-    assert!(dispatches[0].command.target.create_thread.is_some());
+    assert!(dispatches[0].to.create_thread.is_some());
     let provisioning_id = dispatches[0].id;
     let deferred = core
         .ingest(event(WHATSAPP, "111@g.us", "wa-2", None))
@@ -370,13 +363,10 @@ async fn restart_replays_stash_when_provisioning_settled_while_down() {
         .unwrap();
     let replayed_b = replayed
         .iter()
-        .find(|dispatch| matches!(dispatch.command.payload, Action::Send { .. }))
+        .find(|dispatch| matches!(dispatch.action, Action::Send { .. }))
         .expect("the stashed message replays after restart");
-    assert!(replayed_b.command.target.create_thread.is_none());
-    assert_eq!(
-        replayed_b.command.target.address.thread_id,
-        Some("777".into())
-    );
+    assert!(replayed_b.to.create_thread.is_none());
+    assert_eq!(replayed_b.to.address.thread_id, Some("777".into()));
 }
 
 #[tokio::test]
@@ -391,7 +381,7 @@ async fn failed_provisioning_releases_stashed_messages() {
     let IngestOutcome::Routed { dispatches, .. } = first else {
         panic!("first message routes");
     };
-    assert!(dispatches[0].command.target.create_thread.is_some());
+    assert!(dispatches[0].to.create_thread.is_some());
     let provisioning_id = dispatches[0].id;
 
     // A second message is deferred (stashed) behind the in-flight provision.
@@ -412,10 +402,10 @@ async fn failed_provisioning_releases_stashed_messages() {
         .unwrap();
     let replay = released
         .iter()
-        .find(|dispatch| matches!(dispatch.command.payload, Action::Send { .. }))
+        .find(|dispatch| matches!(dispatch.action, Action::Send { .. }))
         .expect("the stashed message replays when provisioning fails");
     assert!(
-        replay.command.target.create_thread.is_some(),
+        replay.to.create_thread.is_some(),
         "replay re-attempts provisioning",
     );
 
@@ -445,7 +435,7 @@ async fn ignores_echoes_of_dispatched_copies() {
     else {
         panic!("message should route");
     };
-    let telegram = dispatches[0].command.target_endpoint;
+    let telegram = dispatches[0].to.endpoint_id;
     core.record_dispatched_copy(message_id, telegram, "tg-9")
         .await
         .unwrap();
@@ -483,7 +473,7 @@ async fn maps_replies_through_internal_identity_and_target_copy() {
     else {
         panic!("parent should route");
     };
-    let telegram = dispatches[0].command.target_endpoint;
+    let telegram = dispatches[0].to.endpoint_id;
     core.record_dispatched_copy(parent_id, telegram, "tg-parent")
         .await
         .unwrap();
@@ -501,7 +491,7 @@ async fn maps_replies_through_internal_identity_and_target_copy() {
         message,
         reply: reply_context,
         ..
-    } = &reply.dispatches()[0].command.payload
+    } = &reply.dispatches()[0].action
     else {
         panic!("reply should route as a message create");
     };
@@ -590,10 +580,7 @@ async fn migrated_address_resolves_to_the_same_endpoint() {
     };
     assert_ne!(message_id, migrated_id);
     assert_eq!(dispatches.len(), 1);
-    assert_eq!(
-        dispatches[0].command.target_connector,
-        ConnectorId(TELEGRAM.into())
-    );
+    assert_eq!(dispatches[0].to.connector_id, ConnectorId(TELEGRAM.into()));
 }
 
 #[tokio::test]
@@ -681,7 +668,7 @@ async fn edit_after_delivery_revises_the_delivered_copy() {
     else {
         panic!("create should route");
     };
-    let telegram = dispatches[0].command.target_endpoint;
+    let telegram = dispatches[0].to.endpoint_id;
     core.record_dispatched_copy(message_id, telegram, "tg-1")
         .await
         .unwrap();
@@ -697,13 +684,10 @@ async fn edit_after_delivery_revises_the_delivered_copy() {
         .await
         .unwrap();
     let dispatch = &edited.dispatches()[0];
-    assert_eq!(
-        dispatch.command.target_connector,
-        ConnectorId(TELEGRAM.into())
-    );
+    assert_eq!(dispatch.to.connector_id, ConnectorId(TELEGRAM.into()));
     let Action::Edit {
         message, native_id, ..
-    } = &dispatch.command.payload
+    } = &dispatch.action
     else {
         panic!("edit should route as a message edit");
     };
@@ -754,9 +738,9 @@ async fn edit_before_delivery_blocks_then_releases_with_native_id() {
         .unwrap();
     let edit = released
         .iter()
-        .find(|dispatch| matches!(dispatch.command.payload, Action::Edit { .. }))
+        .find(|dispatch| matches!(dispatch.action, Action::Edit { .. }))
         .expect("acknowledging the create releases the blocked edit");
-    let Action::Edit { native_id, .. } = &edit.command.payload else {
+    let Action::Edit { native_id, .. } = &edit.action else {
         unreachable!();
     };
     assert_eq!(native_id, "tg-1");
@@ -815,7 +799,7 @@ async fn reaction_after_delivery_fans_to_the_delivered_copy() {
     else {
         panic!("create should route");
     };
-    let telegram = dispatches[0].command.target_endpoint;
+    let telegram = dispatches[0].to.endpoint_id;
     core.record_dispatched_copy(message_id, telegram, "tg-1")
         .await
         .unwrap();
@@ -830,16 +814,13 @@ async fn reaction_after_delivery_fans_to_the_delivered_copy() {
         .await
         .unwrap();
     let dispatch = &reacted.dispatches()[0];
-    assert_eq!(
-        dispatch.command.target_connector,
-        ConnectorId(TELEGRAM.into())
-    );
+    assert_eq!(dispatch.to.connector_id, ConnectorId(TELEGRAM.into()));
     let Action::React {
         native_id,
         emoji,
         reactor_name,
         ..
-    } = &dispatch.command.payload
+    } = &dispatch.action
     else {
         panic!("reaction should route as a reaction dispatch");
     };
@@ -890,11 +871,11 @@ async fn reaction_before_delivery_blocks_then_releases_with_native_id() {
         .unwrap();
     let reaction = released
         .iter()
-        .find(|dispatch| matches!(dispatch.command.payload, Action::React { .. }))
+        .find(|dispatch| matches!(dispatch.action, Action::React { .. }))
         .expect("acknowledging the create releases the blocked reaction");
     let Action::React {
         native_id, emoji, ..
-    } = &reaction.command.payload
+    } = &reaction.action
     else {
         unreachable!();
     };
@@ -922,10 +903,23 @@ async fn acknowledging_a_mirror_create_emits_a_delivery_ack_to_the_origin() {
         .unwrap();
     let ack = released
         .iter()
-        .find(|dispatch| matches!(dispatch.command.payload, Action::DeliveryAck { .. }))
+        .find(|dispatch| {
+            matches!(
+                dispatch.action,
+                Action::Receipt {
+                    kind: ReceiptKind::Delivered,
+                    ..
+                }
+            )
+        })
         .expect("acknowledging the mirror create emits a delivery ack");
-    assert_eq!(ack.command.target_connector, ConnectorId(WHATSAPP.into()));
-    let Action::DeliveryAck { native_id, .. } = &ack.command.payload else {
+    assert_eq!(ack.to.connector_id, ConnectorId(WHATSAPP.into()));
+    let Action::Receipt {
+        kind: ReceiptKind::Delivered,
+        native_id,
+        ..
+    } = &ack.action
+    else {
         unreachable!();
     };
     assert_eq!(native_id, "wa-1");
@@ -945,7 +939,7 @@ async fn read_receipt_on_a_mirror_copy_surfaces_a_seen_receipt_on_the_origin() {
     else {
         panic!("create should route");
     };
-    let telegram = dispatches[0].command.target_endpoint;
+    let telegram = dispatches[0].to.endpoint_id;
     core.record_dispatched_copy(message_id, telegram, "tg-1")
         .await
         .unwrap();
@@ -967,11 +961,13 @@ async fn read_receipt_on_a_mirror_copy_surfaces_a_seen_receipt_on_the_origin() {
         .await
         .unwrap();
     let dispatch = &seen.dispatches()[0];
-    assert_eq!(
-        dispatch.command.target_connector,
-        ConnectorId(WHATSAPP.into())
-    );
-    let Action::SeenReceipt { native_id, .. } = &dispatch.command.payload else {
+    assert_eq!(dispatch.to.connector_id, ConnectorId(WHATSAPP.into()));
+    let Action::Receipt {
+        kind: ReceiptKind::Read,
+        native_id,
+        ..
+    } = &dispatch.action
+    else {
         panic!("read receipt should surface a seen receipt");
     };
     assert_eq!(native_id, "wa-1");
@@ -994,7 +990,7 @@ async fn receipts_for_a_message_sent_from_another_source_device_surface_on_the_m
     else {
         panic!("create should route");
     };
-    let telegram = dispatches[0].command.target_endpoint;
+    let telegram = dispatches[0].to.endpoint_id;
     core.record_dispatched_copy(message_id, telegram, "tg-1")
         .await
         .unwrap();
@@ -1010,8 +1006,13 @@ async fn receipts_for_a_message_sent_from_another_source_device_surface_on_the_m
         .await
         .unwrap();
     let ack = &delivered.dispatches()[0];
-    assert_eq!(ack.command.target_connector, ConnectorId(TELEGRAM.into()));
-    let Action::DeliveryAck { native_id, .. } = &ack.command.payload else {
+    assert_eq!(ack.to.connector_id, ConnectorId(TELEGRAM.into()));
+    let Action::Receipt {
+        kind: ReceiptKind::Delivered,
+        native_id,
+        ..
+    } = &ack.action
+    else {
         panic!("delivered receipt should surface a delivery ack on the mirror");
     };
     assert_eq!(native_id, "tg-1");
@@ -1027,8 +1028,13 @@ async fn receipts_for_a_message_sent_from_another_source_device_surface_on_the_m
         .await
         .unwrap();
     let seen = &read.dispatches()[0];
-    assert_eq!(seen.command.target_connector, ConnectorId(TELEGRAM.into()));
-    let Action::SeenReceipt { native_id, .. } = &seen.command.payload else {
+    assert_eq!(seen.to.connector_id, ConnectorId(TELEGRAM.into()));
+    let Action::Receipt {
+        kind: ReceiptKind::Read,
+        native_id,
+        ..
+    } = &seen.action
+    else {
         panic!("read receipt should surface a seen receipt on the mirror");
     };
     assert_eq!(native_id, "tg-1");
@@ -1149,14 +1155,11 @@ async fn owner_message_to_a_routed_chat_fans_out_to_the_other_side() {
         .send_owner_message(owner_message("12345@s.whatsapp.net", "from the tui", None))
         .await
         .unwrap();
-    assert_eq!(
-        outcome.direct.command.target_connector,
-        ConnectorId(WHATSAPP.into())
-    );
+    assert_eq!(outcome.direct.to.connector_id, ConnectorId(WHATSAPP.into()));
     assert_eq!(outcome.mirrored.len(), 1);
-    let mirror = &outcome.mirrored[0].command;
-    assert_eq!(mirror.target_connector, ConnectorId(TELEGRAM.into()));
-    assert_eq!(mirror.target.address.chat_id, "-100123");
+    let mirror = &outcome.mirrored[0].to;
+    assert_eq!(mirror.connector_id, ConnectorId(TELEGRAM.into()));
+    assert_eq!(mirror.address.chat_id, "-100123");
 
     // The echo stays suppressed on the routed path too.
     core.acknowledge_dispatch(DispatchAck {
@@ -1212,7 +1215,7 @@ async fn owner_message_reply_quotes_the_stored_parent_and_degrades_to_plain() {
         message,
         reply: reply_context,
         ..
-    } = &outcome.direct.command.payload
+    } = &outcome.direct.action
     else {
         panic!("owner message dispatches a message create");
     };
@@ -1235,7 +1238,7 @@ async fn owner_message_reply_quotes_the_stored_parent_and_degrades_to_plain() {
         message,
         reply: reply_context,
         ..
-    } = &outcome.direct.command.payload
+    } = &outcome.direct.action
     else {
         panic!("owner message dispatches a message create");
     };
@@ -1417,11 +1420,11 @@ async fn a_form_learned_after_the_chat_is_routed_joins_the_same_conversation() {
         .unwrap();
     let dispatch = &under_phone.dispatches()[0];
     assert_eq!(
-        dispatch.command.target.address,
+        dispatch.to.address,
         ChatAddress::new("-1001234567", Some("777".into()))
     );
     assert!(
-        dispatch.command.target.create_thread.is_none(),
+        dispatch.to.create_thread.is_none(),
         "the phone form provisioned a second mirror thread"
     );
 }
@@ -1563,7 +1566,7 @@ async fn a_quote_of_a_received_copy_is_not_attributed_to_the_bridge() {
     let Action::Send {
         reply: reply_context,
         ..
-    } = &reply.dispatches()[0].command.payload
+    } = &reply.dispatches()[0].action
     else {
         panic!("reply should dispatch a create");
     };
@@ -1605,7 +1608,7 @@ async fn a_quote_of_a_bridge_sent_copy_is_attributed_to_the_bridge() {
     let Action::Send {
         reply: reply_context,
         ..
-    } = &reply.dispatches()[0].command.payload
+    } = &reply.dispatches()[0].action
     else {
         panic!("reply should dispatch a create");
     };
@@ -1631,7 +1634,7 @@ fn notifying_core() -> Core<InMemoryStorage> {
 }
 
 fn notice_text(dispatch: &Dispatch) -> String {
-    let Action::Send { message, .. } = &dispatch.command.payload else {
+    let Action::Send { message, .. } = &dispatch.action else {
         panic!("a notice should dispatch a message create");
     };
     message.text.clone().expect("a notice carries text")
@@ -1653,10 +1656,7 @@ async fn an_owner_notice_reaches_the_other_connectors_only() {
     // The WhatsApp target is skipped: a logged-out connector cannot deliver
     // the news that it is logged out.
     assert_eq!(dispatches.len(), 1);
-    assert_eq!(
-        dispatches[0].command.target_connector,
-        ConnectorId(TELEGRAM.into())
-    );
+    assert_eq!(dispatches[0].to.connector_id, ConnectorId(TELEGRAM.into()));
     let text = notice_text(&dispatches[0]);
     assert!(
         text.contains(WHATSAPP),

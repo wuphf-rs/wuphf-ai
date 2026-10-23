@@ -13,8 +13,8 @@ use async_trait::async_trait;
 use thiserror::Error;
 use wuphf_model::{
     AddressLink, Alias, ChatAddress, ConnectorId, Conversation, ConversationId, DedupKey, Dispatch,
-    DispatchCommand, DispatchId, Endpoint, EndpointId, MediaBlob, MediaId, Message, MessageCopy,
-    MessageId, ObservedChat, ObservedMessage, ReplicaSet, ReplicaSetId, ThreadMapping,
+    DispatchId, Endpoint, EndpointId, MediaBlob, MediaId, Message, MessageCopy, MessageId,
+    ObservedChat, ObservedMessage, ReplicaSet, ReplicaSetId, ThreadMapping,
 };
 
 #[derive(Debug, Error)]
@@ -132,11 +132,10 @@ pub trait Storage: Send + Sync + 'static {
     async fn put_media(&self, media: MediaBlob, stored_at_ms: i64) -> StorageResult<()>;
     async fn media(&self, media_id: MediaId) -> StorageResult<Option<MediaBlob>>;
     async fn prune_unreferenced_media_before(&self, cutoff_ms: i64) -> StorageResult<u64>;
-    async fn enqueue_dispatch(
-        &self,
-        command: DispatchCommand,
-        waiting_for: Option<MessageId>,
-    ) -> StorageResult<Dispatch>;
+    /// Persist a dispatch as given. The caller builds it with
+    /// [`Dispatch::new`](wuphf_model::Dispatch::new), which already decides
+    /// whether it is pending or blocked.
+    async fn enqueue_dispatch(&self, dispatch: &Dispatch) -> StorageResult<()>;
     async fn pending_dispatches(&self) -> StorageResult<Vec<Dispatch>>;
     async fn dispatch(&self, dispatch_id: DispatchId) -> StorageResult<Option<Dispatch>>;
     async fn acknowledge_dispatch(

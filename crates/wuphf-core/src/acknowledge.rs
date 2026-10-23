@@ -59,30 +59,33 @@ where
     /// how to surface it (Telegram reacts 👍; sources ignore it). Multiple
     /// mirrors each emit one; the signal is idempotent.
     async fn delivery_ack_for(&self, dispatch: &Dispatch) -> Result<Option<Dispatch>, CoreError> {
-        if !matches!(dispatch.command.payload, wuphf_model::Action::Send { .. }) {
+        if !matches!(dispatch.action, wuphf_model::Action::Send { .. }) {
             return Ok(None);
         }
-        let Some(message_id) = dispatch.command.message_id() else {
+        let Some(message_id) = dispatch.message_id() else {
             return Ok(None);
         };
         let Some(origin) = self.storage.received_copy(message_id).await? else {
             return Ok(None);
         };
         let endpoint = self.storage.endpoint(origin.endpoint_id).await?;
-        let command = wuphf_model::DispatchCommand {
-            target_endpoint: endpoint.id,
-            target_connector: endpoint.connector_id.clone(),
-            target: wuphf_model::TargetAddress {
+        let ack = Dispatch::new(
+            wuphf_model::Target {
+                endpoint_id: endpoint.id,
+                connector_id: endpoint.connector_id.clone(),
                 address: endpoint.address(),
                 create_thread: None,
             },
-            payload: wuphf_model::Action::DeliveryAck {
+            dispatch.replica_set_id,
+            wuphf_model::Action::Receipt {
                 message_id,
-                replica_set_id: dispatch.command.message_replica_set_id(),
                 native_id: origin.native_id,
+                kind: wuphf_model::ReceiptKind::Delivered,
             },
-        };
-        Ok(Some(self.storage.enqueue_dispatch(command, None).await?))
+            None,
+        );
+        self.storage.enqueue_dispatch(&ack).await?;
+        Ok(Some(ack))
     }
 
     /// Settle one provisioning dispatch (acknowledged or failed) against its
@@ -93,7 +96,7 @@ where
         &self,
         dispatch: &Dispatch,
     ) -> Result<Vec<Dispatch>, CoreError> {
-        let replica_set_id = dispatch.command.message_replica_set_id();
+        let replica_set_id = dispatch.replica_set_id;
         {
             let mut provisioning = self.provisioning.lock().unwrap();
             let Some(state) = provisioning.get_mut(&replica_set_id) else {
@@ -122,7 +125,7 @@ where
             .await?;
         let mut dispatches = Vec::new();
         for (message, origin_endpoint, provision_title) in stash {
-            let (_, routed) = self
+            let (routed, _) = self
                 .route_and_record(&message, origin_endpoint, &provision_title)
                 .await?;
             dispatches.extend(routed);
@@ -173,9 +176,9 @@ where
         {
             let mut provisioning = self.provisioning.lock().unwrap();
             for dispatch in &pending {
-                if dispatch.command.target.create_thread.is_some() {
+                if dispatch.to.create_thread.is_some() {
                     provisioning
-                        .entry(dispatch.command.message_replica_set_id())
+                        .entry(dispatch.replica_set_id)
                         .or_default()
                         .pending
                         .insert(dispatch.id);
@@ -205,16 +208,12 @@ where
         dispatch: &Dispatch,
         thread_id: String,
     ) -> Result<(), CoreError> {
-        let connector = dispatch.command.target_connector.clone();
-        let container = match &dispatch.command.target.create_thread {
-            Some(provision) => provision.container.clone(),
-            None => dispatch.command.target.address.chat_id.clone(),
-        };
+        let connector = dispatch.to.connector_id.clone();
+        // A thread is always created inside the target chat, so that chat is
+        // the thread's container.
+        let container = dispatch.to.address.chat_id.clone();
 
-        let mut endpoint = self
-            .storage
-            .endpoint(dispatch.command.target_endpoint)
-            .await?;
+        let mut endpoint = self.storage.endpoint(dispatch.to.endpoint_id).await?;
         endpoint.thread_id = Some(thread_id.clone());
         self.storage.put_endpoint(endpoint.clone()).await?;
         self.storage
@@ -226,7 +225,7 @@ where
             })
             .await?;
 
-        let replica_set_id = dispatch.command.message_replica_set_id();
+        let replica_set_id = dispatch.replica_set_id;
         if let Some(conversation) = self
             .storage
             .conversation_for_replica_set(replica_set_id)

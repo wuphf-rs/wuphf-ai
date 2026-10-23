@@ -1,7 +1,7 @@
 //! SQLite-backed [`Storage`]. Rows hold JSON-encoded model values keyed by id;
 //! dispatch state is denormalized into columns so pending work can be queried.
 
-use crate::shared::{acknowledged_copy, dispatch_state, release_blocked};
+use crate::shared::{acknowledged_copy, release_blocked};
 use crate::{Storage, StorageError, StorageResult};
 use async_trait::async_trait;
 use sqlx::migrate::Migrator;
@@ -10,9 +10,9 @@ use sqlx::{Row, SqlitePool};
 use std::str::FromStr;
 use wuphf_model::{
     AddressLink, Alias, ChatAddress, ConnectorId, Conversation, ConversationId, DedupKey, Dispatch,
-    DispatchCommand, DispatchId, DispatchState, Endpoint, EndpointId, MediaBlob, MediaId, Message,
-    MessageCopy, MessageId, ObservedChat, ObservedDirection, ObservedMessage, ReplicaSet,
-    ReplicaSetId, ThreadMapping,
+    DispatchId, DispatchState, Endpoint, EndpointId, MediaBlob, MediaId, Message, MessageCopy,
+    MessageId, ObservedChat, ObservedDirection, ObservedMessage, ReplicaSet, ReplicaSetId,
+    ThreadMapping,
 };
 
 /// The schema migrations, embedded at build time. Shared with the migration
@@ -467,18 +467,8 @@ impl Storage for SqliteStorage {
         Ok(result.rows_affected())
     }
 
-    async fn enqueue_dispatch(
-        &self,
-        command: DispatchCommand,
-        waiting_for: Option<MessageId>,
-    ) -> StorageResult<Dispatch> {
-        let dispatch = Dispatch {
-            id: DispatchId::new(),
-            command,
-            state: dispatch_state(waiting_for),
-        };
-        insert_dispatch(&self.pool, &dispatch).await?;
-        Ok(dispatch)
+    async fn enqueue_dispatch(&self, dispatch: &Dispatch) -> StorageResult<()> {
+        insert_dispatch(&self.pool, dispatch).await
     }
 
     async fn pending_dispatches(&self) -> StorageResult<Vec<Dispatch>> {
@@ -517,7 +507,7 @@ impl Storage for SqliteStorage {
             .bind(dispatch.id.to_string())
             .execute(&mut *transaction)
             .await?;
-        let Some(copy) = acknowledged_copy(&dispatch.command, &platform_message_id) else {
+        let Some(copy) = acknowledged_copy(&dispatch, &platform_message_id) else {
             transaction.commit().await?;
             return Ok(Vec::new());
         };
@@ -541,7 +531,7 @@ impl Storage for SqliteStorage {
             "SELECT payload FROM dispatches WHERE state = 'blocked' AND waiting_for = ? AND target_endpoint = ?",
         )
         .bind(message_id.to_string())
-        .bind(dispatch.command.target_endpoint.to_string())
+        .bind(dispatch.to.endpoint_id.to_string())
         .fetch_all(&mut *transaction)
         .await?;
         let mut released = Vec::new();
@@ -1024,8 +1014,8 @@ async fn insert_dispatch(pool: &SqlitePool, dispatch: &Dispatch) -> StorageResul
          VALUES (?, ?, ?, ?, ?, ?)",
     )
     .bind(dispatch.id.to_string())
-    .bind(dispatch.command.target_endpoint.to_string())
-    .bind(dispatch.command.message_id().map(|id| id.to_string()))
+    .bind(dispatch.to.endpoint_id.to_string())
+    .bind(dispatch.message_id().map(|id| id.to_string()))
     .bind(waiting_for(dispatch).map(|id| id.to_string()))
     .bind(state_name(&dispatch.state))
     .bind(serde_json::to_string(dispatch)?)

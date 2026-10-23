@@ -13,10 +13,9 @@ use std::fmt::Debug;
 use std::str::FromStr;
 use uuid::Uuid;
 use wuphf_model::{
-    Action, Attachment, AttachmentKind, ChatAddress, ConnectorId, Dispatch, DispatchCommand,
-    DispatchId, DispatchState, EndpointId, MediaId, Message, MessageCopy, MessageId,
-    ObservedDirection, ObservedMessage, Platform, ProvisionThread, ReplicaSetId, ReplyContext,
-    TargetAddress,
+    Action, Attachment, AttachmentKind, ChatAddress, ConnectorId, Dispatch, DispatchId,
+    DispatchState, EndpointId, MediaId, Message, MessageCopy, MessageId, ObservedDirection,
+    ObservedMessage, Platform, ReceiptKind, ReplicaSetId, ReplyContext, Target,
 };
 
 /// A fresh database migrated up to, but not including, `version`.
@@ -229,53 +228,48 @@ fn sample_copy() -> MessageCopy {
     }
 }
 
-fn command(action: Action, create_thread: Option<ProvisionThread>) -> DispatchCommand {
-    DispatchCommand {
-        target_endpoint: endpoint_id(),
-        target_connector: ConnectorId("telegram".into()),
-        target: TargetAddress {
-            address: ChatAddress::new("-100", Some("7".into())),
-            create_thread,
-        },
-        payload: action,
+fn target(create_thread: Option<String>) -> Target {
+    Target {
+        endpoint_id: endpoint_id(),
+        connector_id: ConnectorId("telegram".into()),
+        address: ChatAddress::new("-100", Some("7".into())),
+        create_thread,
     }
 }
 
-/// One dispatch per [`Action`] variant. The create also carries a reply, a
-/// thread to provision, and an acknowledged state, so every renamed key on a
-/// dispatch appears at least once.
+/// One dispatch per kind of stored action. The send also carries a reply, a
+/// thread to create, and an acknowledged state, so every key a migration
+/// rewrites on a dispatch appears at least once.
 fn sample_dispatches() -> Vec<Dispatch> {
     let dispatch = |n: u128, action: Action, state: DispatchState| Dispatch {
         id: DispatchId(Uuid::from_u128(100 + n)),
-        command: command(action, None),
         state,
+        to: target(None),
+        replica_set_id: replica_set_id(),
+        action,
     };
-    let create = Dispatch {
+    let send = Dispatch {
         id: DispatchId(Uuid::from_u128(100)),
-        command: command(
-            Action::Send {
-                message: sample_message(),
-                reply: Some(ReplyContext {
-                    message_id: MessageId(Uuid::from_u128(5)),
-                    native_id: "tg-parent".into(),
-                    author_id: "15550002222@s.whatsapp.net".into(),
-                    participant: None,
-                    text: Some("parent".into()),
-                    attachments: Vec::new(),
-                    authored_by_bridge: true,
-                }),
-            },
-            Some(ProvisionThread {
-                container: "-100".into(),
-                title: "Alice".into(),
-            }),
-        ),
         state: DispatchState::Acknowledged {
             native_id: "tg-1".into(),
         },
+        to: target(Some("Alice".into())),
+        replica_set_id: replica_set_id(),
+        action: Action::Send {
+            message: sample_message(),
+            reply: Some(ReplyContext {
+                message_id: MessageId(Uuid::from_u128(5)),
+                native_id: "tg-parent".into(),
+                author_id: "15550002222@s.whatsapp.net".into(),
+                participant: None,
+                text: Some("parent".into()),
+                attachments: Vec::new(),
+                authored_by_bridge: true,
+            }),
+        },
     };
     vec![
-        create,
+        send,
         dispatch(
             1,
             Action::Edit {
@@ -287,7 +281,7 @@ fn sample_dispatches() -> Vec<Dispatch> {
         dispatch(
             2,
             Action::Delete {
-                message: sample_message(),
+                message_id: message_id(),
                 native_id: "tg-1".into(),
             },
             DispatchState::Pending,
@@ -295,7 +289,6 @@ fn sample_dispatches() -> Vec<Dispatch> {
         dispatch(
             3,
             Action::RenameThread {
-                replica_set_id: replica_set_id(),
                 title: "Alice (renamed)".into(),
             },
             DispatchState::Pending,
@@ -304,7 +297,6 @@ fn sample_dispatches() -> Vec<Dispatch> {
             4,
             Action::React {
                 message_id: message_id(),
-                replica_set_id: replica_set_id(),
                 native_id: "tg-1".into(),
                 reactor: "15550002222@s.whatsapp.net".into(),
                 reactor_name: Some("Bob".into()),
@@ -314,19 +306,19 @@ fn sample_dispatches() -> Vec<Dispatch> {
         ),
         dispatch(
             5,
-            Action::DeliveryAck {
+            Action::Receipt {
                 message_id: message_id(),
-                replica_set_id: replica_set_id(),
                 native_id: "wa-1".into(),
+                kind: ReceiptKind::Delivered,
             },
             DispatchState::Pending,
         ),
         dispatch(
             6,
-            Action::SeenReceipt {
+            Action::Receipt {
                 message_id: message_id(),
-                replica_set_id: replica_set_id(),
                 native_id: "wa-1".into(),
+                kind: ReceiptKind::Read,
             },
             DispatchState::Pending,
         ),

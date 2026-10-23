@@ -1,16 +1,16 @@
 //! In-memory [`Storage`] backend. Keeps all state behind a single `RwLock`,
 //! used for tests and ephemeral runs.
 
-use crate::shared::{acknowledged_copy, dispatch_state, release_blocked};
+use crate::shared::{acknowledged_copy, release_blocked};
 use crate::{Storage, StorageError, StorageResult};
 use async_trait::async_trait;
 use std::collections::{HashMap, HashSet};
 use tokio::sync::RwLock;
 use wuphf_model::{
     AddressLink, Alias, ChatAddress, ConnectorId, Conversation, ConversationId, DedupKey, Dispatch,
-    DispatchCommand, DispatchId, DispatchState, Endpoint, EndpointId, MediaBlob, MediaId, Message,
-    MessageCopy, MessageId, ObservedChat, ObservedDirection, ObservedMessage, ReplicaSet,
-    ReplicaSetId, ThreadMapping,
+    DispatchId, DispatchState, Endpoint, EndpointId, MediaBlob, MediaId, Message, MessageCopy,
+    MessageId, ObservedChat, ObservedDirection, ObservedMessage, ReplicaSet, ReplicaSetId,
+    ThreadMapping,
 };
 
 #[derive(Default)]
@@ -386,22 +386,13 @@ impl Storage for InMemoryStorage {
         Ok((before - state.media.len()) as u64)
     }
 
-    async fn enqueue_dispatch(
-        &self,
-        command: DispatchCommand,
-        waiting_for: Option<MessageId>,
-    ) -> StorageResult<Dispatch> {
-        let dispatch = Dispatch {
-            id: DispatchId::new(),
-            command,
-            state: dispatch_state(waiting_for),
-        };
+    async fn enqueue_dispatch(&self, dispatch: &Dispatch) -> StorageResult<()> {
         self.state
             .write()
             .await
             .dispatches
             .insert(dispatch.id, dispatch.clone());
-        Ok(dispatch)
+        Ok(())
     }
 
     async fn pending_dispatches(&self) -> StorageResult<Vec<Dispatch>> {
@@ -439,7 +430,7 @@ impl Storage for InMemoryStorage {
         dispatch.state = DispatchState::Acknowledged {
             native_id: platform_message_id.clone(),
         };
-        let Some(copy) = acknowledged_copy(&dispatch.command, &platform_message_id) else {
+        let Some(copy) = acknowledged_copy(dispatch, &platform_message_id) else {
             return Ok(Vec::new());
         };
         let (message_id, endpoint_id) = (copy.message_id, copy.endpoint_id);
@@ -449,7 +440,7 @@ impl Storage for InMemoryStorage {
             .dispatches
             .values()
             .filter(|candidate| {
-                candidate.command.target_endpoint == endpoint_id
+                candidate.to.endpoint_id == endpoint_id
                     && candidate.state
                         == (DispatchState::Blocked {
                             waiting_for: message_id,

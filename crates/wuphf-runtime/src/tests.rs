@@ -115,8 +115,8 @@ async fn transports_ready_dispatches_over_tokio_channels() {
     let task = tokio::spawn(runtime.run());
     send_event(&channels, wa_event("wa-1", None)).await;
     let dispatch = channels.dispatches.recv().await.unwrap();
-    assert_eq!(dispatch.command.target_connector, ConnectorId(TG.into()));
-    assert_eq!(dispatch.command.target.address.chat_id, "tg-chat");
+    assert_eq!(dispatch.to.connector_id, ConnectorId(TG.into()));
+    assert_eq!(dispatch.to.address.chat_id, "tg-chat");
     drop(channels.inbound);
     task.await.unwrap().unwrap();
 }
@@ -134,10 +134,7 @@ async fn interleaved_connectors_route_through_independent_workers() {
 
     let first = channels.dispatches.recv().await.unwrap();
     let second = channels.dispatches.recv().await.unwrap();
-    let targets = [
-        first.command.target_connector,
-        second.command.target_connector,
-    ];
+    let targets = [first.to.connector_id, second.to.connector_id];
     assert!(
         targets.contains(&ConnectorId(WA.into())),
         "Telegram event should route to WhatsApp",
@@ -187,8 +184,8 @@ async fn migration_before_event_is_applied_first_on_one_connector() {
     // The message under the migrated address routes only if the migration was
     // applied first; otherwise it matches no rule and yields no dispatch.
     let dispatch = channels.dispatches.recv().await.unwrap();
-    assert_eq!(dispatch.command.target_connector, ConnectorId(TG.into()));
-    assert_eq!(dispatch.command.target.address.chat_id, "tg-chat");
+    assert_eq!(dispatch.to.connector_id, ConnectorId(TG.into()));
+    assert_eq!(dispatch.to.address.chat_id, "tg-chat");
     drop(channels.inbound);
     task.await.unwrap().unwrap();
 }
@@ -217,7 +214,7 @@ async fn acknowledgement_releases_reply_with_target_native_parent_id() {
         if let Action::Send {
             reply: reply_context,
             ..
-        } = dispatch.command.payload
+        } = dispatch.action
         {
             break reply_context.expect("reply context set on release");
         }
@@ -411,7 +408,7 @@ async fn restart_with_orphaned_stash_replays_immediately() {
         let core = mirror_core(Arc::clone(&storage));
         let first = core.ingest(wa_group_event("wa-1")).await.unwrap();
         let provision = &first.dispatches()[0];
-        assert!(provision.command.target.create_thread.is_some());
+        assert!(provision.to.create_thread.is_some());
         let provision_id = provision.id;
         let deferred = core.ingest(wa_group_event("wa-2")).await.unwrap();
         assert!(matches!(deferred, IngestOutcome::Deferred { .. }));
@@ -431,7 +428,7 @@ async fn restart_with_orphaned_stash_replays_immediately() {
     let task = tokio::spawn(runtime.run());
     let replayed = channels.dispatches.recv().await.unwrap();
     assert!(
-        replayed.command.target.create_thread.is_some(),
+        replayed.to.create_thread.is_some(),
         "the orphaned stash replays and re-attempts provisioning at startup",
     );
     drop(channels.inbound);
@@ -480,7 +477,7 @@ async fn connector_sessions_route_dispatches_and_authorize_inputs() {
     let ConnectorOutput::Dispatch(parent_dispatch) = telegram.output.recv().await.unwrap() else {
         panic!("Telegram should receive parent dispatch");
     };
-    assert_eq!(parent_dispatch.command.target.address.chat_id, "tg-chat");
+    assert_eq!(parent_dispatch.to.address.chat_id, "tg-chat");
     drop(telegram);
     let mut telegram = handle.connect(registrations()[1].clone()).await.unwrap();
     let ConnectorOutput::Dispatch(redelivered_parent) = telegram.output.recv().await.unwrap()
@@ -512,7 +509,7 @@ async fn connector_sessions_route_dispatches_and_authorize_inputs() {
     let Action::Send {
         reply: reply_context,
         ..
-    } = reply_dispatch.command.payload
+    } = reply_dispatch.action
     else {
         panic!("released reply should be a message create");
     };
@@ -794,12 +791,12 @@ async fn owner_message_travels_the_dispatch_loop_and_settles_an_outgoing_observa
     let second = channels.dispatches.recv().await.unwrap();
     let direct = [&first, &second]
         .into_iter()
-        .find(|dispatch| dispatch.command.target_connector == ConnectorId(WA.into()))
+        .find(|dispatch| dispatch.to.connector_id == ConnectorId(WA.into()))
         .expect("the owner message dispatches to its own connector");
     assert!(
         [&first, &second]
             .into_iter()
-            .any(|dispatch| dispatch.command.target_connector == ConnectorId(TG.into())),
+            .any(|dispatch| dispatch.to.connector_id == ConnectorId(TG.into())),
         "an owner message into a routed chat also feeds the mirror",
     );
 
@@ -851,7 +848,7 @@ async fn observer_service_send_message_returns_the_acknowledged_native_id() {
     } = channels;
     let acker = tokio::spawn(async move {
         while let Some(dispatch) = dispatches.recv().await {
-            if dispatch.command.target_connector == ConnectorId(WA.into()) {
+            if dispatch.to.connector_id == ConnectorId(WA.into()) {
                 acknowledgements
                     .send(DispatchAck {
                         dispatch_id: dispatch.id,

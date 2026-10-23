@@ -7,9 +7,8 @@ use crate::config::RoutingConfig;
 use std::sync::Arc;
 use thiserror::Error;
 use wuphf_model::{
-    Action, BlockedDispatch, ChatAddress, ConnectorId, Conversation, DispatchCommand, Endpoint,
-    EndpointId, Message, MessageId, ProvisionThread, ReceiptKind, ReplyContext, RoutingOutcome,
-    Rule, RuleKind, TargetAddress,
+    Action, ChatAddress, ConnectorId, Conversation, Dispatch, Endpoint, EndpointId, Message,
+    MessageId, ReceiptKind, ReplyContext, Rule, RuleKind, Target,
 };
 use wuphf_storage::{Storage, StorageError};
 
@@ -52,12 +51,15 @@ impl<S> Router<S>
 where
     S: Storage,
 {
+    /// Fan a new message out to every other endpoint in its replica set. A
+    /// reply whose parent has no copy at a target yet is blocked on the parent
+    /// there, and gains the quote when the parent is delivered.
     pub async fn route(
         &self,
         message: &Message,
         origin_endpoint: EndpointId,
         provision_title: &str,
-    ) -> Result<RoutingOutcome, RouterError> {
+    ) -> Result<Vec<Dispatch>, RouterError> {
         let replica_set = self.storage.replica_set(message.replica_set_id).await?;
         if !replica_set.endpoints.contains(&origin_endpoint) {
             return Err(RouterError::OriginOutsideReplicaSet(origin_endpoint));
@@ -67,7 +69,7 @@ where
             .conversation_for_replica_set(message.replica_set_id)
             .await?;
 
-        let mut outcome = RoutingOutcome::default();
+        let mut dispatches = Vec::new();
         for endpoint_id in replica_set
             .endpoints
             .into_iter()
@@ -77,9 +79,8 @@ where
             let target = self
                 .resolve_target(&endpoint, conversation.as_ref(), provision_title)
                 .await?;
-            let target_connector = endpoint.connector_id.clone();
 
-            let reply_context = match message.reply_to {
+            let (reply, waiting_for) = match message.reply_to {
                 Some(parent_id) => {
                     match self
                         .storage
@@ -99,60 +100,42 @@ where
                                 .storage
                                 .is_sent_copy(endpoint_id, &copy.native_id)
                                 .await?;
-                            Some(ReplyContext::quoting(
-                                parent,
-                                copy.native_id,
-                                authored_by_bridge,
-                            ))
+                            let reply =
+                                ReplyContext::quoting(parent, copy.native_id, authored_by_bridge);
+                            (Some(reply), None)
                         }
-                        None => {
-                            outcome.blocked.push(BlockedDispatch {
-                                command: DispatchCommand {
-                                    target_endpoint: endpoint_id,
-                                    target_connector: target_connector.clone(),
-                                    target: target.clone(),
-                                    payload: Action::Send {
-                                        message: message.clone(),
-                                        reply: None,
-                                    },
-                                },
-                                waiting_for_message: parent_id,
-                            });
-                            continue;
-                        }
+                        None => (None, Some(parent_id)),
                     }
                 }
-                None => None,
+                None => (None, None),
             };
 
-            outcome.dispatches.push(DispatchCommand {
-                target_endpoint: endpoint_id,
-                target_connector,
+            dispatches.push(Dispatch::new(
                 target,
-                payload: Action::Send {
+                message.replica_set_id,
+                Action::Send {
                     message: message.clone(),
-                    reply: reply_context,
+                    reply,
                 },
-            });
+                waiting_for,
+            ));
         }
-        Ok(outcome)
+        Ok(dispatches)
     }
 
     /// Fan an edit of an already-routed message out to every other endpoint in
     /// the replica set. A target whose copy already exists is dispatched
     /// immediately, carrying that copy's native id to edit; a target whose
-    /// create has not been acknowledged yet is blocked on the message and gains
-    /// its native id when the create is acknowledged.
+    /// send has not been acknowledged yet is blocked on the message and gains
+    /// its native id when the send is acknowledged.
     pub async fn route_edit(
         &self,
         message: &Message,
         origin_endpoint: EndpointId,
-    ) -> Result<RoutingOutcome, RouterError> {
-        self.fan_out_to_copies(message, origin_endpoint, |_connector, native_id| {
-            Action::Edit {
-                message: message.clone(),
-                native_id,
-            }
+    ) -> Result<Vec<Dispatch>, RouterError> {
+        self.fan_out_to_copies(message, origin_endpoint, |native_id| Action::Edit {
+            message: message.clone(),
+            native_id,
         })
         .await
     }
@@ -161,12 +144,10 @@ where
         &self,
         message: &Message,
         origin_endpoint: EndpointId,
-    ) -> Result<RoutingOutcome, RouterError> {
-        self.fan_out_to_copies(message, origin_endpoint, |_connector, native_id| {
-            Action::Delete {
-                message: message.clone(),
-                native_id,
-            }
+    ) -> Result<Vec<Dispatch>, RouterError> {
+        self.fan_out_to_copies(message, origin_endpoint, |native_id| Action::Delete {
+            message_id: message.id,
+            native_id,
         })
         .await
     }
@@ -182,104 +163,83 @@ where
         reactor: String,
         reactor_name: Option<String>,
         emoji: Option<String>,
-    ) -> Result<RoutingOutcome, RouterError> {
-        self.fan_out_to_copies(message, origin_endpoint, |_connector, native_id| {
-            Action::React {
-                message_id: message.id,
-                replica_set_id: message.replica_set_id,
-                native_id,
-                reactor: reactor.clone(),
-                reactor_name: reactor_name.clone(),
-                emoji: emoji.clone(),
-            }
+    ) -> Result<Vec<Dispatch>, RouterError> {
+        self.fan_out_to_copies(message, origin_endpoint, |native_id| Action::React {
+            message_id: message.id,
+            native_id,
+            reactor: reactor.clone(),
+            reactor_name: reactor_name.clone(),
+            emoji: emoji.clone(),
         })
         .await
     }
 
     /// Fan a delivery/read receipt out to every other endpoint that holds a
     /// copy of the message. Like a reaction, each target carries the native id
-    /// of its copy and is blocked until that copy is delivered. The receipt
-    /// kind picks the signal: a delivered receipt becomes a `DeliveryAck`, a
-    /// read receipt a `SeenReceipt`; the connector decides how to render each.
-    /// Fanning to all non-observer endpoints (rather than only the origin) means
-    /// a message the owner authored from another source device — which lands as
-    /// a mirror copy on the other endpoints — still surfaces its receipt there.
+    /// of its copy and is blocked until that copy is delivered; the connector
+    /// decides how to render each receipt kind. Fanning to all non-observer
+    /// endpoints (rather than only the origin) means a message the owner
+    /// authored from another source device — which lands as a mirror copy on
+    /// the other endpoints — still surfaces its receipt there.
     pub async fn route_receipt(
         &self,
         message: &Message,
         observer_endpoint: EndpointId,
         kind: ReceiptKind,
-    ) -> Result<RoutingOutcome, RouterError> {
-        self.fan_out_to_copies(
-            message,
-            observer_endpoint,
-            |_connector, native_id| match kind {
-                ReceiptKind::Delivered => Action::DeliveryAck {
-                    message_id: message.id,
-                    replica_set_id: message.replica_set_id,
-                    native_id,
-                },
-                ReceiptKind::Read => Action::SeenReceipt {
-                    message_id: message.id,
-                    replica_set_id: message.replica_set_id,
-                    native_id,
-                },
-            },
-        )
+    ) -> Result<Vec<Dispatch>, RouterError> {
+        self.fan_out_to_copies(message, observer_endpoint, |native_id| Action::Receipt {
+            message_id: message.id,
+            native_id,
+            kind,
+        })
         .await
     }
 
     /// Fan an operation on an existing message out to every other endpoint in
     /// the replica set. Each target either carries the native id of its copy or
-    /// is blocked on the message until that copy is delivered. `payload_for`
-    /// builds the per-target payload from (target connector, native id) — the
-    /// native id is empty while blocked and bound on release.
+    /// is blocked on the message until that copy is delivered. `action_for`
+    /// builds the per-target action from the native id — empty while blocked
+    /// and bound on release.
     async fn fan_out_to_copies(
         &self,
         message: &Message,
         origin_endpoint: EndpointId,
-        payload_for: impl Fn(&ConnectorId, String) -> Action,
-    ) -> Result<RoutingOutcome, RouterError> {
+        action_for: impl Fn(String) -> Action,
+    ) -> Result<Vec<Dispatch>, RouterError> {
         let replica_set = self.storage.replica_set(message.replica_set_id).await?;
         if !replica_set.endpoints.contains(&origin_endpoint) {
             return Err(RouterError::OriginOutsideReplicaSet(origin_endpoint));
         }
 
-        let mut outcome = RoutingOutcome::default();
+        let mut dispatches = Vec::new();
         for endpoint_id in replica_set
             .endpoints
             .into_iter()
             .filter(|endpoint_id| *endpoint_id != origin_endpoint)
         {
             let endpoint = self.storage.endpoint(endpoint_id).await?;
-            let target = TargetAddress {
+            let target = Target {
+                endpoint_id,
+                connector_id: endpoint.connector_id.clone(),
                 address: endpoint.address(),
                 create_thread: None,
             };
-            let target_connector = endpoint.connector_id.clone();
-            match self
+            let (native_id, waiting_for) = match self
                 .storage
                 .copy_at_endpoint(message.id, endpoint_id)
                 .await?
             {
-                Some(copy) => outcome.dispatches.push(DispatchCommand {
-                    target_endpoint: endpoint_id,
-                    payload: payload_for(&target_connector, copy.native_id),
-                    target_connector,
-                    target,
-                }),
-                None => outcome.blocked.push(BlockedDispatch {
-                    command: DispatchCommand {
-                        target_endpoint: endpoint_id,
-                        payload: payload_for(&target_connector, String::new()),
-                        target_connector,
-                        target,
-                    },
-                    waiting_for_message: message.id,
-                }),
-            }
+                Some(copy) => (copy.native_id, None),
+                None => (String::new(), Some(message.id)),
+            };
+            dispatches.push(Dispatch::new(
+                target,
+                message.replica_set_id,
+                action_for(native_id),
+                waiting_for,
+            ));
         }
-        Ok(outcome)
+        Ok(dispatches)
     }
 
     /// Fan a source-title change out to every mirror endpoint that has already
@@ -290,15 +250,15 @@ where
         &self,
         conversation: &Conversation,
         title: &str,
-    ) -> Result<RoutingOutcome, RouterError> {
+    ) -> Result<Vec<Dispatch>, RouterError> {
         let replica_set = self
             .storage
             .replica_set(conversation.replica_set_id)
             .await?;
         let Some(rule) = self.config.rule(&conversation.rule_id) else {
-            return Ok(RoutingOutcome::default());
+            return Ok(Vec::new());
         };
-        let mut outcome = RoutingOutcome::default();
+        let mut dispatches = Vec::new();
         for endpoint_id in replica_set.endpoints {
             let endpoint = self.storage.endpoint(endpoint_id).await?;
             if !is_mirror_side(rule, &endpoint.connector_id, &endpoint.chat_id) {
@@ -311,58 +271,52 @@ where
             else {
                 continue;
             };
-            outcome.dispatches.push(DispatchCommand {
-                target_endpoint: endpoint_id,
-                target_connector: endpoint.connector_id.clone(),
-                target: TargetAddress {
+            dispatches.push(Dispatch::new(
+                Target {
+                    endpoint_id,
+                    connector_id: endpoint.connector_id.clone(),
                     address: ChatAddress::new(endpoint.chat_id.clone(), Some(thread)),
                     create_thread: None,
                 },
-                payload: Action::RenameThread {
-                    replica_set_id: conversation.replica_set_id,
+                conversation.replica_set_id,
+                Action::RenameThread {
                     title: title.to_owned(),
                 },
-            });
+                None,
+            ));
         }
-        Ok(outcome)
+        Ok(dispatches)
     }
 
     /// Resolve the platform destination for one target endpoint. Mirror
-    /// endpoints either reuse their provisioned thread or carry a provision
-    /// instruction; all other endpoints send to their canonical address.
+    /// endpoints either reuse their provisioned thread or ask the connector to
+    /// create one inside the mirror chat; all other endpoints send to their
+    /// canonical address.
     async fn resolve_target(
         &self,
         endpoint: &Endpoint,
         conversation: Option<&Conversation>,
         provision_title: &str,
-    ) -> Result<TargetAddress, RouterError> {
+    ) -> Result<Target, RouterError> {
+        let mut target = Target {
+            endpoint_id: endpoint.id,
+            connector_id: endpoint.connector_id.clone(),
+            address: endpoint.address(),
+            create_thread: None,
+        };
         if let Some(conversation) = conversation
             && let Some(rule) = self.config.rule(&conversation.rule_id)
             && is_mirror_side(rule, &endpoint.connector_id, &endpoint.chat_id)
         {
-            return Ok(
-                match self
-                    .storage
-                    .thread_for_conversation(conversation.id, &endpoint.connector_id)
-                    .await?
-                {
-                    Some(thread) => TargetAddress {
-                        address: ChatAddress::new(endpoint.chat_id.clone(), Some(thread)),
-                        create_thread: None,
-                    },
-                    None => TargetAddress {
-                        address: ChatAddress::new(endpoint.chat_id.clone(), None),
-                        create_thread: Some(ProvisionThread {
-                            container: endpoint.chat_id.clone(),
-                            title: provision_title.to_owned(),
-                        }),
-                    },
-                },
-            );
+            let thread = self
+                .storage
+                .thread_for_conversation(conversation.id, &endpoint.connector_id)
+                .await?;
+            if thread.is_none() {
+                target.create_thread = Some(provision_title.to_owned());
+            }
+            target.address = ChatAddress::new(endpoint.chat_id.clone(), thread);
         }
-        Ok(TargetAddress {
-            address: endpoint.address(),
-            create_thread: None,
-        })
+        Ok(target)
     }
 }
