@@ -47,7 +47,7 @@ code).
 | 027 | Rename model fields and variants, keeping old stored JSON readable | P2 | M | 026 | DONE (migration 0011, not serde aliases) |
 | 028 | Delete dead and duplicate model types | P2 | M | 026, 027 | DONE (migration 0012) |
 | 029 | Fold the wuphf-router crate into wuphf-core | P3 | S | 028 (soft) | DONE |
-| 030 | Collapse the dispatch types into one `Dispatch` | P2 | M–L | 019, 026–029 | TODO |
+| 030 | Collapse the dispatch types into one `Dispatch` | P2 | M–L | 019, 026–029 | DONE (migration 0013, no legacy decoder) |
 | 031 | Merge ReplicaSet and ThreadMapping into Conversation | P2 | M–L | 030 | TODO |
 | 032 | Add a remote function broker to the core (`wuphf-functions`) | P2 | L | — | TODO |
 | 033 | Move sticker conversion into a `media.convert` provider | P2 | M–L | 032 | TODO |
@@ -194,6 +194,26 @@ Rust) by the owner's decision.
   Done as planned: the moved code is verbatim, `Router` is `pub(crate)`, and
   `wuphf_core::{RoutingConfig, MatchedRule, RouterError}` are re-exported.
   `crates/wuphf-router` is gone. Workspace: 115 tests passing, clippy clean.
+- **030 done 2026-10-23** (`advisor/030-single-dispatch-type`): no drift.
+  Following the owner's migrations-over-aliases decision, there is **no
+  `legacy.rs` decoder**. `migrations/0013_collapse_dispatch_shape.sql`
+  rewrites every old-shape `dispatches.payload` in SQL, using `json_object`,
+  `->`/`->>` and a `CASE` on the action variant. Keys are written in serde's
+  order, so a migrated row is byte-identical to a new one.
+  `migration_0013_reshapes_stored_dispatches` seeds the post-0011 shape for
+  all seven actions and asserts that byte-identity. The 0011 test now runs its
+  pre-rename rows through both migrations to the current shape, and both fail
+  if 0013 is removed. Storage still decodes with plain `serde_json::from_str`.
+  New tests: `Dispatch` construction, `records_copy` and `message_id` in
+  `wuphf-model`; receipt-kind and thread-creation wire mapping in
+  `wuphf-runtime/src/grpc.rs`. No test assertion changed, only field paths. The
+  thread-creation test now checks `to.address.chat_id` in place of the old
+  `container`. Workspace: 121 tests passing, clippy clean.
+  - **Knock-on for 031:** the next free migration is `0014`. 031's
+    `Dispatch.replica_set_id` → `conversation_id` rename (and the same rename
+    in `Message`) should be a key-rename migration in the style of 0011, plus a
+    `migration_tests.rs` case, not the `#[serde(alias)]` attributes or
+    `legacy.rs` extension the plan describes.
 - **021 must be re-planned after 031.** 028 performs 021's deletion of
   `put_contact`/`put_chat_settings`, and 031 replaces seven of the trait
   methods 021 groups into role traits.
