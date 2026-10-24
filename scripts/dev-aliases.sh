@@ -10,6 +10,7 @@
 alias ws='wuphf-server'
 alias wtg='wuphf-telegram'
 alias wwa='wuphf-whatsapp'
+alias wwr='wuphf-whatsapp-rust'
 alias wig='wuphf-instagram'
 alias wmc='wuphf-mediaconv'
 alias wtui='wuphf-tui'
@@ -23,6 +24,7 @@ wuphf dev session
   ws     wuphf-server       core server      (config/example.toml)
   wtg    wuphf-telegram     Telegram connector
   wwa    wuphf-whatsapp     WhatsApp connector
+  wwr    wuphf-whatsapp-rust  WhatsApp connector (whatsapp-rust)
   wig    wuphf-instagram    Instagram connector
   wmc    wuphf-mediaconv    sticker converter (media.convert@1 provider)
   wtui   wuphf-tui          observer TUI
@@ -33,7 +35,11 @@ or `ws serve --config config.local.toml`.
 
 Override a config without arguments: WUPHF_SERVER_CONFIG,
 WUPHF_TELEGRAM_CONFIG, WUPHF_WHATSAPP_CONFIG, WUPHF_INSTAGRAM_CONFIG,
-WUPHF_MEDIACONV_CONFIG.
+WUPHF_MEDIACONV_CONFIG, WUPHF_WHATSAPP_RUST_CONFIG.
+
+scripts/install-dev-bins.sh builds release binaries the commands then run
+instead of building on every start; re-run it after changing code, or delete
+scripts/dev-bin/.bin/ to build on start again.
 
 wmc needs WUPHF_PROVIDER_MEDIACONV_TOKEN set, and the server config needs the
 matching [[functions.providers]] entry (see providers/mediaconv/README.md).

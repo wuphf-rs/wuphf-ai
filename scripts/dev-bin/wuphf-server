@@ -2,12 +2,20 @@
 # Run the wuphf core server. Config comes from $WUPHF_SERVER_CONFIG, or the
 # checked-in example. Any argument switches to passthrough, so subcommands and
 # one-off flags work: `wuphf-server serve --config config.local.toml`.
+# Runs the binary scripts/install-dev-bins.sh installed, when there is one, and
+# builds with `cargo run` otherwise.
 set -euo pipefail
 
 repo="$(cd "$(dirname "$(readlink -f "$0")")/../.." && pwd)"
+installed="$repo/scripts/dev-bin/.bin/wuphf-server"
 cd "$repo"
 
-if [ "$#" -gt 0 ]; then
-    exec cargo run -p wuphf-cli -- "$@"
+run=(cargo run -p wuphf-cli --)
+if [ -x "$installed" ]; then
+    run=("$installed")
 fi
-exec cargo run -p wuphf-cli -- serve --config "${WUPHF_SERVER_CONFIG:-config/example.toml}"
+
+if [ "$#" -gt 0 ]; then
+    exec "${run[@]}" "$@"
+fi
+exec "${run[@]}" serve --config "${WUPHF_SERVER_CONFIG:-config/example.toml}"

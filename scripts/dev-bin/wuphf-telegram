@@ -2,12 +2,20 @@
 # Run the telegram connector from its own directory, where its session and
 # config files live. Config comes from $WUPHF_TELEGRAM_CONFIG, or the checked-in
 # example. Any argument switches to passthrough, so subcommands still work.
+# Runs the binary scripts/install-dev-bins.sh installed, when there is one, and
+# builds with `go run` otherwise.
 set -euo pipefail
 
 repo="$(cd "$(dirname "$(readlink -f "$0")")/../.." && pwd)"
+installed="$repo/scripts/dev-bin/.bin/wuphf-telegram"
 cd "$repo/connectors/telegram"
 
-if [ "$#" -gt 0 ]; then
-    exec go run ./cmd/wuphf-telegram "$@"
+run=(go run ./cmd/wuphf-telegram)
+if [ -x "$installed" ]; then
+    run=("$installed")
 fi
-exec go run ./cmd/wuphf-telegram -config "${WUPHF_TELEGRAM_CONFIG:-config.example.toml}"
+
+if [ "$#" -gt 0 ]; then
+    exec "${run[@]}" "$@"
+fi
+exec "${run[@]}" -config "${WUPHF_TELEGRAM_CONFIG:-config.example.toml}"

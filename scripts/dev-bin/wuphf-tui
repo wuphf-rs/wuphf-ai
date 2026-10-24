@@ -1,17 +1,25 @@
 #!/usr/bin/env bash
 # Run the observer TUI against the local server. Point it elsewhere with
-# $WUPHF_TUI_SERVER, or pass flags directly.
+# $WUPHF_TUI_SERVER, or pass flags directly. Runs the binary
+# scripts/install-dev-bins.sh installed, when there is one, and builds with
+# `cargo run` otherwise.
 set -euo pipefail
 
 repo="$(cd "$(dirname "$(readlink -f "$0")")/../.." && pwd)"
+installed="$repo/scripts/dev-bin/.bin/wuphf-tui"
 cd "$repo"
 
+run=(cargo run -p wuphf-tui --)
+if [ -x "$installed" ]; then
+    run=("$installed")
+fi
+
 if [ "$#" -gt 0 ]; then
-    exec cargo run -p wuphf-tui -- "$@"
+    exec "${run[@]}" "$@"
 fi
 
 set -- --server "${WUPHF_TUI_SERVER:-http://127.0.0.1:50051}"
 if [ -n "${WUPHF_OBSERVER_TOKEN:-}" ]; then
     set -- "$@" --token "$WUPHF_OBSERVER_TOKEN"
 fi
-exec cargo run -p wuphf-tui -- "$@"
+exec "${run[@]}" "$@"

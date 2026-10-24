@@ -1,0 +1,23 @@
+#!/usr/bin/env bash
+# Run the whatsapp-rust connector from its own directory, where its session and
+# config files live. Config comes from $WUPHF_WHATSAPP_RUST_CONFIG, or the
+# checked-in example. Any argument switches to passthrough.
+# Runs the binary scripts/install-dev-bins.sh installed, when there is one, and
+# builds with `cargo run` otherwise. Its whatsapp-rust dependency uses the
+# nightly-only portable_simd feature, which RUSTC_BOOTSTRAP lets the dev shell's
+# stable compiler accept.
+set -euo pipefail
+
+repo="$(cd "$(dirname "$(readlink -f "$0")")/../.." && pwd)"
+installed="$repo/scripts/dev-bin/.bin/wuphf-whatsapp-rust"
+cd "$repo/connectors/whatsapp-rust"
+
+run=(env RUSTC_BOOTSTRAP=1 cargo run --release --)
+if [ -x "$installed" ]; then
+    run=("$installed")
+fi
+
+if [ "$#" -gt 0 ]; then
+    exec "${run[@]}" "$@"
+fi
+exec "${run[@]}" --config "${WUPHF_WHATSAPP_RUST_CONFIG:-config.example.toml}"

@@ -14,6 +14,9 @@
 # Go provider build output
 /providers/mediaconv/wuphf-mediaconv
 
+# Dev binaries installed by scripts/install-dev-bins.sh
+/scripts/dev-bin/.bin/
+
 # Local runtime state and configuration
 *.db
 *.db-shm

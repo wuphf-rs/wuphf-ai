@@ -2,6 +2,8 @@
 # Run the mediaconv provider (the media.convert@1 sticker converter) from its own
 # directory. Config comes from $WUPHF_MEDIACONV_CONFIG, or the checked-in
 # example. Any argument switches to passthrough, so one-off flags still work.
+# Runs the binary scripts/install-dev-bins.sh installed, when there is one, and
+# builds with `go run` otherwise.
 #
 # The provider reads its token from the variable its config names
 # (WUPHF_PROVIDER_MEDIACONV_TOKEN in the example), and the core only accepts it
@@ -9,9 +11,15 @@
 set -euo pipefail
 
 repo="$(cd "$(dirname "$(readlink -f "$0")")/../.." && pwd)"
+installed="$repo/scripts/dev-bin/.bin/wuphf-mediaconv"
 cd "$repo/providers/mediaconv"
 
-if [ "$#" -gt 0 ]; then
-    exec go run ./cmd/wuphf-mediaconv "$@"
+run=(go run ./cmd/wuphf-mediaconv)
+if [ -x "$installed" ]; then
+    run=("$installed")
 fi
-exec go run ./cmd/wuphf-mediaconv -config "${WUPHF_MEDIACONV_CONFIG:-config.example.toml}"
+
+if [ "$#" -gt 0 ]; then
+    exec "${run[@]}" "$@"
+fi
+exec "${run[@]}" -config "${WUPHF_MEDIACONV_CONFIG:-config.example.toml}"
