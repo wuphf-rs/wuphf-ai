@@ -967,3 +967,72 @@ async fn rename_observed_chat_merges_both_forms<S: Storage>(storage: S) {
         .expect("the moved row is reachable under the new address");
     assert!(deleted.deleted);
 }
+
+fn setting(key: &str, value: &str, updated_by: Option<&str>) -> StoredSetting {
+    StoredSetting {
+        key: key.into(),
+        value: value.into(),
+        updated_by: updated_by.map(Into::into),
+    }
+}
+
+#[tokio::test]
+async fn memory_settings_overrides_round_trip() {
+    settings_overrides_round_trip(InMemoryStorage::default()).await;
+}
+
+#[tokio::test]
+async fn sqlite_settings_overrides_round_trip() {
+    let path = std::env::temp_dir().join(format!("wuphf-{}.sqlite", DispatchId::new()));
+    let storage = SqliteStorage::connect(&format!("sqlite://{}", path.display()))
+        .await
+        .unwrap();
+    settings_overrides_round_trip(storage).await;
+}
+
+/// Upserts replace by key and load in key order; one write deletes some keys
+/// and upserts another together.
+async fn settings_overrides_round_trip<S: SettingsOverrides>(storage: S) {
+    let b = setting("b", "1", None);
+    let a = setting("a", "\"x\"", Some("telegram:user:7"));
+    let b2 = setting("b", "2", Some("telegram:user:8"));
+    for upserted in [&b, &a, &b2] {
+        storage
+            .write_settings_overrides(&[], Some(upserted), 1)
+            .await
+            .unwrap();
+    }
+    assert_eq!(
+        storage.settings_overrides().await.unwrap(),
+        [a.clone(), b2.clone()]
+    );
+
+    storage
+        .write_settings_overrides(&["a".into(), "missing".into()], None, 2)
+        .await
+        .unwrap();
+    assert_eq!(storage.settings_overrides().await.unwrap(), [b2]);
+
+    let c = setting("c", "[]", None);
+    storage
+        .write_settings_overrides(&["b".into()], Some(&c), 3)
+        .await
+        .unwrap();
+    assert_eq!(storage.settings_overrides().await.unwrap(), [c]);
+}
+
+#[tokio::test]
+async fn sqlite_settings_overrides_survive_reopen() {
+    let path = std::env::temp_dir().join(format!("wuphf-{}.sqlite", DispatchId::new()));
+    let url = format!("sqlite://{}", path.display());
+    let stored = setting("rules", "{}", Some("whatsapp:1@lid"));
+    SqliteStorage::connect(&url)
+        .await
+        .unwrap()
+        .write_settings_overrides(&[], Some(&stored), 1)
+        .await
+        .unwrap();
+
+    let reopened = SqliteStorage::connect(&url).await.unwrap();
+    assert_eq!(reopened.settings_overrides().await.unwrap(), [stored]);
+}

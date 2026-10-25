@@ -3,11 +3,11 @@
 
 use crate::shared::{acknowledged_copy, release_blocked};
 use crate::{
-    DispatchStore, MediaStore, MessageStore, ObservationStore, ProvisioningStash, StorageError,
-    StorageResult, TopologyStore,
+    DispatchStore, MediaStore, MessageStore, ObservationStore, ProvisioningStash,
+    SettingsOverrides, StorageError, StorageResult, StoredSetting, TopologyStore,
 };
 use async_trait::async_trait;
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use tokio::sync::RwLock;
 use wuphf_model::{
     AddressLink, Alias, ChatAddress, ConnectorId, Conversation, ConversationId, DedupKey, Dispatch,
@@ -42,6 +42,9 @@ struct State {
     provisioning_stash: HashMap<ConversationId, Vec<(MessageId, EndpointId, String)>>,
     observed_messages: HashMap<(ConnectorId, String, String), ObservedMessage>,
     observed_chats: HashMap<(ConnectorId, String), ObservedChat>,
+    /// Runtime settings overrides by key, mirroring the SQLite `settings` table
+    /// (the write time is not kept: nothing reads it back).
+    settings: BTreeMap<String, StoredSetting>,
 }
 
 struct StoredMedia {
@@ -684,6 +687,29 @@ impl ObservationStore for InMemoryStorage {
         messages.sort_by_key(|observed| std::cmp::Reverse(observed.timestamp_ms));
         messages.truncate(limit as usize);
         Ok(messages)
+    }
+}
+
+#[async_trait]
+impl SettingsOverrides for InMemoryStorage {
+    async fn settings_overrides(&self) -> StorageResult<Vec<StoredSetting>> {
+        Ok(self.state.read().await.settings.values().cloned().collect())
+    }
+
+    async fn write_settings_overrides(
+        &self,
+        deleted: &[String],
+        upserted: Option<&StoredSetting>,
+        _updated_at_ms: i64,
+    ) -> StorageResult<()> {
+        let mut state = self.state.write().await;
+        for key in deleted {
+            state.settings.remove(key);
+        }
+        if let Some(setting) = upserted {
+            state.settings.insert(setting.key.clone(), setting.clone());
+        }
+        Ok(())
     }
 }
 

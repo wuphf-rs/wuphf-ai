@@ -245,6 +245,33 @@ pub trait ObservationStore: Send + Sync + 'static {
     ) -> StorageResult<Vec<ObservedMessage>>;
 }
 
+/// One stored runtime settings override.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct StoredSetting {
+    /// The dotted configuration key, e.g. `rules`.
+    pub key: String,
+    /// The JSON-encoded value.
+    pub value: String,
+    /// Who changed it, if known (a platform user id on a connector).
+    pub updated_by: Option<String>,
+}
+
+/// Runtime settings overrides. Not part of [`Storage`]: the core never reads
+/// settings; the settings store does, through `wuphf-settings`.
+#[async_trait]
+pub trait SettingsOverrides: Send + Sync + 'static {
+    /// Every stored override, ordered by key.
+    async fn settings_overrides(&self) -> StorageResult<Vec<StoredSetting>>;
+    /// Delete the overrides of `deleted`, then store `upserted` (replacing any
+    /// override of its key), all at once.
+    async fn write_settings_overrides(
+        &self,
+        deleted: &[String],
+        upserted: Option<&StoredSetting>,
+        updated_at_ms: i64,
+    ) -> StorageResult<()>;
+}
+
 /// The full persistence surface the core needs: the sum of the role traits.
 /// Blanket-implemented, so a backend implements the roles and gets `Storage`;
 /// a consumer that needs only part of it bounds on the roles it uses.

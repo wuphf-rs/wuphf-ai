@@ -3,8 +3,8 @@
 
 use crate::shared::{acknowledged_copy, release_blocked};
 use crate::{
-    DispatchStore, MediaStore, MessageStore, ObservationStore, ProvisioningStash, StorageError,
-    StorageResult, TopologyStore,
+    DispatchStore, MediaStore, MessageStore, ObservationStore, ProvisioningStash,
+    SettingsOverrides, StorageError, StorageResult, StoredSetting, TopologyStore,
 };
 use async_trait::async_trait;
 use sqlx::migrate::Migrator;
@@ -870,6 +870,54 @@ impl ObservationStore for SqliteStorage {
         rows.into_iter()
             .map(|row| serde_json::from_str(row.get("payload")).map_err(Into::into))
             .collect()
+    }
+}
+
+#[async_trait]
+impl SettingsOverrides for SqliteStorage {
+    async fn settings_overrides(&self) -> StorageResult<Vec<StoredSetting>> {
+        let rows = sqlx::query("SELECT key, value, updated_by FROM settings ORDER BY key")
+            .fetch_all(&self.pool)
+            .await?;
+        Ok(rows
+            .into_iter()
+            .map(|row| StoredSetting {
+                key: row.get("key"),
+                value: row.get("value"),
+                updated_by: row.get("updated_by"),
+            })
+            .collect())
+    }
+
+    async fn write_settings_overrides(
+        &self,
+        deleted: &[String],
+        upserted: Option<&StoredSetting>,
+        updated_at_ms: i64,
+    ) -> StorageResult<()> {
+        let mut transaction = self.pool.begin().await?;
+        for key in deleted {
+            sqlx::query("DELETE FROM settings WHERE key = ?")
+                .bind(key)
+                .execute(&mut *transaction)
+                .await?;
+        }
+        if let Some(setting) = upserted {
+            sqlx::query(
+                "INSERT INTO settings (key, value, updated_by, updated_at_ms) VALUES (?, ?, ?, ?)
+                 ON CONFLICT(key) DO UPDATE SET
+                   value = excluded.value, updated_by = excluded.updated_by,
+                   updated_at_ms = excluded.updated_at_ms",
+            )
+            .bind(&setting.key)
+            .bind(&setting.value)
+            .bind(&setting.updated_by)
+            .bind(updated_at_ms)
+            .execute(&mut *transaction)
+            .await?;
+        }
+        transaction.commit().await?;
+        Ok(())
     }
 }
 
