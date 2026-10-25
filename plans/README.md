@@ -51,7 +51,7 @@ code).
 | 031 | Merge ReplicaSet and ThreadMapping into Conversation | P2 | M–L | 030 | DONE (migration 0014) |
 | 032 | Add a remote function broker to the core (`wuphf-functions`) | P2 | L | — | DONE (see notes) |
 | 033 | Move sticker conversion into a `media.convert` provider | P2 | M–L | 032 | DONE (see notes) |
-| 034 | Authenticate connectors and stop session takeover | P1 | M | — | TODO |
+| 034 | Authenticate connectors and stop session takeover | P1 | M | — | DONE (see notes) |
 | 035 | Load the core configuration through figment and describe it to botconf | P2 | M | botconf 001 | TODO |
 | 036 | Keep runtime settings overrides in SQLite | P2 | S | 035 | TODO |
 | 037 | Route from a live settings snapshot; `rules` and `notify` at runtime | P2 | M | 035, 036 | TODO |
@@ -434,6 +434,62 @@ Dependencies and ordering:
   - 042: the CLI edits the database directly, except `reload --address`.
   - 043: a 5-second inline budget before the fallback.
 - The botconf repo lives at `~/work/side_projects/Propheci/botconf`.
+- **034 done 2026-10-25** (on `plans/runtime-settings`). The drift check
+  passed. Implemented as planned, with these deviations:
+  - **Commit split:** the Rust SDK's `Options.token`, and the matching
+    `crates/wuphf-connector/tests/session.rs` update, landed in commit 2 with
+    the token check rather than commit 3. Every commit then passes
+    `cargo test --workspace` on its own.
+  - **Old input after a reconnect:** `input_from_a_replaced_session_is_ignored`
+    is kept rather than deleted. A clone of the old session's input sender,
+    taken before the drop, reaches the hub. The test orders the old and the
+    new input with a barrier frame and a bounded wait for the old forwarder to
+    drain, not a sleep.
+  - **Shared Go helpers:** the bearer credentials live in a new
+    `connectors/shared/coreclient/credentials.go`, with
+    `credentials_test.go`. A shared `coreclient.TokenFromEnv` reads
+    `core_token_env`, so the three Go connectors do not each repeat the check.
+    The error wording matches mediaconv's.
+  - **Docs beyond the plan's scope:**
+    - The root `README.md` "Run" section now says which token variables to
+      export.
+    - The `scripts/dev-bin` wrappers name their token variable in their header
+      comments.
+    - The dev scripts give no default tokens. Like
+      `WUPHF_PROVIDER_MEDIACONV_TOKEN`, the owner exports them.
+  - **Extra tests:** `auth.rs` has two more unit tests (the any-token
+    interceptor's accept path, and `ConnectorTokens` matching by connector).
+    The CLI has `connector_tokens_are_read_from_the_environment`. The Go
+    `coreclient` has `TestSessionPresentsTheConnectorToken`,
+    `TestMediaPresentsTheToken` and `TestTokenFromEnv`. Each Go connector's
+    config test requires `core_token_env`.
+  - **Mutation checks:** each removal below made the named tests fail.
+    - The `live_session` check: `second_live_session_is_rejected` and
+      `grpc_second_session_is_already_exists`.
+    - The generation check: `input_from_a_replaced_session_is_ignored`.
+    - The reader's end signal: `grpc_session_after_client_disconnect_is_accepted`,
+      after its 5 s bound.
+    - The token check: `grpc_session_with_another_connectors_token_is_unauthenticated`
+      and `grpc_session_without_token_is_unauthenticated`.
+    - `WithToken` on the Go session: `TestSessionPresentsTheConnectorToken`.
+  - **Smoke test:** a real core with the example config, plus a throwaway Go
+    connector built on `coreclient`.
+    - A wrong token got `UNAUTHENTICATED`.
+    - The first copy registered.
+    - A second copy got `ALREADY_EXISTS` and kept retrying.
+    - Killing the first made the core log "connector stream ended" at once,
+      and the second registered on its next backoff attempt, after about 1 s.
+    - Without the token variables, the core refuses to start, naming the
+      first missing one.
+  - **Results:** Rust has 161 tests passing (147 + 14), and clippy and
+    `cargo fmt` are clean. whatsapp-rust builds and tests green with
+    `RUSTC_BOOTSTRAP=1`. The Go modules shared, telegram, whatsapp, instagram
+    and mediaconv all build, vet and test green.
+  - **Noticed, not changed:** the Go client logs "connector session
+    registered with core" as soon as it has sent the registration frame,
+    before the core accepts it. So a refused copy logs it before its
+    `ALREADY_EXISTS`. Moving that log after the first server frame, or
+    rewording it to "registration sent", is a small follow-up.
 
 ## Findings considered and rejected
 
