@@ -6,17 +6,16 @@ license.workspace = true
 
 [dependencies]
 anyhow.workspace = true
+botconf.workspace = true
 clap.workspace = true
-serde.workspace = true
 tokio.workspace = true
-toml.workspace = true
 tonic.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
 uuid.workspace = true
 wuphf-core.workspace = true
 wuphf-functions.workspace = true
-wuphf-model.workspace = true
 wuphf-proto.workspace = true
 wuphf-runtime.workspace = true
+wuphf-settings.workspace = true
 wuphf-storage.workspace = true

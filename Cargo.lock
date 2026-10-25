@@ -3133,19 +3133,18 @@ name = "wuphf-cli"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "botconf",
  "clap",
- "serde",
  "tokio",
- "toml",
  "tonic",
  "tracing",
  "tracing-subscriber",
  "uuid",
  "wuphf-core",
  "wuphf-functions",
- "wuphf-model",
  "wuphf-proto",
  "wuphf-runtime",
+ "wuphf-settings",
  "wuphf-storage",
 ]
 
