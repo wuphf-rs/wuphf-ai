@@ -6,7 +6,6 @@ license.workspace = true
 
 [dependencies]
 anyhow.workspace = true
-botconf.workspace = true
 clap.workspace = true
 tokio.workspace = true
 tonic.workspace = true

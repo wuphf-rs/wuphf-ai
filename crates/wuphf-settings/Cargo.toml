@@ -13,6 +13,7 @@ thiserror.workspace = true
 wuphf-core.workspace = true
 wuphf-functions.workspace = true
 wuphf-model.workspace = true
+wuphf-storage.workspace = true
 
 [dev-dependencies]
 figment = { workspace = true, features = ["test"] }

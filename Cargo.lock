@@ -3133,7 +3133,6 @@ name = "wuphf-cli"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "botconf",
  "clap",
  "tokio",
  "tonic",
@@ -3238,6 +3237,7 @@ dependencies = [
  "wuphf-core",
  "wuphf-functions",
  "wuphf-model",
+ "wuphf-storage",
 ]
 
 [[package]]

@@ -10,9 +10,11 @@
 mod config;
 mod load;
 mod schema;
+mod storage;
 #[cfg(test)]
 mod tests;
 
 pub use config::{Configuration, ConnectorConfiguration, Secret};
 pub use load::{ENV_PREFIX, LoadError, base, load};
 pub use schema::{Derived, SettingsStore, Snapshot, WuphfSchema};
+pub use storage::SettingsStorage;

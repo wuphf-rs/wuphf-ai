@@ -3,11 +3,13 @@
 //! restores the environment afterwards.
 #![allow(clippy::result_large_err)] // `figment::Jail` returns `figment::Error`.
 
-use crate::{Configuration, LoadError, SettingsStore, WuphfSchema, base, load};
-use botconf::{MemoryStorage, SettingsError};
+use crate::{Configuration, LoadError, SettingsStorage, SettingsStore, WuphfSchema, base, load};
+use botconf::{MemoryStorage, SettingsError, Storage, StoredOverride};
 use figment::Jail;
 use std::path::Path;
+use std::sync::Arc;
 use wuphf_model::{ChatFilter, ConnectorId, RuleId, RuleKind};
+use wuphf_storage::{SettingsOverrides, SqliteStorage};
 
 const EXAMPLE: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../../config/example.toml");
 
@@ -339,4 +341,76 @@ fn store_error(schema: WuphfSchema, path: &Path) -> String {
         Err(error @ SettingsError::InvalidBase(_)) => error.to_string(),
         Err(other) => panic!("expected an invalid base configuration, got {other}"),
     }
+}
+
+/// A fresh SQLite database in the temp directory, and its URL.
+fn temp_database() -> String {
+    let path = std::env::temp_dir().join(format!(
+        "wuphf-settings-{}.sqlite",
+        wuphf_model::DispatchId::new()
+    ));
+    format!("sqlite://{}", path.display())
+}
+
+fn runtime() -> tokio::runtime::Runtime {
+    tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap()
+}
+
+/// An override written through the adapter is read back by a store loaded
+/// over a reopened database. No key is a runtime key yet, so the store keeps
+/// it as ignored (with a reason) rather than applying it; plan 037 replaces
+/// this with a real key.
+#[test]
+fn sqlite_overrides_survive_a_restart() {
+    Jail::expect_with(|_| {
+        let url = temp_database();
+        runtime().block_on(async {
+            let sqlite = Arc::new(SqliteStorage::connect(&url).await.unwrap());
+            SettingsStorage::new(sqlite)
+                .write(
+                    &[],
+                    Some(&StoredOverride {
+                        key: "rules".into(),
+                        value: "[]".into(),
+                        by: Some(1),
+                    }),
+                )
+                .await
+                .unwrap();
+
+            let reopened = Arc::new(SqliteStorage::connect(&url).await.unwrap());
+            let store = load(
+                every_token_set(),
+                base(Path::new(EXAMPLE)).unwrap(),
+                SettingsStorage::new(reopened),
+            )
+            .await
+            .unwrap();
+            assert!(store.current().ignored().contains_key("rules"));
+        });
+        Ok(())
+    });
+}
+
+#[test]
+fn adapter_stores_the_actor_as_text() {
+    runtime().block_on(async {
+        let sqlite = Arc::new(SqliteStorage::connect(&temp_database()).await.unwrap());
+        SettingsStorage::new(Arc::clone(&sqlite))
+            .write(
+                &[],
+                Some(&StoredOverride {
+                    key: "notify".into(),
+                    value: "[]".into(),
+                    by: Some(42),
+                }),
+            )
+            .await
+            .unwrap();
+        let stored = sqlite.settings_overrides().await.unwrap();
+        assert_eq!(stored[0].updated_by.as_deref(), Some("42"));
+    });
 }

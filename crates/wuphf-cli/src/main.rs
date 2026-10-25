@@ -19,7 +19,7 @@ use wuphf_runtime::{
     media::GrpcMediaService,
     observer_service::{GrpcObserverService, bearer_auth},
 };
-use wuphf_settings::WuphfSchema;
+use wuphf_settings::{Configuration, SettingsStorage, WuphfSchema};
 use wuphf_storage::SqliteStorage;
 
 #[derive(Parser)]
@@ -78,15 +78,22 @@ fn init_logging() {
 async fn serve(path: PathBuf) -> Result<()> {
     let base = wuphf_settings::base(&path)
         .with_context(|| format!("failed to load configuration {}", path.display()))?;
+    // The database holds the runtime overrides, so its URL comes from the file
+    // and the environment only; it can never be a runtime key.
+    let file: Configuration = base.extract().context("invalid configuration")?;
+    let storage = Arc::new(SqliteStorage::connect(&file.database_url).await?);
     let settings = Arc::new(
-        wuphf_settings::load(WuphfSchema::new(), base, botconf::MemoryStorage::new())
-            .await
-            .context("invalid configuration")?,
+        wuphf_settings::load(
+            WuphfSchema::new(),
+            base,
+            SettingsStorage::new(Arc::clone(&storage)),
+        )
+        .await
+        .context("invalid configuration")?,
     );
     let snapshot = settings.current();
     let configuration = &snapshot.config;
     let derived = &snapshot.derived;
-    let storage = Arc::new(SqliteStorage::connect(&configuration.database_url).await?);
     let connectors = derived.connectors.clone();
     let connector_tokens = Arc::new(ConnectorTokens::new(derived.connector_tokens.clone()));
     let config = Arc::clone(&derived.routing);
