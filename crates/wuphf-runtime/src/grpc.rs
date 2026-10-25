@@ -1,5 +1,7 @@
+use crate::auth::{ConnectorTokens, bearer_token};
 use crate::connector::{ConnectorConnection, ConnectorHubHandle, RegistrationError};
 use std::pin::Pin;
+use std::sync::Arc;
 use thiserror::Error;
 use tokio::sync::{mpsc, oneshot};
 use tokio_stream::{Stream, wrappers::ReceiverStream};
@@ -15,11 +17,14 @@ use wuphf_proto::connector::connector_transport_server::ConnectorTransport;
 
 pub struct GrpcConnectorService {
     hub: ConnectorHubHandle,
+    tokens: Arc<ConnectorTokens>,
 }
 
 impl GrpcConnectorService {
-    pub fn new(hub: ConnectorHubHandle) -> Self {
-        Self { hub }
+    /// A session is accepted only when it presents the token configured for
+    /// the connector id in its registration frame.
+    pub fn new(hub: ConnectorHubHandle, tokens: Arc<ConnectorTokens>) -> Self {
+        Self { hub, tokens }
     }
 }
 
@@ -32,6 +37,7 @@ impl ConnectorTransport for GrpcConnectorService {
         &self,
         request: Request<tonic::Streaming<pb::ClientFrame>>,
     ) -> Result<Response<Self::OpenSessionStream>, Status> {
+        let token = bearer_token(request.metadata()).map(str::to_owned);
         let mut incoming = request.into_inner();
         let first = incoming
             .message()
@@ -44,6 +50,16 @@ impl ConnectorTransport for GrpcConnectorService {
             }
             _ => return Err(Status::invalid_argument("first frame must be registration")),
         };
+        if !self
+            .tokens
+            .authenticates(&registration.id, token.as_deref())
+        {
+            tracing::warn!(
+                connector = %registration.id.0,
+                "rejecting connector session: unknown connector or wrong token",
+            );
+            return Err(Status::unauthenticated("unknown connector or wrong token"));
+        }
         let connector_id = registration.id.clone();
         let connection = self
             .hub

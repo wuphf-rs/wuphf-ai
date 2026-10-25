@@ -43,6 +43,9 @@ pub struct Options {
     pub platform: pb::Platform,
     pub supports_threads: bool,
     pub supports_topic_create: bool,
+    /// The connector's core token, sent as `authorization: Bearer <token>` on
+    /// the session.
+    pub token: String,
     /// When set, classifies platform-specific failures as permanent in
     /// addition to explicit [`Failure::Permanent`] marking.
     pub is_permanent: Option<Arc<PermanentFailureClassifier>>,
@@ -54,6 +57,8 @@ pub enum SessionError {
     Address(#[from] tonic::codegen::http::uri::InvalidUri),
     #[error("connect to core: {0}")]
     Connect(#[from] tonic::transport::Error),
+    #[error("the core token is not a valid header value")]
+    Token(#[from] tonic::metadata::errors::InvalidMetadataValue),
     #[error(transparent)]
     Transport(#[from] tonic::Status),
     #[error("core rejected connector operation: {0}")]
@@ -144,10 +149,12 @@ impl Client {
                 })),
             })
             .map_err(|_| SessionError::StreamClosed)?;
-        let mut frames = transport
-            .open_session(ReceiverStream::new(outbound_rx))
-            .await?
-            .into_inner();
+        let mut request = tonic::Request::new(ReceiverStream::new(outbound_rx));
+        request.metadata_mut().insert(
+            "authorization",
+            format!("Bearer {}", self.opts.token).parse()?,
+        );
+        let mut frames = transport.open_session(request).await?.into_inner();
         on_connected();
         info!(connector_id = %self.opts.connector_id, "connector session registered with core");
 

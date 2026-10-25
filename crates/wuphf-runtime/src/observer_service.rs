@@ -272,12 +272,7 @@ pub fn bearer_auth(token: Option<String>) -> impl tonic::service::Interceptor + 
         let Some(expected) = token.as_deref() else {
             return Ok(request);
         };
-        let presented = request
-            .metadata()
-            .get("authorization")
-            .and_then(|value| value.to_str().ok())
-            .and_then(|value| value.strip_prefix("Bearer "));
-        match presented {
+        match crate::auth::bearer_token(request.metadata()) {
             Some(value) if value == expected => Ok(request),
             _ => Err(Status::unauthenticated("valid bearer token required")),
         }

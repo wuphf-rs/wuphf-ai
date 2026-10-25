@@ -9,29 +9,41 @@ orphan_media_retention_seconds = 86400
 # is unauthenticated.
 # observer_token = "change-me"
 
-# Connectors are thin pipes. The core only trusts a session whose registration
-# matches an entry here. `supports_threads` / `supports_topic_create` gate which
-# rule ends a connector may serve (a many-to-one destination needs both). How a
-# connector renders replicated copies (attachments-as-files, text spillover,
-# edit/delete rendering) is configured in each connector's own config file
-# under `[rendering]`, not here.
+# Connectors are thin pipes. The core only trusts a session that presents the
+# connector's token (`authorization: Bearer <token>`, read from the environment
+# variable named by `token_env`) *and* whose registration matches an entry here.
+# The core refuses to start while a connector's variable is unset or empty. A
+# second session for a connector whose session is still live is refused
+# (ALREADY_EXISTS); the connector keeps retrying and gets in once the old
+# session has ended. Media upload and download accept any connector's or
+# function provider's token.
+#
+# `supports_threads` / `supports_topic_create` gate which rule ends a connector
+# may serve (a many-to-one destination needs both). How a connector renders
+# replicated copies (attachments-as-files, text spillover, edit/delete
+# rendering) is configured in each connector's own config file under
+# `[rendering]`, not here.
 [[connectors]]
 id = "whatsapp-main"
 platform = "whatsapp"
+token_env = "WUPHF_CONNECTOR_WHATSAPP_MAIN_TOKEN"
 
 # Rust WhatsApp connector alternative. Keep its id in sync with
 # connectors/whatsapp-rust/config.example.toml.
 [[connectors]]
 id = "whatsapp-rust"
 platform = "whatsapp"
+token_env = "WUPHF_CONNECTOR_WHATSAPP_RUST_TOKEN"
 
 [[connectors]]
 id = "instagram-main"
 platform = "instagram"
+token_env = "WUPHF_CONNECTOR_INSTAGRAM_MAIN_TOKEN"
 
 [[connectors]]
 id = "telegram-main"
 platform = "telegram"
+token_env = "WUPHF_CONNECTOR_TELEGRAM_MAIN_TOKEN"
 supports_threads = true
 supports_topic_create = true
 

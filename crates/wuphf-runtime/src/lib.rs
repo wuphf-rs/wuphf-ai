@@ -11,6 +11,7 @@ use wuphf_model::{
 };
 use wuphf_storage::Storage;
 
+pub mod auth;
 pub mod connector;
 pub mod grpc;
 pub mod media;

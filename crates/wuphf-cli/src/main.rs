@@ -1,7 +1,7 @@
 use anyhow::{Context, Result, bail};
 use clap::{Parser, Subcommand};
 use serde::Deserialize;
-use std::{net::SocketAddr, path::PathBuf, sync::Arc, time::Duration};
+use std::{collections::HashMap, net::SocketAddr, path::PathBuf, sync::Arc, time::Duration};
 use tonic::transport::Server;
 use wuphf_core::{Core, RoutingConfig};
 use wuphf_functions::{FunctionHub, FunctionsConfig, GrpcFunctionService, GrpcProviderService};
@@ -15,6 +15,7 @@ use wuphf_proto::connector::observer_transport_server::ObserverTransportServer;
 use wuphf_proto::connector::provider_transport_server::ProviderTransportServer;
 use wuphf_runtime::{
     Runtime,
+    auth::{ConnectorTokens, any_token_auth},
     connector::ConnectorHub,
     grpc::GrpcConnectorService,
     media::GrpcMediaService,
@@ -92,6 +93,9 @@ fn default_orphan_media_retention_seconds() -> u64 {
 struct ConnectorConfiguration {
     id: String,
     platform: String,
+    /// Environment variable holding this connector's token. The connector
+    /// presents it as `authorization: Bearer <token>`; required.
+    token_env: String,
     #[serde(default)]
     supports_threads: bool,
     #[serde(default)]
@@ -140,6 +144,9 @@ async fn serve(path: PathBuf) -> Result<()> {
             },
         });
     }
+    let connector_tokens = Arc::new(connector_tokens(&configuration.connectors, |name| {
+        std::env::var(name).ok()
+    })?);
     let config = Arc::new(
         RoutingConfig::new(configuration.rules, connectors.clone())
             .with_notice_targets(configuration.notify),
@@ -168,6 +175,13 @@ async fn serve(path: PathBuf) -> Result<()> {
     if functions.invoke_token().is_none() {
         tracing::warn!("function service has no invoke token set; bind it to a local address only");
     }
+    // Media is used by every connector and by providers (mediaconv converts
+    // stickers through it), so any of their tokens is accepted.
+    let media_tokens = connector_tokens
+        .tokens()
+        .chain(functions.provider_tokens())
+        .map(str::to_owned)
+        .collect();
     let (function_hub, function_handle) = FunctionHub::new(Arc::clone(&functions));
     let (hub, handle) = ConnectorHub::new(channels, connectors);
     let runtime_task = tokio::spawn(runtime.run());
@@ -180,8 +194,12 @@ async fn serve(path: PathBuf) -> Result<()> {
         .http2_keepalive_timeout(Some(functions.keepalive_timeout()))
         .add_service(ConnectorTransportServer::new(GrpcConnectorService::new(
             handle,
+            connector_tokens,
         )))
-        .add_service(MediaTransportServer::new(media_service))
+        .add_service(MediaTransportServer::with_interceptor(
+            media_service,
+            any_token_auth(media_tokens),
+        ))
         .add_service(observer_service)
         .add_service(FunctionTransportServer::with_interceptor(
             GrpcFunctionService::new(function_handle.clone(), Arc::clone(&functions)),
@@ -245,6 +263,26 @@ async fn list_functions(address: String) -> Result<()> {
         );
     }
     Ok(())
+}
+
+/// Read every connector's token from `env`, failing startup when one is unset
+/// or empty, as provider tokens do.
+fn connector_tokens(
+    connectors: &[ConnectorConfiguration],
+    env: impl Fn(&str) -> Option<String>,
+) -> Result<ConnectorTokens> {
+    let mut tokens = HashMap::new();
+    for connector in connectors {
+        let Some(token) = env(&connector.token_env).filter(|token| !token.is_empty()) else {
+            bail!(
+                "connector {} reads its token from {}, which is unset or empty",
+                connector.id,
+                connector.token_env
+            );
+        };
+        tokens.insert(ConnectorId(connector.id.clone()), token);
+    }
+    Ok(ConnectorTokens::new(tokens))
 }
 
 fn platform(name: &str) -> Result<Platform> {
@@ -344,6 +382,50 @@ mod tests {
             panic!("second rule is a filtered mirror");
         };
         assert_eq!(chats[0].chat_id, "spam@g.us");
+    }
+
+    #[test]
+    fn connector_without_token_env_is_rejected() {
+        let error = toml::from_str::<Configuration>(
+            r#"
+            listen = "127.0.0.1:50051"
+            database_url = "sqlite://test.sqlite"
+
+            [[connectors]]
+            id = "telegram-main"
+            platform = "telegram"
+            "#,
+        )
+        .err()
+        .expect("a connector needs token_env");
+        assert!(error.to_string().contains("token_env"), "{error}");
+    }
+
+    #[test]
+    fn connector_tokens_are_read_from_the_environment() {
+        let configuration: Configuration =
+            toml::from_str(include_str!("../../../config/example.toml")).unwrap();
+        let tokens = connector_tokens(&configuration.connectors, |name| {
+            Some(format!("secret-{name}"))
+        })
+        .unwrap();
+        assert!(tokens.authenticates(
+            &ConnectorId("telegram-main".into()),
+            Some("secret-WUPHF_CONNECTOR_TELEGRAM_MAIN_TOKEN"),
+        ));
+
+        let error = connector_tokens(&configuration.connectors, |name| {
+            (name != "WUPHF_CONNECTOR_TELEGRAM_MAIN_TOKEN").then(|| "x".to_owned())
+        })
+        .expect_err("an unset token fails startup");
+        assert_eq!(
+            error.to_string(),
+            "connector telegram-main reads its token from WUPHF_CONNECTOR_TELEGRAM_MAIN_TOKEN, which is unset or empty"
+        );
+        assert!(
+            connector_tokens(&configuration.connectors, |_| Some(String::new())).is_err(),
+            "an empty token fails startup"
+        );
     }
 
     #[test]

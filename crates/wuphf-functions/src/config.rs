@@ -324,6 +324,13 @@ impl Functions {
         self.invoke_token.as_deref()
     }
 
+    /// Every provider's token, for services providers also use, such as media.
+    pub fn provider_tokens(&self) -> impl Iterator<Item = &str> {
+        self.providers
+            .iter()
+            .map(|provider| provider.token.as_str())
+    }
+
     pub fn keepalive_interval(&self) -> Duration {
         self.keepalive_interval
     }

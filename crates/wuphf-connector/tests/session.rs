@@ -3,6 +3,7 @@
 //! ConnectorHub and GrpcConnectorService on a loopback listener, with the SDK
 //! client as the connector under test.
 
+use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::Mutex as StdMutex;
 use std::time::Duration;
@@ -20,12 +21,15 @@ use wuphf_model::{
 };
 use wuphf_proto::connector as pb;
 use wuphf_runtime::Runtime;
+use wuphf_runtime::auth::ConnectorTokens;
 use wuphf_runtime::connector::ConnectorHub;
 use wuphf_runtime::grpc::GrpcConnectorService;
 use wuphf_storage::{DispatchStore, InMemoryStorage};
 
 const WA: &str = "whatsapp-main";
 const TG: &str = "telegram-main";
+const WA_TOKEN: &str = "wa-token";
+const TG_TOKEN: &str = "tg-token";
 
 fn registrations() -> Vec<Connector> {
     vec![
@@ -79,6 +83,14 @@ fn routing() -> RoutingConfig {
     RoutingConfig::new(rules, connectors)
 }
 
+/// Each connector's core token, as the core would read them from its config.
+fn tokens() -> Arc<ConnectorTokens> {
+    Arc::new(ConnectorTokens::new(HashMap::from([
+        (ConnectorId(WA.into()), WA_TOKEN.to_owned()),
+        (ConnectorId(TG.into()), TG_TOKEN.to_owned()),
+    ])))
+}
+
 struct Harness {
     address: String,
     inbound: mpsc::Sender<InboundWork>,
@@ -104,7 +116,7 @@ impl Harness {
                 Server::builder()
                     .add_service(
                         wuphf_proto::connector::connector_transport_server::ConnectorTransportServer::new(
-                            GrpcConnectorService::new(handle),
+                            GrpcConnectorService::new(handle, tokens()),
                         ),
                     )
                     .serve_with_incoming(TcpListenerStream::new(listener))
@@ -134,6 +146,7 @@ fn sdk_client(address: &str) -> Client {
         platform: pb::Platform::Telegram,
         supports_threads: true,
         supports_topic_create: true,
+        token: TG_TOKEN.into(),
         is_permanent: None,
     })
 }
@@ -329,6 +342,7 @@ async fn inbound_event_frames_are_forwarded_to_the_core() {
             platform: pb::Platform::Whatsapp,
             supports_threads: false,
             supports_topic_create: false,
+            token: WA_TOKEN.into(),
             is_permanent: None,
         });
         let received = Arc::new(StdMutex::new(Vec::new()));

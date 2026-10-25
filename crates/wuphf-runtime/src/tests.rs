@@ -630,6 +630,7 @@ async fn grpc_transport_delivers_dispatch_to_registered_connector() {
         Server::builder()
             .add_service(ConnectorTransportServer::new(GrpcConnectorService::new(
                 handle,
+                connector_tokens(),
             )))
             .serve_with_incoming(TcpListenerStream::new(listener)),
     );
@@ -650,7 +651,7 @@ async fn grpc_transport_delivers_dispatch_to_registered_connector() {
     let mut telegram_output = ConnectorTransportClient::connect(uri.clone())
         .await
         .unwrap()
-        .open_session(ReceiverStream::new(telegram_rx))
+        .open_session(with_token(ReceiverStream::new(telegram_rx), TG_TOKEN))
         .await
         .unwrap()
         .into_inner();
@@ -661,7 +662,7 @@ async fn grpc_transport_delivers_dispatch_to_registered_connector() {
         .unwrap();
     let mut whatsapp_client = ConnectorTransportClient::connect(uri).await.unwrap();
     let _whatsapp_output = whatsapp_client
-        .open_session(ReceiverStream::new(whatsapp_rx))
+        .open_session(with_token(ReceiverStream::new(whatsapp_rx), WA_TOKEN))
         .await
         .unwrap()
         .into_inner();
@@ -1051,6 +1052,7 @@ async fn serve_connectors(
         Server::builder()
             .add_service(ConnectorTransportServer::new(GrpcConnectorService::new(
                 handle,
+                connector_tokens(),
             )))
             .serve_with_incoming(TcpListenerStream::new(listener))
             .await
@@ -1063,6 +1065,7 @@ async fn serve_connectors(
 /// returned tuple so the session stays open until it is dropped.
 async fn open_telegram_session(
     client: &mut ConnectorTransportClient<tonic::transport::Channel>,
+    token: Option<&str>,
 ) -> Result<
     (
         mpsc::Sender<pb::ClientFrame>,
@@ -1082,10 +1085,11 @@ async fn open_telegram_session(
         ))
         .await
         .unwrap();
-    let output = client
-        .open_session(ReceiverStream::new(frames_rx))
-        .await?
-        .into_inner();
+    let mut request = tonic::Request::new(ReceiverStream::new(frames_rx));
+    if let Some(token) = token {
+        request = with_token(request.into_inner(), token);
+    }
+    let output = client.open_session(request).await?.into_inner();
     Ok((frames, output))
 }
 
@@ -1094,8 +1098,12 @@ async fn grpc_second_session_is_already_exists() {
     let harness = hub_harness();
     let (uri, server) = serve_connectors(harness.handle.clone()).await;
     let mut client = ConnectorTransportClient::connect(uri).await.unwrap();
-    let _first = open_telegram_session(&mut client).await.unwrap();
-    let error = open_telegram_session(&mut client).await.unwrap_err();
+    let _first = open_telegram_session(&mut client, Some(TG_TOKEN))
+        .await
+        .unwrap();
+    let error = open_telegram_session(&mut client, Some(TG_TOKEN))
+        .await
+        .unwrap_err();
     assert_eq!(error.code(), tonic::Code::AlreadyExists);
     server.abort();
     harness.task.abort();
@@ -1108,7 +1116,9 @@ async fn grpc_session_after_client_disconnect_is_accepted() {
     let mut first_client = ConnectorTransportClient::connect(uri.clone())
         .await
         .unwrap();
-    let first = open_telegram_session(&mut first_client).await.unwrap();
+    let first = open_telegram_session(&mut first_client, Some(TG_TOKEN))
+        .await
+        .unwrap();
     drop(first);
     drop(first_client);
 
@@ -1117,7 +1127,7 @@ async fn grpc_session_after_client_disconnect_is_accepted() {
     let mut client = ConnectorTransportClient::connect(uri).await.unwrap();
     tokio::time::timeout(std::time::Duration::from_secs(5), async {
         loop {
-            match open_telegram_session(&mut client).await {
+            match open_telegram_session(&mut client, Some(TG_TOKEN)).await {
                 Ok(session) => return session,
                 Err(error) if error.code() == tonic::Code::AlreadyExists => {
                     tokio::task::yield_now().await;
@@ -1130,4 +1140,153 @@ async fn grpc_session_after_client_disconnect_is_accepted() {
     .expect("the new session registers once the old stream has ended");
     server.abort();
     harness.task.abort();
+}
+
+const WA_TOKEN: &str = "wa-token";
+const TG_TOKEN: &str = "tg-token";
+const PROVIDER_TOKEN: &str = "provider-token";
+
+fn connector_tokens() -> Arc<crate::auth::ConnectorTokens> {
+    Arc::new(crate::auth::ConnectorTokens::new(HashMap::from([
+        (ConnectorId(WA.into()), WA_TOKEN.to_owned()),
+        (ConnectorId(TG.into()), TG_TOKEN.to_owned()),
+    ])))
+}
+
+/// A request carrying `authorization: Bearer <token>`.
+fn with_token<T>(message: T, token: &str) -> tonic::Request<T> {
+    let mut request = tonic::Request::new(message);
+    request
+        .metadata_mut()
+        .insert("authorization", format!("Bearer {token}").parse().unwrap());
+    request
+}
+
+#[tokio::test]
+async fn grpc_session_without_token_is_unauthenticated() {
+    let harness = hub_harness();
+    let (uri, server) = serve_connectors(harness.handle.clone()).await;
+    let mut client = ConnectorTransportClient::connect(uri).await.unwrap();
+    let error = open_telegram_session(&mut client, None).await.unwrap_err();
+    assert_eq!(error.code(), tonic::Code::Unauthenticated);
+    server.abort();
+    harness.task.abort();
+}
+
+#[tokio::test]
+async fn grpc_session_with_another_connectors_token_is_unauthenticated() {
+    let harness = hub_harness();
+    let (uri, server) = serve_connectors(harness.handle.clone()).await;
+    let mut client = ConnectorTransportClient::connect(uri).await.unwrap();
+    let error = open_telegram_session(&mut client, Some(WA_TOKEN))
+        .await
+        .unwrap_err();
+    assert_eq!(error.code(), tonic::Code::Unauthenticated);
+    // The refused attempt never reached the hub: the real connector still gets in.
+    open_telegram_session(&mut client, Some(TG_TOKEN))
+        .await
+        .expect("the connector's own token registers");
+    server.abort();
+    harness.task.abort();
+}
+
+#[tokio::test]
+async fn grpc_session_with_its_token_registers() {
+    let harness = hub_harness();
+    let (uri, server) = serve_connectors(harness.handle.clone()).await;
+    let mut client = ConnectorTransportClient::connect(uri).await.unwrap();
+    let (_frames, mut output) = open_telegram_session(&mut client, Some(TG_TOKEN))
+        .await
+        .unwrap();
+    let dispatch = telegram_dispatch();
+    harness.dispatches.send(dispatch.clone()).await.unwrap();
+    let frame = output.message().await.unwrap().unwrap();
+    let Some(pb::server_frame::Body::MessageDelete(delete)) = frame.body else {
+        panic!("the session should receive the dispatch");
+    };
+    assert_eq!(delete.dispatch_id, dispatch.id.to_string());
+    server.abort();
+    harness.task.abort();
+}
+
+fn upload_frames() -> Vec<pb::UploadMediaFrame> {
+    vec![
+        pb::UploadMediaFrame {
+            body: Some(pb::upload_media_frame::Body::Metadata(pb::MediaMetadata {
+                kind: pb::attachment::Kind::File.into(),
+                file_name: None,
+                mime_type: None,
+                size_bytes: Some(2),
+                animated: false,
+            })),
+        },
+        pb::UploadMediaFrame {
+            body: Some(pb::upload_media_frame::Body::Chunk(b"hi".to_vec())),
+        },
+    ]
+}
+
+#[tokio::test]
+async fn media_requires_a_known_token() {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let server = tokio::spawn(
+        Server::builder()
+            .add_service(MediaTransportServer::with_interceptor(
+                GrpcMediaService::new(
+                    Arc::new(InMemoryStorage::default()),
+                    1024,
+                    std::time::Duration::from_secs(3600),
+                ),
+                crate::auth::any_token_auth(vec![TG_TOKEN.into(), PROVIDER_TOKEN.into()]),
+            ))
+            .serve_with_incoming(TcpListenerStream::new(listener)),
+    );
+    let mut client = MediaTransportClient::connect(format!("http://{address}"))
+        .await
+        .unwrap();
+
+    let error = client
+        .upload_media(tokio_stream::iter(upload_frames()))
+        .await
+        .unwrap_err();
+    assert_eq!(error.code(), tonic::Code::Unauthenticated);
+    let error = client
+        .upload_media(with_token(tokio_stream::iter(upload_frames()), "unknown"))
+        .await
+        .unwrap_err();
+    assert_eq!(error.code(), tonic::Code::Unauthenticated);
+
+    let by_connector = client
+        .upload_media(with_token(tokio_stream::iter(upload_frames()), TG_TOKEN))
+        .await
+        .expect("a connector token may upload")
+        .into_inner();
+    client
+        .upload_media(with_token(
+            tokio_stream::iter(upload_frames()),
+            PROVIDER_TOKEN,
+        ))
+        .await
+        .expect("a provider token may upload");
+
+    let download = || pb::DownloadMediaRequest {
+        media_id: by_connector.media_id.clone(),
+    };
+    let error = client.download_media(download()).await.unwrap_err();
+    assert_eq!(error.code(), tonic::Code::Unauthenticated);
+    let mut stream = client
+        .download_media(with_token(download(), PROVIDER_TOKEN))
+        .await
+        .expect("a provider token may download")
+        .into_inner();
+    assert_eq!(
+        stream.message().await.unwrap().unwrap().chunk,
+        b"hi".to_vec()
+    );
+    client
+        .download_media(with_token(download(), TG_TOKEN))
+        .await
+        .expect("a connector token may download");
+    server.abort();
 }
