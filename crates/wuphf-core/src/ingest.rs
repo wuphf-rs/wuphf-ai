@@ -2,7 +2,8 @@
 //! logical message and the dispatches that fan it out, including mirror-thread
 //! provisioning and source-rename retitling.
 
-use crate::{Core, CoreError};
+use crate::{Core, CoreError, RoutingConfig};
+use std::sync::Arc;
 use wuphf_model::{
     ConversationId, DedupKey, Dispatch, Endpoint, EndpointId, IgnoreReason, IngestOutcome, Message,
     MessageCopy, MessageId, SourceAddress,
@@ -15,6 +16,7 @@ where
 {
     pub(crate) async fn ingest_create(
         &self,
+        routing: &Arc<RoutingConfig>,
         source: SourceAddress,
         origin_endpoint: EndpointId,
         origin: Endpoint,
@@ -92,6 +94,7 @@ where
         if provisioning {
             let replayed = self
                 .stash_deferred(
+                    routing,
                     conversation_id,
                     message.id,
                     origin_endpoint,
@@ -114,11 +117,16 @@ where
         }
 
         let (mut dispatches, blocked) = self
-            .route_and_record(&message, origin_endpoint, &provision_title)
+            .route_and_record(routing, &message, origin_endpoint, &provision_title)
             .await?;
         dispatches.extend(
-            self.maybe_retitle(&origin, conversation_id, source.chat_title.as_deref())
-                .await?,
+            self.maybe_retitle(
+                routing,
+                &origin,
+                conversation_id,
+                source.chat_title.as_deref(),
+            )
+            .await?,
         );
         Ok(IngestOutcome::Routed {
             message_id: message.id,
@@ -140,6 +148,7 @@ where
     /// chat id) — the first real title is a genuine change and is fanned out.
     async fn maybe_retitle(
         &self,
+        routing: &Arc<RoutingConfig>,
         origin: &Endpoint,
         conversation_id: ConversationId,
         new_title: Option<&str>,
@@ -162,7 +171,10 @@ where
             .set_conversation_title(conversation.id, new_title)
             .await?;
         conversation.title = Some(new_title.to_owned());
-        let dispatches = self.router.route_retitle(&conversation, new_title).await?;
+        let dispatches = self
+            .with_routing(routing)
+            .route_retitle(&conversation, new_title)
+            .await?;
         let (pending, _) = self.save_dispatches(dispatches).await?;
         Ok(pending)
     }
@@ -219,12 +231,13 @@ where
     /// count of the blocked ones.
     pub(crate) async fn route_and_record(
         &self,
+        routing: &Arc<RoutingConfig>,
         message: &Message,
         origin_endpoint: EndpointId,
         provision_title: &str,
     ) -> Result<(Vec<Dispatch>, usize), CoreError> {
         let routed = self
-            .router
+            .with_routing(routing)
             .route(message, origin_endpoint, provision_title)
             .await?;
         let (dispatches, blocked) = self.save_dispatches(routed).await?;
@@ -252,6 +265,7 @@ where
     /// loop when our own mirrored edit is reported back by the target platform.
     pub(crate) async fn ingest_edit(
         &self,
+        routing: &Arc<RoutingConfig>,
         origin_endpoint: EndpointId,
         platform_message_id: String,
         text: Option<String>,
@@ -272,7 +286,10 @@ where
         message.text = text;
         self.storage.put_message(message.clone()).await?;
 
-        let routed = self.router.route_edit(&message, origin_endpoint).await?;
+        let routed = self
+            .with_routing(routing)
+            .route_edit(&message, origin_endpoint)
+            .await?;
         let (dispatches, blocked) = self.save_dispatches(routed).await?;
         Ok(IngestOutcome::Routed {
             message_id,
@@ -287,6 +304,7 @@ where
     /// echo loop when our own mirrored delete is reported back by the target.
     pub(crate) async fn ingest_delete(
         &self,
+        routing: &Arc<RoutingConfig>,
         origin_endpoint: EndpointId,
         platform_message_id: String,
     ) -> Result<IngestOutcome, CoreError> {
@@ -306,7 +324,10 @@ where
         message.deleted = true;
         self.storage.put_message(message.clone()).await?;
 
-        let routed = self.router.route_delete(&message, origin_endpoint).await?;
+        let routed = self
+            .with_routing(routing)
+            .route_delete(&message, origin_endpoint)
+            .await?;
         let (dispatches, blocked) = self.save_dispatches(routed).await?;
         Ok(IngestOutcome::Routed {
             message_id,
@@ -323,6 +344,7 @@ where
     /// never applies a native reaction the source could report back.
     pub(crate) async fn ingest_reaction(
         &self,
+        routing: &Arc<RoutingConfig>,
         origin_endpoint: EndpointId,
         platform_message_id: String,
         reactor: String,
@@ -341,7 +363,7 @@ where
         };
 
         let routed = self
-            .router
+            .with_routing(routing)
             .route_reaction(&message, origin_endpoint, reactor, reactor_name, emoji)
             .await?;
         let (dispatches, blocked) = self.save_dispatches(routed).await?;
@@ -365,6 +387,7 @@ where
     /// decides how to render the signal.
     pub(crate) async fn ingest_receipt(
         &self,
+        routing: &Arc<RoutingConfig>,
         observer_endpoint: EndpointId,
         platform_message_id: String,
         from_me: bool,
@@ -385,7 +408,7 @@ where
         };
 
         let routed = self
-            .router
+            .with_routing(routing)
             .route_receipt(&message, observer_endpoint, kind)
             .await?;
         let (dispatches, blocked) = self.save_dispatches(routed).await?;

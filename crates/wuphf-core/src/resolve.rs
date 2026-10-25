@@ -1,7 +1,7 @@
 //! Lazy topology resolution: turn a raw inbound address into its endpoint,
 //! minting the endpoint and conversation on first sighting when a rule matches.
 
-use crate::{Core, CoreError};
+use crate::{Core, CoreError, RoutingConfig};
 use wuphf_model::{
     AddressSet, Alias, ChatAddress, ChatRef, ConnectorId, Conversation, ConversationId, Endpoint,
     EndpointId, RuleEnd, RuleId, RuleKind, SourceAddress,
@@ -18,6 +18,7 @@ where
     /// topic in the container).
     pub(crate) async fn resolve_origin(
         &self,
+        routing: &RoutingConfig,
         source: &SourceAddress,
     ) -> Result<Option<EndpointId>, CoreError> {
         if let Some(endpoint) = self
@@ -25,7 +26,7 @@ where
             .resolve_endpoint(&source.connector_id, &source.address)
             .await?
         {
-            return self.still_covered(endpoint, source).await;
+            return self.still_covered(routing, endpoint, source).await;
         }
 
         // Rules are matched against every address form the platform has
@@ -35,7 +36,7 @@ where
         let addresses = self
             .address_set(&source.connector_id, &source.address)
             .await?;
-        let Some(matched) = self.config.match_source(&source.connector_id, &addresses) else {
+        let Some(matched) = routing.match_source(&source.connector_id, &addresses) else {
             return Ok(None);
         };
         let rule = matched.rule.clone();
@@ -63,7 +64,7 @@ where
         let mut origin = None;
         for end in [RuleEnd::Source, RuleEnd::Destination] {
             let endpoint = self
-                .ensure_end_endpoint(&conversation, &rule.flow, end, &identity_address)
+                .ensure_end_endpoint(routing, &conversation, &rule.flow, end, &identity_address)
                 .await?;
             if end == origin_end {
                 origin = Some(endpoint);
@@ -92,6 +93,7 @@ where
     /// have to stay resolvable so their echoes are recognized.
     async fn still_covered(
         &self,
+        routing: &RoutingConfig,
         endpoint_id: EndpointId,
         source: &SourceAddress,
     ) -> Result<Option<EndpointId>, CoreError> {
@@ -103,7 +105,7 @@ where
         };
         // A conversation whose rule is gone from the config is no longer
         // covered by anything, so it stops replicating.
-        let Some(rule) = self.config.rule(rule_id) else {
+        let Some(rule) = routing.rule(rule_id) else {
             return Ok(None);
         };
         let addresses = self
@@ -209,6 +211,7 @@ where
     /// provisioned, so it is found through the conversation instead.
     async fn ensure_end_endpoint(
         &self,
+        routing: &RoutingConfig,
         conversation: &Conversation,
         flow: &RuleKind,
         end: RuleEnd,
@@ -248,8 +251,7 @@ where
             return Ok(endpoint);
         }
 
-        let info = self
-            .config
+        let info = routing
             .connector(&connector)
             .ok_or_else(|| CoreError::UnknownConnector(connector.clone()))?;
         let endpoint = Endpoint {

@@ -12,17 +12,19 @@ use wuphf_model::{
 };
 use wuphf_storage::{MessageStore, StorageError, TopologyStore};
 
+/// Routes against one operation's routing snapshot; the core builds one per
+/// operation (see [`crate::RoutingSource`]).
 pub(crate) struct Router<S> {
     storage: Arc<S>,
-    config: Arc<RoutingConfig>,
+    routing: Arc<RoutingConfig>,
 }
 
 impl<S> Router<S>
 where
     S: TopologyStore + MessageStore,
 {
-    pub fn new(storage: Arc<S>, config: Arc<RoutingConfig>) -> Self {
-        Self { storage, config }
+    pub fn new(storage: Arc<S>, routing: Arc<RoutingConfig>) -> Self {
+        Self { storage, routing }
     }
 }
 
@@ -291,7 +293,7 @@ where
         conversation
             .rule_id
             .as_ref()
-            .and_then(|rule_id| self.config.rule(rule_id))
+            .and_then(|rule_id| self.routing.rule(rule_id))
             .is_some_and(|rule| is_mirror_side(rule, &endpoint.connector_id, &endpoint.chat_id))
     }
 

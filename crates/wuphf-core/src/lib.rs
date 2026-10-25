@@ -15,14 +15,14 @@ mod resolve;
 mod router;
 mod send;
 
-pub use config::{MatchedRule, RoutingConfig, RoutingConfigError};
+pub use config::{MatchedRule, RoutingConfig, RoutingConfigError, RoutingSource};
 use router::Router;
 pub use router::RouterError;
 
 pub struct Core<S> {
     storage: Arc<S>,
-    router: Router<S>,
-    config: Arc<RoutingConfig>,
+    /// The routing config, read once per operation (see [`RoutingSource`]).
+    routing: Arc<dyn RoutingSource>,
     /// Conversations whose mirror thread is mid-provisioning, holding the dispatch ids whose acknowledgement establishes the
     /// thread. Guards against a burst of messages each provisioning a duplicate
     /// thread before the first provision settles. This is a rebuildable cache of
@@ -49,10 +49,9 @@ impl<S> Core<S>
 where
     S: Storage,
 {
-    pub fn new(storage: Arc<S>, config: Arc<RoutingConfig>) -> Self {
+    pub fn new(storage: Arc<S>, routing: impl RoutingSource) -> Self {
         Self {
-            router: Router::new(Arc::clone(&storage), Arc::clone(&config)),
-            config,
+            routing: Arc::new(routing),
             storage,
             provisioning: Mutex::new(HashMap::new()),
             notices: Mutex::new(HashMap::new()),
@@ -69,14 +68,21 @@ where
     /// when the connector is not configured (an event from an unknown connector);
     /// the caller falls back to a connector-derived label.
     pub fn connector_platform(&self, connector_id: &ConnectorId) -> Option<Platform> {
-        self.config
+        self.routing
+            .routing()
             .connector(connector_id)
             .map(|info| info.platform.clone())
     }
 
+    /// A router over one operation's routing snapshot.
+    fn with_routing(&self, routing: &Arc<RoutingConfig>) -> Router<S> {
+        Router::new(Arc::clone(&self.storage), Arc::clone(routing))
+    }
+
     pub async fn ingest(&self, event: Event) -> Result<IngestOutcome, CoreError> {
+        let routing = self.routing.routing();
         let source = event.source;
-        let Some(origin_endpoint) = self.resolve_origin(&source).await? else {
+        let Some(origin_endpoint) = self.resolve_origin(&routing, &source).await? else {
             return Ok(IngestOutcome::Ignored(IgnoreReason::Unmatched));
         };
         let origin = self.storage.endpoint(origin_endpoint).await?;
@@ -89,20 +95,27 @@ where
 
         match event.payload {
             EventKind::NewMessage(inbound) => {
-                self.ingest_create(source, origin_endpoint, origin, conversation_id, inbound)
-                    .await
+                self.ingest_create(
+                    &routing,
+                    source,
+                    origin_endpoint,
+                    origin,
+                    conversation_id,
+                    inbound,
+                )
+                .await
             }
             EventKind::Edit {
                 native_id: platform_message_id,
                 text,
             } => {
-                self.ingest_edit(origin_endpoint, platform_message_id, text)
+                self.ingest_edit(&routing, origin_endpoint, platform_message_id, text)
                     .await
             }
             EventKind::Delete {
                 native_id: platform_message_id,
             } => {
-                self.ingest_delete(origin_endpoint, platform_message_id)
+                self.ingest_delete(&routing, origin_endpoint, platform_message_id)
                     .await
             }
             EventKind::Reaction {
@@ -116,6 +129,7 @@ where
                 from_me: _,
             } => {
                 self.ingest_reaction(
+                    &routing,
                     origin_endpoint,
                     platform_message_id,
                     reactor,
@@ -130,8 +144,14 @@ where
                 from_me,
                 kind,
             } => {
-                self.ingest_receipt(origin_endpoint, platform_message_id, from_me, kind)
-                    .await
+                self.ingest_receipt(
+                    &routing,
+                    origin_endpoint,
+                    platform_message_id,
+                    from_me,
+                    kind,
+                )
+                .await
             }
         }
     }

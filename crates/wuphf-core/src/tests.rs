@@ -1797,3 +1797,164 @@ fn validate_accepts_the_test_fixture() {
         .with_notice_targets(vec![connector_ref(TELEGRAM, "-100999")]);
     assert_eq!(config.validate(), Ok(()));
 }
+
+/// A routing source whose config the test can swap, as the settings store
+/// does when a change is applied.
+struct Swappable(Arc<std::sync::Mutex<Arc<RoutingConfig>>>);
+
+impl Swappable {
+    fn new(config: RoutingConfig) -> (Self, Arc<std::sync::Mutex<Arc<RoutingConfig>>>) {
+        let shared = Arc::new(std::sync::Mutex::new(Arc::new(config)));
+        (Self(Arc::clone(&shared)), shared)
+    }
+}
+
+impl RoutingSource for Swappable {
+    fn routing(&self) -> Arc<RoutingConfig> {
+        Arc::clone(&self.0.lock().unwrap())
+    }
+}
+
+/// Counts reads, to check each operation reads exactly once.
+struct Counting {
+    inner: Arc<RoutingConfig>,
+    reads: Arc<std::sync::atomic::AtomicUsize>,
+}
+
+impl RoutingSource for Counting {
+    fn routing(&self) -> Arc<RoutingConfig> {
+        self.reads.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        Arc::clone(&self.inner)
+    }
+}
+
+fn swap(shared: &std::sync::Mutex<Arc<RoutingConfig>>, config: RoutingConfig) {
+    *shared.lock().unwrap() = Arc::new(config);
+}
+
+#[tokio::test]
+async fn rule_added_at_runtime_routes_the_next_event() {
+    let (source, shared) = Swappable::new(RoutingConfig::new(vec![], connectors()));
+    let core = Core::new(Arc::new(InMemoryStorage::default()), source);
+
+    let before = core
+        .ingest(event(WHATSAPP, "12345@s.whatsapp.net", "wa-1", None))
+        .await
+        .unwrap();
+    assert_eq!(before, IngestOutcome::Ignored(IgnoreReason::Unmatched));
+
+    swap(
+        &shared,
+        RoutingConfig::new(vec![direct_rule()], connectors()),
+    );
+    let after = core
+        .ingest(event(WHATSAPP, "12345@s.whatsapp.net", "wa-2", None))
+        .await
+        .unwrap();
+    let dispatches = after.dispatches();
+    assert_eq!(dispatches.len(), 1);
+    assert_eq!(dispatches[0].to.connector_id, ConnectorId(TELEGRAM.into()));
+    assert_eq!(dispatches[0].to.address.chat_id, "-100123");
+}
+
+#[tokio::test]
+async fn rule_removed_at_runtime_stops_the_conversation() {
+    let (source, shared) = Swappable::new(RoutingConfig::new(vec![direct_rule()], connectors()));
+    let core = Core::new(Arc::new(InMemoryStorage::default()), source);
+
+    let routed = core
+        .ingest(event(WHATSAPP, "12345@s.whatsapp.net", "wa-1", None))
+        .await
+        .unwrap();
+    assert_eq!(routed.dispatches().len(), 1);
+
+    swap(&shared, RoutingConfig::new(vec![], connectors()));
+    let after = core
+        .ingest(event(WHATSAPP, "12345@s.whatsapp.net", "wa-2", None))
+        .await
+        .unwrap();
+    assert_eq!(after, IngestOutcome::Ignored(IgnoreReason::Unmatched));
+}
+
+#[tokio::test]
+async fn notice_targets_follow_runtime_changes() {
+    let with_target = |chat_id: &str| {
+        RoutingConfig::new(vec![], connectors())
+            .with_notice_targets(vec![connector_ref(TELEGRAM, chat_id)])
+    };
+    let (source, shared) = Swappable::new(with_target("-100111"));
+    let core = Core::new(Arc::new(InMemoryStorage::default()), source);
+    let whatsapp = ConnectorId(WHATSAPP.into());
+
+    let first = core
+        .notify_owners(whatsapp.clone(), NoticeKind::LoggedOut, "", 1)
+        .await
+        .unwrap();
+    assert_eq!(first.len(), 1);
+    assert_eq!(first[0].to.address.chat_id, "-100111");
+
+    swap(&shared, with_target("-100222"));
+    let second = core
+        .notify_owners(whatsapp, NoticeKind::Recovered, "", 2)
+        .await
+        .unwrap();
+    assert_eq!(second.len(), 1);
+    assert_eq!(second[0].to.address.chat_id, "-100222");
+}
+
+#[tokio::test]
+async fn each_operation_reads_routing_once() {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    let reads = Arc::new(AtomicUsize::new(0));
+    let config = RoutingConfig::new(vec![mirror_rule()], connectors())
+        .with_notice_targets(vec![connector_ref(TELEGRAM, "-100999")]);
+    let core = Core::new(
+        Arc::new(InMemoryStorage::default()),
+        Counting {
+            inner: Arc::new(config),
+            reads: Arc::clone(&reads),
+        },
+    );
+    let read_once = |before: usize| assert_eq!(reads.load(Ordering::SeqCst), before + 1);
+
+    // A routed create: resolve, route, provision a thread, retitle check.
+    let before = reads.load(Ordering::SeqCst);
+    let routed = core
+        .ingest(event(WHATSAPP, "111@g.us", "wa-1", None))
+        .await
+        .unwrap();
+    read_once(before);
+
+    // Acknowledging the provisioning dispatch replays the (empty) stash.
+    let before = reads.load(Ordering::SeqCst);
+    core.acknowledge_dispatch(DispatchAck {
+        dispatch_id: routed.dispatches()[0].id,
+        native_id: "tg-1".into(),
+        thread_id: Some("777".into()),
+    })
+    .await
+    .unwrap();
+    read_once(before);
+
+    // A notice reads once for its targets and all of its sends.
+    let before = reads.load(Ordering::SeqCst);
+    core.notify_owners(ConnectorId(WHATSAPP.into()), NoticeKind::LoggedOut, "", 2)
+        .await
+        .unwrap();
+    read_once(before);
+
+    // An owner message into the mirrored chat: resolve plus fan-out.
+    let before = reads.load(Ordering::SeqCst);
+    core.send_owner_message(OwnerMessage {
+        connector_id: ConnectorId(WHATSAPP.into()),
+        chat_id: "111@g.us".into(),
+        thread_id: None,
+        text: "hi".into(),
+        reply_to_native_id: None,
+        timestamp_ms: 3,
+    })
+    .await
+    .unwrap();
+    read_once(before);
+}

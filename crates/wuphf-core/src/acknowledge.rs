@@ -2,7 +2,8 @@
 //! dispatches, persist provisioned threads, replay stashed messages, and apply
 //! identity migrations.
 
-use crate::{Core, CoreError};
+use crate::{Core, CoreError, RoutingConfig};
+use std::sync::Arc;
 use wuphf_model::{
     AddressLink, Alias, ChatAddress, ConnectorId, ConversationId, Dispatch, DispatchAck,
     DispatchId, EndpointId, MessageCopy, MessageId,
@@ -33,6 +34,7 @@ where
         &self,
         acknowledgement: DispatchAck,
     ) -> Result<Vec<Dispatch>, CoreError> {
+        let routing = self.routing.routing();
         let dispatch = self.storage.dispatch(acknowledgement.dispatch_id).await?;
         if let (Some(thread_id), Some(dispatch)) =
             (acknowledgement.thread_id.clone(), dispatch.as_ref())
@@ -47,7 +49,7 @@ where
             if let Some(ack) = self.delivery_ack_for(&dispatch).await? {
                 dispatches.push(ack);
             }
-            dispatches.extend(self.resume_provisioned(&dispatch).await?);
+            dispatches.extend(self.resume_provisioned(&routing, &dispatch).await?);
         }
         Ok(dispatches)
     }
@@ -94,6 +96,7 @@ where
     /// messages are replayed and their resulting dispatches returned.
     pub(crate) async fn resume_provisioned(
         &self,
+        routing: &Arc<RoutingConfig>,
         dispatch: &Dispatch,
     ) -> Result<Vec<Dispatch>, CoreError> {
         let conversation_id = dispatch.conversation_id;
@@ -108,7 +111,7 @@ where
             }
             provisioning.remove(&conversation_id);
         }
-        self.replay_stash(conversation_id).await
+        self.replay_stash(routing, conversation_id).await
     }
 
     /// Drain the durable provisioning stash for a conversation and re-route each
@@ -117,6 +120,7 @@ where
     /// the conversation is not stranded.
     pub(crate) async fn replay_stash(
         &self,
+        routing: &Arc<RoutingConfig>,
         conversation_id: ConversationId,
     ) -> Result<Vec<Dispatch>, CoreError> {
         let stash = self
@@ -126,7 +130,7 @@ where
         let mut dispatches = Vec::new();
         for (message, origin_endpoint, provision_title) in stash {
             let (routed, _) = self
-                .route_and_record(&message, origin_endpoint, &provision_title)
+                .route_and_record(routing, &message, origin_endpoint, &provision_title)
                 .await?;
             dispatches.extend(routed);
         }
@@ -141,6 +145,7 @@ where
     /// race, otherwise empty (the message waits for the provision to settle).
     pub(crate) async fn stash_deferred(
         &self,
+        routing: &Arc<RoutingConfig>,
         conversation_id: ConversationId,
         message_id: MessageId,
         origin_endpoint: EndpointId,
@@ -159,7 +164,7 @@ where
             !provisioning.contains_key(&conversation_id)
         };
         if settled {
-            self.replay_stash(conversation_id).await
+            self.replay_stash(routing, conversation_id).await
         } else {
             Ok(Vec::new())
         }
@@ -172,6 +177,7 @@ where
     /// failed in a previous run, or was lost — is drained and replayed
     /// immediately, and the resulting dispatches returned for delivery.
     pub async fn recover_provisioning(&self) -> Result<Vec<Dispatch>, CoreError> {
+        let routing = self.routing.routing();
         let pending = self.storage.pending_dispatches().await?;
         {
             let mut provisioning = self.provisioning.lock().unwrap();
@@ -194,7 +200,7 @@ where
                     .is_some_and(|state| !state.pending.is_empty())
             };
             if !outstanding {
-                dispatches.extend(self.replay_stash(conversation_id).await?);
+                dispatches.extend(self.replay_stash(&routing, conversation_id).await?);
             }
         }
         Ok(dispatches)
@@ -291,13 +297,14 @@ where
         dispatch_id: DispatchId,
         reason: String,
     ) -> Result<Vec<Dispatch>, CoreError> {
+        let routing = self.routing.routing();
         let dispatch = self.storage.dispatch(dispatch_id).await?;
         self.storage.fail_dispatch(dispatch_id, reason).await?;
         // A failed provisioning dispatch must still release the stash, or the
         // held messages would never send. Replaying them re-attempts the
         // provision with the next message rather than stranding the conversation.
         match dispatch {
-            Some(dispatch) => self.resume_provisioned(&dispatch).await,
+            Some(dispatch) => self.resume_provisioned(&routing, &dispatch).await,
             None => Ok(Vec::new()),
         }
     }

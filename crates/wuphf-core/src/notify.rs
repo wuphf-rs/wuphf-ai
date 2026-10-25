@@ -33,8 +33,9 @@ where
             return Ok(Vec::new());
         }
         let text = notice_text(&connector_id, kind, detail);
-        let targets: Vec<_> = self
-            .config
+        // One snapshot for the whole notice: the targets and every send to them.
+        let routing = self.routing.routing();
+        let targets: Vec<_> = routing
             .notice_targets_excluding(&connector_id)
             .cloned()
             .collect();
@@ -42,14 +43,17 @@ where
         let mut dispatches = Vec::new();
         for target in targets {
             let outcome = self
-                .send_owner_message(OwnerMessage {
-                    connector_id: target.connector_id,
-                    chat_id: target.address.chat_id,
-                    thread_id: target.address.thread_id,
-                    text: text.clone(),
-                    reply_to_native_id: None,
-                    timestamp_ms,
-                })
+                .send_owner_message_with(
+                    &routing,
+                    OwnerMessage {
+                        connector_id: target.connector_id,
+                        chat_id: target.address.chat_id,
+                        thread_id: target.address.thread_id,
+                        text: text.clone(),
+                        reply_to_native_id: None,
+                        timestamp_ms,
+                    },
+                )
                 .await?;
             dispatches.push(outcome.direct);
             dispatches.extend(outcome.mirrored);

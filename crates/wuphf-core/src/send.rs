@@ -12,7 +12,8 @@
 //! without this the mirrors would silently miss owner-sent messages, because
 //! the platform echo that would normally replicate them is suppressed.
 
-use crate::{Core, CoreError};
+use crate::{Core, CoreError, RoutingConfig};
+use std::sync::Arc;
 use wuphf_model::{
     Action, Alias, ChatAddress, ChatRef, ConnectorId, Conversation, ConversationId, Dispatch,
     Endpoint, EndpointId, Message, MessageId, OWNER_AUTHOR, OwnerMessage, OwnerSendOutcome,
@@ -31,9 +32,21 @@ where
         &self,
         outbound: OwnerMessage,
     ) -> Result<OwnerSendOutcome, CoreError> {
+        self.send_owner_message_with(&self.routing.routing(), outbound)
+            .await
+    }
+
+    /// [`Self::send_owner_message`] against a routing snapshot the caller
+    /// already read, so an operation sending several messages (owner notices)
+    /// routes them all against one config.
+    pub(crate) async fn send_owner_message_with(
+        &self,
+        routing: &Arc<RoutingConfig>,
+        outbound: OwnerMessage,
+    ) -> Result<OwnerSendOutcome, CoreError> {
         let address = ChatAddress::new(outbound.chat_id.clone(), outbound.thread_id.clone());
         let endpoint_id = self
-            .owner_message_endpoint(&outbound.connector_id, &address)
+            .owner_message_endpoint(routing, &outbound.connector_id, &address)
             .await?;
         let conversation = self
             .storage
@@ -86,7 +99,13 @@ where
         self.storage.enqueue_dispatch(&direct).await?;
 
         let mirrored = self
-            .fan_out_to_mirrors(message, endpoint_id, conversation, &outbound.chat_id)
+            .fan_out_to_mirrors(
+                routing,
+                message,
+                endpoint_id,
+                conversation,
+                &outbound.chat_id,
+            )
             .await?;
         Ok(OwnerSendOutcome { direct, mirrored })
     }
@@ -98,6 +117,7 @@ where
     /// later inbound resolution working while fanning out to nobody.
     async fn owner_message_endpoint(
         &self,
+        routing: &RoutingConfig,
         connector_id: &ConnectorId,
         address: &ChatAddress,
     ) -> Result<EndpointId, CoreError> {
@@ -106,11 +126,10 @@ where
             address: address.clone(),
             chat_title: None,
         };
-        if let Some(endpoint) = self.resolve_origin(&source).await? {
+        if let Some(endpoint) = self.resolve_origin(routing, &source).await? {
             return Ok(endpoint);
         }
-        let info = self
-            .config
+        let info = routing
             .connector(connector_id)
             .ok_or_else(|| CoreError::UnknownConnector(connector_id.clone()))?;
         let endpoint = Endpoint {
@@ -180,6 +199,7 @@ where
     /// once the thread exists, so an owner message cannot provision a duplicate.
     async fn fan_out_to_mirrors(
         &self,
+        routing: &Arc<RoutingConfig>,
         message: Message,
         origin_endpoint: EndpointId,
         conversation: Conversation,
@@ -198,6 +218,7 @@ where
             // provision settled while we stashed, otherwise the message waits.
             return self
                 .stash_deferred(
+                    routing,
                     conversation_id,
                     message.id,
                     origin_endpoint,
@@ -206,7 +227,7 @@ where
                 .await;
         }
         let (dispatches, _) = self
-            .route_and_record(&message, origin_endpoint, &provision_title)
+            .route_and_record(routing, &message, origin_endpoint, &provision_title)
             .await?;
         Ok(dispatches)
     }

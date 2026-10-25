@@ -1,6 +1,7 @@
 //! The rule set, connector list and owner-notice targets the core routes by.
 
 use std::collections::{HashMap, HashSet};
+use std::sync::Arc;
 use thiserror::Error;
 use wuphf_model::{AddressSet, ChatRef, Connector, ConnectorId, Rule, RuleEnd, RuleId};
 
@@ -123,5 +124,19 @@ impl RoutingConfig {
             }
         }
         None
+    }
+}
+
+/// Where the core gets its routing config. Read once at the start of each
+/// operation, so one event is routed against one consistent config even if
+/// the config changes meanwhile.
+pub trait RoutingSource: Send + Sync + 'static {
+    fn routing(&self) -> Arc<RoutingConfig>;
+}
+
+/// A fixed config, e.g. in tests.
+impl RoutingSource for Arc<RoutingConfig> {
+    fn routing(&self) -> Arc<RoutingConfig> {
+        Arc::clone(self)
     }
 }
