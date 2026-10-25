@@ -53,7 +53,7 @@ code).
 | 033 | Move sticker conversion into a `media.convert` provider | P2 | M–L | 032 | DONE (see notes) |
 | 034 | Authenticate connectors and stop session takeover | P1 | M | — | DONE (see notes) |
 | 035 | Load the core configuration through figment and describe it to botconf | P2 | M | botconf 001 | DONE (botconf v0.1.1, see notes) |
-| 036 | Keep runtime settings overrides in SQLite | P2 | S | 035 | TODO |
+| 036 | Keep runtime settings overrides in SQLite | P2 | S | 035 | DONE (migration 0015; see notes) |
 | 037 | Route from a live settings snapshot; `rules` and `notify` at runtime | P2 | M | 035, 036 | TODO |
 | 038 | Key routing rules by id; chats as `connector:chat#thread` | P2 | M | 037 | TODO |
 | 039 | Owner ids, chat names, and the core serving its settings | P2 | M–L | 034–038, botconf 003–005 | TODO |
@@ -543,6 +543,34 @@ Dependencies and ordering:
   - **Results:** Rust has 168 tests passing (161 minus the 5 moved CLI tests,
     plus 12 in `wuphf-settings`). Clippy and `cargo fmt` are clean, and
     `wuphf-core` depends on neither figment nor botconf.
+- **036 done 2026-10-25** (on `plans/runtime-settings`). The drift check
+  showed only 035's expected changes, and `0015` was still free. botconf
+  `v0.1.1`'s storage contract matched "Current state" (`by: Option<i64>`), so
+  the adapter converts the actor to and from its decimal string, as the plan
+  says. Deviations:
+  - **No `futures` dependency:** the workspace has no `futures` entry, so the
+    adapter spells its future type with `std::pin::Pin` and
+    `std::future::Future`, as the plan allows.
+  - **The CLI no longer depends on botconf:** its only use was
+    `botconf::MemoryStorage`, which the adapter replaces, so the dependency
+    was dropped from `crates/wuphf-cli/Cargo.toml`.
+  - **Docs:** the sentence went into the `wuphf-storage` row of the
+    components table in `docs/architecture.md`, naming the
+    `SettingsOverrides` role and that it sits outside `Storage`.
+  - **Mutation checks:** each change below made a test fail.
+    - Dropping the SQLite `DELETE` loop:
+      `sqlite_settings_overrides_round_trip`.
+    - Dropping the in-memory removal: `memory_settings_overrides_round_trip`.
+    - The adapter writing no actor: `adapter_stores_the_actor_as_text`.
+    - The adapter dropping the upserted row:
+      `sqlite_overrides_survive_a_restart`.
+  - **Smoke test:** `serve` with the example config, every token set, and
+    `WUPHF_CORE_DATABASE_URL` pointing at a copy of the local
+    `./wuphf.sqlite` logged that it was listening. The copy then had
+    migration 15 applied and the `settings` table.
+  - **Results:** Rust has 173 tests passing (168 + 3 storage + 2 settings).
+    Clippy and `cargo fmt` are clean, the `pub trait Storage:` bounds are
+    unchanged, and `wuphf-storage` does not depend on botconf.
 
 ## Findings considered and rejected
 
