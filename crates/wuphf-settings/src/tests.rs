@@ -3,11 +3,14 @@
 //! restores the environment afterwards.
 #![allow(clippy::result_large_err)] // `figment::Jail` returns `figment::Error`.
 
-use crate::{Configuration, LoadError, SettingsStorage, SettingsStore, WuphfSchema, base, load};
-use botconf::{MemoryStorage, SettingsError, Storage, StoredOverride};
+use crate::{
+    Configuration, LiveRouting, LoadError, SettingsStorage, SettingsStore, WuphfSchema, base, load,
+};
+use botconf::{MemoryStorage, SettingsError, Source, Storage, StoredOverride};
 use figment::Jail;
 use std::path::Path;
 use std::sync::Arc;
+use wuphf_core::RoutingSource;
 use wuphf_model::{ChatFilter, ConnectorId, RuleId, RuleKind};
 use wuphf_storage::{SettingsOverrides, SqliteStorage};
 
@@ -396,37 +399,147 @@ fn runtime() -> tokio::runtime::Runtime {
         .unwrap()
 }
 
-/// An override written through the adapter is read back by a store loaded
-/// over a reopened database. No key is a runtime key yet, so the store keeps
-/// it as ignored (with a reason) rather than applying it; plan 037 replaces
-/// this with a real key.
+/// The example configuration's settings store over the SQLite database at
+/// `url`, as `serve` loads it.
+async fn live_store(url: &str) -> (Arc<SettingsStore>, Arc<SqliteStorage>) {
+    let sqlite = Arc::new(SqliteStorage::connect(url).await.unwrap());
+    let store = load(
+        every_token_set(),
+        base(Path::new(EXAMPLE)).unwrap(),
+        SettingsStorage::new(Arc::clone(&sqlite)),
+    )
+    .await
+    .unwrap();
+    (Arc::new(store), sqlite)
+}
+
+/// A one-to-one rule between two of the example's connectors.
+fn runtime_rule(destination_connector: &str) -> serde_json::Value {
+    serde_json::json!([{
+        "id": "runtime-direct",
+        "flow": {
+            "kind": "one-to-one",
+            "source_connector": "whatsapp-main",
+            "source_chat": { "chat_id": "12345@s.whatsapp.net" },
+            "destination_connector": destination_connector,
+            "destination_chat": { "chat_id": "-100123" }
+        }
+    }])
+}
+
+fn runtime_rule_id() -> RuleId {
+    RuleId("runtime-direct".into())
+}
+
 #[test]
-fn sqlite_overrides_survive_a_restart() {
+fn rules_set_at_runtime_reach_live_routing() {
+    Jail::expect_with(|_| {
+        runtime().block_on(async {
+            let (store, _) = live_store(&temp_database()).await;
+            let live = LiveRouting::new(Arc::clone(&store));
+            assert!(live.routing().rule(&runtime_rule_id()).is_none());
+
+            store
+                .set("rules", runtime_rule("telegram-main"), None)
+                .await
+                .unwrap();
+            assert!(live.routing().rule(&runtime_rule_id()).is_some());
+        });
+        Ok(())
+    });
+}
+
+#[test]
+fn invalid_rules_are_rejected_and_not_stored() {
+    Jail::expect_with(|_| {
+        runtime().block_on(async {
+            let (store, sqlite) = live_store(&temp_database()).await;
+            let live = LiveRouting::new(Arc::clone(&store));
+            let before = live.routing();
+
+            let error = store
+                .set("rules", runtime_rule("discord-main"), None)
+                .await
+                .unwrap_err();
+            assert!(
+                matches!(error, SettingsError::InvalidValue { .. }),
+                "{error}"
+            );
+            assert!(error.to_string().contains("discord-main"), "{error}");
+            assert!(Arc::ptr_eq(&before, &live.routing()));
+            assert!(sqlite.settings_overrides().await.unwrap().is_empty());
+        });
+        Ok(())
+    });
+}
+
+#[test]
+fn only_rules_and_notify_change_at_runtime() {
+    Jail::expect_with(|_| {
+        runtime().block_on(async {
+            let (store, _) = live_store(&temp_database()).await;
+            for key in ["connectors", "listen", "database_url", "functions"] {
+                let error = store
+                    .set(key, serde_json::json!("anything"), None)
+                    .await
+                    .unwrap_err();
+                assert!(
+                    matches!(error, SettingsError::UnknownKey(_)),
+                    "{key}: {error}"
+                );
+            }
+            store
+                .set("notify", serde_json::json!([]), None)
+                .await
+                .unwrap();
+        });
+        Ok(())
+    });
+}
+
+/// A rules override is stored in SQLite and applied again by a store loaded
+/// over the reopened database, as after a restart.
+#[test]
+fn rules_override_survives_a_restart() {
     Jail::expect_with(|_| {
         let url = temp_database();
         runtime().block_on(async {
-            let sqlite = Arc::new(SqliteStorage::connect(&url).await.unwrap());
-            SettingsStorage::new(sqlite)
-                .write(
-                    &[],
-                    Some(&StoredOverride {
-                        key: "rules".into(),
-                        value: "[]".into(),
-                        by: Some(1),
-                    }),
-                )
+            let (store, _) = live_store(&url).await;
+            store
+                .set("rules", runtime_rule("telegram-main"), None)
                 .await
                 .unwrap();
 
-            let reopened = Arc::new(SqliteStorage::connect(&url).await.unwrap());
-            let store = load(
-                every_token_set(),
-                base(Path::new(EXAMPLE)).unwrap(),
-                SettingsStorage::new(reopened),
-            )
-            .await
-            .unwrap();
-            assert!(store.current().ignored().contains_key("rules"));
+            let (restarted, _) = live_store(&url).await;
+            let snapshot = restarted.current();
+            assert!(snapshot.ignored().is_empty());
+            assert!(snapshot.derived.routing.rule(&runtime_rule_id()).is_some());
+            assert_eq!(snapshot.source("rules"), Source::Stored);
+        });
+        Ok(())
+    });
+}
+
+#[test]
+fn unset_rules_falls_back_to_the_file() {
+    Jail::expect_with(|_| {
+        runtime().block_on(async {
+            let (store, sqlite) = live_store(&temp_database()).await;
+            store
+                .set("rules", runtime_rule("telegram-main"), None)
+                .await
+                .unwrap();
+
+            store.unset("rules").await.unwrap().unwrap();
+            let routing = LiveRouting::new(Arc::clone(&store)).routing();
+            assert!(routing.rule(&runtime_rule_id()).is_none());
+            assert!(
+                routing
+                    .rule(&RuleId("wa-to-telegram-mirror".into()))
+                    .is_some()
+            );
+            assert_eq!(store.current().source("rules"), Source::File);
+            assert!(sqlite.settings_overrides().await.unwrap().is_empty());
         });
         Ok(())
     });

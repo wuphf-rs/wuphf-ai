@@ -19,7 +19,7 @@ use wuphf_runtime::{
     media::GrpcMediaService,
     observer_service::{GrpcObserverService, bearer_auth},
 };
-use wuphf_settings::{Configuration, SettingsStorage, WuphfSchema};
+use wuphf_settings::{Configuration, LiveRouting, SettingsStorage, WuphfSchema};
 use wuphf_storage::SqliteStorage;
 
 #[derive(Parser)]
@@ -96,15 +96,16 @@ async fn serve(path: PathBuf) -> Result<()> {
     let derived = &snapshot.derived;
     let connectors = derived.connectors.clone();
     let connector_tokens = Arc::new(ConnectorTokens::new(derived.connector_tokens.clone()));
-    let config = Arc::clone(&derived.routing);
 
     let media_service = GrpcMediaService::new(
         Arc::clone(&storage),
         configuration.max_media_bytes,
         Duration::from_secs(configuration.orphan_media_retention_seconds),
     );
-    let (runtime, channels, observer) =
-        Runtime::channelled(Arc::new(Core::new(storage, config)), 128);
+    let (runtime, channels, observer) = Runtime::channelled(
+        Arc::new(Core::new(storage, LiveRouting::new(Arc::clone(&settings)))),
+        128,
+    );
     let observer_service = ObserverTransportServer::with_interceptor(
         GrpcObserverService::new(observer).with_sender(runtime.owner_sender()),
         bearer_auth(

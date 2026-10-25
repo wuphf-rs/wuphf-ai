@@ -2,6 +2,7 @@
 //! from it.
 
 use crate::config::{Configuration, platform};
+use botconf::{Kind, RuntimeSetting};
 use std::collections::HashMap;
 use std::sync::Arc;
 use wuphf_core::RoutingConfig;
@@ -83,9 +84,24 @@ impl botconf::Schema for WuphfSchema {
         })
     }
 
-    fn settings(&self) -> Vec<botconf::RuntimeSetting> {
-        // No key changes at runtime yet; plan 037 adds `rules` and `notify`.
-        Vec::new()
+    /// The keys that may change while the core runs. Everything else (the
+    /// connectors, `listen`, `database_url`, the tokens, `functions`) is read
+    /// once at startup, so it stays file and environment only.
+    fn settings(&self) -> Vec<RuntimeSetting> {
+        vec![
+            RuntimeSetting::new(
+                "rules",
+                "Routing rules: which chats mirror each other (see config/example.toml)",
+            )
+            .titled("Rules")
+            .kind(Kind::Json),
+            RuntimeSetting::new(
+                "notify",
+                "Chats that receive notices about connector trouble",
+            )
+            .titled("Notice targets")
+            .kind(Kind::Json),
+        ]
     }
 }
 
