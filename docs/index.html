@@ -218,8 +218,8 @@
   <div class="wrap">
     <h2><span class="num">03</span>Routing rules</h2>
     <p class="lead">Rules are the only routing input you write. Conversations
-      and endpoints are derived lazily at runtime. Each rule pairs
-      two or more sides; each side names a connector and a kind.</p>
+      and endpoints are derived lazily at runtime. Each rule, keyed by its id,
+      is a flow from a source to a destination.</p>
     <div class="grid c3">
       <div class="card">
         <h3><span class="ic">single</span></h3>
@@ -240,18 +240,14 @@
       <b>source → mirror</b>: every WhatsApp chat mirrored into its own Telegram
       forum topic.</p>
     <div class="codeblock">
-<span class="c"># every allowed WhatsApp chat → its own Telegram forum topic</span>
-[[rules]]
-id = <span class="str">"wa-to-telegram-mirror"</span>
+<span class="c"># chats are connector:chat, optionally #thread</span>
+notify = [<span class="str">"telegram-main:telegram:user:704338780"</span>]
 
-[[rules.sides]]
-connector = <span class="str">"whatsapp-main"</span>
-kind      = <span class="str">"source"</span>
-
-[[rules.sides]]
-connector = <span class="str">"telegram-main"</span>
-kind      = <span class="str">"mirror"</span>
-container = <span class="str">"telegram:channel:2060340733"</span></div>
+<span class="c"># every WhatsApp chat → its own Telegram forum topic</span>
+[rules.wa-to-telegram-mirror]
+kind             = <span class="str">"many-to-one"</span>
+source_connector = <span class="str">"whatsapp-main"</span>
+destination      = <span class="str">"telegram-main:telegram:channel:2060340733"</span></div>
   </div>
 </section>
 

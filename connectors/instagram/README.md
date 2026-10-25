@@ -34,7 +34,8 @@ the JSON file named by `cookies_file` — at minimum `sessionid`, `csrftoken`,
 cookies to `session_file` on shutdown and prefers it on the next start.
 
 The connector owns no routing; configure which conversations map where in the
-core's `[[rules]]` using Instagram thread keys (decimal numbers) as chat IDs.
+core's `[rules.<id>]` entries using Instagram thread keys (decimal numbers) as
+chat IDs.
 
 The connector authenticates to the core with the token in the variable
 `core_token_env` names, which must hold the same value the core reads from this

@@ -19,5 +19,6 @@ log_level = "info"
 # phone_number = "15551234567"
 
 # WhatsApp has no threads. Connector capabilities are hardcoded false.
-# Routing is owned entirely by the core: configure [[rules]] there using
-# WhatsApp JIDs such as "12345@s.whatsapp.net" or "12345@g.us" as chat IDs.
+# Routing is owned entirely by the core: configure [rules.<id>] entries there
+# using WhatsApp JIDs such as "12345@s.whatsapp.net" or "12345@g.us" as chat
+# IDs.

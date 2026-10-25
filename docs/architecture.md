@@ -70,18 +70,28 @@ identity; replication itself is two-way.
 
 - `one-to-one` — one fixed source chat mirrored into one fixed destination
   chat (optionally a thread within it).
-- `many-to-one` — every chat on the source connector that passes the
-  `source_chats_filter` (`all` by default, or an `only` allowlist / `not`
-  blocklist of chats), each mirrored into its own thread provisioned on demand
-  inside the destination container chat. Legal only when the destination
-  connector advertises both `supports_threads` and `supports_topic_create`.
+- `many-to-one` — every chat on the source connector (or only those in
+  `only_chats`, or all but those in `except_chats`), each mirrored into its
+  own thread provisioned on demand inside the destination container chat. Legal
+  only when the destination connector advertises both `supports_threads` and
+  `supports_topic_create`.
 
 The canonical topology is **many-to-one** (e.g. every WhatsApp chat mirrored
 into its own Telegram forum topic).
 
+Rules are keyed by id (`[rules.<id>]`). When several rules match the same
+chat, the one with the lowest `priority` (default 0) wins, then the lowest id.
+Every chat the config names is one string, `connector:chat` or
+`connector:chat#thread`: the connector is everything before the first `:`
+(connector ids may not contain `:`, `#`, `%` or whitespace; chat ids often
+contain `:`), and inside the chat and the thread `#` is written `%23` and `%`
+is written `%25`. Only the config uses this form; stored JSON keeps
+`ChatRef`'s fields.
+
 ### Runtime settings
 
-`rules` and `notify` can change while the core runs. `wuphf-settings` keeps a
+`rules` and `notify` can change while the core runs. Each rule is its own
+entry, `rules.<id>`, set or removed on its own. `wuphf-settings` keeps a
 botconf settings store over the file, the `WUPHF_CORE_*` environment and the
 overrides stored in SQLite; a change is validated like the file (the whole
 configuration is rebuilt and checked, including `RoutingConfig::validate`) and
@@ -155,7 +165,7 @@ rest.
 
 The core composes the wording, names the connector in it (the notice arrives
 somewhere unrelated to the connector in trouble), and delivers it to the chats
-configured under `[[notify]]` through the ordinary raw-send path, so a notice is
+configured under `notify` through the ordinary raw-send path, so a notice is
 a durable dispatch that survives a restart and is redelivered if its own target
 connector is offline.
 

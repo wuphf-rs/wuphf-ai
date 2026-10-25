@@ -32,8 +32,8 @@ whether each is user input or a bridge echo.
 ## Configuration
 
 Copy `config.example.toml`. The connector owns no routing; configure which
-conversations map where in the core's `[[rules]]` using WhatsApp JIDs as chat
-IDs, for example a direct chat `12345@s.whatsapp.net` or group
+conversations map where in the core's `[rules.<id>]` entries using WhatsApp
+JIDs as chat IDs, for example a direct chat `12345@s.whatsapp.net` or group
 `123456789@g.us`.
 
 The connector authenticates to the core with the token in the variable
