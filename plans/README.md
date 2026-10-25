@@ -20,7 +20,7 @@ code).
 |------|-------|----------|--------|------------|--------|
 | 001 | CI pipeline running all verification commands | P1 | S | — | TODO |
 | 002 | Sync README (Instagram connector, retitling) | P3 | S | — | TODO |
-| 003 | Validate routing rules at startup (no panic) | P2 | S | — | TODO |
+| 003 | Validate routing rules at startup (no panic) | P2 | S | — | TODO — stale: 037 landed `RoutingConfig::validate()` (unknown connectors, duplicate rule ids, notice targets); re-plan or close |
 | 004 | Storage backend parity tests (SQLite + InMemory) | P2 | S | — | DONE |
 | 005 | Indexed replica-set-for-endpoint lookup | P2 | S-M | 004 | REJECTED — superseded by 031, whose `conversation_endpoints` table is this index (landed) |
 | 006 | Metadata-only attachment validation at ingest | P2 | S | 004 | TODO |
@@ -54,7 +54,7 @@ code).
 | 034 | Authenticate connectors and stop session takeover | P1 | M | — | DONE (see notes) |
 | 035 | Load the core configuration through figment and describe it to botconf | P2 | M | botconf 001 | DONE (botconf v0.1.1, see notes) |
 | 036 | Keep runtime settings overrides in SQLite | P2 | S | 035 | DONE (migration 0015; see notes) |
-| 037 | Route from a live settings snapshot; `rules` and `notify` at runtime | P2 | M | 035, 036 | TODO |
+| 037 | Route from a live settings snapshot; `rules` and `notify` at runtime | P2 | M | 035, 036 | DONE (see notes) |
 | 038 | Key routing rules by id; chats as `connector:chat#thread` | P2 | M | 037 | TODO |
 | 039 | Owner ids, chat names, and the core serving its settings | P2 | M–L | 034–038, botconf 003–005 | TODO |
 | 040 | Connectors declare their own settings to the core | P2 | L | 039, botconf 005, 006, 009 | TODO |
@@ -571,6 +571,50 @@ Dependencies and ordering:
   - **Results:** Rust has 173 tests passing (168 + 3 storage + 2 settings).
     Clippy and `cargo fmt` are clean, the `pub trait Storage:` bounds are
     unchanged, and `wuphf-storage` does not depend on botconf.
+- **037 done 2026-10-25** (on `plans/runtime-settings`). The drift check
+  showed only 035's and 036's expected changes, and every `self.config` /
+  `self.router` use was where "Current state" said. Deviations:
+  - **No stale field reads:** the `Router`'s own field is renamed from
+    `config` to `routing` (it now holds one operation's snapshot), and the
+    core's per-operation router builder is `with_routing(&routing)`, so the
+    plan's "No stale reads" grep prints nothing.
+  - **Owner notices read once:** `notify_owners` read the targets, then
+    called the public `send_owner_message` per target, which would have read
+    the source again. The public method now reads once and calls a
+    crate-private `send_owner_message_with(&routing, …)`, which
+    `notify_owners` also uses with its own single snapshot.
+  - **What reads the source:** `ingest`, `acknowledge_dispatch`,
+    `fail_dispatch`, `recover_provisioning`, `send_owner_message`,
+    `notify_owners` and `connector_platform`, each exactly once.
+    `record_dispatched_copy`, `migrate_identity` and `pending_dispatches`
+    never route, so they do not read it. `ensure_conversation` never read
+    the config, so it takes no routing parameter.
+  - **No `RuleKind` helper:** `RuleKind::connector(end)` already exists, so
+    `validate` uses it.
+  - **Extra test:** `derive_rejects_a_rule_on_an_unknown_connector`
+    (`wuphf-settings`) proves `derive` runs `validate`.
+  - **Replaced test:** plan 036's `sqlite_overrides_survive_a_restart` (which
+    relied on `rules` being unknown) is replaced by
+    `rules_override_survives_a_restart`, as planned.
+  - **Mutation checks:** each change below made a test fail.
+    - `derive` not calling `validate`:
+      `derive_rejects_a_rule_on_an_unknown_connector`.
+    - Skipping the duplicate-id check: `validate_rejects_duplicate_rule_ids`.
+    - `route_and_record` reading the source itself instead of using its
+      parameter: `each_operation_reads_routing_once`.
+    - `notify_owners` sending through the public `send_owner_message`:
+      `each_operation_reads_routing_once`.
+    - Renaming the `rules` runtime key: the four store-backed rules tests.
+  - **Behaviour change:** a configuration whose rules or notice targets name
+    an unconfigured connector, or that repeats a rule id, now fails at startup
+    with the reason. Capability gating (`supports_threads` /
+    `supports_topic_create`) is still not enforced.
+  - **Builds:** after a host crash caused by concurrent builds, every build
+    and test ran with `nice -n 19` and `CARGO_BUILD_JOBS=2`, per crate, with
+    the workspace gate run once at the end. No smoke run of `serve` was done.
+  - **Results:** Rust has 187 tests passing (173 + 8 in `wuphf-core` + 7 in
+    `wuphf-settings` − 1 replaced). Clippy and `cargo fmt` are clean, the
+    "No stale reads" and "Boundary" commands print nothing.
 
 ## Findings considered and rejected
 
