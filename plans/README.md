@@ -51,6 +51,16 @@ code).
 | 031 | Merge ReplicaSet and ThreadMapping into Conversation | P2 | M–L | 030 | DONE (migration 0014) |
 | 032 | Add a remote function broker to the core (`wuphf-functions`) | P2 | L | — | DONE (see notes) |
 | 033 | Move sticker conversion into a `media.convert` provider | P2 | M–L | 032 | DONE (see notes) |
+| 034 | Authenticate connectors and stop session takeover | P1 | M | — | TODO |
+| 035 | Load the core configuration through figment and describe it to botconf | P2 | M | botconf 001 | TODO |
+| 036 | Keep runtime settings overrides in SQLite | P2 | S | 035 | TODO |
+| 037 | Route from a live settings snapshot; `rules` and `notify` at runtime | P2 | M | 035, 036 | TODO |
+| 038 | Key routing rules by id (`[rules.<id>]`) | P2 | S–M | 037 | TODO |
+| 039 | Owner ids per connector, and the core serving its settings | P2 | M | 034–037, botconf 003, 005 | TODO |
+| 040 | Connectors declare their own settings to the core | P2 | L | 039, botconf 005, 006, dynamic sections | TODO |
+| 041 | A settings panel in the Telegram connector | P2 | L | 039, 040, botconf 004–007 | TODO |
+| 042 | A `wuphf settings` command | P3 | S | 035, 036, 039 | TODO |
+| 043 | Label user-session stickers through the helper bot | P3 | M | 041 | TODO |
 
 Status values: TODO | IN PROGRESS | DONE | BLOCKED (with one-line reason) |
 REJECTED (with one-line rationale).
@@ -351,6 +361,61 @@ configurable timeouts and limits.
   - Go: shared, mediaconv, telegram, whatsapp and instagram build, vet and
     test green (the conversion tests ran, none skipped). Rust: 147 tests,
     unchanged.
+
+### Runtime settings 034–043 (added 2026-10-25 at `643829b`)
+
+Designed in an interview with the owner. wuphf becomes a host of the
+`botconf` settings framework, which moves out of `assistant_bot_rs` into its
+own repo, `github.com/propheci/botconf` (Rust crates, a Go SDK and a shared
+proto; its own `plans/` hold the framework work). Settled decisions, not to be
+reopened by executors:
+
+- The Rust core owns the only settings store. Connectors are front ends: they
+  render the settings panel and forward presses and typed values, and the core
+  decides who may change what.
+- Connectors authenticate with per-connector tokens, and a second session for
+  a live connector id is rejected (034). Owner ids per connector are file-only,
+  as the root of trust (039).
+- Rules become a map keyed by `RuleId` so each rule is its own setting (038).
+- Connectors declare their own settings at registration with a JSON Schema;
+  the core stores and validates them and pushes changes back through `Watch`.
+  Only settings that apply live are runtime keys (040).
+- The Telegram connector opens the panel with `/wuphf` (configurable). It is
+  caught before the `message.Out` drop and never mirrored. User sessions show
+  the panel through a helper bot (a second gotd client in the connector) using
+  the inline-bot trick (041). User-session stickers then go through the same
+  helper bot, falling back to the bold label plus a reply (043).
+
+Dependencies and ordering:
+
+- **034 is independent** and can land first. 039 needs it, since settings
+  arrive over connector sessions.
+- **035 needs botconf plan 001 tagged and pushed** (a git dependency on
+  `propheci/botconf`). The owner creates that remote; executors never push.
+- **035 → 036 → 037 → 038** in order. 039 needs 034–037 plus botconf 003
+  (`Kind::Ref`) and 005 (`botconf.v1.Settings` and `botconf-grpc`).
+- **040 needs botconf's dynamic sections** (settings declared at runtime with
+  owned keys and kinds, sections added after the store loads, a validator
+  other than a Rust type, and a base value per section). The botconf plans
+  cover it; 040 stops if the tag lacks it.
+- **041 needs 039, 040 and botconf 004–007**; 043 needs 041. 042 can land any
+  time after 039.
+- **003 is stale against 037.** 037 adds `RoutingConfig::validate()`, which
+  rejects unknown connectors and duplicate rule ids at startup. 003 still
+  targets the old `sides` model; re-plan or close it once 037 lands.
+- **Open decisions flagged by the plan writers**, each listed in its plan:
+  - 034: restart recovery relies on the socket closing or on keepalive (about
+    30 s), not on token-authenticated takeover.
+  - 035: env prefix `WUPHF_CORE_`; a new `wuphf-settings` crate; the observer
+    token becomes a redacted secret.
+  - 036: `updated_by` is a TEXT actor, which botconf has to support.
+  - 038: a `priority` field replaces list order; migration `0016` rewrites a
+    stored list-shaped `rules` override.
+  - 039: the observer token counts as the owner; chat references stay JSON
+    instead of `Ref` strings for now.
+  - 040: the path is `connector_settings.<id>`.
+  - 042: the CLI edits the database directly, except `reload --address`.
+  - 043: a 5-second inline budget before the fallback.
 
 ## Findings considered and rejected
 
