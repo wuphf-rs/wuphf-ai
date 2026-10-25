@@ -66,10 +66,10 @@ impl botconf::Schema for WuphfSchema {
             });
         }
         let connector_tokens = self.connector_tokens(config)?;
-        let routing = Arc::new(
-            RoutingConfig::new(config.rules.clone(), connectors.clone())
-                .with_notice_targets(config.notify.clone()),
-        );
+        let routing = RoutingConfig::new(config.rules.clone(), connectors.clone())
+            .with_notice_targets(config.notify.clone());
+        routing.validate().map_err(|error| error.to_string())?;
+        let routing = Arc::new(routing);
         let functions = config
             .functions
             .clone()

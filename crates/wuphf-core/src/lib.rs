@@ -15,7 +15,7 @@ mod resolve;
 mod router;
 mod send;
 
-pub use config::{MatchedRule, RoutingConfig};
+pub use config::{MatchedRule, RoutingConfig, RoutingConfigError};
 use router::Router;
 pub use router::RouterError;
 

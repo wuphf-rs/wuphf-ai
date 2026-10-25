@@ -279,6 +279,43 @@ fn store_loads_the_example_and_derives_routing() {
     });
 }
 
+/// The example's rules and notice targets name only configured connectors.
+#[test]
+fn example_configuration_validates() {
+    Jail::expect_with(|_| {
+        let store = store(every_token_set(), Path::new(EXAMPLE)).unwrap();
+        assert_eq!(store.current().derived.routing.validate(), Ok(()));
+        Ok(())
+    });
+}
+
+#[test]
+fn derive_rejects_a_rule_on_an_unknown_connector() {
+    Jail::expect_with(|jail| {
+        jail.create_file(
+            "wuphf.toml",
+            &format!(
+                r#"{MINIMAL}
+                [[rules]]
+                id = "nowhere"
+
+                [rules.flow]
+                kind = "many-to-one"
+                source_connector = "whatsapp-main"
+                destination_connector = "telegram-main"
+                destination_chat = {{ chat_id = "-100123" }}
+                "#
+            ),
+        )?;
+        let error = store_error(every_token_set(), Path::new("wuphf.toml"));
+        assert!(
+            error.contains("rule nowhere names connector whatsapp-main"),
+            "{error}"
+        );
+        Ok(())
+    });
+}
+
 #[test]
 fn derive_rejects_an_unknown_platform() {
     Jail::expect_with(|jail| {

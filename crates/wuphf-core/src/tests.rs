@@ -1,8 +1,8 @@
 use super::*;
 use wuphf_model::{
-    Action, Attachment, AttachmentKind, ChatAddress, ChatFilter, Connector, ConnectorCapabilities,
-    Dispatch, DispatchAck, MediaBlob, MediaId, NewMessage, NoticeKind, OWNER_AUTHOR, OwnerMessage,
-    Platform, ReceiptKind, Rule, RuleId, RuleKind, SourceAddress,
+    Action, Attachment, AttachmentKind, ChatAddress, ChatFilter, ChatRef, Connector,
+    ConnectorCapabilities, Dispatch, DispatchAck, MediaBlob, MediaId, NewMessage, NoticeKind,
+    OWNER_AUTHOR, OwnerMessage, Platform, ReceiptKind, Rule, RuleId, RuleKind, SourceAddress,
 };
 use wuphf_storage::{InMemoryStorage, MediaStore, ObservationStore, TopologyStore};
 
@@ -1738,4 +1738,62 @@ async fn a_notice_with_no_configured_target_is_dropped() {
         .await
         .unwrap();
     assert!(dispatches.is_empty());
+}
+
+fn connector_ref(connector: &str, chat_id: &str) -> ChatRef {
+    ChatRef {
+        connector_id: ConnectorId(connector.into()),
+        address: ChatAddress::new(chat_id, None),
+    }
+}
+
+#[test]
+fn validate_rejects_unknown_rule_connector() {
+    let mut rule = direct_rule();
+    let RuleKind::OneToOne {
+        destination_connector,
+        ..
+    } = &mut rule.flow
+    else {
+        unreachable!("direct_rule is one-to-one");
+    };
+    *destination_connector = ConnectorId("discord-main".into());
+    let config = RoutingConfig::new(vec![rule], connectors());
+    assert_eq!(
+        config.validate(),
+        Err(RoutingConfigError::UnknownRuleConnector {
+            rule: RuleId("direct".into()),
+            connector: ConnectorId("discord-main".into()),
+        })
+    );
+}
+
+#[test]
+fn validate_rejects_duplicate_rule_ids() {
+    let mut second = mirror_rule();
+    second.id = RuleId("direct".into());
+    let config = RoutingConfig::new(vec![direct_rule(), second], connectors());
+    assert_eq!(
+        config.validate(),
+        Err(RoutingConfigError::DuplicateRule(RuleId("direct".into())))
+    );
+}
+
+#[test]
+fn validate_rejects_unknown_notice_connector() {
+    let config = RoutingConfig::new(vec![direct_rule()], connectors())
+        .with_notice_targets(vec![connector_ref("discord-main", "general")]);
+    assert_eq!(
+        config.validate(),
+        Err(RoutingConfigError::UnknownNoticeConnector(ConnectorId(
+            "discord-main".into()
+        )))
+    );
+}
+
+#[test]
+fn validate_accepts_the_test_fixture() {
+    let config = RoutingConfig::new(vec![direct_rule(), mirror_rule()], connectors())
+        .with_notice_targets(vec![connector_ref(TELEGRAM, "-100999")]);
+    assert_eq!(config.validate(), Ok(()));
 }
