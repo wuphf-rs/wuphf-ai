@@ -79,6 +79,23 @@ identity; replication itself is two-way.
 The canonical topology is **many-to-one** (e.g. every WhatsApp chat mirrored
 into its own Telegram forum topic).
 
+### Runtime settings
+
+`rules` and `notify` can change while the core runs. `wuphf-settings` keeps a
+botconf settings store over the file, the `WUPHF_CORE_*` environment and the
+overrides stored in SQLite; a change is validated like the file (the whole
+configuration is rebuilt and checked, including `RoutingConfig::validate`) and
+an invalid one is rejected and never stored. Every other key — the connectors,
+`listen`, `database_url`, the tokens and `functions` — is read once at startup.
+
+The core reads its routing config through a `RoutingSource` once at the start
+of each operation, so one event routes against one consistent config and the
+next event sees a change. Conversations remember their rule by id, so removing
+a rule stops its conversations (re-adding the same id resumes them), and
+renaming a rule starts new conversations with new mirror threads. Editing a
+rule in place does not move existing conversations: their endpoints are
+already stored and are reused.
+
 ## Data Flow
 
 ```text

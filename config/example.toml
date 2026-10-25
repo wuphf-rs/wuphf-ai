@@ -61,10 +61,15 @@ supports_topic_create = true
 # platform you want to stay reachable on, and leave this out entirely to keep
 # notices in the log only.
 #
+# Runtime setting: can also be changed while the core runs (stored overrides win
+# over this file; unsetting one goes back to this file).
 [[notify]]
 connector_id = "telegram-main"
 chat_id = "telegram:user:704338780"
 
+# Runtime setting: can also be changed while the core runs (stored overrides win
+# over this file; unsetting one goes back to this file).
+#
 # Rules declare a flow between a source and a destination. The source end owns
 # conversation identity; replication itself is two-way.
 #
