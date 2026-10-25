@@ -1,5 +1,8 @@
 core_address = "127.0.0.1:50051"
 connector_id = "whatsapp-main"
+# Environment variable holding this connector's core token; must match the
+# core's `[[connectors]].token_env` value for this connector id.
+core_token_env = "WUPHF_CONNECTOR_WHATSAPP_MAIN_TOKEN"
 session_database = "file:whatsapp.session.db?_foreign_keys=on"
 
 # WhatsApp has no threads/topics, so leave both capabilities false. The core

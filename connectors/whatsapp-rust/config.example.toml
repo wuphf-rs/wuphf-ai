@@ -3,6 +3,10 @@ core_address = "127.0.0.1:50051"
 # Must match a [[connectors]] entry in the core config.
 connector_id = "whatsapp-rust"
 
+# Environment variable holding this connector's core token; must match the
+# core's `[[connectors]].token_env` value for this connector id.
+core_token_env = "WUPHF_CONNECTOR_WHATSAPP_RUST_TOKEN"
+
 # Reusing this path restores the paired session. After logout, delete the
 # database and restart the connector to pair again.
 session_database = "whatsapp-rust.session.db"

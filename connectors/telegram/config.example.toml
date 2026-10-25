@@ -1,5 +1,8 @@
 core_address = "127.0.0.1:50051"
 connector_id = "telegram-main"
+# Environment variable holding this connector's core token; must match the
+# core's `[[connectors]].token_env` value for this connector id.
+core_token_env = "WUPHF_CONNECTOR_TELEGRAM_MAIN_TOKEN"
 session_file = "./telegram.session.json"
 
 # Telegram supports forum topics, so the core may use this connector as a

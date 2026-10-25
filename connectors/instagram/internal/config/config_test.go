@@ -24,3 +24,21 @@ func TestShouldBackfillDefaultsToEnabled(t *testing.T) {
 		})
 	}
 }
+
+func TestValidateRequiresCoreTokenEnv(t *testing.T) {
+	t.Parallel()
+	cfg := File{
+		CoreAddress:  "127.0.0.1:50051",
+		ConnectorID:  "instagram-main",
+		CookiesFile:  "./cookies.json",
+		SessionFile:  "./instagram.session.json",
+		CoreTokenEnv: "WUPHF_CONNECTOR_INSTAGRAM_MAIN_TOKEN",
+	}
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("Validate() error = %v", err)
+	}
+	cfg.CoreTokenEnv = ""
+	if err := cfg.Validate(); err == nil {
+		t.Fatal("Validate() accepted configuration without core_token_env")
+	}
+}

@@ -31,7 +31,11 @@ func New(cfg config.File, credentials config.Credentials, logger zerolog.Logger)
 }
 
 func (c Connector) Run(ctx context.Context) error {
-	media, err := coreclient.DialMedia(c.cfg.CoreAddress)
+	coreToken, err := coreclient.TokenFromEnv(c.cfg.CoreTokenEnv)
+	if err != nil {
+		return err
+	}
+	media, err := coreclient.DialMedia(c.cfg.CoreAddress, coreToken)
 	if err != nil {
 		return err
 	}
@@ -88,6 +92,7 @@ func (c Connector) Run(ctx context.Context) error {
 		sender := NewSender(client.API(), peers, media, converter, c.cfg.Rendering, c.credentials.BotToken != "")
 		return coreclient.New(coreclient.Options{
 			CoreAddress:         c.cfg.CoreAddress,
+			Token:               coreToken,
 			ConnectorID:         c.cfg.ConnectorID,
 			Platform:            wuphfpb.Platform_PLATFORM_TELEGRAM,
 			SupportsThreads:     c.cfg.SupportsThreads,

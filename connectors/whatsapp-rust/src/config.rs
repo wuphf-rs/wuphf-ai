@@ -11,6 +11,9 @@ pub struct Config {
     pub core_address: String,
     /// Must match a `[[connectors]]` entry in the core's configuration.
     pub connector_id: String,
+    /// Environment variable holding this connector's core token; must match the
+    /// core's `[[connectors]].token_env` value for this connector id. Required.
+    pub core_token_env: String,
     /// Path of the SQLite database holding the WhatsApp device session.
     /// Reopening the same path restores the paired session.
     pub session_database: String,

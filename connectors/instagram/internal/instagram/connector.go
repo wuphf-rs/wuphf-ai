@@ -37,7 +37,11 @@ func (c Connector) Run(ctx context.Context) error {
 	logger := c.logger
 	client := messagix.NewClient(jar, logger.With().Str("component", "messagix").Logger(), &messagix.Config{})
 
-	media, err := coreclient.DialMedia(c.cfg.CoreAddress)
+	coreToken, err := coreclient.TokenFromEnv(c.cfg.CoreTokenEnv)
+	if err != nil {
+		return err
+	}
+	media, err := coreclient.DialMedia(c.cfg.CoreAddress, coreToken)
 	if err != nil {
 		return err
 	}
@@ -98,6 +102,7 @@ func (c Connector) Run(ctx context.Context) error {
 	go func() {
 		runResult <- coreclient.New(coreclient.Options{
 			CoreAddress:         c.cfg.CoreAddress,
+			Token:               coreToken,
 			ConnectorID:         c.cfg.ConnectorID,
 			Platform:            wuphfpb.Platform_PLATFORM_INSTAGRAM,
 			SupportsThreads:     c.cfg.SupportsThreads,

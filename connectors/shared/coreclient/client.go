@@ -60,6 +60,9 @@ type Options struct {
 	Platform            wuphfpb.Platform
 	SupportsThreads     bool
 	SupportsTopicCreate bool
+	// Token is the connector's core token, presented on the session as
+	// `authorization: Bearer <token>`.
+	Token string
 	// IsPermanent, when set, classifies platform-specific errors as permanent in
 	// addition to the coreclient.Permanent wrapping (e.g. a Telegram RPC 400).
 	IsPermanent func(error) bool
@@ -185,7 +188,11 @@ func (c Client) runSession(
 	inputs <-chan *wuphfpb.ClientFrame,
 	onConnected func(),
 ) error {
-	connection, err := grpc.NewClient(c.opts.CoreAddress, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	connection, err := grpc.NewClient(
+		c.opts.CoreAddress,
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+		WithToken(c.opts.Token),
+	)
 	if err != nil {
 		return fmt.Errorf("connect to core: %w", err)
 	}

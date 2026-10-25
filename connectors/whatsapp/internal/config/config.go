@@ -10,8 +10,12 @@ import (
 )
 
 type File struct {
-	CoreAddress     string `toml:"core_address"`
-	ConnectorID     string `toml:"connector_id"`
+	CoreAddress string `toml:"core_address"`
+	ConnectorID string `toml:"connector_id"`
+	// CoreTokenEnv names the environment variable holding this connector's core
+	// token; it must match the core's [[connectors]].token_env for this
+	// connector id. Required.
+	CoreTokenEnv    string `toml:"core_token_env"`
 	SessionDatabase string `toml:"session_database"`
 	// WhatsApp has no topics; these stay false but are surfaced so the core's
 	// capability gate is configured from one place.
@@ -128,8 +132,8 @@ func Load(path string) (File, error) {
 }
 
 func (c File) Validate() error {
-	if c.CoreAddress == "" || c.ConnectorID == "" || c.SessionDatabase == "" {
-		return errors.New("core_address, connector_id, and session_database are required")
+	if c.CoreAddress == "" || c.ConnectorID == "" || c.CoreTokenEnv == "" || c.SessionDatabase == "" {
+		return errors.New("core_address, connector_id, core_token_env, and session_database are required")
 	}
 	if c.SupportsTopicCreate && !c.SupportsThreads {
 		return errors.New("supports_topic_create requires supports_threads")

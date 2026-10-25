@@ -30,7 +30,7 @@ func main() {
 	if token == "" {
 		exit(fmt.Errorf("environment variable %s (token_env) is unset or empty", cfg.TokenEnv))
 	}
-	media, err := coreclient.DialMedia(cfg.CoreAddress)
+	media, err := coreclient.DialMedia(cfg.CoreAddress, token)
 	if err != nil {
 		exit(err)
 	}

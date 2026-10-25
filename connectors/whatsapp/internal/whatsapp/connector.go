@@ -47,7 +47,11 @@ func (c Connector) Run(ctx context.Context) error {
 		return fmt.Errorf("load WhatsApp device: %w", err)
 	}
 	client := whatsmeow.NewClient(device, waLog.Zerolog(c.logger.With().Str("component", "whatsmeow").Logger()))
-	media, err := coreclient.DialMedia(c.cfg.CoreAddress)
+	coreToken, err := coreclient.TokenFromEnv(c.cfg.CoreTokenEnv)
+	if err != nil {
+		return err
+	}
+	media, err := coreclient.DialMedia(c.cfg.CoreAddress, coreToken)
 	if err != nil {
 		return err
 	}
@@ -105,6 +109,7 @@ func (c Connector) Run(ctx context.Context) error {
 	go func() {
 		runResult <- coreclient.New(coreclient.Options{
 			CoreAddress:         c.cfg.CoreAddress,
+			Token:               coreToken,
 			ConnectorID:         c.cfg.ConnectorID,
 			Platform:            wuphfpb.Platform_PLATFORM_WHATSAPP,
 			SupportsThreads:     c.cfg.SupportsThreads,

@@ -1,5 +1,8 @@
 core_address = "127.0.0.1:50051"
 connector_id = "instagram-main"
+# Environment variable holding this connector's core token; must match the
+# core's `[[connectors]].token_env` value for this connector id.
+core_token_env = "WUPHF_CONNECTOR_INSTAGRAM_MAIN_TOKEN"
 
 # JSON map of Instagram session cookies, exported from a logged-in browser
 # session, e.g. {"sessionid": "...", "csrftoken": "...", "ds_user_id": "...",

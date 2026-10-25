@@ -90,6 +90,17 @@ async fn main() -> anyhow::Result<()> {
     let bot = builder.build().await.context("build WhatsApp bot")?;
     let mut handle = bot.spawn();
 
+    // The token comes from the environment only, so it stays out of the config
+    // file and the process list.
+    let core_token = std::env::var(&config.core_token_env)
+        .ok()
+        .filter(|token| !token.is_empty())
+        .with_context(|| {
+            format!(
+                "environment variable {} (core_token_env) is unset or empty",
+                config.core_token_env
+            )
+        })?;
     let core_client = wuphf_connector::Client::new(wuphf_connector::Options {
         core_address: config.core_address.clone(),
         connector_id: config.connector_id.clone(),
@@ -98,6 +109,7 @@ async fn main() -> anyhow::Result<()> {
         // as a single target or an identity source, never as a threaded mirror.
         supports_threads: false,
         supports_topic_create: false,
+        token: core_token,
         is_permanent: None,
     });
     let cancel = CancellationToken::new();

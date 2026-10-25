@@ -17,8 +17,14 @@ type MediaClient struct {
 	client     wuphfpb.MediaTransportClient
 }
 
-func DialMedia(address string) (*MediaClient, error) {
-	connection, err := grpc.NewClient(address, grpc.WithTransportCredentials(insecure.NewCredentials()))
+// DialMedia connects to the core's media service. token is any connector's or
+// function provider's core token; the service refuses calls without one.
+func DialMedia(address, token string) (*MediaClient, error) {
+	connection, err := grpc.NewClient(
+		address,
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+		WithToken(token),
+	)
 	if err != nil {
 		return nil, fmt.Errorf("connect to core media service: %w", err)
 	}

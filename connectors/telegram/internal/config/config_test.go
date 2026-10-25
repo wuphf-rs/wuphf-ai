@@ -34,6 +34,7 @@ func TestValidateAcceptsThreadedConnector(t *testing.T) {
 	cfg := File{
 		CoreAddress:         "127.0.0.1:50051",
 		ConnectorID:         "telegram-main",
+		CoreTokenEnv:        "WUPHF_CONNECTOR_TELEGRAM_MAIN_TOKEN",
 		SessionFile:         "./telegram.session.json",
 		SupportsThreads:     true,
 		SupportsTopicCreate: true,
@@ -51,5 +52,18 @@ func TestMediaConvertTimeoutDefaultsAndOverrides(t *testing.T) {
 	}
 	if got := (File{MediaConvertTimeoutMs: 1500}).MediaConvertTimeout(); got != 1500*time.Millisecond {
 		t.Errorf("MediaConvertTimeout() = %v, want 1.5s", got)
+	}
+}
+
+func TestValidateRequiresCoreTokenEnv(t *testing.T) {
+	t.Parallel()
+
+	cfg := File{
+		CoreAddress: "127.0.0.1:50051",
+		ConnectorID: "telegram-main",
+		SessionFile: "./telegram.session.json",
+	}
+	if err := cfg.Validate(); err == nil {
+		t.Fatal("Validate() succeeded without core_token_env")
 	}
 }

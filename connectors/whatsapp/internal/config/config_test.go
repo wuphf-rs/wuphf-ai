@@ -52,6 +52,7 @@ func TestValidateAcceptsBusinessClientMode(t *testing.T) {
 	cfg := File{
 		CoreAddress:     "127.0.0.1:50051",
 		ConnectorID:     "whatsapp-main",
+		CoreTokenEnv:    "WUPHF_CONNECTOR_WHATSAPP_MAIN_TOKEN",
 		SessionDatabase: "file:wa.db",
 		ClientMode:      ClientModeAndroidBusiness,
 	}
@@ -86,6 +87,7 @@ func TestValidateAcceptsMinimalConfiguration(t *testing.T) {
 	cfg := File{
 		CoreAddress:     "127.0.0.1:50051",
 		ConnectorID:     "whatsapp-main",
+		CoreTokenEnv:    "WUPHF_CONNECTOR_WHATSAPP_MAIN_TOKEN",
 		SessionDatabase: "file:session.db?_foreign_keys=on",
 	}
 	if err := cfg.Validate(); err != nil {
@@ -101,5 +103,17 @@ func TestMediaConvertTimeoutDefaultsAndOverrides(t *testing.T) {
 	}
 	if got := (File{MediaConvertTimeoutMs: 1500}).MediaConvertTimeout(); got != 1500*time.Millisecond {
 		t.Errorf("MediaConvertTimeout() = %v, want 1.5s", got)
+	}
+}
+
+func TestValidateRequiresCoreTokenEnv(t *testing.T) {
+	t.Parallel()
+	cfg := File{
+		CoreAddress:     "127.0.0.1:50051",
+		ConnectorID:     "whatsapp-main",
+		SessionDatabase: "file:session.db?_foreign_keys=on",
+	}
+	if err := cfg.Validate(); err == nil {
+		t.Fatal("Validate() accepted configuration without core_token_env")
 	}
 }

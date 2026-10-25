@@ -11,8 +11,12 @@ import (
 )
 
 type File struct {
-	CoreAddress         string `toml:"core_address"`
-	ConnectorID         string `toml:"connector_id"`
+	CoreAddress string `toml:"core_address"`
+	ConnectorID string `toml:"connector_id"`
+	// CoreTokenEnv names the environment variable holding this connector's core
+	// token; it must match the core's [[connectors]].token_env for this
+	// connector id. Required.
+	CoreTokenEnv        string `toml:"core_token_env"`
 	SessionFile         string `toml:"session_file"`
 	SupportsThreads     bool   `toml:"supports_threads"`
 	SupportsTopicCreate bool   `toml:"supports_topic_create"`
@@ -94,8 +98,8 @@ func Load(path string) (File, error) {
 }
 
 func (c File) Validate() error {
-	if c.CoreAddress == "" || c.ConnectorID == "" || c.SessionFile == "" {
-		return errors.New("core_address, connector_id, and session_file are required")
+	if c.CoreAddress == "" || c.ConnectorID == "" || c.CoreTokenEnv == "" || c.SessionFile == "" {
+		return errors.New("core_address, connector_id, core_token_env, and session_file are required")
 	}
 	if c.SupportsTopicCreate && !c.SupportsThreads {
 		return errors.New("supports_topic_create requires supports_threads")
