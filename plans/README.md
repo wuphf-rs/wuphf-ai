@@ -52,7 +52,7 @@ code).
 | 032 | Add a remote function broker to the core (`wuphf-functions`) | P2 | L | — | DONE (see notes) |
 | 033 | Move sticker conversion into a `media.convert` provider | P2 | M–L | 032 | DONE (see notes) |
 | 034 | Authenticate connectors and stop session takeover | P1 | M | — | DONE (see notes) |
-| 035 | Load the core configuration through figment and describe it to botconf | P2 | M | botconf 001 | TODO |
+| 035 | Load the core configuration through figment and describe it to botconf | P2 | M | botconf 001 | DONE (botconf v0.1.1, see notes) |
 | 036 | Keep runtime settings overrides in SQLite | P2 | S | 035 | TODO |
 | 037 | Route from a live settings snapshot; `rules` and `notify` at runtime | P2 | M | 035, 036 | TODO |
 | 038 | Key routing rules by id; chats as `connector:chat#thread` | P2 | M | 037 | TODO |
@@ -490,6 +490,59 @@ Dependencies and ordering:
     before the core accepts it. So a refused copy logs it before its
     `ALREADY_EXISTS`. Moving that log after the first server frame, or
     rewording it to "registration sent", is a small follow-up.
+- **035 done 2026-10-25** (on `plans/runtime-settings`). A first run stopped
+  at the STOP condition for the toolchain: botconf `v0.1.0` declared
+  `rust-version = 1.98` and wuphf builds with rustc 1.95. botconf plan 002
+  then lowered its minimum to 1.95, relaxed its dependency floors and dropped
+  `serde_json`'s `preserve_order`, and was tagged `v0.1.1`. The drift check
+  showed only plan 034's expected changes. Deviations:
+  - **Tag:** the git dependency is pinned to `v0.1.1`, not `v0.1.0`.
+  - **Lock:** it only gains packages (botconf, figment and its `pear`,
+    `uncased`, `atomic`, `bytemuck`, `inlinable_string`, `yansi`,
+    `proc-macro2-diagnostics`, plus `arc-swap` and `futures`). Cargo first
+    picked `futures` 0.3.34, which moved the locked `futures-*` crates from
+    0.3.32; the lock was re-resolved so `futures` stays on the workspace's
+    0.3.32. `cargo tree -e features -i serde_json` shows no `preserve_order`.
+  - **Connector tokens in `Derived`:** a plain
+    `HashMap<ConnectorId, String>`, not `Arc<ConnectorTokens>`, so
+    `wuphf-settings` does not depend on `wuphf-runtime` (which would pull in
+    tonic and storage). `serve()` wraps it with `ConnectorTokens::new`.
+    `derive` reads the connector tokens before resolving the functions, with
+    the same error message the CLI had.
+  - **Moved tests:** plan 034's two CLI tests
+    (`connector_without_token_env_is_rejected`,
+    `connector_tokens_are_read_from_the_environment`) moved to
+    `wuphf-settings` with the three planned ones. Every test that reads the
+    environment runs in a `figment::Jail`, so the env-setting tests cannot
+    leak into the others. `unrelated_wuphf_variables_are_not_read` asserts
+    that figment holds no `invoke_token` or `log_level` key, not only that
+    extraction succeeds (which a bare `WUPHF_` prefix would also pass, since
+    unknown keys are ignored).
+  - **Dependencies dropped:** the CLI no longer depends on `toml`, `serde` or
+    `wuphf-model`, and the workspace `toml` entry is gone (nothing else used
+    it).
+  - **Docs:** the `wuphf-functions` row that sat above the title of
+    `docs/architecture.md` (left there by 032) moved into the components
+    table next to the new `wuphf-settings` row, and the `wuphf-cli` rows say
+    it loads through `wuphf-settings`.
+  - **Mutation checks:** each change below made a test fail.
+    - Prefix `WUPHF_` instead of `WUPHF_CORE_`:
+      `unrelated_wuphf_variables_are_not_read` and
+      `environment_overrides_the_file`.
+    - Dropping the environment layer: `environment_overrides_the_file`.
+    - `Secret` serializing its value:
+      `observer_token_is_redacted_when_serialized`.
+    - Accepting empty connector tokens:
+      `connector_tokens_are_read_from_the_environment`.
+    - Defaulting unknown platforms: `derive_rejects_an_unknown_platform`.
+  - **Smoke test:** `serve` with the example config (database redirected
+    through `WUPHF_CORE_DATABASE_URL` to a scratch file) logged
+    `listen=127.0.0.1:50051`; with `WUPHF_CORE_LISTEN=127.0.0.1:50999` it
+    logged that address; without `WUPHF_CONNECTOR_TELEGRAM_MAIN_TOKEN` it
+    refused to start, naming the variable.
+  - **Results:** Rust has 168 tests passing (161 minus the 5 moved CLI tests,
+    plus 12 in `wuphf-settings`). Clippy and `cargo fmt` are clean, and
+    `wuphf-core` depends on neither figment nor botconf.
 
 ## Findings considered and rejected
 
