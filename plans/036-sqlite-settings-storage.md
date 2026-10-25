@@ -44,7 +44,7 @@ restart (there are still no runtime keys to override — plan 037 adds them).
 | 3 | Semantics match botconf's `SeaOrmStorage`: one row per dotted key holding JSON text; a write deletes some keys and upserts at most one, **atomically**; each row records who changed it and when. |
 | 4 | The new role trait is **not** part of the `Storage` sum trait: the core never reads settings, so `Core<S: Storage>` must not require it. Both backends implement it anyway (dual-backend parity). |
 
-### Decisions this plan makes (flag for the owner)
+### Decisions this plan makes (confirmed by the owner 2026-10-25)
 
 - **`updated_by` is `TEXT`, not an integer.** botconf's `StoredOverride.by` is
   an `Option<i64>` (a Telegram user id in the assistant bot). wuphf's actors

@@ -55,8 +55,8 @@ code).
 | 035 | Load the core configuration through figment and describe it to botconf | P2 | M | botconf 001 | TODO |
 | 036 | Keep runtime settings overrides in SQLite | P2 | S | 035 | TODO |
 | 037 | Route from a live settings snapshot; `rules` and `notify` at runtime | P2 | M | 035, 036 | TODO |
-| 038 | Key routing rules by id (`[rules.<id>]`) | P2 | S–M | 037 | TODO |
-| 039 | Owner ids per connector, and the core serving its settings | P2 | M | 034–037, botconf 003, 005 | TODO |
+| 038 | Key routing rules by id; chats as `connector:chat#thread` | P2 | M | 037 | TODO |
+| 039 | Owner ids, chat names, and the core serving its settings | P2 | M–L | 034–038, botconf 003–005 | TODO |
 | 040 | Connectors declare their own settings to the core | P2 | L | 039, botconf 005, 006, 009 | TODO |
 | 041 | A settings panel in the Telegram connector | P2 | L | 039, 040, botconf 004–007 | TODO |
 | 042 | A `wuphf settings` command | P3 | S | 035, 036, 039 | TODO |
@@ -392,8 +392,9 @@ Dependencies and ordering:
   arrive over connector sessions.
 - **035 needs botconf plan 001 tagged and pushed** (a git dependency on
   `propheci/botconf`). The owner creates that remote; executors never push.
-- **035 → 036 → 037 → 038** in order. 039 needs 034–037 plus botconf 003
-  (`Kind::Ref`) and 005 (`botconf.v1.Settings` and `botconf-grpc`).
+- **035 → 036 → 037 → 038** in order. 039 needs 034–038 plus botconf 003
+  (`Kind::Ref`, string actors), 004 (`botconf-panel` and its `TokenStore`)
+  and 005 (`botconf.v1.Settings` and `botconf-grpc`).
 - **040 needs botconf plan 009, dynamic sections** (settings declared at runtime with
   owned keys and kinds, sections added after the store loads, a validator
   other than a Rust type, and a base value per section). The botconf plans
@@ -403,19 +404,36 @@ Dependencies and ordering:
 - **003 is stale against 037.** 037 adds `RoutingConfig::validate()`, which
   rejects unknown connectors and duplicate rule ids at startup. 003 still
   targets the old `sides` model; re-plan or close it once 037 lands.
-- **Open decisions flagged by the plan writers**, each listed in its plan:
-  - 034: restart recovery relies on the socket closing or on keepalive (about
-    30 s), not on token-authenticated takeover.
+- **Decisions confirmed by the owner (2026-10-25)**, each recorded in its
+  plan:
+  - 034: a connector token is required (`token_env`); media accepts any
+    connector or provider token; a second session for a live connector id is
+    rejected, so restart recovery relies on the socket closing or on
+    keepalive (about 30 s), not on token-authenticated takeover.
   - 035: env prefix `WUPHF_CORE_`; a new `wuphf-settings` crate; the observer
     token becomes a redacted secret.
-  - 036: `updated_by` is a TEXT actor, which botconf has to support.
-  - 038: a `priority` field replaces list order; migration `0016` rewrites a
-    stored list-shaped `rules` override.
-  - 039: the observer token counts as the owner; chat references stay JSON
-    instead of `Ref` strings for now.
-  - 040: the path is `connector_settings.<id>`.
+  - 036: `updated_by` is a TEXT actor (botconf plan 003 makes actors
+    strings); times are integer milliseconds.
+  - 038: a `priority` field replaces list order. **Chats are written
+    `connector:chat#thread`** everywhere the config names one (`notify`,
+    rule `source`/`destination`, and the flat `only_chats`/`except_chats`
+    lists that replace the nested filter table). The connector ends at the
+    first `:`; `#` and `%` inside ids are written `%23` and `%25`. The string
+    form is config-only: `ChatRef`'s stored JSON shape is unchanged.
+    Migration `0016` rewrites stored `rules` and `notify` overrides.
+  - 039: the observer token counts as the owner. Chats in settings are
+    `wuphf.chat` refs, so **the panel shows chat names**, taken from observed
+    chat titles (with linked address forms) and conversation titles, with a
+    picker of recently seen chats. Rule entries become a botconf form.
+  - 039: **hybrid panel tokens** (botconf plan 004): stateless when they fit,
+    otherwise a short handle hashed from the action and stored in SQLite
+    (`panel_tokens`, migration `0017`) for 30 days, renewed on redraw.
+  - 040: the path is `connector_settings.<id>`; validation with the
+    `jsonschema` crate; the Rust WhatsApp connector is deferred.
+  - 041: single-use inline nonces; a plain-text fallback for the panel.
   - 042: the CLI edits the database directly, except `reload --address`.
   - 043: a 5-second inline budget before the fallback.
+- The botconf repo lives at `~/work/side_projects/Propheci/botconf`.
 
 ## Findings considered and rejected
 

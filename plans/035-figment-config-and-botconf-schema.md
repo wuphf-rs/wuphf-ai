@@ -57,7 +57,7 @@ exactly that and nothing more. Plans 036 (storage), 037 (live routing) and
 | 4 | No runtime keys in this plan: `Schema::settings()` returns an empty list. The store uses botconf's `MemoryStorage` until plan 036 swaps in SQLite. |
 | 5 | The file must stay valid on its own, and the same keys keep the same meaning: `config/example.toml` loads unchanged. |
 
-### Decisions this plan makes (flag for the owner)
+### Decisions this plan makes (confirmed by the owner 2026-10-25)
 
 - **Env prefix `WUPHF_CORE_`, not `WUPHF_`.** The core's environment already
   holds `WUPHF_INVOKE_TOKEN`, `WUPHF_PROVIDER_MEDIACONV_TOKEN` and (from plan

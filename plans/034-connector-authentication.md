@@ -54,7 +54,7 @@ for a connector id that is still live fail instead of silently taking over.
 | 5 | Each connector config gains `core_token_env` (Go connectors, and `whatsapp-rust`). The provider reuses its existing `token_env` token for media. Tokens are never read from flags or files, only from the environment. |
 | 6 | Token comparison stays `==`, like `bearer_auth` and the provider check (constant-time comparison is a deferred hardening item for all three together). |
 
-### Decision 4 in detail: how a restarted connector gets back in (flag for the owner)
+### Decision 4 in detail: how a restarted connector gets back in (confirmed by the owner 2026-10-25)
 
 The owner settled "reject a second live session instead of taking it over".
 The question this plan had to answer is how a connector that legitimately
@@ -77,8 +77,9 @@ tokens exist, and recovers instantly from silent network loss. This plan
 chose rejection because it is what the owner settled, it is the stricter
 behaviour (two processes running with the same id and token — a deployment
 mistake — fail loudly instead of stealing each other's dispatches back and
-forth), and the cost is a bounded ~30 s delay in a rare case. **If the owner
-prefers authenticated takeover, only Step 2's `register` check changes.**
+forth), and the cost is a bounded ~30 s delay in a rare case. The owner
+confirmed rejection on 2026-10-25, with the alternative noted; switching
+later changes only Step 2's `register` check.
 
 ## Current state
 

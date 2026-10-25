@@ -45,7 +45,7 @@ keeps current, so a validated change applies to the next event, and declares
 | 4 | One event sees one routing config: each core entry point reads the source once and uses that snapshot for the whole operation. |
 | 5 | Keys are `Kind::Json` for now. `notify` moves to botconf's `Kind::Ref` once botconf plan 003 lands; `rules` becomes a per-entry map in plan 038. |
 
-### Decisions this plan makes (flag for the owner)
+### Decisions this plan makes (confirmed by the owner 2026-10-25)
 
 - **Validation moves into the core.** `RoutingConfig::validate()` (new, in
   `wuphf-core`) rejects rules naming an unconfigured connector, duplicate rule
@@ -392,6 +392,7 @@ Commit 4.
 - Capability gating (`supports_threads`/`supports_topic_create` for
   many-to-one destinations) belongs in `RoutingConfig::validate` once the
   owner wants it enforced.
-- When botconf gains `Kind::Ref` (botconf plan 003), `notify` becomes a list
-  of `wuphf.chat` references and the panel can pick chats instead of taking
-  JSON.
+- Plan 038 rewrites `notify` and rule chats as `connector:chat#thread`
+  strings (migrating any override this plan stored), and plan 039 makes them
+  `wuphf.chat` references, so the panel shows chat names and picks chats
+  instead of taking JSON.

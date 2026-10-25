@@ -51,7 +51,7 @@ session kinds.
 | 4 | When the helper bot is not configured, down, or slow, fall back to today's bold label plus the sticker as a reply to it. |
 | 5 | This is a separate plan from the panel (041) and depends on it. |
 
-### Decisions made by this plan (flagged for the owner)
+### Decisions made by this plan (confirmed by the owner 2026-10-25)
 
 | # | Decision | Why |
 |---|---|---|

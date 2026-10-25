@@ -40,7 +40,7 @@ bot already uses the same way; wuphf only has to build its store and call
 |---|---|
 | 1 | (Settled) The CLI edits the **database directly** through the same `SettingsStore<WuphfSchema>` the core uses, so every change is validated exactly as at runtime. It works while the core is down. |
 
-### Decisions made by this plan (flagged for the owner)
+### Decisions made by this plan (confirmed by the owner 2026-10-25)
 
 | # | Decision | Why |
 |---|---|---|

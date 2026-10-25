@@ -55,7 +55,7 @@ that bot's inline result, and the presses reach the helper bot.
 | 6 | Text subcommands work: `/wuphf set <key> <value>` and the rest are passed as text to `Act`. |
 | 7 | Prompts for typed values (from the screen engine) are answered by the owner's next message replying to the panel or prompt; that message goes to `Act`, is not mirrored, and is deleted. |
 
-### Decisions made by this plan (flagged for the owner)
+### Decisions made by this plan (confirmed by the owner 2026-10-25)
 
 | # | Decision | Why |
 |---|---|---|

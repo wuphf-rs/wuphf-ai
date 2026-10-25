@@ -48,7 +48,7 @@ effective values back to the connector, which applies them live.
 | 4 | The core pushes effective values to the connector over botconf's `Watch` stream; the connector swaps them in atomically. |
 | 5 | The connector's own TOML stays the **base** of its settings; core-stored overrides win; unsetting returns to the connector's file value. |
 
-### Decisions made by this plan (flagged for the owner)
+### Decisions made by this plan (confirmed by the owner 2026-10-25)
 
 | # | Decision | Why |
 |---|---|---|
