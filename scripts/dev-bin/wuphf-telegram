@@ -4,6 +4,10 @@
 # example. Any argument switches to passthrough, so subcommands still work.
 # Runs the binary scripts/install-dev-bins.sh installed, when there is one, and
 # builds with `go run` otherwise.
+#
+# The connector authenticates to the server with the token in
+# WUPHF_CONNECTOR_TELEGRAM_MAIN_TOKEN (its config's core_token_env), which must
+# hold the same value the server reads for it.
 set -euo pipefail
 
 repo="$(cd "$(dirname "$(readlink -f "$0")")/../.." && pwd)"

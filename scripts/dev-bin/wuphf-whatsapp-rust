@@ -6,6 +6,10 @@
 # builds with `cargo run` otherwise. Its whatsapp-rust dependency uses the
 # nightly-only portable_simd feature, which RUSTC_BOOTSTRAP lets the dev shell's
 # stable compiler accept.
+#
+# The connector authenticates to the server with the token in
+# WUPHF_CONNECTOR_WHATSAPP_RUST_TOKEN (its config's core_token_env), which must
+# hold the same value the server reads for it.
 set -euo pipefail
 
 repo="$(cd "$(dirname "$(readlink -f "$0")")/../.." && pwd)"

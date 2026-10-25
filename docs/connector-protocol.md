@@ -17,6 +17,17 @@ Registration must match core configuration. Declared capabilities
 (`supports_threads`, `supports_topic_create`) gate whether the connector may
 host a threaded mirror.
 
+`OpenSession` requires the connector's token as `authorization: Bearer <token>`.
+The core reads each connector's token from the environment variable its
+`[[connectors]]` entry names in `token_env`, and the token must belong to the
+connector id in the registration frame: a missing token, or another
+connector's, is refused with `UNAUTHENTICATED` before the session reaches the
+hub. A second session for a connector whose session is still live is refused
+with `ALREADY_EXISTS`; the live session keeps its dispatches. A connector that
+restarts gets in as soon as its old stream has ended, which the core notices at
+once when the old process exits and within the HTTP/2 keepalive window when the
+connection dies silently; the SDKs keep retrying with backoff until then.
+
 ## Client frames (connector → core)
 
 - `MessageCreateEvent` — raw `chat_id`, optional `thread_id`/`chat_title`,
@@ -71,8 +82,12 @@ Attachments carry an internal `media_id` plus type, filename, MIME type, and
 size. A source connector streams bytes to `MediaTransport` before submitting the
 event; the destination downloads by `media_id` while executing its dispatch.
 Uploads are bounded by `max_media_bytes`, persisted in the core so retries and
-restarts don't lose referenced content, and pruned when unreferenced. The core
-rejects events whose attachment metadata doesn't match the broker-issued record.
+restarts don't lose referenced content, and pruned when unreferenced. Both
+`UploadMedia` and `DownloadMedia` require a bearer token: any configured
+connector's token or any function provider's token (providers such as
+`mediaconv` move media too). A call without a known token is refused with
+`UNAUTHENTICATED`. The core rejects events whose attachment metadata doesn't
+match the broker-issued record.
 
 ## Remote functions
 

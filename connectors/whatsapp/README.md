@@ -36,9 +36,14 @@ conversations map where in the core's `[[rules]]` using WhatsApp JIDs as chat
 IDs, for example a direct chat `12345@s.whatsapp.net` or group
 `123456789@g.us`.
 
+The connector authenticates to the core with the token in the variable
+`core_token_env` names, which must hold the same value the core reads from this
+connector's `[[connectors]].token_env`.
+
 Run core server, then connector:
 
 ```sh
+export WUPHF_CONNECTOR_WHATSAPP_MAIN_TOKEN=replace-me
 go run ./cmd/wuphf-whatsapp --config config.example.toml
 ```
 

@@ -36,8 +36,13 @@ cookies to `session_file` on shutdown and prefers it on the next start.
 The connector owns no routing; configure which conversations map where in the
 core's `[[rules]]` using Instagram thread keys (decimal numbers) as chat IDs.
 
+The connector authenticates to the core with the token in the variable
+`core_token_env` names, which must hold the same value the core reads from this
+connector's `[[connectors]].token_env`.
+
 Run core server, then connector:
 
 ```sh
+export WUPHF_CONNECTOR_INSTAGRAM_MAIN_TOKEN=replace-me
 go run ./cmd/wuphf-instagram --config config.example.toml
 ```

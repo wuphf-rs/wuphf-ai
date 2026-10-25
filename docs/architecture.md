@@ -208,6 +208,9 @@ acknowledgement never wait on a provider, and the broker crate
   source title and fans a retitle dispatch to provisioned threads on a change.
 - Inbound attachments are accepted only after their media and metadata match a
   broker-issued record.
+- A connector session is trusted only when it presents that connector's token,
+  and a connector has at most one live session: a second one is refused rather
+  than taking over the first.
 
 ## Planned
 

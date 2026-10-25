@@ -4,6 +4,9 @@
 # one-off flags work: `wuphf-server serve --config config.local.toml`.
 # Runs the binary scripts/install-dev-bins.sh installed, when there is one, and
 # builds with `cargo run` otherwise.
+#
+# The server refuses to start until every connector's token variable (each
+# [[connectors]].token_env in its config) is set.
 set -euo pipefail
 
 repo="$(cd "$(dirname "$(readlink -f "$0")")/../.." && pwd)"

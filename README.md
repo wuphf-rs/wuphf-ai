@@ -59,6 +59,21 @@ scripts/           Dev session launcher, zellij layout, per-component runners
 
 ## Run
 
+Every connector authenticates to the core with a token. The core reads each
+connector's token from the variable its `[[connectors]].token_env` names and
+refuses to start while one is unset, and each connector reads the same value
+from the variable its own `core_token_env` names, so every shell needs the same
+values. With the example configs, generate each token once (for example with
+`openssl rand -hex 16`) and export them from your shell profile or a local env
+file you source, never from a tracked file:
+
+```sh
+export WUPHF_CONNECTOR_TELEGRAM_MAIN_TOKEN=<token>
+export WUPHF_CONNECTOR_WHATSAPP_MAIN_TOKEN=<token>
+export WUPHF_CONNECTOR_WHATSAPP_RUST_TOKEN=<token>
+export WUPHF_CONNECTOR_INSTAGRAM_MAIN_TOKEN=<token>
+```
+
 The whole stack at once, in a zellij session with a tab per component:
 
 ```sh
@@ -91,6 +106,7 @@ The text-first Rust connector lives in a separate Cargo workspace because
 ```sh
 cd connectors/whatsapp-rust
 cargo build --release
+export WUPHF_CONNECTOR_WHATSAPP_RUST_TOKEN=replace-me   # core_token_env
 ./target/release/wuphf-connector-whatsapp --config config.example.toml
 ```
 

@@ -44,6 +44,9 @@ environment variables:
 ```sh
 export WUPHF_TELEGRAM_APP_ID=123456
 export WUPHF_TELEGRAM_APP_HASH=replace-me
+# The core token: the same value the core reads from this connector's
+# [[connectors]].token_env, named here by core_token_env.
+export WUPHF_CONNECTOR_TELEGRAM_MAIN_TOKEN=replace-me
 ```
 
 Run the core server, then the connector from this directory:
