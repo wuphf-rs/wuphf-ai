@@ -878,3 +878,256 @@ async fn observer_service_send_message_returns_the_acknowledged_native_id() {
     task.await.unwrap().unwrap();
     acker.abort();
 }
+
+/// Hub channels the test drives directly: `inbound` receives what the hub
+/// forwards to the runtime, `dispatches` feeds dispatches to the hub.
+struct HubHarness {
+    handle: crate::connector::ConnectorHubHandle,
+    inbound: mpsc::Receiver<InboundWork>,
+    dispatches: mpsc::Sender<Dispatch>,
+    _acknowledgements: mpsc::Receiver<DispatchAck>,
+    _failures: mpsc::Receiver<DispatchFailed>,
+    task: tokio::task::JoinHandle<()>,
+}
+
+fn hub_harness() -> HubHarness {
+    let (inbound_tx, inbound) = mpsc::channel(8);
+    let (acknowledgements_tx, acknowledgements) = mpsc::channel(8);
+    let (failures_tx, failures) = mpsc::channel(8);
+    let (dispatches, dispatches_rx) = mpsc::channel(8);
+    let (hub, handle) = ConnectorHub::new(
+        RuntimeChannels {
+            inbound: inbound_tx,
+            acknowledgements: acknowledgements_tx,
+            failures: failures_tx,
+            dispatches: dispatches_rx,
+        },
+        registrations(),
+    );
+    HubHarness {
+        handle,
+        inbound,
+        dispatches,
+        _acknowledgements: acknowledgements,
+        _failures: failures,
+        task: tokio::spawn(hub.run()),
+    }
+}
+
+fn telegram_dispatch() -> Dispatch {
+    Dispatch::new(
+        wuphf_model::Target {
+            endpoint_id: wuphf_model::EndpointId::new(),
+            connector_id: ConnectorId(TG.into()),
+            address: ChatAddress::new("tg-chat", None),
+            create_thread: None,
+        },
+        wuphf_model::ConversationId::new(),
+        Action::Delete {
+            message_id: wuphf_model::MessageId::new(),
+            native_id: "tg-1".into(),
+        },
+        None,
+    )
+}
+
+fn native_id_of(work: &InboundWork) -> &str {
+    let InboundWork::Event(Event {
+        payload: EventKind::NewMessage(message),
+        ..
+    }) = work
+    else {
+        panic!("expected a new message event, got {work:?}");
+    };
+    &message.native_id
+}
+
+#[tokio::test]
+async fn second_live_session_is_rejected() {
+    let harness = hub_harness();
+    let mut first = harness
+        .handle
+        .connect(registrations()[1].clone())
+        .await
+        .unwrap();
+    let second = harness.handle.connect(registrations()[1].clone()).await;
+    assert_eq!(
+        second.err(),
+        Some(crate::connector::RegistrationError::AlreadyLive)
+    );
+
+    // The first session is untouched and still receives dispatches.
+    let dispatch = telegram_dispatch();
+    harness.dispatches.send(dispatch.clone()).await.unwrap();
+    let ConnectorOutput::Dispatch(received) = first.output.recv().await.unwrap() else {
+        panic!("the live session should receive the dispatch");
+    };
+    assert_eq!(received.id, dispatch.id);
+    harness.task.abort();
+}
+
+#[tokio::test]
+async fn reconnect_after_drop_is_accepted() {
+    let harness = hub_harness();
+    let mut first = harness
+        .handle
+        .connect(registrations()[1].clone())
+        .await
+        .unwrap();
+    let dispatch = telegram_dispatch();
+    harness.dispatches.send(dispatch.clone()).await.unwrap();
+    assert!(matches!(
+        first.output.recv().await.unwrap(),
+        ConnectorOutput::Dispatch(_)
+    ));
+    drop(first);
+
+    // The unacknowledged dispatch is redelivered to the new session.
+    let mut second = harness
+        .handle
+        .connect(registrations()[1].clone())
+        .await
+        .expect("a session whose transport is gone no longer counts as live");
+    let ConnectorOutput::Dispatch(redelivered) = second.output.recv().await.unwrap() else {
+        panic!("the new session should receive the unacknowledged dispatch");
+    };
+    assert_eq!(redelivered.id, dispatch.id);
+    harness.task.abort();
+}
+
+#[tokio::test]
+async fn input_from_a_replaced_session_is_ignored() {
+    let mut harness = hub_harness();
+    let first = harness
+        .handle
+        .connect(registrations()[1].clone())
+        .await
+        .unwrap();
+    // Keep the old session's input sender past the end of its transport, as a
+    // forwarder still draining when the connector reconnects would.
+    let stale_input = first.input.clone();
+    drop(first);
+    let second = harness
+        .handle
+        .connect(registrations()[1].clone())
+        .await
+        .unwrap();
+
+    stale_input
+        .send(ConnectorInput::event(tg_event("stale", None)))
+        .await
+        .unwrap();
+    stale_input
+        .send(ConnectorInput::event(tg_event("stale-barrier", None)))
+        .await
+        .unwrap();
+    // Once the old forwarder has taken the barrier, "stale" is already queued at
+    // the hub, ahead of anything the new session sends next.
+    tokio::time::timeout(std::time::Duration::from_secs(5), async {
+        while stale_input.capacity() < stale_input.max_capacity() {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("the old forwarder drains its queue");
+    second
+        .input
+        .send(ConnectorInput::event(tg_event("fresh", None)))
+        .await
+        .unwrap();
+
+    let forwarded = harness.inbound.recv().await.unwrap();
+    assert_eq!(native_id_of(&forwarded), "fresh");
+    harness.task.abort();
+}
+
+/// Serve the connector transport for `handle` on a local port; returns its URI.
+async fn serve_connectors(
+    handle: crate::connector::ConnectorHubHandle,
+) -> (String, tokio::task::JoinHandle<()>) {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let task = tokio::spawn(async move {
+        Server::builder()
+            .add_service(ConnectorTransportServer::new(GrpcConnectorService::new(
+                handle,
+            )))
+            .serve_with_incoming(TcpListenerStream::new(listener))
+            .await
+            .unwrap();
+    });
+    (format!("http://{address}"), task)
+}
+
+/// Open a Telegram session over gRPC; keeps the request sender alive in the
+/// returned tuple so the session stays open until it is dropped.
+async fn open_telegram_session(
+    client: &mut ConnectorTransportClient<tonic::transport::Channel>,
+) -> Result<
+    (
+        mpsc::Sender<pb::ClientFrame>,
+        tonic::Streaming<pb::ServerFrame>,
+    ),
+    tonic::Status,
+> {
+    let (frames, frames_rx) = mpsc::channel(8);
+    frames
+        .send(registration_frame(
+            TG,
+            pb::Platform::Telegram,
+            Some(pb::Capabilities {
+                supports_threads: true,
+                supports_topic_create: true,
+            }),
+        ))
+        .await
+        .unwrap();
+    let output = client
+        .open_session(ReceiverStream::new(frames_rx))
+        .await?
+        .into_inner();
+    Ok((frames, output))
+}
+
+#[tokio::test]
+async fn grpc_second_session_is_already_exists() {
+    let harness = hub_harness();
+    let (uri, server) = serve_connectors(harness.handle.clone()).await;
+    let mut client = ConnectorTransportClient::connect(uri).await.unwrap();
+    let _first = open_telegram_session(&mut client).await.unwrap();
+    let error = open_telegram_session(&mut client).await.unwrap_err();
+    assert_eq!(error.code(), tonic::Code::AlreadyExists);
+    server.abort();
+    harness.task.abort();
+}
+
+#[tokio::test]
+async fn grpc_session_after_client_disconnect_is_accepted() {
+    let harness = hub_harness();
+    let (uri, server) = serve_connectors(harness.handle.clone()).await;
+    let mut first_client = ConnectorTransportClient::connect(uri.clone())
+        .await
+        .unwrap();
+    let first = open_telegram_session(&mut first_client).await.unwrap();
+    drop(first);
+    drop(first_client);
+
+    // The server notices the closed stream on its own (a socket close, not a
+    // timer); until it has, a new session is still refused.
+    let mut client = ConnectorTransportClient::connect(uri).await.unwrap();
+    tokio::time::timeout(std::time::Duration::from_secs(5), async {
+        loop {
+            match open_telegram_session(&mut client).await {
+                Ok(session) => return session,
+                Err(error) if error.code() == tonic::Code::AlreadyExists => {
+                    tokio::task::yield_now().await;
+                }
+                Err(error) => panic!("unexpected error: {error}"),
+            }
+        }
+    })
+    .await
+    .expect("the new session registers once the old stream has ended");
+    server.abort();
+    harness.task.abort();
+}

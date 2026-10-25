@@ -1,12 +1,27 @@
 use crate::RuntimeChannels;
 use std::collections::HashMap;
+use thiserror::Error;
 use tokio::sync::{mpsc, oneshot};
 use tracing::{debug, info, warn};
 use wuphf_model::{Connector, ConnectorId, ConnectorInput, ConnectorOutput, Dispatch, DispatchId};
 
+/// One registered connector session, as the transport holds it. The session
+/// counts as live until `output` is dropped, so a transport drops it as soon as
+/// the connector's stream ends.
 pub struct ConnectorConnection {
     pub input: mpsc::Sender<ConnectorInput>,
     pub output: mpsc::Receiver<ConnectorOutput>,
+}
+
+/// Why the hub refused a connector session.
+#[derive(Debug, Error, PartialEq, Eq)]
+pub enum RegistrationError {
+    #[error("connector registration does not match configuration")]
+    Mismatch,
+    #[error("a session for this connector is still live")]
+    AlreadyLive,
+    #[error("connector hub is stopped")]
+    HubStopped,
 }
 
 #[derive(Clone)]
@@ -15,7 +30,10 @@ pub struct ConnectorHubHandle {
 }
 
 impl ConnectorHubHandle {
-    pub async fn connect(&self, registration: Connector) -> Result<ConnectorConnection, String> {
+    pub async fn connect(
+        &self,
+        registration: Connector,
+    ) -> Result<ConnectorConnection, RegistrationError> {
         let (input_tx, input_rx) = mpsc::channel(32);
         let (output_tx, output_rx) = mpsc::channel(32);
         let (result_tx, result_rx) = oneshot::channel();
@@ -27,10 +45,10 @@ impl ConnectorHubHandle {
                 result_tx,
             })
             .await
-            .map_err(|_| "connector hub is stopped".to_owned())?;
+            .map_err(|_| RegistrationError::HubStopped)?;
         result_rx
             .await
-            .map_err(|_| "connector hub stopped before registration".to_owned())??;
+            .map_err(|_| RegistrationError::HubStopped)??;
         Ok(ConnectorConnection {
             input: input_tx,
             output: output_rx,
@@ -38,26 +56,32 @@ impl ConnectorHubHandle {
     }
 }
 
+/// Input from a session, tagged with the session's generation so input from a
+/// session that has since been replaced can be told apart and dropped.
+type TaggedInput = (ConnectorId, u64, ConnectorInput);
+
 pub struct ConnectorHub {
     runtime: RuntimeChannels,
     connect_rx: mpsc::Receiver<ConnectRequest>,
-    inbound_tx: mpsc::Sender<(ConnectorId, ConnectorInput)>,
-    inbound_rx: mpsc::Receiver<(ConnectorId, ConnectorInput)>,
+    inbound_tx: mpsc::Sender<TaggedInput>,
+    inbound_rx: mpsc::Receiver<TaggedInput>,
     allowed: HashMap<ConnectorId, Connector>,
     sessions: HashMap<ConnectorId, Session>,
     assigned: HashMap<DispatchId, (ConnectorId, Dispatch)>,
     held: Vec<Dispatch>,
+    next_session: u64,
 }
 
 struct Session {
     output: mpsc::Sender<ConnectorOutput>,
+    generation: u64,
 }
 
 struct ConnectRequest {
     registration: Connector,
     input_rx: mpsc::Receiver<ConnectorInput>,
     output_tx: mpsc::Sender<ConnectorOutput>,
-    result_tx: oneshot::Sender<Result<(), String>>,
+    result_tx: oneshot::Sender<Result<(), RegistrationError>>,
 }
 
 impl ConnectorHub {
@@ -77,6 +101,7 @@ impl ConnectorHub {
                 sessions: HashMap::new(),
                 assigned: HashMap::new(),
                 held: Vec::new(),
+                next_session: 0,
             },
             ConnectorHubHandle { connect_tx },
         )
@@ -86,8 +111,8 @@ impl ConnectorHub {
         loop {
             tokio::select! {
                 Some(request) = self.connect_rx.recv() => self.register(request).await,
-                Some((connector_id, input)) = self.inbound_rx.recv() => {
-                    self.accept_input(connector_id, input).await;
+                Some((connector_id, generation, input)) = self.inbound_rx.recv() => {
+                    self.accept_input(connector_id, generation, input).await;
                 },
                 dispatch = self.runtime.dispatches.recv() => match dispatch {
                     Some(dispatch) => self.deliver_or_hold(dispatch).await,
@@ -104,16 +129,28 @@ impl ConnectorHub {
                 connector = %connector_id.0,
                 "rejecting connector session: registration does not match configuration",
             );
-            let _ = request.result_tx.send(Err(
-                "connector registration does not match configuration".to_owned(),
-            ));
+            let _ = request.result_tx.send(Err(RegistrationError::Mismatch));
+            return;
+        }
+        // A second session for a connector whose session is still live is
+        // refused rather than taking over: the live one keeps its dispatches.
+        // A restarted connector gets in once the old stream has ended.
+        if self.live_session(&connector_id).is_some() {
+            warn!(
+                connector = %connector_id.0,
+                "rejecting connector session: a session for this connector is still live",
+            );
+            let _ = request.result_tx.send(Err(RegistrationError::AlreadyLive));
             return;
         }
         info!(connector = %connector_id.0, "connector session registered");
+        let generation = self.next_session;
+        self.next_session += 1;
         self.sessions.insert(
             connector_id.clone(),
             Session {
                 output: request.output_tx,
+                generation,
             },
         );
         let inbound_tx = self.inbound_tx.clone();
@@ -122,7 +159,7 @@ impl ConnectorHub {
             let mut input_rx = request.input_rx;
             while let Some(input) = input_rx.recv().await {
                 if inbound_tx
-                    .send((input_connector_id.clone(), input))
+                    .send((input_connector_id.clone(), generation, input))
                     .await
                     .is_err()
                 {
@@ -154,8 +191,24 @@ impl ConnectorHub {
         }
     }
 
-    async fn accept_input(&mut self, connector_id: ConnectorId, input: ConnectorInput) {
-        if !self.sessions.contains_key(&connector_id) {
+    /// The connector's current session, if its transport still holds it.
+    fn live_session(&self, connector_id: &ConnectorId) -> Option<&Session> {
+        self.sessions
+            .get(connector_id)
+            .filter(|session| !session.output.is_closed())
+    }
+
+    async fn accept_input(
+        &mut self,
+        connector_id: ConnectorId,
+        generation: u64,
+        input: ConnectorInput,
+    ) {
+        if self
+            .sessions
+            .get(&connector_id)
+            .is_none_or(|session| session.generation != generation)
+        {
             debug!(connector = %connector_id.0, "dropping input from a session that is no longer registered");
             return;
         }

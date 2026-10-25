@@ -1,7 +1,7 @@
-use crate::connector::ConnectorHubHandle;
+use crate::connector::{ConnectorConnection, ConnectorHubHandle, RegistrationError};
 use std::pin::Pin;
 use thiserror::Error;
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, oneshot};
 use tokio_stream::{Stream, wrappers::ReceiverStream};
 use tonic::{Request, Response, Status};
 use uuid::Uuid;
@@ -45,13 +45,21 @@ impl ConnectorTransport for GrpcConnectorService {
             _ => return Err(Status::invalid_argument("first frame must be registration")),
         };
         let connector_id = registration.id.clone();
-        let mut connection = self
+        let connection = self
             .hub
             .connect(registration)
             .await
-            .map_err(Status::failed_precondition)?;
-        let input = connection.input.clone();
+            .map_err(|error| match error {
+                RegistrationError::Mismatch => Status::failed_precondition(error.to_string()),
+                RegistrationError::AlreadyLive => Status::already_exists(error.to_string()),
+                RegistrationError::HubStopped => Status::unavailable(error.to_string()),
+            })?;
+        let ConnectorConnection { input, mut output } = connection;
+        // Fired when the reader returns for any reason, so the outgoing task
+        // drops `output` at once and the hub sees the session as no longer live.
+        let (ended_tx, mut ended_rx) = oneshot::channel::<()>();
         tokio::spawn(async move {
+            let _ended = ended_tx;
             while let Ok(Some(frame)) = incoming.message().await {
                 let message = match input_from_proto(frame, &connector_id) {
                     Ok(message) => message,
@@ -76,9 +84,15 @@ impl ConnectorTransport for GrpcConnectorService {
         });
         let (outgoing_tx, outgoing_rx) = mpsc::channel(32);
         tokio::spawn(async move {
-            while let Some(output) = connection.output.recv().await {
-                if outgoing_tx.send(Ok(output_to_proto(output))).await.is_err() {
-                    return;
+            loop {
+                tokio::select! {
+                    next = output.recv() => {
+                        let Some(next) = next else { return };
+                        if outgoing_tx.send(Ok(output_to_proto(next))).await.is_err() {
+                            return;
+                        }
+                    }
+                    _ = &mut ended_rx => return,
                 }
             }
         });
