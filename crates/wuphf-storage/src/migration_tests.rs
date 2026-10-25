@@ -231,6 +231,109 @@ async fn migration_0014_merges_replica_sets_into_conversations() {
     assert_eq!(stashed, mirrored.to_string());
 }
 
+/// Migration 0016 rewrites the `rules` and `notify` settings overrides from
+/// the shapes plan 037 stored (a list of `{id, flow}`, a list of chat objects)
+/// into plan 038's config shapes (a map keyed by id with the list position as
+/// `priority`, chats as `connector:chat#thread` strings). Other settings are
+/// left alone.
+#[tokio::test]
+async fn migration_0016_reshapes_stored_rules_and_notify() {
+    let pool = database_before(16).await;
+    let rules = serde_json::json!([
+        {
+            "id": "direct",
+            "flow": {
+                "kind": "one-to-one",
+                "source_connector": "whatsapp-main",
+                "source_chat": { "chat_id": "123@s.whatsapp.net", "thread_id": null },
+                "destination_connector": "telegram-main",
+                "destination_chat": { "chat_id": "-100123", "thread_id": "12" }
+            }
+        },
+        {
+            "id": "mirror",
+            "flow": {
+                "kind": "many-to-one",
+                "source_connector": "whatsapp-main",
+                "source_chats_filter": {
+                    "kind": "not",
+                    "chats": [{ "chat_id": "a#b@g.us", "thread_id": null }]
+                },
+                "destination_connector": "telegram-main",
+                "destination_chat": { "chat_id": "-100999", "thread_id": null }
+            }
+        }
+    ]);
+    let notify = serde_json::json!([
+        { "connector_id": "telegram-main", "chat_id": "telegram:user:1", "thread_id": "5" },
+        { "connector_id": "whatsapp-main", "chat_id": "x@s.whatsapp.net" }
+    ]);
+    let unrelated = r#"{"kept":  "byte for byte"}"#;
+    for (key, value) in [
+        ("rules", rules.to_string()),
+        ("notify", notify.to_string()),
+        ("timezone", unrelated.to_owned()),
+    ] {
+        sqlx::query(
+            "INSERT INTO settings (key, value, updated_by, updated_at_ms) VALUES (?, ?, NULL, 0)",
+        )
+        .bind(key)
+        .bind(value)
+        .execute(&pool)
+        .await
+        .unwrap();
+    }
+
+    MIGRATOR.run(&pool).await.unwrap();
+
+    let stored = |key: &'static str| {
+        let pool = pool.clone();
+        async move {
+            sqlx::query_scalar::<_, String>("SELECT value FROM settings WHERE key = ?")
+                .bind(key)
+                .fetch_one(&pool)
+                .await
+                .unwrap()
+        }
+    };
+    let rules: serde_json::Value = serde_json::from_str(&stored("rules").await).unwrap();
+    assert_eq!(
+        rules,
+        serde_json::json!({
+            "direct": {
+                "kind": "one-to-one",
+                "source": "whatsapp-main:123@s.whatsapp.net",
+                "destination": "telegram-main:-100123#12",
+                "priority": 0
+            },
+            "mirror": {
+                "kind": "many-to-one",
+                "source_connector": "whatsapp-main",
+                "destination": "telegram-main:-100999",
+                "except_chats": ["whatsapp-main:a%23b@g.us"],
+                "priority": 1
+            }
+        })
+    );
+    // wuphf-storage cannot see the settings types; check the shape too.
+    for entry in rules.as_object().unwrap().values() {
+        let entry = entry.as_object().unwrap();
+        assert!(entry.contains_key("kind") && entry.contains_key("priority"));
+        for old in ["id", "flow", "source_chat", "destination_chat"] {
+            assert!(!entry.contains_key(old), "{old} left behind");
+        }
+    }
+    let notify: serde_json::Value = serde_json::from_str(&stored("notify").await).unwrap();
+    assert_eq!(
+        notify,
+        serde_json::json!([
+            "telegram-main:telegram:user:1#5",
+            "whatsapp-main:x@s.whatsapp.net"
+        ])
+    );
+    assert_eq!(stored("timezone").await, unrelated);
+}
+
 /// Seed one `dispatches` row per sample, in the JSON shape given.
 async fn insert_dispatches(pool: &SqlitePool, payloads: &[&str]) {
     for (dispatch, payload) in sample_dispatches().iter().zip(payloads) {
