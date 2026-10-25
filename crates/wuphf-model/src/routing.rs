@@ -3,6 +3,8 @@
 
 use crate::*;
 use serde::{Deserialize, Serialize};
+use std::fmt;
+use std::str::FromStr;
 
 /// A messaging platform a connector bridges. `Other` keeps the model open to
 /// platforms without a dedicated variant.
@@ -72,13 +74,111 @@ impl ChatAddress {
     }
 }
 
-/// A chat on a specific connector. Flattened when (de)serialized, so config
-/// spells it as `connector_id`, `chat_id` and `thread_id` side by side.
+/// A chat on a specific connector. Flattened when (de)serialized, so stored
+/// JSON spells it as `connector_id`, `chat_id` and `thread_id` side by side;
+/// the config file writes its text form (see the `Display` impl below).
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct ChatRef {
     pub connector_id: ConnectorId,
     #[serde(flatten)]
     pub address: ChatAddress,
+}
+
+/// The text form of a chat reference, `connector:chat` or
+/// `connector:chat#thread`, as the config file and the settings panel write
+/// it. The connector ends at the first `:` (connector ids may not contain one;
+/// chat ids often do). Inside the chat and thread parts `%` is written `%25`
+/// and `#` is written `%23`, so the thread separator is unambiguous. Stored
+/// JSON does not use this form: `ChatRef` still serializes as fields.
+impl fmt::Display for ChatRef {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "{}:{}",
+            self.connector_id.0,
+            escape_chat_part(&self.address.chat_id)
+        )?;
+        if let Some(thread) = &self.address.thread_id {
+            write!(f, "#{}", escape_chat_part(thread))?;
+        }
+        Ok(())
+    }
+}
+
+impl FromStr for ChatRef {
+    type Err = ChatRefParseError;
+
+    fn from_str(text: &str) -> Result<Self, Self::Err> {
+        let Some((connector, rest)) = text.split_once(':').filter(|(c, _)| !c.is_empty()) else {
+            return Err(ChatRefParseError::MissingConnector(text.to_owned()));
+        };
+        let (chat, thread) = match rest.rsplit_once('#') {
+            Some((chat, thread)) => (chat, Some(thread)),
+            None => (rest, None),
+        };
+        if chat.is_empty() {
+            return Err(ChatRefParseError::EmptyChat(text.to_owned()));
+        }
+        if thread.is_some_and(str::is_empty) {
+            return Err(ChatRefParseError::EmptyThread(text.to_owned()));
+        }
+        let unescape = |part: &str| {
+            unescape_chat_part(part)
+                .ok_or_else(|| ChatRefParseError::InvalidEscape(text.to_owned()))
+        };
+        Ok(ChatRef {
+            connector_id: ConnectorId(connector.to_owned()),
+            address: ChatAddress {
+                chat_id: unescape(chat)?,
+                thread_id: thread.map(unescape).transpose()?,
+            },
+        })
+    }
+}
+
+/// Why a chat reference string did not parse.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum ChatRefParseError {
+    #[error("{0:?} has no connector: write it as connector:chat")]
+    MissingConnector(String),
+    #[error("{0:?} has an empty chat id")]
+    EmptyChat(String),
+    #[error("{0:?} has an empty thread id after '#'")]
+    EmptyThread(String),
+    #[error("{0:?} has an invalid escape; only %23 (#) and %25 (%) are allowed")]
+    InvalidEscape(String),
+}
+
+/// Whether `id` can name a connector in a chat reference: non-empty, and
+/// without `:`, `#`, `%` or whitespace, the characters the text form uses.
+pub fn is_valid_connector_id(id: &str) -> bool {
+    !id.is_empty()
+        && !id
+            .chars()
+            .any(|c| matches!(c, ':' | '#' | '%') || c.is_whitespace())
+}
+
+fn escape_chat_part(part: &str) -> String {
+    part.replace('%', "%25").replace('#', "%23")
+}
+
+/// Decodes exactly `%23` and `%25`; any other `%` sequence is an error, so
+/// every value has one spelling.
+fn unescape_chat_part(part: &str) -> Option<String> {
+    let mut decoded = String::with_capacity(part.len());
+    let mut rest = part;
+    while let Some(index) = rest.find('%') {
+        decoded.push_str(&rest[..index]);
+        let escape = rest.get(index..index + 3)?;
+        decoded.push(match escape {
+            "%23" => '#',
+            "%25" => '%',
+            _ => return None,
+        });
+        rest = &rest[index + 3..];
+    }
+    decoded.push_str(rest);
+    Some(decoded)
 }
 
 /// Every platform address known to name one chat: the address an event actually
@@ -333,4 +433,117 @@ pub struct Conversation {
     /// the mirror threads. `None` until a title is first observed.
     #[serde(default)]
     pub title: Option<String>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn chat_ref(connector: &str, chat: &str, thread: Option<&str>) -> ChatRef {
+        ChatRef {
+            connector_id: ConnectorId(connector.into()),
+            address: ChatAddress::new(chat, thread.map(Into::into)),
+        }
+    }
+
+    #[test]
+    fn chat_refs_round_trip() {
+        let cases = [
+            (
+                "telegram-main:telegram:channel:2060340733",
+                chat_ref("telegram-main", "telegram:channel:2060340733", None),
+            ),
+            (
+                "telegram-main:telegram:channel:2060340733#12",
+                chat_ref("telegram-main", "telegram:channel:2060340733", Some("12")),
+            ),
+            (
+                "whatsapp-main:12345@s.whatsapp.net",
+                chat_ref("whatsapp-main", "12345@s.whatsapp.net", None),
+            ),
+            (
+                "whatsapp-main:98765@lid",
+                chat_ref("whatsapp-main", "98765@lid", None),
+            ),
+            (
+                "whatsapp-main:120363@g.us",
+                chat_ref("whatsapp-main", "120363@g.us", None),
+            ),
+            (
+                "instagram-main:340282366841710300949128",
+                chat_ref("instagram-main", "340282366841710300949128", None),
+            ),
+            (
+                "matrix-main:!room:example.org",
+                chat_ref("matrix-main", "!room:example.org", None),
+            ),
+            (
+                "matrix-main:%23alias:example.org",
+                chat_ref("matrix-main", "#alias:example.org", None),
+            ),
+            (
+                "matrix-main:50%25off#t%23%25",
+                chat_ref("matrix-main", "50%off", Some("t#%")),
+            ),
+        ];
+        for (text, expected) in cases {
+            let parsed: ChatRef = text
+                .parse()
+                .unwrap_or_else(|error| panic!("{text}: {error}"));
+            assert_eq!(parsed, expected, "{text}");
+            assert_eq!(parsed.to_string(), text);
+        }
+    }
+
+    #[test]
+    fn chat_ref_parse_errors() {
+        let cases = [
+            (
+                "no-colon",
+                ChatRefParseError::MissingConnector("no-colon".into()),
+            ),
+            (":chat", ChatRefParseError::MissingConnector(":chat".into())),
+            ("conn:", ChatRefParseError::EmptyChat("conn:".into())),
+            ("conn:#7", ChatRefParseError::EmptyChat("conn:#7".into())),
+            (
+                "conn:chat#",
+                ChatRefParseError::EmptyThread("conn:chat#".into()),
+            ),
+            (
+                "conn:a%2Fb",
+                ChatRefParseError::InvalidEscape("conn:a%2Fb".into()),
+            ),
+            (
+                "conn:a%2",
+                ChatRefParseError::InvalidEscape("conn:a%2".into()),
+            ),
+        ];
+        for (text, expected) in cases {
+            assert_eq!(text.parse::<ChatRef>(), Err(expected), "{text}");
+        }
+    }
+
+    #[test]
+    fn chat_ref_json_shape_is_unchanged() {
+        let value = serde_json::to_value(chat_ref("tg", "-100", Some("12"))).unwrap();
+        assert_eq!(
+            value,
+            serde_json::json!({ "connector_id": "tg", "chat_id": "-100", "thread_id": "12" })
+        );
+    }
+
+    #[test]
+    fn connector_ids_exclude_the_separators() {
+        for valid in [
+            "whatsapp-main",
+            "whatsapp-rust",
+            "instagram-main",
+            "telegram-main",
+        ] {
+            assert!(is_valid_connector_id(valid), "{valid}");
+        }
+        for invalid in ["", "tg:main", "tg#main", "tg%main", "tg main", "tg\tmain"] {
+            assert!(!is_valid_connector_id(invalid), "{invalid:?}");
+        }
+    }
 }
