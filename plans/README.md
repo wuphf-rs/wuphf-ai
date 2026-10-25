@@ -55,7 +55,7 @@ code).
 | 035 | Load the core configuration through figment and describe it to botconf | P2 | M | botconf 001 | DONE (botconf v0.1.1, see notes) |
 | 036 | Keep runtime settings overrides in SQLite | P2 | S | 035 | DONE (migration 0015; see notes) |
 | 037 | Route from a live settings snapshot; `rules` and `notify` at runtime | P2 | M | 035, 036 | DONE (see notes) |
-| 038 | Key routing rules by id; chats as `connector:chat#thread` | P2 | M | 037 | TODO |
+| 038 | Key routing rules by id; chats as `connector:chat#thread` | P2 | M | 037 | DONE (migration 0016; see notes) |
 | 039 | Owner ids, chat names, and the core serving its settings | P2 | M–L | 034–038, botconf 003–005 | TODO |
 | 040 | Connectors declare their own settings to the core | P2 | L | 039, botconf 005, 006, 009 | TODO |
 | 041 | A settings panel in the Telegram connector | P2 | L | 039, 040, botconf 004–007 | TODO |
@@ -615,6 +615,53 @@ Dependencies and ordering:
   - **Results:** Rust has 187 tests passing (173 + 8 in `wuphf-core` + 7 in
     `wuphf-settings` − 1 replaced). Clippy and `cargo fmt` are clean, the
     "No stale reads" and "Boundary" commands print nothing.
+- **038 done 2026-10-25** (on `plans/runtime-settings`). The drift check
+  showed only 035–037's expected changes, and `0016` was free. None of the
+  STOP conditions occurred: the flattened, internally tagged `RuleEntryKind`
+  loads through figment and round-trips through botconf (a `rules.<id>`
+  entry set at runtime), and no stored message JSON changed (every earlier
+  `migration_tests.rs` case passes unchanged). Deviations:
+  - **`thiserror` in `wuphf-model`:** added from the workspace for
+    `ChatRefParseError`, as the plan allows.
+  - **`ChatRef`'s doc comment** now says stored JSON uses the fields and the
+    config uses the text form. Its serde attributes are unchanged.
+  - **Extra test cases:** `connector_ids_exclude_the_separators` in
+    `wuphf-model`; `chat_ref_parse_errors` also covers `conn:#7` (empty chat
+    before a thread) and a truncated escape `conn:a%2`; the round-trip covers
+    a value with `%` and `#` in both chat and thread.
+  - **The ordering tests go through routing,** not a list accessor:
+    `rules_are_ordered_by_priority_then_id` checks which rule
+    `match_source` returns for three overlapping catch-alls, since
+    `RoutingConfig` exposes no rule list.
+  - **Migration test values:** the stored `rules` override in
+    `migration_0016_reshapes_stored_rules_and_notify` holds a one-to-one rule
+    with a destination thread and a many-to-one rule with a `not` filter whose
+    chat id contains `#`; the unrelated row is checked byte for byte. The SQL
+    was also run by hand with an `all` filter (no list key added) and an empty
+    list (`{}`).
+  - **Local data:** the local `./wuphf.sqlite` has no `settings` table yet (no
+    core with migration 0015 has run against it), so 0016 has nothing to
+    rewrite there, and no server smoke run was needed.
+  - **Docs beyond the plan's list:** the landing page's lead sentence about
+    rule "sides" now describes a rule as a flow keyed by id.
+  - **Mutation checks:** each change below made a test fail.
+    - Sorting rules by id only: `rules_are_ordered_by_priority_then_id`.
+    - Skipping the `id` field guard: `rule_id_field_is_rejected`.
+    - Skipping the filter chat's connector check:
+      `filter_chat_on_another_connector_is_rejected`.
+    - Accepting both filter lists: `only_and_except_chats_together_are_rejected`.
+    - Migration 0016 writing `priority` 0 for every rule, or dropping the
+      `not` filter: `migration_0016_reshapes_stored_rules_and_notify`.
+  - **Builds:** every build and test ran with `nice -n 19` and
+    `CARGO_BUILD_JOBS=2`, per crate, with the workspace gate run once at the
+    end.
+  - **Results:** Rust has 201 tests passing (187 + 4 in `wuphf-model` + 9 in
+    `wuphf-settings` + 1 in `wuphf-storage`). Clippy and `cargo fmt` are
+    clean, and the "Old formats gone" grep prints nothing.
+  - **Owner action:** any local config of your own that still uses
+    `[[rules]]` + `[rules.flow]` or `[[notify]]` must be rewritten in the new
+    form (see `config/example.toml`); the old form fails to load. The tracked
+    `config/example.toml`, which the dev scripts use, is already converted.
 
 ## Findings considered and rejected
 
