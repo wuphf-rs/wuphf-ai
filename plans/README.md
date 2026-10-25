@@ -57,7 +57,7 @@ code).
 | 037 | Route from a live settings snapshot; `rules` and `notify` at runtime | P2 | M | 035, 036 | TODO |
 | 038 | Key routing rules by id (`[rules.<id>]`) | P2 | S–M | 037 | TODO |
 | 039 | Owner ids per connector, and the core serving its settings | P2 | M | 034–037, botconf 003, 005 | TODO |
-| 040 | Connectors declare their own settings to the core | P2 | L | 039, botconf 005, 006, dynamic sections | TODO |
+| 040 | Connectors declare their own settings to the core | P2 | L | 039, botconf 005, 006, 009 | TODO |
 | 041 | A settings panel in the Telegram connector | P2 | L | 039, 040, botconf 004–007 | TODO |
 | 042 | A `wuphf settings` command | P3 | S | 035, 036, 039 | TODO |
 | 043 | Label user-session stickers through the helper bot | P3 | M | 041 | TODO |
@@ -394,7 +394,7 @@ Dependencies and ordering:
   `propheci/botconf`). The owner creates that remote; executors never push.
 - **035 → 036 → 037 → 038** in order. 039 needs 034–037 plus botconf 003
   (`Kind::Ref`) and 005 (`botconf.v1.Settings` and `botconf-grpc`).
-- **040 needs botconf's dynamic sections** (settings declared at runtime with
+- **040 needs botconf plan 009, dynamic sections** (settings declared at runtime with
   owned keys and kinds, sections added after the store loads, a validator
   other than a Rust type, and a base value per section). The botconf plans
   cover it; 040 stops if the tag lacks it.

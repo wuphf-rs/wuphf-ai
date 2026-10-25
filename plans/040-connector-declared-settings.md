@@ -23,7 +23,7 @@
 - **Risk**: MED — touches the connector registration protocol and every Go
   connector's sender; a bad push could mis-render every mirrored message
 - **Depends on**: 039; botconf plans 005 (`Watch`) and 006 (Go client), plus
-  the botconf **dynamic sections** capability described under "Prerequisite"
+  the botconf **dynamic sections** capability (botconf plan 009) described under "Prerequisite"
 - **Category**: direction
 - **Planned at**: commit `643829b`, 2026-10-25
 
