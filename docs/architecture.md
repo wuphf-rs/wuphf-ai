@@ -1,4 +1,3 @@
-| `wuphf-functions` | Brokers remote function calls between callers and provider processes; independent of the core and storage. |
 # Architecture
 
 wuphf replicates messages between chat platforms by modelling **one logical
@@ -99,8 +98,10 @@ dedup, reply mapping, loop prevention, or address mapping.
 | `wuphf-storage` | The `Storage` trait — the sum of six role traits (topology, messages, media, dispatch queue, provisioning stash, observation log) — plus two backends: `memory` (tests) and `sqlite` (durable). A consumer that needs only part of storage bounds on its roles. |
 | `wuphf-core` | Owns logical identity, dedup, echo suppression, reply resolution and identity migration; evaluates rules and computes dispatch targets (`config.rs`, `router.rs`). |
 | `wuphf-runtime` | Tokio event bus + dispatch pipeline; connector session hub; bounded media broker; gRPC transport adapter. |
+| `wuphf-functions` | Brokers remote function calls between callers and provider processes; independent of the core and storage. |
+| `wuphf-settings` | Loads the core configuration (TOML, then `WUPHF_CORE_*` environment) and describes it to botconf; builds the routing config, connector list, resolved functions and connector tokens from it. |
 | `wuphf-proto` | Canonical protobuf contract and Tonic bindings. |
-| `wuphf-cli` | Loads TOML config, wires storage/core/runtime, serves gRPC. |
+| `wuphf-cli` | Loads the configuration through `wuphf-settings`, wires storage/core/runtime, serves gRPC. |
 | `connectors/` | Go connectors: Telegram (`gotd/td`, forum topics), WhatsApp (`whatsmeow`, QR pairing), and Instagram (`mautrix/meta`, cookie auth). |
 
 ## Replicated Operations

@@ -1,3 +1,7 @@
+# Every key can be overridden by an environment variable: `WUPHF_CORE_` plus the
+# key path in upper case, with `__` between levels (`WUPHF_CORE_LISTEN`,
+# `WUPHF_CORE_FUNCTIONS__MAX_DEADLINE_MS`).
+
 listen = "127.0.0.1:50051"
 database_url = "sqlite://wuphf.sqlite"
 max_media_bytes = 33554432
