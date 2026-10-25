@@ -3,7 +3,7 @@
 //! validates it, reads tokens from the environment and produces [`Functions`],
 //! which the hub and services consult for authorization, deadlines and limits.
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashSet};
 use std::fmt;
 use std::time::Duration;
@@ -11,7 +11,7 @@ use thiserror::Error;
 use wuphf_proto::connector as pb;
 
 /// `[functions]` in the core configuration. All durations are milliseconds.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(default)]
 pub struct FunctionsConfig {
     /// Deadline for a call whose caller sets none.
@@ -49,7 +49,7 @@ impl Default for FunctionsConfig {
     }
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct ProviderConfig {
     pub id: String,
     /// Env var holding this provider's token. Required.
@@ -59,7 +59,7 @@ pub struct ProviderConfig {
 }
 
 /// Per-function limits that replace the global ones.
-#[derive(Debug, Clone, Default, Deserialize)]
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
 #[serde(default)]
 pub struct FunctionOverride {
     pub default_deadline_ms: Option<u64>,

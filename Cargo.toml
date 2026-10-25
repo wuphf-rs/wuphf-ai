@@ -3,6 +3,7 @@ members = [
   "crates/wuphf-model",
   "crates/wuphf-proto",
   "crates/wuphf-functions",
+  "crates/wuphf-settings",
   "crates/wuphf-storage",
   "crates/wuphf-core",
   "crates/wuphf-runtime",
@@ -24,9 +25,11 @@ version = "0.1.0"
 
 [workspace.dependencies]
 async-trait = "0.1"
+botconf = { git = "https://github.com/propheci/botconf", tag = "v0.1.1" }
 anyhow = "1"
 clap = { version = "4", features = ["derive"] }
 crossterm = { version = "0.28", features = ["event-stream"] }
+figment = { version = "0.10", features = ["env", "toml"] }
 ratatui = "0.29"
 prost = "0.13"
 serde = { version = "1", features = ["derive"] }
@@ -48,4 +51,5 @@ wuphf-functions = { path = "crates/wuphf-functions" }
 wuphf-model = { path = "crates/wuphf-model" }
 wuphf-proto = { path = "crates/wuphf-proto" }
 wuphf-runtime = { path = "crates/wuphf-runtime" }
+wuphf-settings = { path = "crates/wuphf-settings" }
 wuphf-storage = { path = "crates/wuphf-storage" }
