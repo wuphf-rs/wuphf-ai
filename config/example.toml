@@ -1,6 +1,12 @@
 # Every key can be overridden by an environment variable: `WUPHF_CORE_` plus the
 # key path in upper case, with `__` between levels (`WUPHF_CORE_LISTEN`,
 # `WUPHF_CORE_FUNCTIONS__MAX_DEADLINE_MS`).
+#
+# A chat is written as one string, `connector:chat`, optionally `#thread`
+# (`telegram-main:telegram:channel:2060340733#12`). The connector is everything
+# before the first `:`, so chat ids may contain `:`. Inside the chat and the
+# thread, write `#` as `%23` and `%` as `%25`. Connector ids may not contain
+# `:`, `#`, `%` or spaces.
 
 listen = "127.0.0.1:50051"
 database_url = "sqlite://wuphf.sqlite"
@@ -12,6 +18,20 @@ orphan_media_retention_seconds = 86400
 # local address — without it the observer, which can read every captured chat,
 # is unauthenticated.
 # observer_token = "change-me"
+
+# Where connectors report their own trouble. A connector that loses its session
+# stops bridging silently — from the outside that looks exactly like nobody
+# writing to you — so it tells the core, which relays a message here.
+#
+# A notice is never sent through the connector that raised it: a logged-out
+# WhatsApp cannot deliver the news that it is logged out. List a target on each
+# platform you want to stay reachable on, and leave this out entirely to keep
+# notices in the log only.
+#
+# Runtime setting: can also be changed while the core runs (stored overrides win
+# over this file; unsetting one goes back to this file). It is a top-level key,
+# so it must stay above the first `[table]`.
+notify = ["telegram-main:telegram:user:704338780"]
 
 # Connectors are thin pipes. The core only trusts a session that presents the
 # connector's token (`authorization: Bearer <token>`, read from the environment
@@ -51,24 +71,12 @@ token_env = "WUPHF_CONNECTOR_TELEGRAM_MAIN_TOKEN"
 supports_threads = true
 supports_topic_create = true
 
-
-# Where connectors report their own trouble. A connector that loses its session
-# stops bridging silently — from the outside that looks exactly like nobody
-# writing to you — so it tells the core, which relays a message here.
+# Rules, keyed by id: `[rules.<id>]`. Runtime setting: each rule is its own
+# entry (`rules.<id>`) and can be set or removed while the core runs (stored
+# overrides win over this file; unsetting goes back to it).
 #
-# A notice is never sent through the connector that raised it: a logged-out
-# WhatsApp cannot deliver the news that it is logged out. List a target on each
-# platform you want to stay reachable on, and leave this out entirely to keep
-# notices in the log only.
-#
-# Runtime setting: can also be changed while the core runs (stored overrides win
-# over this file; unsetting one goes back to this file).
-[[notify]]
-connector_id = "telegram-main"
-chat_id = "telegram:user:704338780"
-
-# Runtime setting: can also be changed while the core runs (stored overrides win
-# over this file; unsetting one goes back to this file).
+# A rule's id is how its conversations remember it: renaming a rule (changing
+# its key) starts new mirror threads.
 #
 # Rules declare a flow between a source and a destination. The source end owns
 # conversation identity; replication itself is two-way.
@@ -76,24 +84,22 @@ chat_id = "telegram:user:704338780"
 # `kind = "one-to-one"`: one fixed source chat mirrored into one fixed
 # destination chat (optionally a thread within it):
 #
-# [[rules]]
-# id = "direct-pair"
-#
-# [rules.flow]
+# [rules.direct-pair]
 # kind = "one-to-one"
-# source_connector = "whatsapp-main"
-# source_chat = { chat_id = "12345@s.whatsapp.net" }
-# destination_connector = "telegram-main"
-# destination_chat = { chat_id = "-100123", thread_id = "12" }
-
-# `kind = "many-to-one"`: every chat on the source connector that passes the
-# filter, each mirrored into its own topic auto-created inside the destination
-# container chat. `source_chats_filter` defaults to every chat; restrict it
-# with kind = "only" (allowlist) or kind = "not" (blocklist):
+# source = "whatsapp-main:12345@s.whatsapp.net"
+# destination = "telegram-main:-100123#12"
 #
-# [rules.flow.source_chats_filter]
-# kind = "not"
-# chats = [{ chat_id = "12345@s.whatsapp.net" }]
+# `kind = "many-to-one"`: every chat on the source connector, each mirrored
+# into its own topic auto-created inside the destination container chat. A
+# many-to-one rule may limit its source chats with `only_chats = [...]` (an
+# allowlist) or `except_chats = [...]` (a blocklist), not both; the chats must
+# be on `source_connector`:
+#
+# except_chats = ["whatsapp-main:12345@s.whatsapp.net"]
+#
+# When several rules match the same chat, the one with the lowest `priority`
+# (default 0) wins, then the lowest id. Set it only when rules overlap, e.g.
+# `priority = -1` on a one-to-one exception to a many-to-one catch-all.
 #
 # Chat ids may be written in any address form the platform uses for the chat.
 # WhatsApp reaches a contact as both a phone JID (`<number>@s.whatsapp.net`) and
@@ -101,23 +107,15 @@ chat_id = "telegram:user:704338780"
 # entry written with one form selects — or, in a blocklist, excludes — the chat
 # under all of them, as soon as the connector has reported that the forms belong
 # together. Group ids (`<id>@g.us`) have a single form.
-[[rules]]
-id = "wa-to-telegram-mirror"
-
-[rules.flow]
+[rules.wa-to-telegram-mirror]
 kind = "many-to-one"
 source_connector = "whatsapp-main"
-destination_connector = "telegram-main"
-destination_chat = { chat_id = "telegram:channel:2060340733" }
+destination = "telegram-main:telegram:channel:2060340733"
 
-[[rules]]
-id = "ig-to-telegram-mirror"
-
-[rules.flow]
+[rules.ig-to-telegram-mirror]
 kind = "many-to-one"
 source_connector = "instagram-main"
-destination_connector = "telegram-main"
-destination_chat = { chat_id = "telegram:channel:2060340733" }
+destination = "telegram-main:telegram:channel:2060340733"
 
 # Remote functions (see docs/connector-protocol.md, "Remote functions").
 # Providers dial the core and serve named functions; connectors call them.
@@ -137,6 +135,5 @@ destination_chat = { chat_id = "telegram:channel:2060340733" }
 id = "mediaconv"
 token_env = "WUPHF_PROVIDER_MEDIACONV_TOKEN"
 functions = ["media.convert"]
-
 # [functions.overrides."media.convert"]
 # default_deadline_ms = 20000

@@ -7,7 +7,9 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use wuphf_core::RoutingConfig;
 use wuphf_functions::Functions;
-use wuphf_model::{Connector, ConnectorCapabilities, ConnectorId};
+use wuphf_model::{
+    Connector, ConnectorCapabilities, ConnectorId, Rule, RuleId, is_valid_connector_id,
+};
 
 /// What the core runs from, computed from a validated configuration.
 pub struct Derived {
@@ -57,6 +59,12 @@ impl botconf::Schema for WuphfSchema {
     fn derive(&self, config: &Configuration) -> Result<Derived, String> {
         let mut connectors = Vec::new();
         for connector in &config.connectors {
+            if !is_valid_connector_id(&connector.id) {
+                return Err(format!(
+                    "connector id {:?} must not be empty or contain ':', '#', '%' or spaces",
+                    connector.id
+                ));
+            }
             connectors.push(Connector {
                 id: ConnectorId(connector.id.clone()),
                 platform: platform(&connector.platform)?,
@@ -67,8 +75,13 @@ impl botconf::Schema for WuphfSchema {
             });
         }
         let connector_tokens = self.connector_tokens(config)?;
-        let routing = RoutingConfig::new(config.rules.clone(), connectors.clone())
-            .with_notice_targets(config.notify.clone());
+        let notice_targets = config
+            .notify
+            .iter()
+            .map(|target| target.0.clone())
+            .collect();
+        let routing = RoutingConfig::new(rules(config)?, connectors.clone())
+            .with_notice_targets(notice_targets);
         routing.validate().map_err(|error| error.to_string())?;
         let routing = Arc::new(routing);
         let functions = config
@@ -89,12 +102,12 @@ impl botconf::Schema for WuphfSchema {
     /// once at startup, so it stays file and environment only.
     fn settings(&self) -> Vec<RuntimeSetting> {
         vec![
-            RuntimeSetting::new(
+            RuntimeSetting::per_entry(
                 "rules",
-                "Routing rules: which chats mirror each other (see config/example.toml)",
+                "Routing rules by id: which chats mirror each other. Lower priority numbers match first.",
+                &Kind::Json,
             )
-            .titled("Rules")
-            .kind(Kind::Json),
+            .titled("Rules"),
             RuntimeSetting::new(
                 "notify",
                 "Chats that receive notices about connector trouble",
@@ -103,6 +116,36 @@ impl botconf::Schema for WuphfSchema {
             .kind(Kind::Json),
         ]
     }
+}
+
+/// The rules in match order: by `priority`, then by id. A map has no order of
+/// its own, and the first matching rule wins.
+fn rules(config: &Configuration) -> Result<Vec<Rule>, String> {
+    let mut rules = Vec::new();
+    for (id, entry) in &config.rules {
+        if !botconf::keys::is_entry_name(id) {
+            return Err(format!(
+                "rule id {id:?} must be non-empty and must not contain '.'"
+            ));
+        }
+        if entry.id.is_some() {
+            return Err(format!(
+                "rule {id:?}: remove the id field; a rule's id is its key"
+            ));
+        }
+        let flow = entry.flow.clone().into_rule_kind(id)?;
+        rules.push((
+            entry.priority,
+            Rule {
+                id: RuleId(id.clone()),
+                flow,
+            },
+        ));
+    }
+    rules.sort_by(|(a_priority, a), (b_priority, b)| {
+        a_priority.cmp(b_priority).then_with(|| a.id.0.cmp(&b.id.0))
+    });
+    Ok(rules.into_iter().map(|(_, rule)| rule).collect())
 }
 
 impl WuphfSchema {

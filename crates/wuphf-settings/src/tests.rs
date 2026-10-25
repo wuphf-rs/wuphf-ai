@@ -11,7 +11,7 @@ use figment::Jail;
 use std::path::Path;
 use std::sync::Arc;
 use wuphf_core::RoutingSource;
-use wuphf_model::{ChatFilter, ConnectorId, RuleId, RuleKind};
+use wuphf_model::{AddressSet, ChatAddress, ChatFilter, ConnectorId, RuleId, RuleKind};
 use wuphf_storage::{SettingsOverrides, SqliteStorage};
 
 const EXAMPLE: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../../config/example.toml");
@@ -47,30 +47,31 @@ fn example_configuration_parses() {
     Jail::expect_with(|_| {
         let configuration: Configuration = base(Path::new(EXAMPLE)).unwrap().extract()?;
         assert_eq!(configuration.rules.len(), 2);
-        for rule in &configuration.rules {
+        for (id, entry) in &configuration.rules {
             let RuleKind::ManyToOne {
                 source_chats_filter,
+                destination_connector,
                 destination_chat,
                 ..
-            } = &rule.flow
+            } = entry.flow.clone().into_rule_kind(id).unwrap()
             else {
                 panic!("example rules are many-to-one mirrors");
             };
-            assert_eq!(*source_chats_filter, ChatFilter::All);
+            assert_eq!(source_chats_filter, ChatFilter::All);
+            assert_eq!(destination_connector, ConnectorId("telegram-main".into()));
             assert_eq!(destination_chat.chat_id, "telegram:channel:2060340733");
         }
         assert_eq!(configuration.notify.len(), 1);
-        assert_eq!(
-            configuration.notify[0].connector_id,
-            ConnectorId("telegram-main".into())
-        );
-        assert_eq!(
-            configuration.notify[0].address.chat_id,
-            "telegram:user:704338780"
-        );
-        assert_eq!(configuration.notify[0].address.thread_id, None);
+        let target = &configuration.notify[0].0;
+        assert_eq!(target.connector_id, ConnectorId("telegram-main".into()));
+        assert_eq!(target.address.chat_id, "telegram:user:704338780");
+        assert_eq!(target.address.thread_id, None);
         Ok(())
     });
+}
+
+fn chat(chat_id: &str, thread_id: Option<&str>) -> ChatAddress {
+    ChatAddress::new(chat_id, thread_id.map(Into::into))
 }
 
 #[test]
@@ -80,46 +81,65 @@ fn one_to_one_rule_and_filters_parse() {
             jail,
             &format!(
                 r#"{MINIMAL}
-                [[rules]]
-                id = "direct"
-                [rules.flow]
+                [rules.direct]
                 kind = "one-to-one"
-                source_connector = "whatsapp-main"
-                source_chat = {{ chat_id = "123@s.whatsapp.net" }}
-                destination_connector = "telegram-main"
-                destination_chat = {{ chat_id = "-100123", thread_id = "12" }}
+                source = "whatsapp-main:123@s.whatsapp.net"
+                destination = "telegram-main:-100123#12"
 
-                [[rules]]
-                id = "filtered-mirror"
-                [rules.flow]
+                [rules.filtered-mirror]
                 kind = "many-to-one"
                 source_connector = "whatsapp-main"
-                destination_connector = "telegram-main"
-                destination_chat = {{ chat_id = "-100999" }}
-                [rules.flow.source_chats_filter]
-                kind = "not"
-                chats = [{{ chat_id = "spam@g.us" }}]
+                destination = "telegram-main:-100999"
+                except_chats = ["whatsapp-main:spam@g.us"]
+
+                [rules.only-mirror]
+                kind = "many-to-one"
+                source_connector = "whatsapp-main"
+                destination = "telegram-main:-100999"
+                only_chats = ["whatsapp-main:family@g.us", "whatsapp-main:a%23b#7"]
                 "#
             ),
         )?;
-        let RuleKind::OneToOne {
-            source_chat,
-            destination_chat,
-            ..
-        } = &configuration.rules[0].flow
-        else {
-            panic!("first rule is one-to-one");
+        let kind = |id: &str| {
+            configuration.rules[id]
+                .flow
+                .clone()
+                .into_rule_kind(id)
+                .unwrap()
         };
-        assert_eq!(source_chat.chat_id, "123@s.whatsapp.net");
-        assert_eq!(destination_chat.thread_id.as_deref(), Some("12"));
-        let RuleKind::ManyToOne {
-            source_chats_filter: ChatFilter::Not { chats },
-            ..
-        } = &configuration.rules[1].flow
-        else {
-            panic!("second rule is a filtered mirror");
-        };
-        assert_eq!(chats[0].chat_id, "spam@g.us");
+        let whatsapp = || ConnectorId("whatsapp-main".into());
+        let telegram = || ConnectorId("telegram-main".into());
+        assert_eq!(
+            kind("direct"),
+            RuleKind::OneToOne {
+                source_connector: whatsapp(),
+                source_chat: chat("123@s.whatsapp.net", None),
+                destination_connector: telegram(),
+                destination_chat: chat("-100123", Some("12")),
+            }
+        );
+        assert_eq!(
+            kind("filtered-mirror"),
+            RuleKind::ManyToOne {
+                source_connector: whatsapp(),
+                source_chats_filter: ChatFilter::Not {
+                    chats: vec![chat("spam@g.us", None)],
+                },
+                destination_connector: telegram(),
+                destination_chat: chat("-100999", None),
+            }
+        );
+        assert_eq!(
+            kind("only-mirror"),
+            RuleKind::ManyToOne {
+                source_connector: whatsapp(),
+                source_chats_filter: ChatFilter::Only {
+                    chats: vec![chat("family@g.us", None), chat("a#b", Some("7"))],
+                },
+                destination_connector: telegram(),
+                destination_chat: chat("-100999", None),
+            }
+        );
         Ok(())
     });
 }
@@ -299,20 +319,181 @@ fn derive_rejects_a_rule_on_an_unknown_connector() {
             "wuphf.toml",
             &format!(
                 r#"{MINIMAL}
-                [[rules]]
-                id = "nowhere"
-
-                [rules.flow]
+                [rules.nowhere]
                 kind = "many-to-one"
                 source_connector = "whatsapp-main"
-                destination_connector = "telegram-main"
-                destination_chat = {{ chat_id = "-100123" }}
+                destination = "telegram-main:-100123"
                 "#
             ),
         )?;
         let error = store_error(every_token_set(), Path::new("wuphf.toml"));
         assert!(
             error.contains("rule nowhere names connector whatsapp-main"),
+            "{error}"
+        );
+        Ok(())
+    });
+}
+
+/// Two connectors to route between, for tests that derive rules.
+const CONNECTORS: &str = r#"
+[[connectors]]
+id = "whatsapp-main"
+platform = "whatsapp"
+token_env = "WUPHF_CONNECTOR_WHATSAPP_MAIN_TOKEN"
+
+[[connectors]]
+id = "telegram-main"
+platform = "telegram"
+token_env = "WUPHF_CONNECTOR_TELEGRAM_MAIN_TOKEN"
+supports_threads = true
+supports_topic_create = true
+"#;
+
+/// A many-to-one rule from WhatsApp, every chat, with an optional priority.
+fn catch_all(id: &str, priority: Option<i32>) -> String {
+    let priority = priority.map_or(String::new(), |p| format!("priority = {p}\n"));
+    format!(
+        "[rules.{id}]\nkind = \"many-to-one\"\nsource_connector = \"whatsapp-main\"\n\
+         destination = \"telegram-main:-100{id}\"\n{priority}\n"
+    )
+}
+
+/// The rule that wins for a WhatsApp chat, loading `rules` with the two
+/// connectors.
+fn winning_rule(jail: &mut Jail, rules: &str, chat_id: &str) -> String {
+    jail.create_file("wuphf.toml", &format!("{MINIMAL}\n{rules}\n{CONNECTORS}"))
+        .unwrap();
+    let store = store(every_token_set(), Path::new("wuphf.toml")).unwrap();
+    let routing = Arc::clone(&store.current().derived.routing);
+    let matched = routing
+        .match_source(
+            &ConnectorId("whatsapp-main".into()),
+            &AddressSet::single(chat(chat_id, None)),
+        )
+        .expect("a rule matches");
+    matched.rule.id.0.clone()
+}
+
+#[test]
+fn rules_are_ordered_by_priority_then_id() {
+    Jail::expect_with(|jail| {
+        let ties = format!("{}{}", catch_all("b", None), catch_all("a", None));
+        assert_eq!(winning_rule(jail, &ties, "x@g.us"), "a");
+        let with_z = format!("{ties}{}", catch_all("z", Some(-1)));
+        assert_eq!(winning_rule(jail, &with_z, "x@g.us"), "z");
+        Ok(())
+    });
+}
+
+#[test]
+fn a_one_to_one_exception_beats_a_catch_all() {
+    Jail::expect_with(|jail| {
+        let rules = format!(
+            "{}[rules.vip]\nkind = \"one-to-one\"\npriority = -1\n\
+             source = \"whatsapp-main:vip@s.whatsapp.net\"\n\
+             destination = \"telegram-main:-100777\"\n",
+            catch_all("all", None)
+        );
+        assert_eq!(winning_rule(jail, &rules, "vip@s.whatsapp.net"), "vip");
+        assert_eq!(winning_rule(jail, &rules, "other@g.us"), "all");
+        Ok(())
+    });
+}
+
+/// The message a config with `rules` (and the two connectors) fails with.
+fn rules_error(jail: &mut Jail, rules: &str) -> String {
+    jail.create_file("wuphf.toml", &format!("{MINIMAL}\n{rules}\n{CONNECTORS}"))
+        .unwrap();
+    store_error(every_token_set(), Path::new("wuphf.toml"))
+}
+
+#[test]
+fn rule_id_field_is_rejected() {
+    Jail::expect_with(|jail| {
+        let rules = format!("{}id = \"x\"\n", catch_all("x", None));
+        let error = rules_error(jail, &rules);
+        assert!(
+            error.contains("rule \"x\": remove the id field; a rule's id is its key"),
+            "{error}"
+        );
+        Ok(())
+    });
+}
+
+#[test]
+fn rule_id_with_a_dot_is_rejected() {
+    Jail::expect_with(|jail| {
+        let rules = "[rules.\"a.b\"]\nkind = \"many-to-one\"\n\
+                     source_connector = \"whatsapp-main\"\n\
+                     destination = \"telegram-main:-100\"\n";
+        let error = rules_error(jail, rules);
+        assert!(
+            error.contains("rule id \"a.b\" must be non-empty and must not contain '.'"),
+            "{error}"
+        );
+        Ok(())
+    });
+}
+
+#[test]
+fn filter_chat_on_another_connector_is_rejected() {
+    Jail::expect_with(|jail| {
+        let rules = format!(
+            "{}except_chats = [\"instagram-main:1\"]\n",
+            catch_all("mirror", None)
+        );
+        let error = rules_error(jail, &rules);
+        assert!(
+            error.contains(
+                "rule \"mirror\": filter chat instagram-main:1 is not on source connector \
+                 whatsapp-main"
+            ),
+            "{error}"
+        );
+        Ok(())
+    });
+}
+
+#[test]
+fn only_and_except_chats_together_are_rejected() {
+    Jail::expect_with(|jail| {
+        let rules = format!(
+            "{}only_chats = [\"whatsapp-main:a@g.us\"]\nexcept_chats = [\"whatsapp-main:b@g.us\"]\n",
+            catch_all("mirror", None)
+        );
+        let error = rules_error(jail, &rules);
+        assert!(
+            error.contains("rule \"mirror\": use only_chats or except_chats, not both"),
+            "{error}"
+        );
+        Ok(())
+    });
+}
+
+#[test]
+fn invalid_chat_strings_are_rejected() {
+    Jail::expect_with(|jail| {
+        let error = extract(jail, &format!("notify = [\"no-colon\"]\n{MINIMAL}"))
+            .expect_err("a chat needs its connector");
+        assert!(error.to_string().contains("\"no-colon\""), "{error}");
+        Ok(())
+    });
+}
+
+#[test]
+fn connector_ids_with_separators_are_rejected() {
+    Jail::expect_with(|jail| {
+        jail.create_file(
+            "wuphf.toml",
+            &format!(
+                "{MINIMAL}\n[[connectors]]\nid = \"tg:main\"\nplatform = \"telegram\"\n\
+                 token_env = \"WUPHF_CONNECTOR_TG_TOKEN\"\n"
+            ),
+        )?;
+        let error = store_error(every_token_set(), Path::new("wuphf.toml"));
+        assert!(
+            error.contains("connector id \"tg:main\" must not be empty or contain"),
             "{error}"
         );
         Ok(())
@@ -413,18 +594,19 @@ async fn live_store(url: &str) -> (Arc<SettingsStore>, Arc<SqliteStorage>) {
     (Arc::new(store), sqlite)
 }
 
-/// A one-to-one rule between two of the example's connectors.
+/// A one-to-one rule between two of the example's connectors, as the value
+/// of the whole `rules` map.
 fn runtime_rule(destination_connector: &str) -> serde_json::Value {
-    serde_json::json!([{
-        "id": "runtime-direct",
-        "flow": {
-            "kind": "one-to-one",
-            "source_connector": "whatsapp-main",
-            "source_chat": { "chat_id": "12345@s.whatsapp.net" },
-            "destination_connector": destination_connector,
-            "destination_chat": { "chat_id": "-100123" }
-        }
-    }])
+    serde_json::json!({ "runtime-direct": runtime_rule_entry(destination_connector) })
+}
+
+/// One rule entry: what `rules.<id>` holds.
+fn runtime_rule_entry(destination_connector: &str) -> serde_json::Value {
+    serde_json::json!({
+        "kind": "one-to-one",
+        "source": "whatsapp-main:12345@s.whatsapp.net",
+        "destination": format!("{destination_connector}:-100123"),
+    })
 }
 
 fn runtime_rule_id() -> RuleId {
@@ -489,7 +671,7 @@ fn only_rules_and_notify_change_at_runtime() {
                 );
             }
             store
-                .set("notify", serde_json::json!([]), None)
+                .set("notify", serde_json::json!(["telegram-main:-100123"]), None)
                 .await
                 .unwrap();
         });
@@ -562,5 +744,44 @@ fn adapter_stores_the_actor_as_text() {
             .unwrap();
         let stored = sqlite.settings_overrides().await.unwrap();
         assert_eq!(stored[0].updated_by.as_deref(), Some("42"));
+    });
+}
+
+#[test]
+fn a_single_rule_can_be_set_and_removed_at_runtime() {
+    Jail::expect_with(|_| {
+        runtime().block_on(async {
+            let (store, _) = live_store(&temp_database()).await;
+            let file_rules = [
+                RuleId("wa-to-telegram-mirror".into()),
+                RuleId("ig-to-telegram-mirror".into()),
+            ];
+            let extra = RuleId("extra".into());
+
+            store
+                .set("rules.extra", runtime_rule_entry("telegram-main"), None)
+                .await
+                .unwrap();
+            let routing = store.current().derived.routing.clone();
+            assert!(routing.rule(&extra).is_some());
+            for id in &file_rules {
+                assert!(routing.rule(id).is_some(), "{} kept", id.0);
+            }
+
+            store.delete_entry("rules.extra", None).await.unwrap();
+            let routing = store.current().derived.routing.clone();
+            assert!(routing.rule(&extra).is_none());
+            for id in &file_rules {
+                assert!(routing.rule(id).is_some(), "{} kept", id.0);
+            }
+
+            store.unset("rules").await.unwrap().unwrap();
+            let routing = store.current().derived.routing.clone();
+            for id in &file_rules {
+                assert!(routing.rule(id).is_some(), "{} back", id.0);
+            }
+            assert_eq!(store.current().source("rules"), Source::File);
+        });
+        Ok(())
     });
 }
