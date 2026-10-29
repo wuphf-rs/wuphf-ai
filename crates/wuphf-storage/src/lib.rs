@@ -234,6 +234,12 @@ pub trait ObservationStore: Send + Sync + 'static {
     ) -> StorageResult<()>;
     /// Every chat the observation log has seen, most recently active first.
     async fn list_observed_chats(&self) -> StorageResult<Vec<ObservedChat>>;
+    /// The observation log's summary of one chat, if it has seen the chat.
+    async fn observed_chat(
+        &self,
+        connector_id: &ConnectorId,
+        chat_id: &str,
+    ) -> StorageResult<Option<ObservedChat>>;
     /// A page of a chat's observed messages, newest first, older than `before_ms`
     /// when set (for scrollback), capped at `limit`.
     async fn observed_messages(
@@ -270,6 +276,30 @@ pub trait SettingsOverrides: Send + Sync + 'static {
         upserted: Option<&StoredSetting>,
         updated_at_ms: i64,
     ) -> StorageResult<()>;
+}
+
+/// The settings panel's button handles: actions too long for a platform's
+/// button data, kept under a short key derived from the action
+/// (botconf-panel's hybrid tokens). Not part of [`Storage`]: routing never
+/// reads them.
+#[async_trait]
+pub trait PanelTokens: Send + Sync + 'static {
+    /// Store `action` under `key` until `expires_at_ms`. If `key` holds the
+    /// same action, or one that expired before `now_ms`, it is replaced
+    /// (renewing the expiry) and the result is `true`. If it holds a
+    /// different unexpired action (a hash collision), nothing changes and the
+    /// result is `false`.
+    async fn put_panel_token(
+        &self,
+        key: &str,
+        action: &str,
+        now_ms: i64,
+        expires_at_ms: i64,
+    ) -> StorageResult<bool>;
+    /// The action under `key`, unless it is absent or expired at `now_ms`.
+    async fn panel_token(&self, key: &str, now_ms: i64) -> StorageResult<Option<String>>;
+    /// Delete the handles expired at `now_ms`; returns how many.
+    async fn purge_panel_tokens(&self, now_ms: i64) -> StorageResult<u64>;
 }
 
 /// The full persistence surface the core needs: the sum of the role traits.

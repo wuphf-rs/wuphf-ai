@@ -3,7 +3,7 @@
 
 use crate::shared::{acknowledged_copy, release_blocked};
 use crate::{
-    DispatchStore, MediaStore, MessageStore, ObservationStore, ProvisioningStash,
+    DispatchStore, MediaStore, MessageStore, ObservationStore, PanelTokens, ProvisioningStash,
     SettingsOverrides, StorageError, StorageResult, StoredSetting, TopologyStore,
 };
 use async_trait::async_trait;
@@ -847,6 +847,22 @@ impl ObservationStore for SqliteStorage {
             .collect()
     }
 
+    async fn observed_chat(
+        &self,
+        connector_id: &ConnectorId,
+        chat_id: &str,
+    ) -> StorageResult<Option<ObservedChat>> {
+        let row = sqlx::query(
+            "SELECT payload FROM observed_chats WHERE connector_id = ? AND chat_id = ?",
+        )
+        .bind(connector_id.to_string())
+        .bind(chat_id)
+        .fetch_optional(&self.pool)
+        .await?;
+        row.map(|row| serde_json::from_str(row.get("payload")).map_err(Into::into))
+            .transpose()
+    }
+
     async fn observed_messages(
         &self,
         connector_id: &ConnectorId,
@@ -918,6 +934,51 @@ impl SettingsOverrides for SqliteStorage {
         }
         transaction.commit().await?;
         Ok(())
+    }
+}
+
+#[async_trait]
+impl PanelTokens for SqliteStorage {
+    async fn put_panel_token(
+        &self,
+        key: &str,
+        action: &str,
+        now_ms: i64,
+        expires_at_ms: i64,
+    ) -> StorageResult<bool> {
+        // One statement: insert, or replace a row holding the same action or
+        // an expired one. A live row with another action is left alone, and
+        // no row is written.
+        let result = sqlx::query(
+            "INSERT INTO panel_tokens (key, action, expires_at) VALUES (?1, ?2, ?4)
+             ON CONFLICT(key) DO UPDATE SET
+               action = excluded.action, expires_at = excluded.expires_at
+             WHERE panel_tokens.action = excluded.action OR panel_tokens.expires_at < ?3",
+        )
+        .bind(key)
+        .bind(action)
+        .bind(now_ms)
+        .bind(expires_at_ms)
+        .execute(&self.pool)
+        .await?;
+        Ok(result.rows_affected() == 1)
+    }
+
+    async fn panel_token(&self, key: &str, now_ms: i64) -> StorageResult<Option<String>> {
+        let row = sqlx::query("SELECT action FROM panel_tokens WHERE key = ? AND expires_at >= ?")
+            .bind(key)
+            .bind(now_ms)
+            .fetch_optional(&self.pool)
+            .await?;
+        Ok(row.map(|row| row.get("action")))
+    }
+
+    async fn purge_panel_tokens(&self, now_ms: i64) -> StorageResult<u64> {
+        let result = sqlx::query("DELETE FROM panel_tokens WHERE expires_at < ?")
+            .bind(now_ms)
+            .execute(&self.pool)
+            .await?;
+        Ok(result.rows_affected())
     }
 }
 

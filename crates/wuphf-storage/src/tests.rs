@@ -1036,3 +1036,157 @@ async fn sqlite_settings_overrides_survive_reopen() {
     let reopened = SqliteStorage::connect(&url).await.unwrap();
     assert_eq!(reopened.settings_overrides().await.unwrap(), [stored]);
 }
+
+/// A fresh SQLite database in the temp directory.
+async fn temp_sqlite() -> SqliteStorage {
+    let path = std::env::temp_dir().join(format!("wuphf-{}.sqlite", DispatchId::new()));
+    SqliteStorage::connect(&format!("sqlite://{}", path.display()))
+        .await
+        .unwrap()
+}
+
+#[tokio::test]
+async fn memory_observed_chat_returns_the_latest_title() {
+    observed_chat_returns_the_latest_title(InMemoryStorage::default()).await;
+}
+
+#[tokio::test]
+async fn sqlite_observed_chat_returns_the_latest_title() {
+    observed_chat_returns_the_latest_title(temp_sqlite().await).await;
+}
+
+/// One chat's summary: a newer title replaces the old one, a message without a
+/// title keeps it, and an unseen chat has none.
+async fn observed_chat_returns_the_latest_title<S: Storage>(storage: S) {
+    let whatsapp = ConnectorId("whatsapp".into());
+    for (id, ts, title) in [
+        ("m1", 100, Some("Old")),
+        ("m2", 200, Some("New")),
+        ("m3", 300, None),
+    ] {
+        storage
+            .log_observed(
+                observed(&whatsapp, "family@g.us", id, ts, Some("hi")),
+                title.map(Into::into),
+            )
+            .await
+            .unwrap();
+    }
+    let chat = storage
+        .observed_chat(&whatsapp, "family@g.us")
+        .await
+        .unwrap()
+        .expect("the chat was observed");
+    assert_eq!(chat.title.as_deref(), Some("New"));
+    assert_eq!(chat.last_message_ts, 300);
+    assert!(
+        storage
+            .observed_chat(&whatsapp, "unseen@g.us")
+            .await
+            .unwrap()
+            .is_none()
+    );
+}
+
+#[tokio::test]
+async fn memory_panel_tokens_round_trip() {
+    panel_tokens_round_trip(InMemoryStorage::default()).await;
+}
+
+#[tokio::test]
+async fn sqlite_panel_tokens_round_trip() {
+    panel_tokens_round_trip(temp_sqlite().await).await;
+}
+
+async fn panel_tokens_round_trip<S: PanelTokens>(storage: S) {
+    assert!(storage.put_panel_token("~k", "a", 0, 100).await.unwrap());
+    assert_eq!(
+        storage.panel_token("~k", 50).await.unwrap().as_deref(),
+        Some("a")
+    );
+    assert!(storage.panel_token("~missing", 50).await.unwrap().is_none());
+}
+
+#[tokio::test]
+async fn memory_putting_the_same_action_renews_it() {
+    putting_the_same_action_renews_it(InMemoryStorage::default()).await;
+}
+
+#[tokio::test]
+async fn sqlite_putting_the_same_action_renews_it() {
+    putting_the_same_action_renews_it(temp_sqlite().await).await;
+}
+
+async fn putting_the_same_action_renews_it<S: PanelTokens>(storage: S) {
+    assert!(storage.put_panel_token("~k", "a", 0, 100).await.unwrap());
+    assert!(storage.put_panel_token("~k", "a", 50, 200).await.unwrap());
+    assert_eq!(
+        storage.panel_token("~k", 199).await.unwrap().as_deref(),
+        Some("a"),
+        "the second put renewed the expiry"
+    );
+}
+
+#[tokio::test]
+async fn memory_a_live_collision_is_refused() {
+    a_live_collision_is_refused(InMemoryStorage::default()).await;
+}
+
+#[tokio::test]
+async fn sqlite_a_live_collision_is_refused() {
+    a_live_collision_is_refused(temp_sqlite().await).await;
+}
+
+/// A key holding another unexpired action is kept; once that action expired,
+/// the key is reused.
+async fn a_live_collision_is_refused<S: PanelTokens>(storage: S) {
+    assert!(storage.put_panel_token("~k", "a", 0, 100).await.unwrap());
+    assert!(!storage.put_panel_token("~k", "b", 50, 200).await.unwrap());
+    assert_eq!(
+        storage.panel_token("~k", 60).await.unwrap().as_deref(),
+        Some("a")
+    );
+    assert!(storage.put_panel_token("~k", "b", 101, 300).await.unwrap());
+    assert_eq!(
+        storage.panel_token("~k", 150).await.unwrap().as_deref(),
+        Some("b")
+    );
+}
+
+#[tokio::test]
+async fn memory_expired_panel_tokens_are_not_returned() {
+    expired_panel_tokens_are_not_returned(InMemoryStorage::default()).await;
+}
+
+#[tokio::test]
+async fn sqlite_expired_panel_tokens_are_not_returned() {
+    expired_panel_tokens_are_not_returned(temp_sqlite().await).await;
+}
+
+async fn expired_panel_tokens_are_not_returned<S: PanelTokens>(storage: S) {
+    storage.put_panel_token("~k", "a", 0, 100).await.unwrap();
+    assert!(storage.panel_token("~k", 100).await.unwrap().is_some());
+    assert!(storage.panel_token("~k", 101).await.unwrap().is_none());
+}
+
+#[tokio::test]
+async fn memory_purge_removes_only_expired_tokens() {
+    purge_removes_only_expired_tokens(InMemoryStorage::default()).await;
+}
+
+#[tokio::test]
+async fn sqlite_purge_removes_only_expired_tokens() {
+    purge_removes_only_expired_tokens(temp_sqlite().await).await;
+}
+
+async fn purge_removes_only_expired_tokens<S: PanelTokens>(storage: S) {
+    storage.put_panel_token("~old", "a", 0, 100).await.unwrap();
+    storage.put_panel_token("~older", "b", 0, 50).await.unwrap();
+    storage.put_panel_token("~live", "c", 0, 500).await.unwrap();
+    assert_eq!(storage.purge_panel_tokens(200).await.unwrap(), 2);
+    assert_eq!(
+        storage.panel_token("~live", 200).await.unwrap().as_deref(),
+        Some("c")
+    );
+    assert_eq!(storage.purge_panel_tokens(200).await.unwrap(), 0);
+}

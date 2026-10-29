@@ -868,3 +868,21 @@ fn a_single_rule_can_be_set_and_removed_at_runtime() {
         Ok(())
     });
 }
+
+#[test]
+fn panel_token_store_keeps_handles_in_sqlite() {
+    use botconf_panel::TokenStore;
+    runtime().block_on(async {
+        let url = temp_database();
+        let tokens =
+            crate::PanelTokenStore::new(Arc::new(SqliteStorage::connect(&url).await.unwrap()));
+        assert!(tokens.put("~k", "a", 0, 100).await.unwrap());
+        assert!(!tokens.put("~k", "b", 10, 100).await.unwrap());
+
+        let reopened =
+            crate::PanelTokenStore::new(Arc::new(SqliteStorage::connect(&url).await.unwrap()));
+        assert_eq!(reopened.get("~k", 50).await.unwrap().as_deref(), Some("a"));
+        assert_eq!(reopened.purge_expired(200).await.unwrap(), 1);
+        assert!(reopened.get("~k", 50).await.unwrap().is_none());
+    });
+}

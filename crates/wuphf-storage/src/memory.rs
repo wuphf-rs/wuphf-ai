@@ -3,7 +3,7 @@
 
 use crate::shared::{acknowledged_copy, release_blocked};
 use crate::{
-    DispatchStore, MediaStore, MessageStore, ObservationStore, ProvisioningStash,
+    DispatchStore, MediaStore, MessageStore, ObservationStore, PanelTokens, ProvisioningStash,
     SettingsOverrides, StorageError, StorageResult, StoredSetting, TopologyStore,
 };
 use async_trait::async_trait;
@@ -45,6 +45,9 @@ struct State {
     /// Runtime settings overrides by key, mirroring the SQLite `settings` table
     /// (the write time is not kept: nothing reads it back).
     settings: BTreeMap<String, StoredSetting>,
+    /// Settings-panel button handles: key to (action, expiry in ms), mirroring
+    /// the SQLite `panel_tokens` table.
+    panel_tokens: HashMap<String, (String, i64)>,
 }
 
 struct StoredMedia {
@@ -664,6 +667,20 @@ impl ObservationStore for InMemoryStorage {
         Ok(chats)
     }
 
+    async fn observed_chat(
+        &self,
+        connector_id: &ConnectorId,
+        chat_id: &str,
+    ) -> StorageResult<Option<ObservedChat>> {
+        Ok(self
+            .state
+            .read()
+            .await
+            .observed_chats
+            .get(&(connector_id.clone(), chat_id.to_owned()))
+            .cloned())
+    }
+
     async fn observed_messages(
         &self,
         connector_id: &ConnectorId,
@@ -710,6 +727,49 @@ impl SettingsOverrides for InMemoryStorage {
             state.settings.insert(setting.key.clone(), setting.clone());
         }
         Ok(())
+    }
+}
+
+#[async_trait]
+impl PanelTokens for InMemoryStorage {
+    async fn put_panel_token(
+        &self,
+        key: &str,
+        action: &str,
+        now_ms: i64,
+        expires_at_ms: i64,
+    ) -> StorageResult<bool> {
+        let mut state = self.state.write().await;
+        if let Some((stored, expires_at)) = state.panel_tokens.get(key)
+            && stored != action
+            && *expires_at >= now_ms
+        {
+            return Ok(false);
+        }
+        state
+            .panel_tokens
+            .insert(key.to_owned(), (action.to_owned(), expires_at_ms));
+        Ok(true)
+    }
+
+    async fn panel_token(&self, key: &str, now_ms: i64) -> StorageResult<Option<String>> {
+        Ok(self
+            .state
+            .read()
+            .await
+            .panel_tokens
+            .get(key)
+            .filter(|(_, expires_at)| *expires_at >= now_ms)
+            .map(|(action, _)| action.clone()))
+    }
+
+    async fn purge_panel_tokens(&self, now_ms: i64) -> StorageResult<u64> {
+        let mut state = self.state.write().await;
+        let before = state.panel_tokens.len();
+        state
+            .panel_tokens
+            .retain(|_, (_, expires_at)| *expires_at >= now_ms);
+        Ok((before - state.panel_tokens.len()) as u64)
     }
 }
 

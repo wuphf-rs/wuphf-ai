@@ -238,6 +238,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "botconf-panel"
+version = "0.5.0"
+source = "git+https://github.com/propheci/botconf?tag=v0.5.0#835597a08405e37038666c041bd8a2af23131acf"
+dependencies = [
+ "botconf",
+ "futures",
+ "serde_json",
+ "thiserror",
+ "tracing",
+]
+
+[[package]]
 name = "bumpalo"
 version = "3.20.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3230,6 +3242,7 @@ name = "wuphf-settings"
 version = "0.1.0"
 dependencies = [
  "botconf",
+ "botconf-panel",
  "figment",
  "serde",
  "serde_json",
