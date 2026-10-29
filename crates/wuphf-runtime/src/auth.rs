@@ -40,6 +40,13 @@ impl ConnectorTokens {
             .is_some_and(|expected| token == Some(expected.as_str()))
     }
 
+    /// The connector whose token `token` is, if any.
+    pub fn connector_for(&self, token: &str) -> Option<&ConnectorId> {
+        self.tokens
+            .iter()
+            .find_map(|(id, expected)| (expected == token).then_some(id))
+    }
+
     /// Every connector's token, for services any connector may use.
     pub fn tokens(&self) -> impl Iterator<Item = &str> {
         self.tokens.values().map(String::as_str)
@@ -102,5 +109,10 @@ mod tests {
         assert!(!tokens.authenticates(&ConnectorId("wa".into()), Some("tg-secret")));
         assert!(!tokens.authenticates(&ConnectorId("wa".into()), None));
         assert!(!tokens.authenticates(&ConnectorId("other".into()), Some("wa-secret")));
+        assert_eq!(
+            tokens.connector_for("tg-secret"),
+            Some(&ConnectorId("tg".into()))
+        );
+        assert_eq!(tokens.connector_for("unknown"), None);
     }
 }

@@ -18,6 +18,7 @@ pub mod media;
 pub mod observation;
 pub mod observer_service;
 pub mod owner_send;
+pub mod settings_auth;
 
 pub use observation::Observer;
 pub use owner_send::{OwnerMessageSender, OwnerSendError};

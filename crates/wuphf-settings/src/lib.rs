@@ -8,6 +8,7 @@
 //! this crate, figment or botconf.
 
 mod config;
+pub mod domains;
 mod load;
 mod routing;
 mod schema;

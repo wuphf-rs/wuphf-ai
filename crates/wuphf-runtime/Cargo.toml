@@ -5,6 +5,9 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
+botconf-grpc.workspace = true
+botconf-panel.workspace = true
+serde_json.workspace = true
 thiserror.workspace = true
 tokio = { workspace = true, features = ["macros", "net", "rt-multi-thread", "sync"] }
 tokio-stream = { workspace = true, features = ["net"] }
@@ -14,4 +17,8 @@ uuid.workspace = true
 wuphf-core.workspace = true
 wuphf-model.workspace = true
 wuphf-proto.workspace = true
+wuphf-settings.workspace = true
 wuphf-storage.workspace = true
+
+[dev-dependencies]
+botconf.workspace = true

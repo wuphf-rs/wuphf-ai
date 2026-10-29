@@ -238,6 +238,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "botconf-grpc"
+version = "0.5.0"
+source = "git+https://github.com/propheci/botconf?tag=v0.5.0#835597a08405e37038666c041bd8a2af23131acf"
+dependencies = [
+ "botconf",
+ "botconf-panel",
+ "prost",
+ "serde_json",
+ "tokio",
+ "tokio-stream",
+ "tonic",
+ "tonic-build",
+ "tracing",
+]
+
+[[package]]
 name = "botconf-panel"
 version = "0.5.0"
 source = "git+https://github.com/propheci/botconf?tag=v0.5.0#835597a08405e37038666c041bd8a2af23131acf"
@@ -3225,6 +3241,10 @@ dependencies = [
 name = "wuphf-runtime"
 version = "0.1.0"
 dependencies = [
+ "botconf",
+ "botconf-grpc",
+ "botconf-panel",
+ "serde_json",
  "thiserror",
  "tokio",
  "tokio-stream",
@@ -3234,6 +3254,7 @@ dependencies = [
  "wuphf-core",
  "wuphf-model",
  "wuphf-proto",
+ "wuphf-settings",
  "wuphf-storage",
 ]
 

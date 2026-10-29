@@ -10,6 +10,7 @@ botconf.workspace = true
 botconf-panel.workspace = true
 figment.workspace = true
 serde.workspace = true
+serde_json.workspace = true
 thiserror.workspace = true
 wuphf-core.workspace = true
 wuphf-functions.workspace = true
@@ -18,5 +19,4 @@ wuphf-storage.workspace = true
 
 [dev-dependencies]
 figment = { workspace = true, features = ["test"] }
-serde_json.workspace = true
 tokio.workspace = true
