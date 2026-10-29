@@ -144,8 +144,11 @@ the core's database, without starting anything else: they validate exactly as
 the running core does and work while it is down. A running core keeps its own
 copy of the settings, so `wuphf settings reload` asks it to re-read them
 through the service's `Reload`, as the observer (`WUPHF_OBSERVER_TOKEN`).
-botconf's reload re-reads the stored overrides only; the config file is read
-when the core starts, so edits to it still need a restart.
+A reload re-reads the config file, the environment and the stored overrides;
+an edit that makes the configuration invalid is refused with the reason, and
+the running configuration stays. `listen`, `database_url`, the connector list,
+the connector tokens and `[functions]` are read only when the core starts, so
+changing them still needs a restart.
 
 Connectors declare their own live-safe settings (rendering, sticker metadata,
 log level, the sticker conversion timeout) when they register: a botconf

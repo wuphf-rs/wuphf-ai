@@ -30,10 +30,19 @@ pub fn base(path: &Path) -> Result<Figment, LoadError> {
         .merge(Env::prefixed(ENV_PREFIX).split("__")))
 }
 
-/// The settings store over `base`, with `storage` holding the overrides.
+/// The file and the environment, read again on every reload, so an edited
+/// config file applies on `reload()`. Startup checks that need the values
+/// once (the database URL) use [`base`].
+pub fn source(path: PathBuf) -> impl botconf::BaseSource + Clone {
+    move || base(&path)
+}
+
+/// The settings store over `base`, with `storage` holding the overrides. A
+/// fixed [`Figment`] base is read once; a [`source`] is read again on every
+/// reload.
 pub async fn load(
     schema: WuphfSchema,
-    base: Figment,
+    base: impl botconf::BaseSource,
     storage: impl botconf::Storage,
 ) -> Result<SettingsStore, botconf::SettingsError> {
     SettingsStore::load(schema, base, storage).await

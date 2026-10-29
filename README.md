@@ -88,7 +88,7 @@ cargo run -p wuphf-cli -- settings --config config/example.toml list
 cargo run -p wuphf-cli -- settings get rules
 cargo run -p wuphf-cli -- settings set notify '["telegram-main:telegram:user:704338780"]'
 cargo run -p wuphf-cli -- settings unset notify          # back to the file's value
-# tell a running core to re-read the stored settings (file edits need a restart)
+# tell a running core to re-read the config file and the stored settings
 WUPHF_OBSERVER_TOKEN=<observer_token> cargo run -p wuphf-cli -- settings reload
 ```
 

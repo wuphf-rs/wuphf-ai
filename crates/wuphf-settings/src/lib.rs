@@ -20,7 +20,7 @@ mod tokens;
 pub use config::{
     ChatTarget, Configuration, ConnectorConfiguration, RuleEntry, RuleEntryKind, Secret,
 };
-pub use load::{ENV_PREFIX, LoadError, base, load};
+pub use load::{ENV_PREFIX, LoadError, base, load, source};
 pub use routing::LiveRouting;
 pub use schema::{CONNECTOR_SETTINGS, Derived, SettingsStore, Snapshot, WuphfSchema};
 pub use storage::SettingsStorage;

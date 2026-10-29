@@ -1051,3 +1051,76 @@ fn rule_filters_share_a_form_group() {
         Ok(())
     });
 }
+
+/// The two connectors with `notify` pointing at `chat` on Telegram. `notify`
+/// is a top-level key, so it goes above the connector tables.
+fn notifying(chat: &str) -> String {
+    format!("{MINIMAL}\nnotify = [\"telegram-main:{chat}\"]\n{CONNECTORS}")
+}
+
+/// Loads the store over [`crate::source`], so `reload()` reads the file again.
+fn rereading_store(path: &Path) -> SettingsStore {
+    runtime()
+        .block_on(load(
+            every_token_set(),
+            crate::source(path.to_path_buf()),
+            MemoryStorage::new(),
+        ))
+        .unwrap()
+}
+
+fn notify_targets(store: &SettingsStore) -> Vec<String> {
+    store
+        .current()
+        .config
+        .notify
+        .iter()
+        .map(|target| target.0.to_string())
+        .collect()
+}
+
+#[test]
+fn reload_reads_an_edited_file() {
+    Jail::expect_with(|jail| {
+        jail.create_file("wuphf.toml", &notifying("telegram:user:1"))?;
+        let store = rereading_store(Path::new("wuphf.toml"));
+        assert_eq!(notify_targets(&store), ["telegram-main:telegram:user:1"]);
+
+        jail.create_file("wuphf.toml", &notifying("telegram:user:2"))?;
+        runtime().block_on(store.reload()).unwrap();
+        assert_eq!(notify_targets(&store), ["telegram-main:telegram:user:2"]);
+        Ok(())
+    });
+}
+
+#[test]
+fn reload_refuses_an_invalid_file() {
+    Jail::expect_with(|jail| {
+        jail.create_file("wuphf.toml", &notifying("telegram:user:1"))?;
+        let store = rereading_store(Path::new("wuphf.toml"));
+
+        // A rule naming a connector the file does not list.
+        jail.create_file(
+            "wuphf.toml",
+            &format!(
+                "{}\n[rules.nowhere]\nkind = \"many-to-one\"\n\
+                 source_connector = \"instagram-main\"\n\
+                 destination = \"telegram-main:telegram:user:2\"\n",
+                notifying("telegram:user:2")
+            ),
+        )?;
+        let error = runtime().block_on(store.reload()).unwrap_err();
+        assert!(
+            matches!(error, SettingsError::InvalidBase(_)),
+            "an invalid file is refused as an invalid base: {error}"
+        );
+        assert!(
+            error.to_string().contains("instagram-main"),
+            "the reason names the problem: {error}"
+        );
+        // The running configuration stays as it was.
+        assert_eq!(notify_targets(&store), ["telegram-main:telegram:user:1"]);
+        assert!(store.current().config.rules.is_empty());
+        Ok(())
+    });
+}

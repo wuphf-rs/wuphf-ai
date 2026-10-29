@@ -1,6 +1,6 @@
 use super::*;
 use botconf_panel::Names;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use wuphf_model::{
     AddressLink, Alias, Conversation, ConversationId, EndpointId, ObservedDirection,
     ObservedMessage, Platform, RuleId,
@@ -390,7 +390,7 @@ async fn connectors_and_rules_are_named_and_offered() {
 // ---- the service, end to end ----
 
 use botconf_grpc::proto::{
-    self, ActRequest, EditRequest, Limits, RenderRequest, act_request,
+    self, ActRequest, EditRequest, Limits, ReloadRequest, RenderRequest, act_request,
     settings_client::SettingsClient,
 };
 use tokio::net::TcpListener;
@@ -399,23 +399,30 @@ use tonic::transport::{Channel, Server};
 use wuphf_settings::SettingsStorage;
 use wuphf_storage::{SettingsOverrides, SqliteStorage};
 
-/// A settings server over the SQLite database at `url`, as `serve` builds it,
-/// and a client of it. Abort the task to stop the server.
-async fn serve_settings(
-    url: &str,
-) -> (
+/// What a test server hands back: a client, the store it serves, its
+/// database, and the server task (abort it to stop the server).
+type Served = (
     SettingsClient<Channel>,
     Arc<SettingsStore>,
     Arc<SqliteStorage>,
     tokio::task::JoinHandle<()>,
-) {
+);
+
+/// A settings server over the SQLite database at `url`, as `serve` builds it,
+/// and a client of it.
+async fn serve_settings(url: &str) -> Served {
+    serve_settings_from(url, &config_file(CONFIG)).await
+}
+
+/// [`serve_settings`] over the config file at `path`, which the store reads
+/// again on every reload, as `serve` does.
+async fn serve_settings_from(url: &str, path: &Path) -> Served {
     let sqlite = Arc::new(SqliteStorage::connect(url).await.unwrap());
     let schema = WuphfSchema::with_env(|name| Some(format!("secret-{name}")));
-    let path = config_file(CONFIG);
     let settings = Arc::new(
         load(
             schema,
-            base(&path).unwrap(),
+            wuphf_settings::source(path.to_path_buf()),
             SettingsStorage::new(Arc::clone(&sqlite)),
         )
         .await
@@ -489,6 +496,46 @@ async fn settings_service_end_to_end() {
         stored[0].updated_by.as_deref(),
         Some("telegram-main:704338780")
     );
+    server.abort();
+}
+
+/// Owners live in the config file and follow a reload: a Telegram user added
+/// to `owner_ids` may change settings once the observer reloads the core.
+#[tokio::test]
+async fn owner_ids_follow_reload() {
+    let path = config_file(CONFIG);
+    let (mut client, settings, _sqlite, server) =
+        serve_settings_from(&temp_database(), &path).await;
+    let notify = || EditRequest {
+        actor: Some(actor("111")),
+        key: "notify".into(),
+        value: r#"["telegram-main:telegram:user:111"]"#.into(),
+    };
+
+    let refused = client
+        .set(with_token(notify(), TELEGRAM_TOKEN))
+        .await
+        .unwrap_err();
+    assert_eq!(refused.code(), tonic::Code::PermissionDenied);
+
+    std::fs::write(
+        &path,
+        CONFIG.replace(
+            r#"owner_ids = ["704338780"]"#,
+            r#"owner_ids = ["704338780", "111"]"#,
+        ),
+    )
+    .unwrap();
+    client
+        .reload(with_token(ReloadRequest { actor: None }, OBSERVER_TOKEN))
+        .await
+        .unwrap();
+
+    client
+        .set(with_token(notify(), TELEGRAM_TOKEN))
+        .await
+        .unwrap();
+    assert_eq!(settings.current().config.notify.len(), 1);
     server.abort();
 }
 

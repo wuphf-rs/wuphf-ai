@@ -3,7 +3,8 @@
 //! The local actions open the same settings store the core uses, over the
 //! core's database, so every change is validated exactly as at runtime and
 //! the command works while the core is down. `reload` asks a running core to
-//! re-read the stored settings through its settings service.
+//! re-read the config file and the stored settings through its settings
+//! service.
 
 use anyhow::{Context, Result};
 use botconf::cli::SettingsAction;
@@ -24,8 +25,8 @@ pub(crate) const RELOAD_NOTE: &str =
 pub(crate) enum SettingsSubcommand {
     #[command(flatten)]
     Local(SettingsAction),
-    /// Ask a running core to re-read its stored settings. Edits to the config
-    /// file still need a restart. Reads the token from WUPHF_OBSERVER_TOKEN.
+    /// Ask a running core to re-read the config file, the environment and the
+    /// stored settings. Reads the token from WUPHF_OBSERVER_TOKEN.
     Reload {
         #[arg(long, default_value = "http://127.0.0.1:50051")]
         address: String,
@@ -46,7 +47,10 @@ pub(crate) async fn open(
     // and the environment only; it can never be a runtime key.
     let file: Configuration = base.extract().context("invalid configuration")?;
     let storage = Arc::new(SqliteStorage::connect(&file.database_url).await?);
-    let settings = wuphf_settings::load(schema, base, SettingsStorage::new(Arc::clone(&storage)))
+    // The store re-reads the file and the environment on every reload, so an
+    // edited config file applies without a restart.
+    let source = wuphf_settings::source(path.to_path_buf());
+    let settings = wuphf_settings::load(schema, source, SettingsStorage::new(Arc::clone(&storage)))
         .await
         .context("invalid configuration")?;
     let settings = Arc::new(settings);
