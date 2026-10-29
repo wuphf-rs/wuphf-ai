@@ -57,7 +57,7 @@ code).
 | 037 | Route from a live settings snapshot; `rules` and `notify` at runtime | P2 | M | 035, 036 | DONE (see notes) |
 | 038 | Key routing rules by id; chats as `connector:chat#thread` | P2 | M | 037 | DONE (migration 0016; see notes) |
 | 039 | Owner ids, chat names, and the core serving its settings | P2 | M–L | 034–038, botconf 003–005 | DONE (botconf v0.5.0, migration 0017; see notes) |
-| 040 | Connectors declare their own settings to the core | P2 | L | 039, botconf 005, 006, 009 | TODO |
+| 040 | Connectors declare their own settings to the core | P2 | L | 039, botconf 005, 006, 009 | DONE (botconf v0.5.0, migration 0018; see notes) |
 | 041 | A settings panel in the Telegram connector | P2 | L | 039, 040, botconf 004–007 | TODO |
 | 042 | A `wuphf settings` command | P3 | S | 035, 036, 039 | DONE (see notes) |
 | 043 | Label user-session stickers through the helper bot | P3 | M | 041 | TODO |
@@ -808,6 +808,107 @@ Dependencies and ordering:
     per crate, with one workspace gate at the end.
   - **Results:** Rust has 244 tests passing (239 + 5). Clippy and
     `cargo fmt` are clean.
+- **040 done 2026-10-29** (on `plans/runtime-settings`). The drift check
+  showed only 034–039's expected changes; the registration is still the first
+  frame and the settings store, its sqlx storage and the settings service are
+  as 035, 036 and 039 left them. botconf `v0.5.0` already has dynamic
+  sections (since `v0.3.0`; `v0.6.0` adds only the Go module and an example),
+  so the pin did not move. Deviations:
+  - **botconf's API as landed:** a section is a `DynamicSection` registered
+    with `SettingsStore::register_section` (not `SectionSettings::dynamic` and
+    `upsert_section`), checked by a `Validator`, with its own `base` and
+    `base_source` (`connector <id>`); `WuphfSchema::dynamic_namespaces` lists
+    `connector_settings`, so overrides for an absent section wait for it.
+  - **The descriptor** is a `botconf.v1.DescribeResponse` carrying only the
+    settings (keys relative to the section), since botconf's
+    `SectionDescriptor` has no settings. botconf-grpc converts kinds to the
+    wire only, so `wuphf-runtime`'s `connector_settings` converts them back
+    (choices arrive resolved and become fixed choices).
+  - **Storage role:** `SettingsDeclarations` is implemented by both backends
+    but, like `SettingsOverrides` and `PanelTokens`, kept out of the `Storage`
+    sum (the plan listed it there): routing never reads it. The migration is
+    `0018`, since 039 took `0017`.
+  - **Validation:** `jsonschema` 0.60.2 (MIT, MSRV 1.85) with default
+    features off, so no HTTP client or TLS is built; schemas are inline. A
+    panel answers with text, so before validating, strings are read as the
+    booleans and numbers the schema asks for (`"true"`, `"1000"`). F2 is a
+    guard field on `Configuration` (it has no `deny_unknown_fields`):
+    `derive` refuses a `[connector_settings]` table in the core's file.
+  - **Registration:** a declaration is checked before `hub.connect`
+    (`INVALID_ARGUMENT` for a non-live-safe key, a bad schema or base, or an
+    unconfigured connector), then stored and registered once the session is
+    accepted; a storage failure there is logged and the session stays up.
+    `GrpcConnectorService::with_settings` enables it; without it a declaration
+    is refused.
+  - **A connector follows its own section** with its token and no actor:
+    `WuphfAuthorizer` now allows a `Watch` or `Get` at or below
+    `connector_settings.<id>` for that connector only (not an empty `Watch`,
+    a `List`, a change or the panel). The plan did not say how the connector
+    authenticates its `Watch`.
+  - **Startup:** `settings::open` (shared by `serve` and `wuphf settings`)
+    returns an `Arc<SettingsStore>` and restores the stored declarations, so
+    the CLI can edit a connector's section while it is down (F7).
+  - **Go side** (`connectors/shared/settings`): `Live` (with `Set`),
+    `Declare`, `Watch` over a `Follower` interface (so tests use a fake), and
+    `Connect`/`Follow`/`Close`, which each connector uses. Fields are declared
+    by `botconf:"<title>"` tags, with `doc:"…"` descriptions and
+    `jsonschema:"enum=…"` choices (one tag feeds both the schema and the
+    panel's choices); bools are Yes/No choices, integers numbers bounded by
+    their type. The schema comes from `invopop/jsonschema` v0.14.0 (MIT) with
+    the `toml` names. The declared base has defaults filled in
+    (`Runtime.WithDefaults()`), so `""` never meets an enum. Values travel as
+    TOML-named maps, so the connectors need no JSON tags.
+  - **Connectors:** each config embeds a `Runtime` struct (TOML layout
+    unchanged; the example configs and a layout test prove it). Telegram:
+    log level, conversion timeout, rendering; WhatsApp: the same plus sticker
+    metadata; Instagram: log level only (`backfill_on_start` stays file-only).
+    Telegram reads `rendering()` once per operation; WhatsApp pins the
+    settings once per `SendMessage` (`Sender.pin`), so a dispatch never mixes
+    two values. `MediaConverter` gained `TimeoutFunc`. The log level is
+    zerolog's global level (`logging.SetLevel`; `WUPHF_LOG_LEVEL` still
+    wins), and an unknown `log_level` now fails at load
+    (`logging.CheckLevel`), since the core would refuse the declaration.
+    `whatsapp-rust` declares nothing (F6); its SDK sends `settings: None`.
+  - **Go ↔ Rust contract:** `connectors/telegram/testdata/settings_declaration.json`
+    is what Telegram declares by default; a Go test keeps it current
+    (`WUPHF_UPDATE_FIXTURES=1`) and a Rust test registers it and changes its
+    values, so a schema the Go side generates must stay readable by the core.
+  - **Extra tests:** panel text read as schema types, unconfigured connectors
+    refused, a declaration over gRPC registering its section, the two
+    authorizer tests, the registration carrying the declaration (coreclient),
+    `WatchSkipsValuesThatDoNotDecode`, `CheckLevel` and the env-wins level,
+    example configs loading, and the contract test above.
+  - **Lock:** gains `jsonschema` and its dependencies; `regex-automata`
+    0.4.14 → 0.4.18 and `zmij` 1.0.21 → 1.0.23 moved, forced by `jsonschema`'s
+    `fancy-regex` and `jsonschema-value` (`cargo update --precise` to the old
+    versions is refused). Go modules only gain packages.
+  - **Mutation checks:** each change below made a test fail.
+    - Accepting non-live-safe keys: both restart-only tests.
+    - No string coercion: `panel_text_values_are_read_as_the_schema_types`.
+    - Allowing an empty `Watch`: `connector_cannot_follow_more_than_its_own_section`.
+    - Skipping the check before `hub.connect`: `restart_only_keys_are_refused`.
+    - `restore` doing nothing: `declaration_survives_restart`.
+    - No F2 guard: `core_file_cannot_set_connector_settings`.
+    - SQLite upsert as `DO NOTHING`:
+      `sqlite_settings_declarations_replace_by_connector`.
+    - Not sending `Settings` in the registration:
+      `TestRegistrationCarriesTheSettingsDeclaration`.
+    - Telegram ignoring the live value: `TestEditModeChangeAppliesToNextDispatch`;
+      WhatsApp ignoring it: `TestStickerMetadataChangeAppliesToNextSticker`.
+    - `Watch` not restarting from the base on `Initial`, or passing JSON
+      floats to TOML: `TestWatchAppliesPushedValues`.
+  - **Builds:** every build ran with `nice -n 19` and `CARGO_BUILD_JOBS=2`
+    (Go with `GOMAXPROCS=2` and `-p=2`), per crate and per touched module,
+    with one gate at the end. No `whatsapp-rust` build; `providers/mediaconv`
+    vetted read-only (unchanged). No smoke run of `serve` with a live
+    connector.
+  - **Results:** Rust has 263 tests passing (244 + 19). Clippy and
+    `cargo fmt` are clean. Go: shared 28, telegram 63, whatsapp 105,
+    instagram 31 tests, all green under `-race`; `go vet` and `gofmt` clean.
+  - **Owner action:** none required: connectors dial the settings service on
+    the core's address with their existing core token. A connector config
+    with a `log_level` other than trace/debug/info/warn/error now fails to
+    load.
 
 ## Findings considered and rejected
 
