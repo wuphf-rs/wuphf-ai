@@ -591,3 +591,58 @@ async fn the_telegram_connectors_declaration_is_accepted() {
         );
     }
 }
+
+#[test]
+fn form_fields_keep_required_and_when_from_the_wire() {
+    use proto::kind::Kind as Wire;
+    let field = |key: &str, required: bool, when: Option<(&str, &str)>| proto::FormField {
+        key: key.into(),
+        title: key.into(),
+        kind: wire(Wire::Text(proto::TextKind::default())),
+        group: String::new(),
+        required,
+        when: when.map(|(key, value)| proto::FieldCondition {
+            key: key.into(),
+            value: value.into(),
+        }),
+    };
+    let form = wire(Wire::Form(proto::FormKind {
+        fields: vec![
+            field("mode", true, None),
+            field("target", true, Some(("mode", "direct"))),
+            field("note", false, None),
+        ],
+        initial_json: "{}".into(),
+    }))
+    .unwrap();
+
+    let Kind::Form(form) = kind_from_wire(form).unwrap() else {
+        panic!("a form arrives as a form");
+    };
+    let fields: Vec<_> = form
+        .fields
+        .iter()
+        .map(|field| {
+            (
+                field.key.to_string(),
+                field.required,
+                field
+                    .when
+                    .as_ref()
+                    .map(|(key, value)| (key.to_string(), value.to_string())),
+            )
+        })
+        .collect();
+    assert_eq!(
+        fields,
+        [
+            ("mode".to_owned(), true, None),
+            (
+                "target".to_owned(),
+                true,
+                Some(("mode".to_owned(), "direct".to_owned()))
+            ),
+            ("note".to_owned(), false, None),
+        ]
+    );
+}

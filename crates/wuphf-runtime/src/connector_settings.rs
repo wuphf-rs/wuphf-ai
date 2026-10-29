@@ -250,6 +250,10 @@ fn kind_from_wire(kind: proto::Kind) -> Result<Kind, String> {
                             .transpose()?
                             .unwrap_or(Kind::Json),
                         group: (!field.group.is_empty()).then(|| Shared::from(field.group)),
+                        required: field.required,
+                        when: field
+                            .when
+                            .map(|when| (Shared::from(when.key), Shared::from(when.value))),
                     })
                 })
                 .collect::<Result<Vec<_>, String>>()?;
