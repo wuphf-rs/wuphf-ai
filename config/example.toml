@@ -59,12 +59,14 @@ platform = "whatsapp"
 token_env = "WUPHF_CONNECTOR_WHATSAPP_MAIN_TOKEN"
 # owner_ids = ["98765432101234@lid"]
 
-# Rust WhatsApp connector alternative. Keep its id in sync with
+# Rust WhatsApp connector, an alternative to whatsapp-main. Uncomment it only
+# when you run it: the core refuses to start while any listed connector's token
+# variable is unset. Keep its id in sync with
 # connectors/whatsapp-rust/config.example.toml.
-[[connectors]]
-id = "whatsapp-rust"
-platform = "whatsapp"
-token_env = "WUPHF_CONNECTOR_WHATSAPP_RUST_TOKEN"
+# [[connectors]]
+# id = "whatsapp-rust"
+# platform = "whatsapp"
+# token_env = "WUPHF_CONNECTOR_WHATSAPP_RUST_TOKEN"
 
 [[connectors]]
 id = "instagram-main"
@@ -95,7 +97,7 @@ supports_topic_create = true
 # [rules.direct-pair]
 # kind = "one-to-one"
 # source = "whatsapp-main:12345@s.whatsapp.net"
-# destination = "telegram-main:-100123#12"
+# destination = "telegram-main:telegram:channel:2060340733#12"
 #
 # `kind = "many-to-one"`: every chat on the source connector, each mirrored
 # into its own topic auto-created inside the destination container chat. A

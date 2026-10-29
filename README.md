@@ -71,7 +71,6 @@ file you source, never from a tracked file:
 ```sh
 export WUPHF_CONNECTOR_TELEGRAM_MAIN_TOKEN=<token>
 export WUPHF_CONNECTOR_WHATSAPP_MAIN_TOKEN=<token>
-export WUPHF_CONNECTOR_WHATSAPP_RUST_TOKEN=<token>
 export WUPHF_CONNECTOR_INSTAGRAM_MAIN_TOKEN=<token>
 ```
 
@@ -123,6 +122,7 @@ The text-first Rust connector lives in a separate Cargo workspace because
 `whatsapp-rust` and the core require incompatible `libsqlite3-sys` versions:
 
 ```sh
+# First uncomment the whatsapp-rust [[connectors]] entry in the core config.
 cd connectors/whatsapp-rust
 cargo build --release
 export WUPHF_CONNECTOR_WHATSAPP_RUST_TOKEN=replace-me   # core_token_env

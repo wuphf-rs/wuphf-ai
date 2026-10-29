@@ -45,7 +45,9 @@ Every connector authenticates to the server with a token, and the server
 refuses to start until all of them are set. Export the same values in every
 tab (from your shell profile or a local env file you source):
   WUPHF_CONNECTOR_TELEGRAM_MAIN_TOKEN, WUPHF_CONNECTOR_WHATSAPP_MAIN_TOKEN,
-  WUPHF_CONNECTOR_WHATSAPP_RUST_TOKEN, WUPHF_CONNECTOR_INSTAGRAM_MAIN_TOKEN.
+  WUPHF_CONNECTOR_INSTAGRAM_MAIN_TOKEN. wwr also needs
+  WUPHF_CONNECTOR_WHATSAPP_RUST_TOKEN, and its [[connectors]] entry uncommented
+  in the server config.
 
 wmc needs WUPHF_PROVIDER_MEDIACONV_TOKEN set, and the server config needs the
 matching [[functions.providers]] entry (see providers/mediaconv/README.md).

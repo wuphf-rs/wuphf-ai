@@ -366,7 +366,7 @@ fn store_loads_the_example_and_derives_routing() {
             snapshot.derived.connectors.len(),
             configuration.connectors.len()
         );
-        assert_eq!(snapshot.derived.connector_tokens.len(), 4);
+        assert_eq!(snapshot.derived.connector_tokens.len(), 3);
         assert!(
             snapshot
                 .derived
