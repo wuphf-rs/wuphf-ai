@@ -59,7 +59,7 @@ code).
 | 039 | Owner ids, chat names, and the core serving its settings | P2 | M–L | 034–038, botconf 003–005 | DONE (botconf v0.5.0, migration 0017; see notes) |
 | 040 | Connectors declare their own settings to the core | P2 | L | 039, botconf 005, 006, 009 | TODO |
 | 041 | A settings panel in the Telegram connector | P2 | L | 039, 040, botconf 004–007 | TODO |
-| 042 | A `wuphf settings` command | P3 | S | 035, 036, 039 | TODO |
+| 042 | A `wuphf settings` command | P3 | S | 035, 036, 039 | DONE (see notes) |
 | 043 | Label user-session stickers through the helper bot | P3 | M | 041 | TODO |
 
 Status values: TODO | IN PROGRESS | DONE | BLOCKED (with one-line reason) |
@@ -759,6 +759,55 @@ Dependencies and ordering:
     settings from (your Telegram user id on `telegram-main`, your LID on
     `whatsapp-main`); without them only the observer token (the TUI) can
     change settings.
+- **042 done 2026-10-29** (on `plans/runtime-settings`). The drift check
+  showed 034–039's expected changes to `crates/wuphf-cli`. F1 and F2 are as
+  planned. Deviations:
+  - **One store function:** `serve()` built its store inline, so the plan's
+    "store built by one function" did not hold literally. Both `serve` and the
+    command now call `settings::open(path, schema)` in the new
+    `crates/wuphf-cli/src/settings.rs`. It returns the database too, so
+    `serve` keeps sharing one `SqliteStorage`. No STOP: the parts already
+    existed (`wuphf_settings::base`, `load`, `SettingsStorage`).
+  - **Subcommand name:** wuphf's enum is `SettingsSubcommand`, because
+    `botconf::command::SettingsCommand` already exists. It flattens
+    `botconf::cli::SettingsAction` (botconf `v0.5.0`'s `cli` feature) and adds
+    `Reload { address }`.
+  - **Reload wording:** botconf's `reload()` re-reads the stored overrides
+    only (see 039's notes), so `reload`'s help says file edits still need a
+    restart. F2's note stays as planned, since a CLI change is a stored
+    override. `reload` prints `reloaded: <n> overrides, <m> ignored` from
+    `ChangeResponse`; a refused call is an error with the status message
+    (`valid bearer token required`), exiting non-zero.
+  - **Tests** are in `crates/wuphf-cli/src/settings/tests.rs`, over the real
+    `config/example.toml` with its database moved to a temp file. The two
+    reload tests start the core's own `settings_server` on `127.0.0.1:0`.
+    `settings_set_then_list_shows_stored_value` reopens the store to prove
+    the change reached the database. `settings_reload_without_token_is_refused`
+    also tries a wrong token.
+  - **Mutation checks:** each change below made a test fail.
+    - The store on `MemoryStorage` instead of the database:
+      `settings_set_then_list_shows_stored_value` and
+      `settings_reload_calls_running_core`.
+    - `reload` sending no bearer token: `settings_reload_calls_running_core`.
+    - `changed` always false: `settings_set_then_list_shows_stored_value`
+      and `settings_unset_falls_back_to_file`.
+  - **Smoke:** on a copy of `wuphf.sqlite` (the original's checksum was
+    unchanged afterwards), `settings list` and `settings get rules` exit 0 and
+    print the example's rules and `notify` with source `config file`.
+  - **Found, not changed:** the command validates the whole configuration as
+    `serve` does, so it refuses to run until every connector and provider token
+    variable is set (`WUPHF_CONNECTOR_*_TOKEN`, `WUPHF_PROVIDER_MEDIACONV_TOKEN`).
+    This follows from the plan's "one `WuphfSchema`" rule. A later change could
+    let the CLI skip only the token checks. Also, the binary is `wuphf-cli`
+    (`cargo run -p wuphf-cli -- settings …`, or the `wuphf-server` dev
+    wrapper), while the texts say `wuphf settings`, as the plan names it.
+  - **Lock:** only gains edges (`clap` under botconf for its `cli` feature;
+    `botconf`, `botconf-grpc`, `serde_json`, `tokio-stream` under
+    `wuphf-cli`). No package and no version changed.
+  - **Builds:** every build ran with `nice -n 19` and `CARGO_BUILD_JOBS=2`,
+    per crate, with one workspace gate at the end.
+  - **Results:** Rust has 244 tests passing (239 + 5). Clippy and
+    `cargo fmt` are clean.
 
 ## Findings considered and rejected
 
