@@ -80,6 +80,19 @@ settings service; list each connector's `owner_ids` in the core's config to
 choose who may change them from that platform (see `docs/architecture.md`,
 "Settings service").
 
+From a terminal, `wuphf settings` views and changes them in the core's
+database directly, so it also works while the core is down. It loads the
+config the same way `serve` does, so it needs the same token variables:
+
+```sh
+cargo run -p wuphf-cli -- settings --config config/example.toml list
+cargo run -p wuphf-cli -- settings get rules
+cargo run -p wuphf-cli -- settings set notify '["telegram-main:telegram:user:704338780"]'
+cargo run -p wuphf-cli -- settings unset notify          # back to the file's value
+# tell a running core to re-read the stored settings (file edits need a restart)
+WUPHF_OBSERVER_TOKEN=<observer_token> cargo run -p wuphf-cli -- settings reload
+```
+
 The whole stack at once, in a zellij session with a tab per component:
 
 ```sh

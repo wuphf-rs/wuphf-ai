@@ -138,6 +138,15 @@ otherwise a short handle stored in the `panel_tokens` table for 30 days
 (renewed whenever a screen draws it again), so they keep working after the
 core restarts.
 
+`wuphf settings` (`wuphf-cli`) is the terminal client. `list`, `get`, `set`,
+`unset`, `add` and `remove` open the same `WuphfSchema` store as `serve`, over
+the core's database, without starting anything else: they validate exactly as
+the running core does and work while it is down. A running core keeps its own
+copy of the settings, so `wuphf settings reload` asks it to re-read them
+through the service's `Reload`, as the observer (`WUPHF_OBSERVER_TOKEN`).
+botconf's reload re-reads the stored overrides only; the config file is read
+when the core starts, so edits to it still need a restart.
+
 ## Data Flow
 
 ```text
@@ -160,7 +169,7 @@ dedup, reply mapping, loop prevention, or address mapping.
 | `wuphf-functions` | Brokers remote function calls between callers and provider processes; independent of the core and storage. |
 | `wuphf-settings` | Loads the core configuration (TOML, then `WUPHF_CORE_*` environment) and describes it to botconf; builds the routing config, connector list, resolved functions and connector tokens from it. |
 | `wuphf-proto` | Canonical protobuf contract and Tonic bindings. |
-| `wuphf-cli` | Loads the configuration through `wuphf-settings`, wires storage/core/runtime, serves gRPC. |
+| `wuphf-cli` | Loads the configuration through `wuphf-settings`, wires storage/core/runtime, serves gRPC; `wuphf settings` views and changes the runtime settings from a terminal. |
 | `connectors/` | Go connectors: Telegram (`gotd/td`, forum topics), WhatsApp (`whatsmeow`, QR pairing), and Instagram (`mautrix/meta`, cookie auth). |
 
 ## Replicated Operations
