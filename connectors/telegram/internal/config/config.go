@@ -25,6 +25,11 @@ type File struct {
 	// FunctionsTokenEnv names the environment variable holding the core's
 	// invoke token, when the core requires one.
 	FunctionsTokenEnv string `toml:"functions_token_env"`
+	// BotToken is the @BotFather token for a bot session. The
+	// WUPHF_TELEGRAM_BOT_TOKEN environment variable wins over it. It is read
+	// once and never declared as a runtime setting, so it never leaves this
+	// process.
+	BotToken string `toml:"bot_token"`
 	// Runtime holds the settings that may change while the connector runs.
 	// Embedded, so the file keeps its layout (`log_level`, `[rendering]`).
 	Runtime
@@ -148,7 +153,10 @@ func (c File) Validate() error {
 	return nil
 }
 
-func LoadCredentials() (Credentials, error) {
+// LoadCredentials reads the Telegram credentials from the environment. The bot
+// token falls back to the file's bot_token when WUPHF_TELEGRAM_BOT_TOKEN is
+// unset.
+func LoadCredentials(file File) (Credentials, error) {
 	appID, err := strconv.Atoi(os.Getenv("WUPHF_TELEGRAM_APP_ID"))
 	if err != nil || appID <= 0 {
 		return Credentials{}, errors.New("WUPHF_TELEGRAM_APP_ID must be a positive integer")
@@ -158,13 +166,16 @@ func LoadCredentials() (Credentials, error) {
 		AppHash:  os.Getenv("WUPHF_TELEGRAM_APP_HASH"),
 		Phone:    os.Getenv("WUPHF_TELEGRAM_PHONE"),
 		Password: os.Getenv("WUPHF_TELEGRAM_PASSWORD"),
-		BotToken: os.Getenv("WUPHF_TELEGRAM_BOT_TOKEN"),
+		BotToken: strings.TrimSpace(os.Getenv("WUPHF_TELEGRAM_BOT_TOKEN")),
+	}
+	if credentials.BotToken == "" {
+		credentials.BotToken = strings.TrimSpace(file.BotToken)
 	}
 	if credentials.AppHash == "" {
 		return Credentials{}, errors.New("WUPHF_TELEGRAM_APP_HASH is required")
 	}
 	if credentials.BotToken == "" && credentials.Phone == "" {
-		return Credentials{}, errors.New("set WUPHF_TELEGRAM_BOT_TOKEN or WUPHF_TELEGRAM_PHONE")
+		return Credentials{}, errors.New("set bot_token (or WUPHF_TELEGRAM_BOT_TOKEN) or WUPHF_TELEGRAM_PHONE")
 	}
 	return credentials, nil
 }

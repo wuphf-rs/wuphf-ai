@@ -1,6 +1,7 @@
 package config
 
 import (
+	"strings"
 	"testing"
 	"time"
 
@@ -136,5 +137,61 @@ func TestValidateRejectsAnUnknownLogLevel(t *testing.T) {
 	}
 	if got := cfg.Runtime.WithDefaults().LogLevel; got != "debug" {
 		t.Fatalf("WithDefaults() log level = %q, want debug", got)
+	}
+}
+
+// setTelegramEnv sets the credential variables a bot session needs, leaving
+// WUPHF_TELEGRAM_BOT_TOKEN and WUPHF_TELEGRAM_PHONE to the caller.
+func setTelegramEnv(t *testing.T, botToken, phone string) {
+	t.Helper()
+	t.Setenv("WUPHF_TELEGRAM_APP_ID", "12345")
+	t.Setenv("WUPHF_TELEGRAM_APP_HASH", "hash")
+	t.Setenv("WUPHF_TELEGRAM_BOT_TOKEN", botToken)
+	t.Setenv("WUPHF_TELEGRAM_PHONE", phone)
+}
+
+func TestBotTokenComesFromTheFileWhenTheEnvironmentHasNone(t *testing.T) {
+	setTelegramEnv(t, "", "")
+
+	credentials, err := LoadCredentials(File{BotToken: " 111:file "})
+	if err != nil {
+		t.Fatalf("LoadCredentials() error = %v", err)
+	}
+	if credentials.BotToken != "111:file" {
+		t.Fatalf("bot token = %q, want the file's", credentials.BotToken)
+	}
+}
+
+func TestBotTokenFromTheEnvironmentWinsOverTheFile(t *testing.T) {
+	setTelegramEnv(t, "222:env", "")
+
+	credentials, err := LoadCredentials(File{BotToken: "111:file"})
+	if err != nil {
+		t.Fatalf("LoadCredentials() error = %v", err)
+	}
+	if credentials.BotToken != "222:env" {
+		t.Fatalf("bot token = %q, want the environment's", credentials.BotToken)
+	}
+}
+
+func TestCredentialsNeedABotTokenOrAPhone(t *testing.T) {
+	setTelegramEnv(t, "", "")
+
+	if _, err := LoadCredentials(File{}); err == nil {
+		t.Fatal("LoadCredentials() accepted neither a bot token nor a phone")
+	}
+}
+
+func TestBotTokenIsNotARuntimeSetting(t *testing.T) {
+	t.Parallel()
+
+	// Runtime settings are declared to the core and pushed back; a secret must
+	// never be one of them.
+	encoded, err := toml.Marshal(Runtime{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(encoded), "bot_token") {
+		t.Fatalf("Runtime carries bot_token:\n%s", encoded)
 	}
 }

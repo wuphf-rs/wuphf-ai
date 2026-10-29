@@ -77,7 +77,7 @@ func newConnector(configPath string) (telegramconnector.Connector, error) {
 	if err != nil {
 		return telegramconnector.Connector{}, err
 	}
-	credentials, err := config.LoadCredentials()
+	credentials, err := config.LoadCredentials(cfg)
 	if err != nil {
 		return telegramconnector.Connector{}, err
 	}

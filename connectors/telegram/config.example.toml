@@ -20,7 +20,11 @@ supports_topic_create = true
 # WUPHF_TELEGRAM_APP_ID and WUPHF_TELEGRAM_APP_HASH.
 # For a user session also set WUPHF_TELEGRAM_PHONE and optionally
 # WUPHF_TELEGRAM_PASSWORD. Authentication codes are prompted on first login.
-# Alternatively set WUPHF_TELEGRAM_BOT_TOKEN for a bot session.
+#
+# For a bot session, set the token from @BotFather here or in
+# WUPHF_TELEGRAM_BOT_TOKEN (the environment wins). Keep this file private when
+# it holds the token. It is read once at startup and is never a runtime setting.
+# bot_token = "123456789:replace-with-your-bot-token"
 #
 # A bot session needs two things set up on the bot itself, or the bridge runs
 # one-way without any error to show for it:
