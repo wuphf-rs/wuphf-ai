@@ -20,18 +20,28 @@ type File struct {
 	SessionFile         string `toml:"session_file"`
 	SupportsThreads     bool   `toml:"supports_threads"`
 	SupportsTopicCreate bool   `toml:"supports_topic_create"`
-	// LogLevel sets log verbosity (trace, debug, info, warn, error). Empty
-	// means info; the WUPHF_LOG_LEVEL environment variable overrides it.
-	LogLevel string `toml:"log_level"`
-	// Rendering governs how replicated copies are rendered on Telegram. It is
-	// this connector's own policy; the core dispatches content only.
-	Rendering RenderingOptions `toml:"rendering"`
 	// FunctionsTokenEnv names the environment variable holding the core's
 	// invoke token, when the core requires one.
 	FunctionsTokenEnv string `toml:"functions_token_env"`
+	// Runtime holds the settings that may change while the connector runs.
+	// Embedded, so the file keeps its layout (`log_level`, `[rendering]`).
+	Runtime
+}
+
+// Runtime holds the settings that can change while the connector runs. The
+// connector declares them to the core (the `botconf` tags, see the shared
+// settings package), which stores, validates and pushes every change; the
+// values in the file are the base. Everything else in File is read once.
+type Runtime struct {
+	// LogLevel sets log verbosity (trace, debug, info, warn, error). Empty
+	// means info; the WUPHF_LOG_LEVEL environment variable overrides it.
+	LogLevel string `toml:"log_level" botconf:"Log level" doc:"How much the connector logs (WUPHF_LOG_LEVEL wins)" jsonschema:"enum=trace,enum=debug,enum=info,enum=warn,enum=error"`
 	// MediaConvertTimeoutMs bounds a sticker conversion, including waiting for
 	// the converter; deliveries on this connector wait behind it. 0 = 20000.
-	MediaConvertTimeoutMs uint32 `toml:"media_convert_timeout_ms"`
+	MediaConvertTimeoutMs uint32 `toml:"media_convert_timeout_ms" botconf:"Sticker conversion timeout (ms)" doc:"How long converting a sticker may take, waiting for the converter included; 0 means 20000"`
+	// Rendering governs how replicated copies are rendered on Telegram. It is
+	// this connector's own policy; the core dispatches content only.
+	Rendering RenderingOptions `toml:"rendering"`
 }
 
 // RenderingOptions are the connector-owned knobs for how mirrored copies are
@@ -39,26 +49,41 @@ type File struct {
 type RenderingOptions struct {
 	// Send every attachment using the generic file/document method, regardless
 	// of its origin kind (image/video/audio/sticker).
-	AttachmentsAsFiles bool `toml:"attachments_as_files"`
+	AttachmentsAsFiles bool `toml:"attachments_as_files" botconf:"Attachments as files" doc:"Send every attachment as a file, whatever its kind"`
 	// Maximum text length, in characters, to carry inline in one message; text
 	// over the limit is sent as a plain-text file instead. Zero is unbounded.
-	MaxMessageLength uint32 `toml:"max_message_length"`
+	MaxMessageLength uint32 `toml:"max_message_length" botconf:"Longest inline message" doc:"Longer text is sent as a file; 0 means no limit"`
 	// EditMode picks how a replicated edit is rendered: "in_place" (default)
 	// revises the original copy, "repost" leaves it untouched and posts the
 	// revision as a reply marked as an edit.
-	EditMode string `toml:"edit_mode"`
+	EditMode string `toml:"edit_mode" botconf:"Edits" doc:"in_place revises the copy; repost replies to it with the new text" jsonschema:"enum=in_place,enum=repost"`
 	// DeleteMode picks how a replicated delete is rendered: "revoke" (default)
 	// deletes the copy, "tombstone" leaves it and posts a deletion notice.
-	DeleteMode string `toml:"delete_mode"`
+	DeleteMode string `toml:"delete_mode" botconf:"Deletes" doc:"revoke deletes the copy; tombstone replies to it with a notice" jsonschema:"enum=revoke,enum=tombstone"`
 }
 
 // defaultMediaConvertTimeout bounds a sticker conversion when the
 // configuration sets no timeout.
 const defaultMediaConvertTimeout = 20 * time.Second
 
+// WithDefaults fills in what an empty setting stands for, so the values
+// declared to the core are explicit (and pass its schema).
+func (c Runtime) WithDefaults() Runtime {
+	if c.LogLevel == "" {
+		c.LogLevel = "info"
+	}
+	if c.Rendering.EditMode == "" {
+		c.Rendering.EditMode = EditModeInPlace
+	}
+	if c.Rendering.DeleteMode == "" {
+		c.Rendering.DeleteMode = DeleteModeRevoke
+	}
+	return c
+}
+
 // MediaConvertTimeout bounds one sticker conversion through media.convert,
 // including the time spent waiting for a converter to be available.
-func (c File) MediaConvertTimeout() time.Duration {
+func (c Runtime) MediaConvertTimeout() time.Duration {
 	if c.MediaConvertTimeoutMs == 0 {
 		return defaultMediaConvertTimeout
 	}

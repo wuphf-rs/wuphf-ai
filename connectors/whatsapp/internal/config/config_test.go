@@ -3,6 +3,8 @@ package config
 import (
 	"testing"
 	"time"
+
+	"github.com/pelletier/go-toml/v2"
 )
 
 func TestStickerMetadataFillsDefaults(t *testing.T) {
@@ -15,7 +17,7 @@ func TestStickerMetadataFillsDefaults(t *testing.T) {
 
 func TestStickerMetadataKeepsConfigured(t *testing.T) {
 	t.Parallel()
-	meta := File{Stickers: StickerMetadata{PackName: "custom", AuthorName: "me"}}.StickerMetadata()
+	meta := Runtime{Stickers: StickerMetadata{PackName: "custom", AuthorName: "me"}}.StickerMetadata()
 	if meta.PackName != "custom" || meta.AuthorName != "me" {
 		t.Fatalf("configured fields overridden: %#v", meta)
 	}
@@ -101,7 +103,7 @@ func TestMediaConvertTimeoutDefaultsAndOverrides(t *testing.T) {
 	if got := (File{}).MediaConvertTimeout(); got != 20*time.Second {
 		t.Errorf("default MediaConvertTimeout() = %v, want 20s", got)
 	}
-	if got := (File{MediaConvertTimeoutMs: 1500}).MediaConvertTimeout(); got != 1500*time.Millisecond {
+	if got := (Runtime{MediaConvertTimeoutMs: 1500}).MediaConvertTimeout(); got != 1500*time.Millisecond {
 		t.Errorf("MediaConvertTimeout() = %v, want 1.5s", got)
 	}
 }
@@ -115,5 +117,46 @@ func TestValidateRequiresCoreTokenEnv(t *testing.T) {
 	}
 	if err := cfg.Validate(); err == nil {
 		t.Fatal("Validate() accepted configuration without core_token_env")
+	}
+}
+
+// The runtime settings are embedded, so the file keeps its layout.
+func TestRuntimeSettingsKeepTheFileLayout(t *testing.T) {
+	t.Parallel()
+
+	var cfg File
+	err := toml.Unmarshal([]byte(`
+connector_id = "whatsapp-main"
+log_level = "debug"
+
+[sticker_metadata]
+pack_name = "pack"
+
+[rendering]
+max_message_length = 100
+`), &cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.ConnectorID != "whatsapp-main" || cfg.Runtime.LogLevel != "debug" ||
+		cfg.Runtime.Stickers.PackName != "pack" || cfg.Runtime.Rendering.MaxMessageLength != 100 {
+		t.Fatalf("decoded %+v", cfg)
+	}
+}
+
+func TestExampleConfigLoads(t *testing.T) {
+	t.Parallel()
+
+	if _, err := Load("../../config.example.toml"); err != nil {
+		t.Fatalf("Load(config.example.toml) error = %v", err)
+	}
+}
+
+func TestRuntimeDefaultsAreExplicit(t *testing.T) {
+	t.Parallel()
+
+	got := Runtime{}.WithDefaults()
+	if got.LogLevel != "info" || got.Stickers != (Runtime{}).StickerMetadata() {
+		t.Fatalf("WithDefaults() = %+v", got)
 	}
 }

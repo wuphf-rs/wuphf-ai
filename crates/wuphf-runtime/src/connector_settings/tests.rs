@@ -511,3 +511,83 @@ async fn registration_equality_ignores_the_declaration() {
         .await
         .expect("the declaration is not part of the identity check");
 }
+
+// ---- the Go connectors' declarations ----
+
+/// What the Telegram connector declares by default, written by its Go test
+/// (`WUPHF_UPDATE_FIXTURES=1 go test ./internal/config/` in
+/// connectors/telegram), so a schema or descriptor the Go side generates must
+/// stay readable here.
+const TELEGRAM_FIXTURE: &str =
+    include_str!("../../../../connectors/telegram/testdata/settings_declaration.json");
+
+fn base64_decode(text: &str) -> Vec<u8> {
+    const ALPHABET: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut bits = 0_u32;
+    let mut count = 0;
+    let mut out = Vec::new();
+    for byte in text.bytes().filter(|byte| *byte != b'=') {
+        let value = ALPHABET
+            .iter()
+            .position(|candidate| *candidate == byte)
+            .expect("base64") as u32;
+        bits = (bits << 6) | value;
+        count += 6;
+        if count >= 8 {
+            count -= 8;
+            out.push((bits >> count) as u8);
+        }
+    }
+    out
+}
+
+#[tokio::test]
+async fn the_telegram_connectors_declaration_is_accepted() {
+    let fixture: Value = serde_json::from_str(TELEGRAM_FIXTURE).unwrap();
+    let field = |name: &str| fixture[name].as_str().unwrap().to_owned();
+    let declaration = SettingsDeclaration {
+        connector_id: ConnectorId(TG.into()),
+        descriptor: base64_decode(&field("descriptor_base64")),
+        json_schema: field("json_schema"),
+        base_json: field("base_json"),
+    };
+    let store = store().await;
+    ConnectorSettings::new(Arc::clone(&store), Arc::new(InMemoryStorage::default()))
+        .declare(declaration)
+        .await
+        .unwrap();
+
+    let path = section_path(&ConnectorId(TG.into()));
+    assert_eq!(store.current().value(&edit_mode()), Some(json!("in_place")));
+    store
+        .set(&edit_mode(), json!("repost"), None)
+        .await
+        .unwrap();
+    store
+        .set(
+            &format!("{path}.rendering.attachments_as_files"),
+            json!("true"),
+            None,
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        store
+            .current()
+            .value(&format!("{path}.rendering.attachments_as_files")),
+        Some(json!(true))
+    );
+    for (key, value) in [
+        ("rendering.edit_mode", json!("sideways")),
+        ("log_level", json!("loud")),
+    ] {
+        let error = store
+            .set(&format!("{path}.{key}"), value, None)
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(error, SettingsError::InvalidValue { .. }),
+            "{error}"
+        );
+    }
+}

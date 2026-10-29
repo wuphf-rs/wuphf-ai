@@ -150,7 +150,7 @@ func TestInModeTranslatesKnownCounterparts(t *testing.T) {
 func replyIn(t *testing.T, addressing Addressing, chat types.JID, reply *wuphfpb.ReplyContext) *stubSendClient {
 	t.Helper()
 	client := &stubSendClient{}
-	sender := NewSender(client, &stubBroker{}, stubConverter{}, addressing, config.StickerMetadata{}, config.RenderingOptions{})
+	sender := NewSender(client, &stubBroker{}, stubConverter{}, addressing, liveRendering(config.RenderingOptions{}))
 	text := "reply"
 	reply.PlatformMessageId = "parent"
 	if _, _, err := sender.SendMessage(context.Background(), &wuphfpb.MessageCreateDispatch{
@@ -211,7 +211,7 @@ func TestDirectChatIsAddressedInItsForm(t *testing.T) {
 		t.Fatalf("quoted participant = %q, want %q", got, peerPN)
 	}
 
-	sender := NewSender(client, &stubBroker{}, stubConverter{}, addresses, config.StickerMetadata{}, config.RenderingOptions{})
+	sender := NewSender(client, &stubBroker{}, stubConverter{}, addresses, liveRendering(config.RenderingOptions{}))
 	if _, err := sender.EditMessage(ctx, &wuphfpb.MessageEditDispatch{TargetChatId: peerLID.String(), TargetPlatformMessageId: "m", Text: proto.String("x")}); err != nil {
 		t.Fatal(err)
 	}

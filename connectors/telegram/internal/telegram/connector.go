@@ -7,9 +7,12 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"time"
 
 	coreclient "github.com/akshettrj/wuphf/connectors/shared/coreclient"
 	"github.com/akshettrj/wuphf/connectors/shared/functions"
+	"github.com/akshettrj/wuphf/connectors/shared/logging"
+	"github.com/akshettrj/wuphf/connectors/shared/settings"
 	"github.com/akshettrj/wuphf/connectors/telegram/internal/config"
 	"github.com/akshettrj/wuphf/proto/go/connector/v1"
 	"github.com/gotd/td/session"
@@ -49,7 +52,21 @@ func (c Connector) Run(ctx context.Context) error {
 		return err
 	}
 	defer fns.Close()
-	converter := functions.MediaConverter{Functions: fns, Media: media, Timeout: c.cfg.MediaConvertTimeout()}
+	// The runtime settings: declared to the core when registering, then
+	// followed as the core pushes changes.
+	runtime, err := settings.Connect(c.cfg.CoreAddress, coreToken, c.cfg.ConnectorID, c.cfg.Runtime.WithDefaults(), c.logger)
+	if err != nil {
+		return err
+	}
+	defer runtime.Close()
+	go runtime.Follow(ctx, func(old, new config.Runtime) {
+		if old.LogLevel != new.LogLevel {
+			logging.SetLevel(new.LogLevel)
+		}
+	})
+	converter := functions.MediaConverter{Functions: fns, Media: media, TimeoutFunc: func() time.Duration {
+		return runtime.Live.Load().MediaConvertTimeout()
+	}}
 	var client *gotd.Client
 	codec := NewMediaCodec(media, func(ctx context.Context, location tg.InputFileLocationClass) ([]byte, error) {
 		var output bytes.Buffer
@@ -89,7 +106,7 @@ func (c Connector) Run(ctx context.Context) error {
 			return err
 		}
 		c.logger.Info().Msg("Telegram session connected")
-		sender := NewSender(client.API(), peers, media, converter, c.cfg.Rendering, c.credentials.BotToken != "")
+		sender := NewSender(client.API(), peers, media, converter, runtime.Live, c.credentials.BotToken != "")
 		return coreclient.New(coreclient.Options{
 			CoreAddress:         c.cfg.CoreAddress,
 			Token:               coreToken,
@@ -98,6 +115,7 @@ func (c Connector) Run(ctx context.Context) error {
 			SupportsThreads:     c.cfg.SupportsThreads,
 			SupportsTopicCreate: c.cfg.SupportsTopicCreate,
 			IsPermanent:         telegramPermanent,
+			Settings:            runtime.Declaration,
 		}, c.logger).Run(ctx, sender, inputs)
 	})
 }

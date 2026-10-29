@@ -27,9 +27,9 @@ type File struct {
 	// capability gate is configured from one place.
 	SupportsThreads     bool `toml:"supports_threads"`
 	SupportsTopicCreate bool `toml:"supports_topic_create"`
-	// LogLevel sets log verbosity (trace, debug, info, warn, error). Empty
-	// means info; the WUPHF_LOG_LEVEL environment variable overrides it.
-	LogLevel string `toml:"log_level"`
+	// Runtime holds the settings that may change while the connector runs.
+	// Embedded, so the file keeps its layout (`log_level`).
+	Runtime
 	// BackfillOnStart replays the inbox snapshot on connect so messages that
 	// arrived while the connector was down are bridged, the same offline-sync
 	// behaviour WhatsApp gets from history sync. The core dedups by native id
@@ -37,6 +37,26 @@ type File struct {
 	// enabled; set it to false to skip the replay (e.g. to avoid bridging the
 	// recent inbox on a fresh install).
 	BackfillOnStart *bool `toml:"backfill_on_start"`
+}
+
+// Runtime holds the settings that can change while the connector runs. The
+// connector declares them to the core (the `botconf` tags, see the shared
+// settings package), which stores, validates and pushes every change; the
+// values in the file are the base. Everything else in File is read once
+// (`backfill_on_start` too: it is read when the session connects).
+type Runtime struct {
+	// LogLevel sets log verbosity (trace, debug, info, warn, error). Empty
+	// means info; the WUPHF_LOG_LEVEL environment variable overrides it.
+	LogLevel string `toml:"log_level" botconf:"Log level" doc:"How much the connector logs (WUPHF_LOG_LEVEL wins)" jsonschema:"enum=trace,enum=debug,enum=info,enum=warn,enum=error"`
+}
+
+// WithDefaults fills in what an empty setting stands for, so the values
+// declared to the core are explicit.
+func (c Runtime) WithDefaults() Runtime {
+	if c.LogLevel == "" {
+		c.LogLevel = "info"
+	}
+	return c
 }
 
 // ShouldBackfill reports whether the inbox snapshot is replayed on connect,

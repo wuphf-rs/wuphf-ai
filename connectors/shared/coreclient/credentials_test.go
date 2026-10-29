@@ -11,6 +11,7 @@ import (
 	"github.com/rs/zerolog"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/metadata"
+	"google.golang.org/protobuf/proto"
 )
 
 // recordingCore captures the authorization header each call presents.
@@ -18,6 +19,7 @@ type recordingCore struct {
 	wuphfpb.UnimplementedConnectorTransportServer
 	wuphfpb.UnimplementedMediaTransportServer
 	authorizations chan []string
+	registrations  chan *wuphfpb.Registration
 }
 
 func (r *recordingCore) record(ctx context.Context) {
@@ -27,8 +29,12 @@ func (r *recordingCore) record(ctx context.Context) {
 
 func (r *recordingCore) OpenSession(stream grpc.BidiStreamingServer[wuphfpb.ClientFrame, wuphfpb.ServerFrame]) error {
 	r.record(stream.Context())
-	// End the session once registered; the test only needs the header.
-	_, err := stream.Recv()
+	// End the session once registered; the tests only need the header and
+	// the registration.
+	frame, err := stream.Recv()
+	if registration := frame.GetRegistration(); registration != nil {
+		r.registrations <- registration
+	}
 	return err
 }
 
@@ -49,7 +55,10 @@ func startRecordingCore(t *testing.T) (string, *recordingCore) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	core := &recordingCore{authorizations: make(chan []string, 4)}
+	core := &recordingCore{
+		authorizations: make(chan []string, 4),
+		registrations:  make(chan *wuphfpb.Registration, 4),
+	}
 	server := grpc.NewServer()
 	wuphfpb.RegisterConnectorTransportServer(server, core)
 	wuphfpb.RegisterMediaTransportServer(server, core)
@@ -107,5 +116,32 @@ func TestTokenFromEnv(t *testing.T) {
 	t.Setenv("WUPHF_TEST_CORE_TOKEN", "")
 	if _, err := TokenFromEnv("WUPHF_TEST_CORE_TOKEN"); err == nil {
 		t.Fatal("an empty token must be refused")
+	}
+}
+
+func TestRegistrationCarriesTheSettingsDeclaration(t *testing.T) {
+	address, core := startRecordingCore(t)
+	declaration := &wuphfpb.ConnectorSettingsDeclaration{
+		Descriptor_: []byte{1, 2, 3},
+		JsonSchema:  `{"type": "object"}`,
+		BaseJson:    `{}`,
+	}
+	client := New(Options{
+		CoreAddress: address,
+		ConnectorID: "telegram-main",
+		Platform:    wuphfpb.Platform_PLATFORM_TELEGRAM,
+		Token:       "tg-secret",
+		Settings:    declaration,
+	}, zerolog.Nop())
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	_ = client.runSession(ctx, &flakySender{}, make(chan *wuphfpb.ClientFrame), func() {})
+	select {
+	case registration := <-core.registrations:
+		if !proto.Equal(registration.GetSettings(), declaration) {
+			t.Fatalf("settings = %v, want %v", registration.GetSettings(), declaration)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("the core saw no registration")
 	}
 }

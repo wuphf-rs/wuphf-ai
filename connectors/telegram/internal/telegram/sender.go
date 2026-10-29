@@ -11,6 +11,7 @@ import (
 	"unicode/utf16"
 
 	coreclient "github.com/akshettrj/wuphf/connectors/shared/coreclient"
+	"github.com/akshettrj/wuphf/connectors/shared/settings"
 	"github.com/akshettrj/wuphf/connectors/telegram/internal/config"
 	"github.com/akshettrj/wuphf/proto/go/connector/v1"
 	"github.com/gotd/td/telegram/message"
@@ -34,12 +35,13 @@ type Sender struct {
 	// bot is set for a bot session, which can attach inline keyboards; a user
 	// session cannot.
 	bot bool
-	// rendering is this connector's own policy for how mirrored copies are
-	// rendered; the core dispatches content only.
-	rendering config.RenderingOptions
+	// runtime holds this connector's own policy for how mirrored copies are
+	// rendered (the core dispatches content only). It is a runtime setting:
+	// each dispatch reads it once.
+	runtime *settings.Live[config.Runtime]
 }
 
-func NewSender(api *tg.Client, peers *PeerCache, media MediaBroker, converter StickerConverter, rendering config.RenderingOptions, bot bool) Sender {
+func NewSender(api *tg.Client, peers *PeerCache, media MediaBroker, converter StickerConverter, runtime *settings.Live[config.Runtime], bot bool) Sender {
 	return Sender{
 		api:       api,
 		sender:    message.NewSender(api),
@@ -47,8 +49,17 @@ func NewSender(api *tg.Client, peers *PeerCache, media MediaBroker, converter St
 		media:     media,
 		converter: converter,
 		bot:       bot,
-		rendering: rendering,
+		runtime:   runtime,
 	}
+}
+
+// rendering is the current rendering policy; the zero value when the sender
+// has no runtime settings (as in tests).
+func (s Sender) rendering() config.RenderingOptions {
+	if s.runtime == nil {
+		return config.RenderingOptions{}
+	}
+	return s.runtime.Load().Rendering
 }
 
 func (s Sender) SendMessage(ctx context.Context, dispatch *wuphfpb.MessageCreateDispatch) (string, string, error) {
@@ -89,14 +100,15 @@ func (s Sender) SendMessage(ctx context.Context, dispatch *wuphfpb.MessageCreate
 		builder = builder.Reply(topicRoot)
 	}
 
+	rendering := s.rendering()
 	body := attributedText(dispatch.GetSenderName(), dispatch.GetParticipant(), dispatch.GetText())
 	var updates tg.UpdatesClass
 	switch {
 	case len(dispatch.Attachments) > 1:
-		updates, err = s.sendAlbum(ctx, builder, dispatch.Attachments, body, s.rendering.AttachmentsAsFiles)
+		updates, err = s.sendAlbum(ctx, builder, dispatch.Attachments, body, rendering.AttachmentsAsFiles)
 	case len(dispatch.Attachments) > 0:
-		updates, err = s.sendAttachment(ctx, builder, dispatch.Attachments[0], body, senderLabel(dispatch.GetSenderName(), dispatch.GetParticipant()), s.rendering.AttachmentsAsFiles)
-	case textExceedsLimit(dispatch.GetText(), s.rendering.MaxMessageLength):
+		updates, err = s.sendAttachment(ctx, builder, dispatch.Attachments[0], body, senderLabel(dispatch.GetSenderName(), dispatch.GetParticipant()), rendering.AttachmentsAsFiles)
+	case textExceedsLimit(dispatch.GetText(), rendering.MaxMessageLength):
 		updates, err = s.sendTextAsFile(ctx, builder, dispatch.GetSenderName(), dispatch.GetParticipant(), dispatch.GetText())
 	default:
 		updates, err = builder.StyledText(ctx, body...)
@@ -126,7 +138,7 @@ func (s Sender) EditMessage(ctx context.Context, dispatch *wuphfpb.MessageEditDi
 		return "", coreclient.Permanent(fmt.Errorf("invalid Telegram target message id %q: %w", dispatch.TargetPlatformMessageId, err))
 	}
 	body := attributedText(dispatch.GetSenderName(), dispatch.GetParticipant(), dispatch.GetText())
-	if s.rendering.EditMode == config.EditModeRepost {
+	if s.rendering().EditMode == config.EditModeRepost {
 		body = append(body, styling.Italic("\n(edited)"))
 		if _, err := s.sender.To(peer).CloneBuilder().Reply(messageID).StyledText(ctx, body...); err != nil {
 			return "", fmt.Errorf("repost Telegram edit: %w", err)
@@ -152,7 +164,7 @@ func (s Sender) DeleteMessage(ctx context.Context, dispatch *wuphfpb.MessageDele
 	if err != nil {
 		return "", coreclient.Permanent(fmt.Errorf("invalid Telegram target message id %q: %w", dispatch.TargetPlatformMessageId, err))
 	}
-	if s.rendering.DeleteMode == config.DeleteModeTombstone {
+	if s.rendering().DeleteMode == config.DeleteModeTombstone {
 		if _, err := s.sender.To(peer).CloneBuilder().Reply(messageID).StyledText(ctx, styling.Italic("🗑 message deleted")); err != nil {
 			return "", fmt.Errorf("post Telegram tombstone: %w", err)
 		}

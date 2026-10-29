@@ -5,9 +5,12 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"time"
 
 	coreclient "github.com/akshettrj/wuphf/connectors/shared/coreclient"
 	"github.com/akshettrj/wuphf/connectors/shared/functions"
+	"github.com/akshettrj/wuphf/connectors/shared/logging"
+	"github.com/akshettrj/wuphf/connectors/shared/settings"
 	"github.com/akshettrj/wuphf/connectors/whatsapp/internal/config"
 	wuphfpb "github.com/akshettrj/wuphf/proto/go/connector/v1"
 	_ "github.com/mattn/go-sqlite3"
@@ -65,7 +68,21 @@ func (c Connector) Run(ctx context.Context) error {
 		return err
 	}
 	defer fns.Close()
-	converter := functions.MediaConverter{Functions: fns, Media: media, Timeout: c.cfg.MediaConvertTimeout()}
+	// The runtime settings: declared to the core when registering, then
+	// followed as the core pushes changes.
+	runtime, err := settings.Connect(c.cfg.CoreAddress, coreToken, c.cfg.ConnectorID, c.cfg.Runtime.WithDefaults(), c.logger)
+	if err != nil {
+		return err
+	}
+	defer runtime.Close()
+	go runtime.Follow(ctx, func(old, new config.Runtime) {
+		if old.LogLevel != new.LogLevel {
+			logging.SetLevel(new.LogLevel)
+		}
+	})
+	converter := functions.MediaConverter{Functions: fns, Media: media, TimeoutFunc: func() time.Duration {
+		return runtime.Live.Load().MediaConvertTimeout()
+	}}
 	inputs := make(chan *wuphfpb.ClientFrame, 128)
 	identity := newIdentityResolver(client)
 	addresses := newAddressBook(identity, whatsmeowAccount{client: client})
@@ -114,7 +131,8 @@ func (c Connector) Run(ctx context.Context) error {
 			Platform:            wuphfpb.Platform_PLATFORM_WHATSAPP,
 			SupportsThreads:     c.cfg.SupportsThreads,
 			SupportsTopicCreate: c.cfg.SupportsTopicCreate,
-		}, c.logger).Run(ctx, NewSender(client, media, converter, addresses, c.cfg.StickerMetadata(), c.cfg.Rendering), inputs)
+			Settings:            runtime.Declaration,
+		}, c.logger).Run(ctx, NewSender(client, media, converter, addresses, runtime.Live), inputs)
 	}()
 	select {
 	case <-ctx.Done():

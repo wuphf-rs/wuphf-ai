@@ -41,14 +41,21 @@ type MediaConverter struct {
 	Functions *Client
 	Media     MediaDownloader
 	Timeout   time.Duration // bounds the whole call, including waiting for a provider
+	// TimeoutFunc, when set, is read on every call instead of Timeout, so a
+	// timeout that is a runtime setting applies to the next conversion.
+	TimeoutFunc func() time.Duration
 }
 
 // Convert converts the stored media mediaID to targetMime. sourceMime and
 // sourceName describe the source so the provider can pick a conversion.
 func (m MediaConverter) Convert(ctx context.Context, mediaID, sourceMime, sourceName, targetMime string) ([]byte, error) {
-	if m.Timeout > 0 {
+	timeout := m.Timeout
+	if m.TimeoutFunc != nil {
+		timeout = m.TimeoutFunc()
+	}
+	if timeout > 0 {
 		var cancel context.CancelFunc
-		ctx, cancel = context.WithTimeout(ctx, m.Timeout)
+		ctx, cancel = context.WithTimeout(ctx, timeout)
 		defer cancel()
 	}
 	var result MediaConvertResult

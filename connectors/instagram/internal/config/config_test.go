@@ -1,6 +1,10 @@
 package config
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/pelletier/go-toml/v2"
+)
 
 func TestShouldBackfillDefaultsToEnabled(t *testing.T) {
 	t.Parallel()
@@ -40,5 +44,29 @@ func TestValidateRequiresCoreTokenEnv(t *testing.T) {
 	cfg.CoreTokenEnv = ""
 	if err := cfg.Validate(); err == nil {
 		t.Fatal("Validate() accepted configuration without core_token_env")
+	}
+}
+
+// The runtime settings are embedded, so the file keeps its layout.
+func TestRuntimeSettingsKeepTheFileLayout(t *testing.T) {
+	t.Parallel()
+
+	var cfg File
+	if err := toml.Unmarshal([]byte("connector_id = \"instagram-main\"\nlog_level = \"debug\"\n"), &cfg); err != nil {
+		t.Fatal(err)
+	}
+	if cfg.ConnectorID != "instagram-main" || cfg.Runtime.LogLevel != "debug" {
+		t.Fatalf("decoded %+v", cfg)
+	}
+	if got := (Runtime{}).WithDefaults().LogLevel; got != "info" {
+		t.Fatalf("default log level = %q", got)
+	}
+}
+
+func TestExampleConfigLoads(t *testing.T) {
+	t.Parallel()
+
+	if _, err := Load("../../config.example.toml"); err != nil {
+		t.Fatalf("Load(config.example.toml) error = %v", err)
 	}
 }

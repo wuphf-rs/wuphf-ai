@@ -66,6 +66,10 @@ type Options struct {
 	// IsPermanent, when set, classifies platform-specific errors as permanent in
 	// addition to the coreclient.Permanent wrapping (e.g. a Telegram RPC 400).
 	IsPermanent func(error) bool
+	// Settings, when set, declares the connector's runtime settings in the
+	// registration (see the settings package), so the core keeps and pushes
+	// them. Nil declares none, and the core keeps any section declared before.
+	Settings *wuphfpb.ConnectorSettingsDeclaration
 }
 
 // Sender is the minimum surface every connector implements: the three message
@@ -210,6 +214,7 @@ func (c Client) runSession(
 				SupportsThreads:     c.opts.SupportsThreads,
 				SupportsTopicCreate: c.opts.SupportsTopicCreate,
 			},
+			Settings: c.opts.Settings,
 		}},
 	}); err != nil {
 		return fmt.Errorf("register connector: %w", err)

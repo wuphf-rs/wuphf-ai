@@ -8,6 +8,7 @@ import (
 	"unicode/utf8"
 
 	coreclient "github.com/akshettrj/wuphf/connectors/shared/coreclient"
+	"github.com/akshettrj/wuphf/connectors/shared/settings"
 	"github.com/akshettrj/wuphf/connectors/whatsapp/internal/config"
 	wuphfpb "github.com/akshettrj/wuphf/proto/go/connector/v1"
 	"go.mau.fi/whatsmeow"
@@ -35,21 +36,46 @@ type Sender struct {
 	converter StickerConverter
 	// addressing translates the canonical addresses dispatches carry into the
 	// form each chat is addressed in on WhatsApp.
-	addressing  Addressing
-	stickerMeta config.StickerMetadata
-	// rendering is this connector's own policy for how mirrored copies are
-	// rendered; the core dispatches content only.
-	rendering config.RenderingOptions
+	addressing Addressing
+	// runtime holds this connector's own policy for how mirrored copies are
+	// rendered (the core dispatches content only) and the sticker pack
+	// metadata. It is a runtime setting: each dispatch reads it once.
+	runtime *settings.Live[config.Runtime]
+	// pinned is the value one dispatch read from runtime, so every part of
+	// the dispatch sees the same settings (see pin).
+	pinned *config.Runtime
 }
 
-func NewSender(client SendClient, media MediaBroker, converter StickerConverter, addressing Addressing, stickerMeta config.StickerMetadata, rendering config.RenderingOptions) Sender {
-	return Sender{client: client, media: media, converter: converter, addressing: addressing, stickerMeta: stickerMeta, rendering: rendering}
+func NewSender(client SendClient, media MediaBroker, converter StickerConverter, addressing Addressing, runtime *settings.Live[config.Runtime]) Sender {
+	return Sender{client: client, media: media, converter: converter, addressing: addressing, runtime: runtime}
+}
+
+// settings are the runtime settings: the dispatch's pinned value, else the
+// current one; the zero value when the sender has none.
+func (s Sender) settings() config.Runtime {
+	switch {
+	case s.pinned != nil:
+		return *s.pinned
+	case s.runtime == nil:
+		return config.Runtime{}
+	default:
+		return s.runtime.Load()
+	}
+}
+
+// pin returns a copy of the sender bound to the settings as they are now, for
+// one dispatch: a change pushed meanwhile applies to the next one.
+func (s Sender) pin() Sender {
+	current := s.settings()
+	s.pinned = &current
+	return s
 }
 
 // SendMessage delivers a dispatch to the target WhatsApp chat. WhatsApp has no
 // threads, so the dispatch never carries a thread target and the returned
 // threadID is always empty.
 func (s Sender) SendMessage(ctx context.Context, dispatch *wuphfpb.MessageCreateDispatch) (string, string, error) {
+	s = s.pin()
 	chat, mode, err := s.target(ctx, dispatch.GetTargetChatId())
 	if err != nil {
 		return "", "", err
@@ -65,11 +91,11 @@ func (s Sender) SendMessage(ctx context.Context, dispatch *wuphfpb.MessageCreate
 	var message *waE2E.Message
 	switch {
 	case len(dispatch.Attachments) > 0:
-		message, err = s.attachmentMessage(ctx, dispatch.Attachments[0], dispatch.GetText(), s.rendering.AttachmentsAsFiles)
+		message, err = s.attachmentMessage(ctx, dispatch.Attachments[0], dispatch.GetText(), s.settings().Rendering.AttachmentsAsFiles)
 		if err != nil {
 			return "", "", err
 		}
-	case textExceedsLimit(dispatch.GetText(), s.rendering.MaxMessageLength):
+	case textExceedsLimit(dispatch.GetText(), s.settings().Rendering.MaxMessageLength):
 		message, err = s.textFileMessage(ctx, dispatch.GetText())
 		if err != nil {
 			return "", "", err
@@ -108,7 +134,7 @@ func (s Sender) sendAttachments(
 		if i == 0 {
 			caption = dispatch.GetText()
 		}
-		message, err := s.attachmentMessage(ctx, attachment, caption, s.rendering.AttachmentsAsFiles)
+		message, err := s.attachmentMessage(ctx, attachment, caption, s.settings().Rendering.AttachmentsAsFiles)
 		if err != nil {
 			return "", attachmentGroupError(err, i)
 		}
@@ -397,7 +423,7 @@ func (s Sender) stickerMessage(
 		data, mimeType = converted, "image/webp"
 	}
 	if mimeType == "image/webp" {
-		data = applyStickerMetadata(ctx, data, s.stickerMeta)
+		data = applyStickerMetadata(ctx, data, s.settings().StickerMetadata())
 	}
 	uploaded, err := s.client.Upload(ctx, data, whatsmeow.MediaImage)
 	if err != nil {

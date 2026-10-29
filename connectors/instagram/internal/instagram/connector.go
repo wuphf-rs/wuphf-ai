@@ -10,6 +10,8 @@ import (
 
 	"github.com/akshettrj/wuphf/connectors/instagram/internal/config"
 	coreclient "github.com/akshettrj/wuphf/connectors/shared/coreclient"
+	"github.com/akshettrj/wuphf/connectors/shared/logging"
+	"github.com/akshettrj/wuphf/connectors/shared/settings"
 	wuphfpb "github.com/akshettrj/wuphf/proto/go/connector/v1"
 	"github.com/rs/zerolog"
 	"go.mau.fi/mautrix-meta/pkg/messagix"
@@ -46,6 +48,18 @@ func (c Connector) Run(ctx context.Context) error {
 		return err
 	}
 	defer media.Close()
+	// The runtime settings: declared to the core when registering, then
+	// followed as the core pushes changes.
+	runtime, err := settings.Connect(c.cfg.CoreAddress, coreToken, c.cfg.ConnectorID, c.cfg.Runtime.WithDefaults(), logger)
+	if err != nil {
+		return err
+	}
+	defer runtime.Close()
+	go runtime.Follow(ctx, func(old, new config.Runtime) {
+		if old.LogLevel != new.LogLevel {
+			logging.SetLevel(new.LogLevel)
+		}
+	})
 
 	inputs := make(chan *wuphfpb.ClientFrame, 128)
 	codec := NewMediaCodec(media, http.DefaultClient, client.Instagram)
@@ -107,6 +121,7 @@ func (c Connector) Run(ctx context.Context) error {
 			Platform:            wuphfpb.Platform_PLATFORM_INSTAGRAM,
 			SupportsThreads:     c.cfg.SupportsThreads,
 			SupportsTopicCreate: c.cfg.SupportsTopicCreate,
+			Settings:            runtime.Declaration,
 		}, logger).Run(ctx, NewSender(client), inputs)
 	}()
 

@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	coreclient "github.com/akshettrj/wuphf/connectors/shared/coreclient"
+	"github.com/akshettrj/wuphf/connectors/shared/settings"
 	"github.com/akshettrj/wuphf/connectors/whatsapp/internal/config"
 	wuphfpb "github.com/akshettrj/wuphf/proto/go/connector/v1"
 	"go.mau.fi/whatsmeow"
@@ -60,7 +61,7 @@ func (s *stubBroker) Download(context.Context, string) ([]byte, error) {
 func TestSendFileDispatch(t *testing.T) {
 	t.Parallel()
 	client := &stubSendClient{}
-	sender := NewSender(client, &stubBroker{bytes: []byte("data")}, stubConverter{}, staticAddressing{}, config.StickerMetadata{}, config.RenderingOptions{})
+	sender := NewSender(client, &stubBroker{bytes: []byte("data")}, stubConverter{}, staticAddressing{}, liveRendering(config.RenderingOptions{}))
 	text := "caption"
 	fileName := "receipt.pdf"
 	mime := "application/pdf"
@@ -89,7 +90,7 @@ func TestSendFileDispatch(t *testing.T) {
 func TestSendAttachmentsAsFilesForcesDocument(t *testing.T) {
 	t.Parallel()
 	client := &stubSendClient{}
-	sender := NewSender(client, &stubBroker{bytes: []byte("data")}, stubConverter{}, staticAddressing{}, config.StickerMetadata{}, config.RenderingOptions{AttachmentsAsFiles: true})
+	sender := NewSender(client, &stubBroker{bytes: []byte("data")}, stubConverter{}, staticAddressing{}, liveRendering(config.RenderingOptions{AttachmentsAsFiles: true}))
 	mime := "image/jpeg"
 	_, _, err := sender.SendMessage(context.Background(), &wuphfpb.MessageCreateDispatch{
 		TargetChatId: "123@s.whatsapp.net",
@@ -113,7 +114,7 @@ func TestSendAttachmentsAsFilesForcesDocument(t *testing.T) {
 func TestSendOverLengthTextAsFile(t *testing.T) {
 	t.Parallel()
 	client := &stubSendClient{}
-	sender := NewSender(client, &stubBroker{}, stubConverter{}, staticAddressing{}, config.StickerMetadata{}, config.RenderingOptions{MaxMessageLength: 5})
+	sender := NewSender(client, &stubBroker{}, stubConverter{}, staticAddressing{}, liveRendering(config.RenderingOptions{MaxMessageLength: 5}))
 	text := "hello world"
 	_, _, err := sender.SendMessage(context.Background(), &wuphfpb.MessageCreateDispatch{
 		TargetChatId: "123@s.whatsapp.net",
@@ -134,7 +135,7 @@ func TestSendOverLengthTextAsFile(t *testing.T) {
 func TestSendWithinLengthLimitStaysInline(t *testing.T) {
 	t.Parallel()
 	client := &stubSendClient{}
-	sender := NewSender(client, &stubBroker{}, stubConverter{}, staticAddressing{}, config.StickerMetadata{}, config.RenderingOptions{MaxMessageLength: 5})
+	sender := NewSender(client, &stubBroker{}, stubConverter{}, staticAddressing{}, liveRendering(config.RenderingOptions{MaxMessageLength: 5}))
 	text := "hi"
 	_, _, err := sender.SendMessage(context.Background(), &wuphfpb.MessageCreateDispatch{
 		TargetChatId: "123@s.whatsapp.net",
@@ -175,7 +176,7 @@ func TestSendOutboundReplyBuildsQuotedContext(t *testing.T) {
 	t.Parallel()
 	client := &stubSendClient{}
 	ownJID := types.NewJID("15550001111", types.DefaultUserServer)
-	sender := NewSender(client, &stubBroker{}, stubConverter{}, staticAddressing{ownPN: ownJID}, config.StickerMetadata{}, config.RenderingOptions{})
+	sender := NewSender(client, &stubBroker{}, stubConverter{}, staticAddressing{ownPN: ownJID}, liveRendering(config.RenderingOptions{}))
 	text := "child reply"
 	parentText := "parent body"
 	parentID := "parent-stanza-id"
@@ -213,7 +214,7 @@ func TestSendOutboundReplyQuotesMediaParent(t *testing.T) {
 	t.Parallel()
 	client := &stubSendClient{}
 	ownJID := types.NewJID("15550001111", types.DefaultUserServer)
-	sender := NewSender(client, &stubBroker{}, stubConverter{}, staticAddressing{ownPN: ownJID}, config.StickerMetadata{}, config.RenderingOptions{})
+	sender := NewSender(client, &stubBroker{}, stubConverter{}, staticAddressing{ownPN: ownJID}, liveRendering(config.RenderingOptions{}))
 	text := "look at this"
 	parentCaption := "parent photo"
 	mime := "image/jpeg"
@@ -250,7 +251,7 @@ func TestSendOutboundReplyQuotesMediaParent(t *testing.T) {
 func TestSendDeliversToCanonicalLIDTarget(t *testing.T) {
 	t.Parallel()
 	client := &stubSendClient{}
-	sender := NewSender(client, &stubBroker{}, stubConverter{}, staticAddressing{}, config.StickerMetadata{}, config.RenderingOptions{})
+	sender := NewSender(client, &stubBroker{}, stubConverter{}, staticAddressing{}, liveRendering(config.RenderingOptions{}))
 	lid := types.NewJID("88887777", types.HiddenUserServer)
 	text := "reply to lid chat"
 	messageID, _, err := sender.SendMessage(context.Background(), &wuphfpb.MessageCreateDispatch{
@@ -271,7 +272,7 @@ func TestSendDeliversToCanonicalLIDTarget(t *testing.T) {
 func TestEditMessageRevisesTargetInPlace(t *testing.T) {
 	t.Parallel()
 	client := &stubSendClient{}
-	sender := NewSender(client, &stubBroker{}, stubConverter{}, staticAddressing{}, config.StickerMetadata{}, config.RenderingOptions{})
+	sender := NewSender(client, &stubBroker{}, stubConverter{}, staticAddressing{}, liveRendering(config.RenderingOptions{}))
 	text := "revised text"
 	messageID, err := sender.EditMessage(context.Background(), &wuphfpb.MessageEditDispatch{
 		TargetChatId:            "123@s.whatsapp.net",
@@ -295,7 +296,7 @@ func TestEditMessageRevisesTargetInPlace(t *testing.T) {
 func TestSendRejectsLegacyReplyWithoutContext(t *testing.T) {
 	t.Parallel()
 	client := &stubSendClient{}
-	sender := NewSender(client, &stubBroker{}, stubConverter{}, staticAddressing{}, config.StickerMetadata{}, config.RenderingOptions{})
+	sender := NewSender(client, &stubBroker{}, stubConverter{}, staticAddressing{}, liveRendering(config.RenderingOptions{}))
 	reply := "parent-id"
 	_, _, err := sender.SendMessage(context.Background(), &wuphfpb.MessageCreateDispatch{
 		TargetChatId:             "123@s.whatsapp.net",
@@ -341,7 +342,7 @@ func imageAttachments(n int) []*wuphfpb.Attachment {
 func TestSendMultipleAttachmentsCaptionsOnlyTheFirst(t *testing.T) {
 	t.Parallel()
 	client := &recordingSendClient{}
-	sender := NewSender(client, &stubBroker{bytes: []byte("data")}, stubConverter{}, staticAddressing{}, config.StickerMetadata{}, config.RenderingOptions{})
+	sender := NewSender(client, &stubBroker{bytes: []byte("data")}, stubConverter{}, staticAddressing{}, liveRendering(config.RenderingOptions{}))
 	text := "caption"
 	id, _, err := sender.SendMessage(context.Background(), &wuphfpb.MessageCreateDispatch{
 		TargetChatId: "123@s.whatsapp.net",
@@ -372,7 +373,7 @@ func TestSendMultipleAttachmentsCaptionsOnlyTheFirst(t *testing.T) {
 func TestSendMultipleAttachmentsDeadLettersAfterPartialDelivery(t *testing.T) {
 	t.Parallel()
 	client := &recordingSendClient{failAt: 1, err: errors.New("upstream refused")}
-	sender := NewSender(client, &stubBroker{bytes: []byte("data")}, stubConverter{}, staticAddressing{}, config.StickerMetadata{}, config.RenderingOptions{})
+	sender := NewSender(client, &stubBroker{bytes: []byte("data")}, stubConverter{}, staticAddressing{}, liveRendering(config.RenderingOptions{}))
 	_, _, err := sender.SendMessage(context.Background(), &wuphfpb.MessageCreateDispatch{
 		TargetChatId: "123@s.whatsapp.net",
 		Attachments:  imageAttachments(3),
@@ -394,7 +395,7 @@ func TestSendMultipleAttachmentsDeadLettersAfterPartialDelivery(t *testing.T) {
 func TestSendFirstAttachmentFailureStaysRetryable(t *testing.T) {
 	t.Parallel()
 	client := &recordingSendClient{failAt: 0, err: errors.New("transient")}
-	sender := NewSender(client, &stubBroker{bytes: []byte("data")}, stubConverter{}, staticAddressing{}, config.StickerMetadata{}, config.RenderingOptions{})
+	sender := NewSender(client, &stubBroker{bytes: []byte("data")}, stubConverter{}, staticAddressing{}, liveRendering(config.RenderingOptions{}))
 	_, _, err := sender.SendMessage(context.Background(), &wuphfpb.MessageCreateDispatch{
 		TargetChatId: "123@s.whatsapp.net",
 		Attachments:  imageAttachments(2),
@@ -440,7 +441,7 @@ func TestQuotedAuthorAttributesTheRealSender(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			sender := NewSender(&stubSendClient{}, &stubBroker{}, stubConverter{}, staticAddressing{ownPN: own}, config.StickerMetadata{}, config.RenderingOptions{})
+			sender := NewSender(&stubSendClient{}, &stubBroker{}, stubConverter{}, staticAddressing{ownPN: own}, liveRendering(config.RenderingOptions{}))
 			got, err := sender.quotedAuthor(context.Background(), tc.reply, "")
 			if err != nil {
 				t.Fatalf("quotedAuthor() error = %v", err)
@@ -482,7 +483,7 @@ func (r *recordingConverter) Convert(_ context.Context, mediaID, sourceMime, sou
 func sendSticker(t *testing.T, converter StickerConverter, mimeType, fileName string, animated bool) *waE2E.Message {
 	t.Helper()
 	client := &stubSendClient{}
-	sender := NewSender(client, &stubBroker{bytes: []byte("source")}, converter, staticAddressing{}, config.StickerMetadata{}, config.RenderingOptions{})
+	sender := NewSender(client, &stubBroker{bytes: []byte("source")}, converter, staticAddressing{}, liveRendering(config.RenderingOptions{}))
 	if _, _, err := sender.SendMessage(context.Background(), &wuphfpb.MessageCreateDispatch{
 		TargetChatId: "123@s.whatsapp.net",
 		Attachments: []*wuphfpb.Attachment{{
@@ -576,4 +577,10 @@ func (a staticAddressing) Own(mode types.AddressingMode) types.JID {
 		return a.ownLID
 	}
 	return a.ownPN
+}
+
+// liveRendering is runtime settings holding rendering, as the connector's
+// settings would after the core pushed them.
+func liveRendering(rendering config.RenderingOptions) *settings.Live[config.Runtime] {
+	return settings.NewLive(config.Runtime{Rendering: rendering})
 }
