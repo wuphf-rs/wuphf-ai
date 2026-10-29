@@ -3,7 +3,7 @@
 
 use crate::config::{Configuration, platform};
 use botconf::{Kind, RuntimeSetting};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use wuphf_core::RoutingConfig;
 use wuphf_functions::Functions;
@@ -20,6 +20,9 @@ pub struct Derived {
     /// crate stays independent of the runtime; the server wraps it in
     /// `wuphf_runtime::auth::ConnectorTokens`.
     pub connector_tokens: HashMap<ConnectorId, String>,
+    /// The owner's platform user ids on each connector (`owner_ids`): who
+    /// may change settings through that connector.
+    pub owners: HashMap<ConnectorId, HashSet<String>>,
 }
 
 /// Reads an environment variable by name.
@@ -75,6 +78,7 @@ impl botconf::Schema for WuphfSchema {
             });
         }
         let connector_tokens = self.connector_tokens(config)?;
+        let owners = owners(config)?;
         let notice_targets = config
             .notify
             .iter()
@@ -94,6 +98,7 @@ impl botconf::Schema for WuphfSchema {
             connectors,
             functions: Arc::new(functions),
             connector_tokens,
+            owners,
         })
     }
 
@@ -116,6 +121,31 @@ impl botconf::Schema for WuphfSchema {
             .kind(Kind::Json),
         ]
     }
+}
+
+/// Each connector's `owner_ids`, checked: no blank id and no id twice on one
+/// connector.
+fn owners(config: &Configuration) -> Result<HashMap<ConnectorId, HashSet<String>>, String> {
+    let mut owners = HashMap::new();
+    for connector in &config.connectors {
+        let mut ids = HashSet::new();
+        for id in &connector.owner_ids {
+            if id.trim().is_empty() {
+                return Err(format!(
+                    "connector {}: owner_ids must not contain a blank id",
+                    connector.id
+                ));
+            }
+            if !ids.insert(id.clone()) {
+                return Err(format!(
+                    "connector {}: owner id {id:?} is listed twice",
+                    connector.id
+                ));
+            }
+        }
+        owners.insert(ConnectorId(connector.id.clone()), ids);
+    }
+    Ok(owners)
 }
 
 /// The rules in match order: by `priority`, then by id. A map has no order of

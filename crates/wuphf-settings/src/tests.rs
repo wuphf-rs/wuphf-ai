@@ -236,6 +236,83 @@ fn connector_tokens_are_read_from_the_environment() {
     });
 }
 
+/// Two connectors; `owners` is spliced into the first one's table.
+fn two_connectors(owners: &str) -> String {
+    format!(
+        r#"{MINIMAL}
+        [[connectors]]
+        id = "telegram-main"
+        platform = "telegram"
+        token_env = "TELEGRAM_TOKEN"
+        {owners}
+
+        [[connectors]]
+        id = "whatsapp-main"
+        platform = "whatsapp"
+        token_env = "WHATSAPP_TOKEN"
+        "#
+    )
+}
+
+#[test]
+fn connector_owner_ids_parse() {
+    Jail::expect_with(|jail| {
+        jail.create_file(
+            "wuphf.toml",
+            &two_connectors(r#"owner_ids = ["704338780"]"#),
+        )?;
+        let store = store(every_token_set(), Path::new("wuphf.toml")).unwrap();
+        let owners = &store.current().derived.owners;
+        assert_eq!(
+            owners[&ConnectorId("telegram-main".into())],
+            ["704338780".to_owned()].into_iter().collect()
+        );
+        assert!(owners[&ConnectorId("whatsapp-main".into())].is_empty());
+        Ok(())
+    });
+}
+
+#[test]
+fn owner_ids_must_not_be_blank() {
+    Jail::expect_with(|jail| {
+        jail.create_file("wuphf.toml", &two_connectors(r#"owner_ids = [" "]"#))?;
+        let error = store_error(every_token_set(), Path::new("wuphf.toml"));
+        assert!(
+            error.contains("connector telegram-main: owner_ids must not contain a blank id"),
+            "{error}"
+        );
+
+        jail.create_file("wuphf.toml", &two_connectors(r#"owner_ids = ["1", "1"]"#))?;
+        let error = store_error(every_token_set(), Path::new("wuphf.toml"));
+        assert!(error.contains("owner id \"1\" is listed twice"), "{error}");
+        Ok(())
+    });
+}
+
+#[test]
+fn owner_ids_are_not_runtime_keys() {
+    Jail::expect_with(|jail| {
+        jail.create_file(
+            "wuphf.toml",
+            &two_connectors(r#"owner_ids = ["704338780"]"#),
+        )?;
+        let store = store(every_token_set(), Path::new("wuphf.toml")).unwrap();
+        runtime().block_on(async {
+            for key in ["connectors", "connectors.0.owner_ids", "owner_ids"] {
+                let error = store
+                    .set(key, serde_json::json!(["intruder"]), None)
+                    .await
+                    .unwrap_err();
+                assert!(
+                    matches!(error, SettingsError::UnknownKey(_)),
+                    "{key}: {error}"
+                );
+            }
+        });
+        Ok(())
+    });
+}
+
 #[test]
 fn environment_overrides_the_file() {
     Jail::expect_with(|jail| {

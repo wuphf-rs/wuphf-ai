@@ -176,6 +176,13 @@ pub struct ConnectorConfiguration {
     pub supports_threads: bool,
     #[serde(default)]
     pub supports_topic_create: bool,
+    /// Platform user ids of the owner on this connector, as the connector
+    /// reports actors (e.g. "704338780" for a Telegram user). Settings
+    /// requests a connector makes on behalf of anyone else are refused.
+    /// File-only: never a runtime setting, since it decides who may change
+    /// the others.
+    #[serde(default)]
+    pub owner_ids: Vec<String>,
 }
 
 /// A secret configuration value. It reads like a plain string, but never
