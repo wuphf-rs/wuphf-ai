@@ -61,7 +61,7 @@ code).
 | 041 | A settings panel in the Telegram connector | P2 | L | 039, 040, botconf 004–007 | TODO |
 | 042 | A `wuphf settings` command | P3 | S | 035, 036, 039 | DONE (see notes) |
 | 043 | Label user-session stickers through the helper bot | P3 | M | 041 | TODO |
-| 044 | Reload re-reads the config file; new rules go through panel drafts | P2 | S–M | 039, 040, 042, botconf 010, 011 | TODO |
+| 044 | Reload re-reads the config file; new rules go through panel drafts | P2 | S–M | 039, 040, 042, botconf 010, 011 | DONE (botconf v0.9.0; see notes) |
 
 Status values: TODO | IN PROGRESS | DONE | BLOCKED (with one-line reason) |
 REJECTED (with one-line rationale).
@@ -445,6 +445,41 @@ Dependencies and ordering:
   only at startup), and marks the rule form's fields `required`/`when`. It
   waits for both botconf tags; it does not conflict with 041/043 (different
   files).
+- **044 done 2026-10-29** (on `plans/runtime-settings`). The drift check showed
+  only the expected `1ae375a` (the example's whatsapp-rust connector commented
+  out, so one `wuphf-settings` test expects 3 tokens) and `d2c224c` (Telegram
+  `bot_token`). Done as planned, with these notes:
+  - **Lock:** `cargo update -p botconf -p botconf-grpc -p botconf-panel` also
+    dropped `itertools` 0.14 and repointed a `getrandom` edge, so the lock was
+    edited by hand instead: only the three botconf sources move (0.5.0 to
+    0.9.0), and `cargo metadata --locked` and every build ran `--locked`.
+    tonic 0.12.3 and prost 0.13.5 stay single.
+  - **Wire conversion:** plan 040's `kind_from_wire` now keeps a connector
+    form field's `required` and `when`; new test
+    `form_fields_keep_required_and_when_from_the_wire` (in
+    `wuphf-runtime/src/connector_settings/tests.rs`).
+  - **Reload:** `wuphf_settings::source(path)` re-reads the file and the
+    `WUPHF_CORE_` environment; `settings::open` (used by `serve` and the CLI)
+    loads over it, and still reads `database_url` once from `base(path)`. The
+    runtime's end-to-end harness now serves over `source` too
+    (`serve_settings_from`), as `serve` does.
+  - **Drafts:** `kind`, `destination` required; `source` required when
+    one-to-one; `source_connector` required when many-to-one; the filters
+    apply when many-to-one. Effective values include the default
+    `priority: 0`, so the draft tests expect it.
+  - **Step 0** skipped (the plan's limits allow one workspace run): the
+    baseline is 040's recorded 263.
+  - **Tests:** 269 (263 + 6: the converter test, `reload_reads_an_edited_file`,
+    `reload_refuses_an_invalid_file`, `owner_ids_follow_reload`,
+    `a_rule_is_created_through_a_draft`,
+    `switching_a_rules_kind_goes_through_a_draft`). Clippy and fmt clean; all
+    builds niced with 2 jobs.
+  - **Mutation checks**, each failing a test: `source()` returning a fixed
+    figment (both reload tests and `owner_ids_follow_reload`); the converter
+    dropping `required`; dropping `required` from `destination`, from
+    `source_connector` and from `source`; dropping `only_chats`' `when`.
+  - **Not checked:** the CLI's `settings::open` passing `source` is covered
+    only through the shared `source()` tests, not by a test of `open` itself.
 - **034 done 2026-10-25** (on `plans/runtime-settings`). The drift check
   passed. Implemented as planned, with these deviations:
   - **Commit split:** the Rust SDK's `Options.token`, and the matching
