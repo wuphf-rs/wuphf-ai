@@ -5,8 +5,10 @@ import (
 	"fmt"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 
+	"github.com/akshettrj/wuphf/connectors/shared/logging"
 	"github.com/pelletier/go-toml/v2"
 )
 
@@ -69,6 +71,7 @@ const defaultMediaConvertTimeout = 20 * time.Second
 // WithDefaults fills in what an empty setting stands for, so the values
 // declared to the core are explicit (and pass its schema).
 func (c Runtime) WithDefaults() Runtime {
+	c.LogLevel = strings.ToLower(c.LogLevel)
 	if c.LogLevel == "" {
 		c.LogLevel = "info"
 	}
@@ -123,6 +126,9 @@ func Load(path string) (File, error) {
 }
 
 func (c File) Validate() error {
+	if err := logging.CheckLevel(c.LogLevel); err != nil {
+		return err
+	}
 	if c.CoreAddress == "" || c.ConnectorID == "" || c.CoreTokenEnv == "" || c.SessionFile == "" {
 		return errors.New("core_address, connector_id, core_token_env, and session_file are required")
 	}

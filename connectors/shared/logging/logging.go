@@ -6,7 +6,9 @@
 package logging
 
 import (
+	"fmt"
 	"os"
+	"slices"
 	"strings"
 
 	"github.com/rs/zerolog"
@@ -40,4 +42,19 @@ func parseLevel(candidates ...string) zerolog.Level {
 		}
 	}
 	return zerolog.InfoLevel
+}
+
+// levels are the log levels a configuration may name (the connectors' runtime
+// settings declare the same list).
+var levels = []string{"trace", "debug", "info", "warn", "error"}
+
+// CheckLevel reports a configured level that is not one of trace, debug, info,
+// warn or error (in any case). Empty means info. The connectors check it when
+// loading their file, because the core refuses a settings declaration whose
+// level it does not know.
+func CheckLevel(configured string) error {
+	if configured == "" || slices.Contains(levels, strings.ToLower(configured)) {
+		return nil
+	}
+	return fmt.Errorf("log_level must be one of %s, not %q", strings.Join(levels, ", "), configured)
 }

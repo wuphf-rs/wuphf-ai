@@ -114,3 +114,27 @@ func TestRuntimeDefaultsAreExplicit(t *testing.T) {
 		t.Fatalf("WithDefaults() = %+v", got)
 	}
 }
+
+// The core refuses a declaration whose log level it does not know, so an
+// unknown level fails at load rather than at every registration.
+func TestValidateRejectsAnUnknownLogLevel(t *testing.T) {
+	t.Parallel()
+
+	cfg := File{
+		CoreAddress:  "127.0.0.1:50051",
+		ConnectorID:  "telegram-main",
+		CoreTokenEnv: "TOKEN",
+		SessionFile:  "./telegram.session.json",
+		Runtime:      Runtime{LogLevel: "verbose"},
+	}
+	if err := cfg.Validate(); err == nil {
+		t.Fatal("Validate() accepted log_level = verbose")
+	}
+	cfg.LogLevel = "DEBUG"
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("Validate() rejected DEBUG: %v", err)
+	}
+	if got := cfg.Runtime.WithDefaults().LogLevel; got != "debug" {
+		t.Fatalf("WithDefaults() log level = %q, want debug", got)
+	}
+}

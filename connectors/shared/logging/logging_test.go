@@ -37,3 +37,16 @@ func TestEnvironmentLevelWins(t *testing.T) {
 		t.Fatalf("level = %s, want warn", zerolog.GlobalLevel())
 	}
 }
+
+func TestCheckLevel(t *testing.T) {
+	for _, level := range []string{"", "info", "DEBUG", "warn"} {
+		if err := CheckLevel(level); err != nil {
+			t.Errorf("CheckLevel(%q) = %v", level, err)
+		}
+	}
+	for _, level := range []string{"verbose", "fatal"} {
+		if err := CheckLevel(level); err == nil {
+			t.Errorf("CheckLevel(%q) accepted", level)
+		}
+	}
+}

@@ -4,8 +4,10 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
+	"github.com/akshettrj/wuphf/connectors/shared/logging"
 	"github.com/pelletier/go-toml/v2"
 )
 
@@ -111,6 +113,7 @@ func (c Runtime) StickerMetadata() StickerMetadata {
 // WithDefaults fills in what an empty setting stands for, so the values
 // declared to the core are explicit.
 func (c Runtime) WithDefaults() Runtime {
+	c.LogLevel = strings.ToLower(c.LogLevel)
 	if c.LogLevel == "" {
 		c.LogLevel = "info"
 	}
@@ -152,6 +155,9 @@ func Load(path string) (File, error) {
 }
 
 func (c File) Validate() error {
+	if err := logging.CheckLevel(c.LogLevel); err != nil {
+		return err
+	}
 	if c.CoreAddress == "" || c.ConnectorID == "" || c.CoreTokenEnv == "" || c.SessionDatabase == "" {
 		return errors.New("core_address, connector_id, core_token_env, and session_database are required")
 	}
