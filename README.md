@@ -75,6 +75,11 @@ export WUPHF_CONNECTOR_WHATSAPP_RUST_TOKEN=<token>
 export WUPHF_CONNECTOR_INSTAGRAM_MAIN_TOKEN=<token>
 ```
 
+`rules` and `notify` can also change while the core runs, through its
+settings service; list each connector's `owner_ids` in the core's config to
+choose who may change them from that platform (see `docs/architecture.md`,
+"Settings service").
+
 The whole stack at once, in a zellij session with a tab per component:
 
 ```sh

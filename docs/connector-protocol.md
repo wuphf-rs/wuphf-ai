@@ -170,6 +170,26 @@ The core refuses to start when a token variable is unset or empty, a value is
 zero, a default deadline exceeds its maximum, or a provider or pattern is
 malformed.
 
+## Settings
+
+The core serves its runtime settings as `botconf.v1.Settings` (botconf's
+`proto/botconf/v1/settings.proto`) on the same address. A connector that
+offers a settings panel (for example a `/wuphf` command) is a client of it:
+
+- Send the connector's own token, `authorization: Bearer <token>`, the same
+  one as for the connector session.
+- Set `actor` on every request to the platform user who acted, with `id` as
+  the connector reports actors (e.g. `704338780` for a Telegram user). The
+  core allows it only when that id is in the connector's `owner_ids` in the
+  core's config.
+- `UNAUTHENTICATED`: the token is missing or unknown. `PERMISSION_DENIED`: no
+  actor, or the actor is not one of this connector's owners. Show the user a
+  short "not allowed" and change nothing.
+- Never mirror a settings command or a panel answer as a chat message.
+
+The panel's screens come from the core (`Render`, `Act`); the connector only
+draws them and sends back what was pressed or typed.
+
 ## Connectors
 
 - **Telegram** (`connectors/telegram`, `gotd/td`) — registers with forum-topic

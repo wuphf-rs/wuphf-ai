@@ -47,10 +47,17 @@ notify = ["telegram-main:telegram:user:704338780"]
 # replicated copies (attachments-as-files, text spillover, edit/delete
 # rendering) is configured in each connector's own config file under
 # `[rendering]`, not here.
+#
+# `owner_ids` lists the owner's platform user ids on a connector, as that
+# connector reports who acted. The core's settings service only obeys a
+# connector acting for one of its own owner ids (or the observer token), so
+# these decide who may change settings from that platform. File-only: never
+# editable at runtime.
 [[connectors]]
 id = "whatsapp-main"
 platform = "whatsapp"
 token_env = "WUPHF_CONNECTOR_WHATSAPP_MAIN_TOKEN"
+# owner_ids = ["98765432101234@lid"]
 
 # Rust WhatsApp connector alternative. Keep its id in sync with
 # connectors/whatsapp-rust/config.example.toml.
@@ -70,6 +77,7 @@ platform = "telegram"
 token_env = "WUPHF_CONNECTOR_TELEGRAM_MAIN_TOKEN"
 supports_threads = true
 supports_topic_create = true
+# owner_ids = ["704338780"]
 
 # Rules, keyed by id: `[rules.<id>]`. Runtime setting: each rule is its own
 # entry (`rules.<id>`) and can be set or removed while the core runs (stored

@@ -106,6 +106,38 @@ renaming a rule starts new conversations with new mirror threads. Editing a
 rule in place does not move existing conversations: their endpoints are
 already stored and are reused.
 
+### Settings service
+
+The settings store lives in the core, and the core serves it as botconf's
+generic `botconf.v1.Settings` gRPC service (`botconf-grpc`), next to its other
+services: reading and changing settings, and a settings panel
+(`botconf-panel`) that platforms render as buttons. The TUI, a CLI and the
+connectors' panels are its clients; none of them decides who may change what.
+
+- A connector authenticates with its own connector token and says who acted
+  (the request's actor). The core allows the request only when that platform
+  user id is one of **that** connector's `owner_ids`, a file-only list per
+  `[[connectors]]` entry. A connector cannot act for another connector's
+  owner, and a request with no actor is refused.
+- The observer token, which the TUI already holds to send messages as the
+  owner, acts as the owner and needs no actor. With no observer token set,
+  nothing is accepted as the observer.
+- Changes are recorded in the settings table as `<connector>:<actor>`, or
+  `observer`.
+
+Chats, connectors and rules in the settings are references (`wuphf.chat`,
+`wuphf.connector`, `wuphf.rule`), so the panel shows names. A chat's name is
+the title the observation log last saw for it (under its address or a linked
+form, such as a phone JID for a LID), else the title of the conversation it is
+the source of; a mirror thread is named after its conversation. A chat no one
+has written in since the observation log started shows its raw id. Adding a
+chat offers the chats the core has seen, most recent first.
+
+Panel buttons carry their action when it fits the platform's button data, and
+otherwise a short handle stored in the `panel_tokens` table for 30 days
+(renewed whenever a screen draws it again), so they keep working after the
+core restarts.
+
 ## Data Flow
 
 ```text
@@ -122,9 +154,9 @@ dedup, reply mapping, loop prevention, or address mapping.
 | Crate | Responsibility |
 |-------|----------------|
 | `wuphf-model` | Shared domain types, grouped into `ids` / `routing` / `connector` / `message` / `dispatch`. |
-| `wuphf-storage` | The `Storage` trait — the sum of six role traits (topology, messages, media, dispatch queue, provisioning stash, observation log) — plus two backends: `memory` (tests) and `sqlite` (durable). A consumer that needs only part of storage bounds on its roles. The same database holds runtime settings overrides (`settings` table, the `SettingsOverrides` role, outside `Storage`), read through `wuphf-settings`. |
+| `wuphf-storage` | The `Storage` trait — the sum of six role traits (topology, messages, media, dispatch queue, provisioning stash, observation log) — plus two backends: `memory` (tests) and `sqlite` (durable). A consumer that needs only part of storage bounds on its roles. The same database holds runtime settings overrides (`settings` table, the `SettingsOverrides` role, outside `Storage`), read through `wuphf-settings`, and the settings panel's button handles (`panel_tokens`, the `PanelTokens` role, also outside `Storage`). |
 | `wuphf-core` | Owns logical identity, dedup, echo suppression, reply resolution and identity migration; evaluates rules and computes dispatch targets (`config.rs`, `router.rs`). |
-| `wuphf-runtime` | Tokio event bus + dispatch pipeline; connector session hub; bounded media broker; gRPC transport adapter. |
+| `wuphf-runtime` | Tokio event bus + dispatch pipeline; connector session hub; bounded media broker; gRPC transport adapter; the settings service's authorizer and reference names (`settings_auth`). |
 | `wuphf-functions` | Brokers remote function calls between callers and provider processes; independent of the core and storage. |
 | `wuphf-settings` | Loads the core configuration (TOML, then `WUPHF_CORE_*` environment) and describes it to botconf; builds the routing config, connector list, resolved functions and connector tokens from it. |
 | `wuphf-proto` | Canonical protobuf contract and Tonic bindings. |
