@@ -56,7 +56,7 @@ code).
 | 036 | Keep runtime settings overrides in SQLite | P2 | S | 035 | DONE (migration 0015; see notes) |
 | 037 | Route from a live settings snapshot; `rules` and `notify` at runtime | P2 | M | 035, 036 | DONE (see notes) |
 | 038 | Key routing rules by id; chats as `connector:chat#thread` | P2 | M | 037 | DONE (migration 0016; see notes) |
-| 039 | Owner ids, chat names, and the core serving its settings | P2 | M–L | 034–038, botconf 003–005 | TODO |
+| 039 | Owner ids, chat names, and the core serving its settings | P2 | M–L | 034–038, botconf 003–005 | DONE (botconf v0.5.0, migration 0017; see notes) |
 | 040 | Connectors declare their own settings to the core | P2 | L | 039, botconf 005, 006, 009 | TODO |
 | 041 | A settings panel in the Telegram connector | P2 | L | 039, 040, botconf 004–007 | TODO |
 | 042 | A `wuphf settings` command | P3 | S | 035, 036, 039 | TODO |
@@ -662,6 +662,103 @@ Dependencies and ordering:
     `[[rules]]` + `[rules.flow]` or `[[notify]]` must be rewritten in the new
     form (see `config/example.toml`); the old form fails to load. The tracked
     `config/example.toml`, which the dev scripts use, is already converted.
+- **039 done 2026-10-29** (on `plans/runtime-settings`). The drift check
+  showed only 034–038's expected changes, and `0017` was free. botconf
+  `v0.5.0`'s API differs in names from the plan's "Current state", but every
+  concept exists, so no STOP condition occurred. Deviations:
+  - **botconf pin:** the workspace moved from `v0.1.1` to `v0.5.0` in its own
+    commit first (`build: move to botconf 0.5`), with no behaviour change.
+    The only code change there: botconf 0.2+ records actors as strings, so the
+    settings adapter passes `updated_by` through instead of converting it to
+    and from an integer. `botconf-panel` and `botconf-grpc` were added at the
+    same tag.
+  - **Lock:** it only gains packages (`botconf-panel`, `botconf-grpc`; tonic
+    0.12.3 and prost 0.13.5 stay single versions). Each time a new git
+    package was added, cargo also re-pointed some existing dependency edges
+    to older duplicates already in the lock (`hyper-util` to `socket2`
+    0.5.10, `errno`, `rustix` 1.1.4 and `tempfile` to `windows-sys` 0.52);
+    those edges were put back by hand, and `cargo check --locked` accepts the
+    result.
+  - **botconf's landed API, as used:**
+    - `Authorizer::authorize(&MetadataMap, Option<&Actor>, Operation)` is
+      synchronous and returns `Principal { actor }`; `Actor` has a `domain`
+      and an `id`, and only the `id` is checked (the authenticated connector
+      already fixes which ids are meaningful).
+    - Names are botconf-panel's `Names` (`name` returns `Name { full, short }`,
+      `candidates(domain, query, limit)` returns `(Value, Name)` pairs).
+    - The token store goes on the `Panel`, the names on the `SettingsService`;
+      there is no separate `server()` function (`into_server()`).
+  - **Where things live:**
+    - `owner_ids` is on `ConnectorConfiguration` in `wuphf-settings`, since
+      035 moved the configuration there, and its three tests are in
+      `wuphf-settings`.
+    - `Derived.owners` is a `HashMap<ConnectorId, HashSet<String>>`.
+    - `settings_server(…)` in `wuphf-runtime`'s `settings_auth` module builds
+      the whole service (panel, domains, token store, authorizer, names), so
+      `serve()` only mounts it and the end-to-end tests build it the same way.
+      Those tests are in `settings_auth/tests.rs`, not `wuphf-cli`.
+    - The `PanelTokenStore` adapter is in `wuphf-settings` (`tokens.rs`), next
+      to 036's `SettingsStorage`. The three reference domains, with how the
+      panel parses a typed id, are `wuphf_settings::domains`.
+    - `ConnectorTokens` gained `connector_for(token)` for the authorizer.
+  - **Panel command:** the panel's texts name `/wuphf` (`PANEL_COMMAND`),
+    the command 041 will open it with.
+  - **Empty observer token:** an empty configured observer token counts as
+    none, and an empty bearer is never accepted, so `Bearer ` cannot pass as
+    the observer.
+  - **Connector names:** `<id> (<platform>)` uses the platform as the config
+    writes it; `wuphf-model` has no platform-to-name mapping yet (plan 022).
+  - **Test 9 (`owner_ids_follow_reload`) is not written.** botconf's
+    `reload()` re-reads only the stored overrides: figment reads the config
+    file eagerly when the base is built, so a reload never sees an edited
+    file, and `owner_ids` (file-only) change only on a restart. The authorizer
+    still reads `owners` from the current snapshot on every request.
+  - **`a_rule_can_be_built_field_by_field` became
+    `a_rule_is_edited_field_by_field` plus `rule_filters_share_a_form_group`.**
+    Every field edit writes the whole rule and `derive` validates it, so the
+    form's initial value (`{"kind": "many-to-one"}`) alone is refused. The test
+    edits an existing rule step by step, asserts the half-filled entry is
+    refused with the reason, and checks the filter group in the descriptor
+    (the panel, not the store, clears the other list of a group).
+  - **Extra tests:** `connectors_and_rules_are_named_and_offered`,
+    `panel_requests_need_an_owner`, `panel_token_store_keeps_handles_in_sqlite`,
+    `chats_parse_to_their_canonical_form`, and `connector_for` in the
+    `ConnectorTokens` test. `adapter_stores_the_actor_as_text` now round-trips
+    a string actor.
+  - **No migration test for 0017:** it only creates a table; every earlier
+    `migration_tests.rs` case passes unchanged.
+  - **Mutation checks:** each change below made a test fail.
+    - Skipping the owner check: `connector_acting_for_a_stranger_is_denied`
+      and `connector_cannot_act_for_another_connectors_owner`.
+    - Accepting an empty observer token or bearer:
+      `observer_credential_refused_when_no_observer_token`.
+    - Skipping linked addresses in chat names:
+      `chat_names_follow_linked_addresses`.
+    - Dropping the SQL collision guard: `sqlite_a_live_collision_is_refused`;
+      dropping the in-memory expiry filter:
+      `memory_expired_panel_tokens_are_not_returned`.
+    - Leaving the panel on its in-memory token store:
+      `panel_handles_survive_a_restart`.
+    - Accepting a blank owner id: `owner_ids_must_not_be_blank`.
+    - `notify` back to `Kind::Json`: `notify_and_rule_chats_are_chat_refs`.
+  - **Builds:** every build and test ran with `nice -n 19` and
+    `CARGO_BUILD_JOBS=2`, per crate, with the workspace gate run once at the
+    end. No smoke run of `serve`.
+  - **Results:** Rust has 239 tests passing (201 + 38). Clippy and
+    `cargo fmt` are clean.
+  - **Found, not changed:**
+    - A new rule cannot be created from the panel's form: the panel adds a
+      map entry by storing the form's initial value, which is not a valid
+      rule. Switching an existing rule's `kind` field by field fails the same
+      way. Until a later plan allows drafts (or a "new rule" prompt that asks
+      for the required fields first), new rules go through
+      `/wuphf set rules.<id> {…}` or the CLI (042).
+    - botconf's `reload()` not re-reading the config file also affects the
+      assistant bot, whose README says `/config reload` picks up file edits.
+  - **Owner action:** add `owner_ids` to the connectors you want to change
+    settings from (your Telegram user id on `telegram-main`, your LID on
+    `whatsapp-main`); without them only the observer token (the TUI) can
+    change settings.
 
 ## Findings considered and rejected
 
