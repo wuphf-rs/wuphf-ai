@@ -20,8 +20,9 @@ use wuphf_runtime::{
     observer_service::{GrpcObserverService, bearer_auth},
     settings_auth::settings_server,
 };
-use wuphf_settings::{Configuration, LiveRouting, SettingsStorage, WuphfSchema};
-use wuphf_storage::SqliteStorage;
+use wuphf_settings::{LiveRouting, WuphfSchema};
+
+mod settings;
 
 #[derive(Parser)]
 #[command(about = "Run the wuphf messaging replication runtime")]
@@ -40,6 +41,14 @@ enum Command {
     Functions {
         #[command(subcommand)]
         command: FunctionsCommand,
+    },
+    /// View or change the runtime settings. Edits the database directly, so it
+    /// works while the core is down.
+    Settings {
+        #[arg(long, default_value = "config/example.toml")]
+        config: PathBuf,
+        #[command(subcommand)]
+        action: settings::SettingsSubcommand,
     },
 }
 
@@ -61,6 +70,7 @@ async fn main() -> Result<()> {
         Command::Functions {
             command: FunctionsCommand::List { address },
         } => list_functions(address).await,
+        Command::Settings { config, action } => settings::run(&config, action).await,
     }
 }
 
@@ -77,21 +87,8 @@ fn init_logging() {
 }
 
 async fn serve(path: PathBuf) -> Result<()> {
-    let base = wuphf_settings::base(&path)
-        .with_context(|| format!("failed to load configuration {}", path.display()))?;
-    // The database holds the runtime overrides, so its URL comes from the file
-    // and the environment only; it can never be a runtime key.
-    let file: Configuration = base.extract().context("invalid configuration")?;
-    let storage = Arc::new(SqliteStorage::connect(&file.database_url).await?);
-    let settings = Arc::new(
-        wuphf_settings::load(
-            WuphfSchema::new(),
-            base,
-            SettingsStorage::new(Arc::clone(&storage)),
-        )
-        .await
-        .context("invalid configuration")?,
-    );
+    let (storage, settings) = settings::open(&path, WuphfSchema::new()).await?;
+    let settings = Arc::new(settings);
     let snapshot = settings.current();
     let configuration = &snapshot.config;
     let derived = &snapshot.derived;

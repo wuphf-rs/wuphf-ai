@@ -228,6 +228,7 @@ version = "0.5.0"
 source = "git+https://github.com/propheci/botconf?tag=v0.5.0#835597a08405e37038666c041bd8a2af23131acf"
 dependencies = [
  "arc-swap",
+ "clap",
  "figment",
  "futures",
  "serde",
@@ -3161,8 +3162,12 @@ name = "wuphf-cli"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "botconf",
+ "botconf-grpc",
  "clap",
+ "serde_json",
  "tokio",
+ "tokio-stream",
  "tonic",
  "tracing",
  "tracing-subscriber",

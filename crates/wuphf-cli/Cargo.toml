@@ -6,6 +6,8 @@ license.workspace = true
 
 [dependencies]
 anyhow.workspace = true
+botconf = { workspace = true, features = ["cli"] }
+botconf-grpc.workspace = true
 clap.workspace = true
 tokio.workspace = true
 tonic.workspace = true
@@ -18,3 +20,7 @@ wuphf-proto.workspace = true
 wuphf-runtime.workspace = true
 wuphf-settings.workspace = true
 wuphf-storage.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true
+tokio-stream.workspace = true
