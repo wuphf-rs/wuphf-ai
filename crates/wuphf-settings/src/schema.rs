@@ -149,16 +149,19 @@ const RULE_KINDS: &[FixedChoice] = &[
     FixedChoice::new("one-to-one", "One chat to one chat"),
     FixedChoice::new("many-to-one", "Every chat into one, a thread each"),
 ];
-/// Fields that do not apply to the chosen `kind` stay unset; `derive`
-/// validates the whole entry, so a half-filled rule is refused with the
-/// reason. `only_chats` and `except_chats` share a group: setting one clears
-/// the other, as a rule may not have both.
+/// Fields that do not apply to the chosen `kind` carry a `when` and stay
+/// hidden (and are dropped when the kind changes). A new rule, or a rule whose
+/// kind changes, needs several fields at once, so the panel builds it in a
+/// draft, asks for the required fields, and stores it on Save; `derive` still
+/// validates the whole entry. `only_chats` and `except_chats` share a group:
+/// setting one clears the other, as a rule may not have both.
 const RULE_FIELDS: &[Field] = &[
     Field::new(
         "kind",
         "Kind",
         Kind::one_of(Choices::fixed(RULE_KINDS), false, true),
-    ),
+    )
+    .required(),
     Field::new(
         "priority",
         "Priority (lower first)",
@@ -168,29 +171,36 @@ const RULE_FIELDS: &[Field] = &[
         "source",
         "Source chat (one-to-one)",
         Kind::reference(domains::CHAT, false),
-    ),
+    )
+    .when("kind", "one-to-one")
+    .required(),
     Field::new(
         "source_connector",
         "Source connector (many-to-one)",
         Kind::reference(domains::CONNECTOR, false),
-    ),
+    )
+    .when("kind", "many-to-one")
+    .required(),
     Field::new(
         "destination",
         "Destination chat",
         Kind::reference(domains::CHAT, false),
-    ),
+    )
+    .required(),
     Field::new(
         "only_chats",
         "Only these chats",
         Kind::reference(domains::CHAT, true),
     )
-    .group("filter"),
+    .group("filter")
+    .when("kind", "many-to-one"),
     Field::new(
         "except_chats",
         "Every chat except these",
         Kind::reference(domains::CHAT, true),
     )
-    .group("filter"),
+    .group("filter")
+    .when("kind", "many-to-one"),
 ];
 
 /// Each connector's `owner_ids`, checked: no blank id and no id twice on one

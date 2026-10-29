@@ -973,7 +973,8 @@ fn notify_and_rule_chats_are_chat_refs() {
 
 /// The panel edits a rule one field at a time, writing the whole entry each
 /// time: every step must be a valid rule, and the filter group swaps one list
-/// for the other. A half-filled new entry is refused with the reason.
+/// for the other. The store itself still refuses a half-filled new entry; the
+/// panel builds one in a draft instead (see `a_rule_is_created_through_a_draft`).
 #[test]
 fn a_rule_is_edited_field_by_field() {
     Jail::expect_with(|_| {
@@ -1121,6 +1122,236 @@ fn reload_refuses_an_invalid_file() {
         // The running configuration stays as it was.
         assert_eq!(notify_targets(&store), ["telegram-main:telegram:user:1"]);
         assert!(store.current().config.rules.is_empty());
+        Ok(())
+    });
+}
+
+// ---- rules built through the panel's drafts ----
+
+use botconf_panel::{AskKind, Input, Limits, Page, Panel, Question, Reaction, Screen, Target};
+
+const PANEL_LIMITS: Limits = Limits {
+    token_bytes: 64,
+    text_chars: 4096,
+    max_rows: None,
+    max_per_row: 8,
+};
+
+/// A panel over `store` with wuphf's reference domains, as the settings
+/// service builds it (button handles stay in memory).
+fn rules_panel(store: SettingsStore) -> Panel<WuphfSchema> {
+    crate::domains::all()
+        .into_iter()
+        .fold(Panel::new(Arc::new(store)), Panel::domain)
+}
+
+fn viewer() -> botconf_panel::Viewer<'static> {
+    botconf_panel::Viewer {
+        actor: Some("observer".into()),
+        limits: &PANEL_LIMITS,
+        names: None,
+        pickers: false,
+    }
+}
+
+fn rules_target(panel: &Panel<WuphfSchema>) -> Target {
+    let catalog = panel.store().catalog();
+    let position = catalog
+        .live()
+        .find(|(_, entry)| entry.key == "rules")
+        .unwrap()
+        .0;
+    Target::setting(position)
+}
+
+fn screen_text(screen: &Screen) -> String {
+    screen.text.to_plain()
+}
+
+fn screen_labels(screen: &Screen) -> Vec<String> {
+    screen
+        .rows
+        .iter()
+        .flatten()
+        .map(|button| button.label.clone())
+        .collect()
+}
+
+/// The token of the first button whose label contains `label`.
+fn button(screen: &Screen, label: &str) -> String {
+    screen
+        .rows
+        .iter()
+        .flatten()
+        .find(|button| button.label.contains(label))
+        .unwrap_or_else(|| panic!("no {label:?} in {:?}", screen_labels(screen)))
+        .token
+        .clone()
+}
+
+async fn press(panel: &Panel<WuphfSchema>, token: &str) -> Reaction<WuphfSchema> {
+    panel.press(token, &viewer()).await.unwrap()
+}
+
+/// Opens the draft's field `title` and answers its question with `text`:
+/// the redrawn draft.
+async fn fill_in(panel: &Panel<WuphfSchema>, draft: &Screen, title: &str, text: &str) -> Screen {
+    let field = press(panel, &button(draft, &format!("{title}:")))
+        .await
+        .screen
+        .expect("the field's page");
+    let ask = press(panel, &button(&field, "✏️ Change"))
+        .await
+        .ask
+        .unwrap_or_else(|| panic!("no question on {}", screen_text(&field)));
+    assert!(ask.question.draft.is_some(), "{:?}", ask.question);
+    panel
+        .answer(&ask.question, Input::Text(text.into()), &viewer())
+        .await
+        .unwrap()
+        .screen
+        .expect("the redrawn draft")
+}
+
+fn rule_value(panel: &Panel<WuphfSchema>, id: &str) -> Option<serde_json::Value> {
+    panel.store().current().value(&format!("rules.{id}"))
+}
+
+#[test]
+fn a_rule_is_created_through_a_draft() {
+    Jail::expect_with(|_| {
+        let panel = rules_panel(store(every_token_set(), Path::new(EXAMPLE)).unwrap());
+        runtime().block_on(async {
+            let question = Question::new(rules_target(&panel), AskKind::Entry);
+            let draft = panel
+                .answer(&question, Input::Text("r1".into()), &viewer())
+                .await
+                .unwrap()
+                .screen
+                .expect("a draft");
+            assert!(
+                screen_text(&draft).contains("draft, not saved"),
+                "{}",
+                screen_text(&draft)
+            );
+            assert_eq!(rule_value(&panel, "r1"), None);
+            // The draft asks for the fields a many-to-one rule needs.
+            for needed in [
+                "Source connector (many-to-one): ⚠️ needed",
+                "Destination chat: ⚠️ needed",
+            ] {
+                assert!(
+                    screen_text(&draft).contains(needed),
+                    "{needed}: {}",
+                    screen_text(&draft)
+                );
+            }
+            // A many-to-one draft does not ask for a one-to-one source.
+            assert!(
+                !screen_text(&draft).contains("Source chat (one-to-one):"),
+                "{}",
+                screen_text(&draft)
+            );
+
+            let draft = fill_in(
+                &panel,
+                &draft,
+                "Source connector (many-to-one)",
+                "whatsapp-main",
+            )
+            .await;
+            assert!(
+                !screen_labels(&draft)
+                    .iter()
+                    .any(|label| label.contains("Save")),
+                "Save before the destination is set: {:?}",
+                screen_labels(&draft)
+            );
+            assert_eq!(rule_value(&panel, "r1"), None);
+
+            let draft = fill_in(
+                &panel,
+                &draft,
+                "Destination chat",
+                "telegram-main:telegram:channel:99",
+            )
+            .await;
+            let saved = press(&panel, &button(&draft, "💾 Save")).await;
+            assert!(saved.change.is_some());
+            assert_eq!(
+                rule_value(&panel, "r1"),
+                Some(serde_json::json!({
+                    "kind": "many-to-one",
+                    "source_connector": "whatsapp-main",
+                    "destination": "telegram-main:telegram:channel:99",
+                    "priority": 0,
+                }))
+            );
+            let live = LiveRouting::new(Arc::clone(panel.store()));
+            assert!(live.routing().rule(&RuleId("r1".into())).is_some());
+        });
+        Ok(())
+    });
+}
+
+#[test]
+fn switching_a_rules_kind_goes_through_a_draft() {
+    Jail::expect_with(|_| {
+        let panel = rules_panel(store(every_token_set(), Path::new(EXAMPLE)).unwrap());
+        runtime().block_on(async {
+            let stored = serde_json::json!({
+                "kind": "many-to-one",
+                "source_connector": "whatsapp-main",
+                "destination": "telegram-main:telegram:channel:99",
+                "only_chats": ["whatsapp-main:family@g.us"],
+            });
+            panel
+                .store()
+                .set("rules.r2", stored.clone(), None)
+                .await
+                .unwrap();
+            let entry = rules_target(&panel).entry("r2");
+            let page = panel.render(&Page::Setting(entry), &viewer()).await;
+            let kind = press(&panel, &button(&page, "Kind:"))
+                .await
+                .screen
+                .expect("the kind's page");
+            let reaction = press(&panel, &button(&kind, "One chat to one chat")).await;
+            assert!(reaction.change.is_none());
+            // The stored rule is untouched (its effective value adds the
+            // default priority).
+            let mut unchanged = stored;
+            unchanged["priority"] = serde_json::json!(0);
+            assert_eq!(rule_value(&panel, "r2"), Some(unchanged));
+            let draft = reaction.screen.expect("a draft");
+            let text = screen_text(&draft);
+            assert!(text.contains("draft, not saved"), "{text}");
+            // The many-to-one fields went with the switch; a source is needed.
+            assert!(!text.contains("Source connector (many-to-one):"), "{text}");
+            assert!(!text.contains("Only these chats:"), "{text}");
+            assert!(
+                text.contains("Source chat (one-to-one): ⚠️ needed"),
+                "{text}"
+            );
+
+            let draft = fill_in(
+                &panel,
+                &draft,
+                "Source chat (one-to-one)",
+                "whatsapp-main:12345@s.whatsapp.net",
+            )
+            .await;
+            press(&panel, &button(&draft, "💾 Save")).await;
+            assert_eq!(
+                rule_value(&panel, "r2"),
+                Some(serde_json::json!({
+                    "kind": "one-to-one",
+                    "source": "whatsapp-main:12345@s.whatsapp.net",
+                    "destination": "telegram-main:telegram:channel:99",
+                    "priority": 0,
+                }))
+            );
+        });
         Ok(())
     });
 }
