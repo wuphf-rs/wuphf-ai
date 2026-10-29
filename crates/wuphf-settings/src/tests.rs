@@ -886,3 +886,168 @@ fn panel_token_store_keeps_handles_in_sqlite() {
         assert!(reopened.get("~k", 50).await.unwrap().is_none());
     });
 }
+
+/// Every reference kind in `kind`, including inside maps and forms, with the
+/// form field's key when it is one.
+fn references(
+    kind: &botconf::Kind,
+    field: Option<&str>,
+    out: &mut Vec<(Option<String>, String, bool)>,
+) {
+    match kind {
+        botconf::Kind::Ref { domain, many } => {
+            out.push((field.map(Into::into), domain.to_string(), *many));
+        }
+        botconf::Kind::Map { value, .. } => references(value, field, out),
+        botconf::Kind::Form(form) => {
+            for field in form.fields.iter() {
+                references(&field.kind, Some(&field.key), out);
+            }
+        }
+        _ => {}
+    }
+}
+
+/// Each runtime setting's references: (setting key, field, domain, many).
+fn catalog_references(store: &SettingsStore) -> Vec<(String, Option<String>, String, bool)> {
+    let catalog = store.catalog();
+    let mut found = Vec::new();
+    for (_, entry) in catalog.live() {
+        let mut refs = Vec::new();
+        references(&entry.kind, None, &mut refs);
+        found.extend(
+            refs.into_iter()
+                .map(|(field, domain, many)| (entry.key.clone(), field, domain, many)),
+        );
+    }
+    found
+}
+
+#[test]
+fn ref_domains_are_wuphf_ones() {
+    Jail::expect_with(|_| {
+        let store = store(every_token_set(), Path::new(EXAMPLE)).unwrap();
+        let found = catalog_references(&store);
+        assert!(!found.is_empty());
+        for (key, field, domain, _) in found {
+            assert!(domain.starts_with("wuphf."), "{key} {field:?}: {domain}");
+        }
+        Ok(())
+    });
+}
+
+#[test]
+fn notify_and_rule_chats_are_chat_refs() {
+    Jail::expect_with(|_| {
+        let store = store(every_token_set(), Path::new(EXAMPLE)).unwrap();
+        let found = catalog_references(&store);
+        let domain_of = |key: &str, field: Option<&str>| {
+            found
+                .iter()
+                .find(|(k, f, _, _)| k == key && f.as_deref() == field)
+                .map(|(_, _, domain, many)| (domain.as_str(), *many))
+        };
+        assert_eq!(
+            domain_of("notify", None),
+            Some((crate::domains::CHAT, true))
+        );
+        for (field, many) in [
+            ("source", false),
+            ("destination", false),
+            ("only_chats", true),
+            ("except_chats", true),
+        ] {
+            assert_eq!(
+                domain_of("rules", Some(field)),
+                Some((crate::domains::CHAT, many)),
+                "{field}"
+            );
+        }
+        assert_eq!(
+            domain_of("rules", Some("source_connector")),
+            Some((crate::domains::CONNECTOR, false))
+        );
+        Ok(())
+    });
+}
+
+/// The panel edits a rule one field at a time, writing the whole entry each
+/// time: every step must be a valid rule, and the filter group swaps one list
+/// for the other. A half-filled new entry is refused with the reason.
+#[test]
+fn a_rule_is_edited_field_by_field() {
+    Jail::expect_with(|_| {
+        let store = store(every_token_set(), Path::new(EXAMPLE)).unwrap();
+        runtime().block_on(async {
+            let error = store
+                .set(
+                    "rules.new",
+                    serde_json::json!({"kind": "many-to-one"}),
+                    None,
+                )
+                .await
+                .unwrap_err();
+            assert!(
+                matches!(error, SettingsError::InvalidValue { .. }),
+                "the form's initial value alone is not a rule: {error}"
+            );
+
+            let mut entry = serde_json::json!({
+                "kind": "many-to-one",
+                "source_connector": "whatsapp-main",
+                "destination": "telegram-main:-100999",
+            });
+            store.set("rules.new", entry.clone(), None).await.unwrap();
+            let new = RuleId("new".into());
+            assert!(store.current().derived.routing.rule(&new).is_some());
+
+            entry["only_chats"] = serde_json::json!(["whatsapp-main:family@g.us"]);
+            store.set("rules.new", entry.clone(), None).await.unwrap();
+
+            // The panel's group: setting except_chats clears only_chats.
+            entry.as_object_mut().unwrap().remove("only_chats");
+            entry["except_chats"] = serde_json::json!(["whatsapp-main:spam@g.us"]);
+            store.set("rules.new", entry, None).await.unwrap();
+            let stored = &store.current().config.rules["new"];
+            let RuleKind::ManyToOne {
+                source_chats_filter,
+                ..
+            } = stored.flow.clone().into_rule_kind("new").unwrap()
+            else {
+                panic!("still many-to-one");
+            };
+            assert_eq!(
+                source_chats_filter,
+                ChatFilter::Not {
+                    chats: vec![chat("spam@g.us", None)]
+                }
+            );
+        });
+        Ok(())
+    });
+}
+
+#[test]
+fn rule_filters_share_a_form_group() {
+    Jail::expect_with(|_| {
+        let store = store(every_token_set(), Path::new(EXAMPLE)).unwrap();
+        let catalog = store.catalog();
+        let rules = catalog.resolve("rules").unwrap();
+        let botconf::Kind::Map { value, .. } = &rules.kind else {
+            panic!("rules is a map: {:?}", rules.kind);
+        };
+        let botconf::Kind::Form(form) = &**value else {
+            panic!("a rule is a form: {value:?}");
+        };
+        let group = |key: &str| {
+            form.fields
+                .iter()
+                .find(|field| &*field.key == key)
+                .and_then(|field| field.group.as_ref().map(ToString::to_string))
+        };
+        assert_eq!(group("only_chats").as_deref(), Some("filter"));
+        assert_eq!(group("except_chats").as_deref(), Some("filter"));
+        assert_eq!(group("destination"), None);
+        Ok(())
+    });
+}

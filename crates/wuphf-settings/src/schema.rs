@@ -2,7 +2,8 @@
 //! from it.
 
 use crate::config::{Configuration, platform};
-use botconf::{Kind, RuntimeSetting};
+use crate::domains;
+use botconf::{Choices, Field, FixedChoice, Form, Kind, RuntimeSetting};
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use wuphf_core::RoutingConfig;
@@ -110,7 +111,7 @@ impl botconf::Schema for WuphfSchema {
             RuntimeSetting::per_entry(
                 "rules",
                 "Routing rules by id: which chats mirror each other. Lower priority numbers match first.",
-                &Kind::Json,
+                RULE,
             )
             .titled("Rules"),
             RuntimeSetting::new(
@@ -118,10 +119,62 @@ impl botconf::Schema for WuphfSchema {
                 "Chats that receive notices about connector trouble",
             )
             .titled("Notice targets")
-            .kind(Kind::Json),
+            .kind(Kind::reference(domains::CHAT, true)),
         ]
     }
 }
+
+// A rule entry, edited field by field. Nested descriptors are not promoted
+// to `'static`, so the kind, the form and its pieces each get a `const`.
+const RULE: &Kind = &Kind::form(RULE_FORM);
+const RULE_FORM: &Form = &Form::new(RULE_FIELDS, r#"{"kind": "many-to-one"}"#);
+const RULE_KINDS: &[FixedChoice] = &[
+    FixedChoice::new("one-to-one", "One chat to one chat"),
+    FixedChoice::new("many-to-one", "Every chat into one, a thread each"),
+];
+/// Fields that do not apply to the chosen `kind` stay unset; `derive`
+/// validates the whole entry, so a half-filled rule is refused with the
+/// reason. `only_chats` and `except_chats` share a group: setting one clears
+/// the other, as a rule may not have both.
+const RULE_FIELDS: &[Field] = &[
+    Field::new(
+        "kind",
+        "Kind",
+        Kind::one_of(Choices::fixed(RULE_KINDS), false, true),
+    ),
+    Field::new(
+        "priority",
+        "Priority (lower first)",
+        Kind::number(-1000, 1000, "", &[-1, 0, 1], true),
+    ),
+    Field::new(
+        "source",
+        "Source chat (one-to-one)",
+        Kind::reference(domains::CHAT, false),
+    ),
+    Field::new(
+        "source_connector",
+        "Source connector (many-to-one)",
+        Kind::reference(domains::CONNECTOR, false),
+    ),
+    Field::new(
+        "destination",
+        "Destination chat",
+        Kind::reference(domains::CHAT, false),
+    ),
+    Field::new(
+        "only_chats",
+        "Only these chats",
+        Kind::reference(domains::CHAT, true),
+    )
+    .group("filter"),
+    Field::new(
+        "except_chats",
+        "Every chat except these",
+        Kind::reference(domains::CHAT, true),
+    )
+    .group("filter"),
+];
 
 /// Each connector's `owner_ids`, checked: no blank id and no id twice on one
 /// connector.
