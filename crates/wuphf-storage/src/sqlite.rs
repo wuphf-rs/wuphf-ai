@@ -4,7 +4,8 @@
 use crate::shared::{acknowledged_copy, release_blocked};
 use crate::{
     DispatchStore, MediaStore, MessageStore, ObservationStore, PanelTokens, ProvisioningStash,
-    SettingsOverrides, StorageError, StorageResult, StoredSetting, TopologyStore,
+    SettingsDeclaration, SettingsDeclarations, SettingsOverrides, StorageError, StorageResult,
+    StoredSetting, TopologyStore,
 };
 use async_trait::async_trait;
 use sqlx::migrate::Migrator;
@@ -979,6 +980,50 @@ impl PanelTokens for SqliteStorage {
             .execute(&self.pool)
             .await?;
         Ok(result.rows_affected())
+    }
+}
+
+#[async_trait]
+impl SettingsDeclarations for SqliteStorage {
+    async fn put_settings_declaration(
+        &self,
+        declaration: &SettingsDeclaration,
+        updated_at_ms: i64,
+    ) -> StorageResult<()> {
+        sqlx::query(
+            "INSERT INTO connector_settings_declarations
+               (connector_id, descriptor, json_schema, base_json, updated_at_ms)
+             VALUES (?, ?, ?, ?, ?)
+             ON CONFLICT(connector_id) DO UPDATE SET
+               descriptor = excluded.descriptor, json_schema = excluded.json_schema,
+               base_json = excluded.base_json, updated_at_ms = excluded.updated_at_ms",
+        )
+        .bind(&declaration.connector_id.0)
+        .bind(&declaration.descriptor)
+        .bind(&declaration.json_schema)
+        .bind(&declaration.base_json)
+        .bind(updated_at_ms)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    async fn settings_declarations(&self) -> StorageResult<Vec<SettingsDeclaration>> {
+        let rows = sqlx::query(
+            "SELECT connector_id, descriptor, json_schema, base_json
+             FROM connector_settings_declarations ORDER BY connector_id",
+        )
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(rows
+            .into_iter()
+            .map(|row| SettingsDeclaration {
+                connector_id: ConnectorId(row.get("connector_id")),
+                descriptor: row.get("descriptor"),
+                json_schema: row.get("json_schema"),
+                base_json: row.get("base_json"),
+            })
+            .collect())
     }
 }
 

@@ -1190,3 +1190,37 @@ async fn purge_removes_only_expired_tokens<S: PanelTokens>(storage: S) {
     );
     assert_eq!(storage.purge_panel_tokens(200).await.unwrap(), 0);
 }
+
+fn declaration(connector: &str, base_json: &str) -> SettingsDeclaration {
+    SettingsDeclaration {
+        connector_id: ConnectorId(connector.into()),
+        descriptor: vec![0x0a, 0x00, 0xff],
+        json_schema: r#"{"type": "object"}"#.into(),
+        base_json: base_json.into(),
+    }
+}
+
+#[tokio::test]
+async fn memory_settings_declarations_replace_by_connector() {
+    settings_declarations_replace_by_connector(InMemoryStorage::default()).await;
+}
+
+#[tokio::test]
+async fn sqlite_settings_declarations_replace_by_connector() {
+    settings_declarations_replace_by_connector(temp_sqlite().await).await;
+}
+
+/// A connector's new declaration replaces its old one; declarations load in
+/// connector order, the descriptor bytes intact.
+async fn settings_declarations_replace_by_connector<S: SettingsDeclarations>(storage: S) {
+    let whatsapp = declaration("whatsapp-main", r#"{"log_level": "info"}"#);
+    let telegram = declaration("telegram-main", r#"{"log_level": "info"}"#);
+    let telegram2 = declaration("telegram-main", r#"{"log_level": "debug"}"#);
+    for (stored, at) in [(&whatsapp, 1), (&telegram, 2), (&telegram2, 3)] {
+        storage.put_settings_declaration(stored, at).await.unwrap();
+    }
+    assert_eq!(
+        storage.settings_declarations().await.unwrap(),
+        [telegram2, whatsapp]
+    );
+}

@@ -334,6 +334,42 @@ async fn migration_0016_reshapes_stored_rules_and_notify() {
     assert_eq!(stored("timezone").await, unrelated);
 }
 
+/// 0018 only adds a table: a database from before it keeps its settings, and
+/// the new table takes a declaration with binary descriptor bytes intact.
+#[tokio::test]
+async fn migration_0018_adds_connector_settings_declarations() {
+    let pool = database_before(18).await;
+    sqlx::query(
+        "INSERT INTO settings (key, value, updated_by, updated_at_ms)
+         VALUES ('notify', '[]', NULL, 1)",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    MIGRATOR.run(&pool).await.unwrap();
+
+    let descriptor = vec![0x0a_u8, 0x00, 0xff, 0x80];
+    sqlx::query(
+        "INSERT INTO connector_settings_declarations
+           (connector_id, descriptor, json_schema, base_json, updated_at_ms)
+         VALUES ('telegram-main', ?, '{}', '{}', 2)",
+    )
+    .bind(&descriptor)
+    .execute(&pool)
+    .await
+    .unwrap();
+    let row = sqlx::query("SELECT descriptor FROM connector_settings_declarations")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(row.get::<Vec<u8>, _>("descriptor"), descriptor);
+    let kept = sqlx::query("SELECT value FROM settings WHERE key = 'notify'")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(kept.get::<String, _>("value"), "[]");
+}
+
 /// Seed one `dispatches` row per sample, in the JSON shape given.
 async fn insert_dispatches(pool: &SqlitePool, payloads: &[&str]) {
     for (dispatch, payload) in sample_dispatches().iter().zip(payloads) {

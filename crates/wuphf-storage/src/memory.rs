@@ -4,7 +4,8 @@
 use crate::shared::{acknowledged_copy, release_blocked};
 use crate::{
     DispatchStore, MediaStore, MessageStore, ObservationStore, PanelTokens, ProvisioningStash,
-    SettingsOverrides, StorageError, StorageResult, StoredSetting, TopologyStore,
+    SettingsDeclaration, SettingsDeclarations, SettingsOverrides, StorageError, StorageResult,
+    StoredSetting, TopologyStore,
 };
 use async_trait::async_trait;
 use std::collections::{BTreeMap, HashMap, HashSet};
@@ -48,6 +49,9 @@ struct State {
     /// Settings-panel button handles: key to (action, expiry in ms), mirroring
     /// the SQLite `panel_tokens` table.
     panel_tokens: HashMap<String, (String, i64)>,
+    /// Connector settings declarations by connector id, mirroring the SQLite
+    /// `connector_settings_declarations` table (the write time is not kept).
+    settings_declarations: BTreeMap<String, SettingsDeclaration>,
 }
 
 struct StoredMedia {
@@ -770,6 +774,33 @@ impl PanelTokens for InMemoryStorage {
             .panel_tokens
             .retain(|_, (_, expires_at)| *expires_at >= now_ms);
         Ok((before - state.panel_tokens.len()) as u64)
+    }
+}
+
+#[async_trait]
+impl SettingsDeclarations for InMemoryStorage {
+    async fn put_settings_declaration(
+        &self,
+        declaration: &SettingsDeclaration,
+        _updated_at_ms: i64,
+    ) -> StorageResult<()> {
+        self.state
+            .write()
+            .await
+            .settings_declarations
+            .insert(declaration.connector_id.0.clone(), declaration.clone());
+        Ok(())
+    }
+
+    async fn settings_declarations(&self) -> StorageResult<Vec<SettingsDeclaration>> {
+        Ok(self
+            .state
+            .read()
+            .await
+            .settings_declarations
+            .values()
+            .cloned()
+            .collect())
     }
 }
 

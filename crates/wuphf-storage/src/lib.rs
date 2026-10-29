@@ -302,6 +302,33 @@ pub trait PanelTokens: Send + Sync + 'static {
     async fn purge_panel_tokens(&self, now_ms: i64) -> StorageResult<u64>;
 }
 
+/// What a connector declared about its runtime settings when it last
+/// registered: the botconf descriptor of its settings, the JSON Schema of its
+/// section and its own file values (the section's base).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SettingsDeclaration {
+    pub connector_id: ConnectorId,
+    /// A `botconf.v1.DescribeResponse`, serialized with protobuf.
+    pub descriptor: Vec<u8>,
+    pub json_schema: String,
+    /// A JSON object.
+    pub base_json: String,
+}
+
+/// Each connector's last settings declaration, so its section exists before
+/// it reconnects. Not part of [`Storage`]: routing never reads it.
+#[async_trait]
+pub trait SettingsDeclarations: Send + Sync + 'static {
+    /// Store `declaration`, replacing the connector's previous one.
+    async fn put_settings_declaration(
+        &self,
+        declaration: &SettingsDeclaration,
+        updated_at_ms: i64,
+    ) -> StorageResult<()>;
+    /// Every stored declaration, ordered by connector id.
+    async fn settings_declarations(&self) -> StorageResult<Vec<SettingsDeclaration>>;
+}
+
 /// The full persistence surface the core needs: the sum of the role traits.
 /// Blanket-implemented, so a backend implements the roles and gets `Storage`;
 /// a consumer that needs only part of it bounds on the roles it uses.
