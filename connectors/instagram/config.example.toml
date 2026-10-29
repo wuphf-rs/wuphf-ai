@@ -1,3 +1,9 @@
+# Keys marked "Runtime." can also change while the connector runs: the
+# connector declares them to the core, which keeps any change (made from its
+# settings panel or `wuphf settings`, under
+# `connector_settings.<connector id>`) and pushes it back here. The values in
+# this file are the base; unsetting a change returns to them.
+
 core_address = "127.0.0.1:50051"
 connector_id = "instagram-main"
 # Environment variable holding this connector's core token; must match the
@@ -23,7 +29,8 @@ supports_topic_create = false
 # where through the core's [rules.<id>] entries using Instagram thread keys
 # (decimal numbers) as chat IDs.
 
-# Log verbosity: trace, debug, info, warn, error (WUPHF_LOG_LEVEL overrides).
+# Runtime. Log verbosity: trace, debug, info, warn, error (WUPHF_LOG_LEVEL
+# overrides).
 log_level = "info"
 
 # Replay the inbox snapshot on connect so messages exchanged while the connector

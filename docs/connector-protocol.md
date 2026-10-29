@@ -7,7 +7,8 @@ gRPC `OpenSession` stream plus a `MediaTransport` service. Remote functions
 ## Session
 
 A connector opens one session and its first frame must be a `Registration`
-(connector id, platform, capabilities). One session is one connector for one
+(connector id, platform, capabilities, and optionally its own settings; see
+"A connector's own settings"). One session is one connector for one
 platform. The connector owns no routing or mapping — it reports conversations by
 their native address and executes dispatches addressed the same way. The
 connector id is stamped by the runtime from the session, never trusted from the
@@ -189,6 +190,42 @@ offers a settings panel (for example a `/wuphf` command) is a client of it:
 
 The panel's screens come from the core (`Render`, `Act`); the connector only
 draws them and sends back what was pressed or typed.
+
+### A connector's own settings
+
+A connector may declare its own runtime settings in its `Registration`, in
+the optional `settings` field (`ConnectorSettingsDeclaration`):
+
+- `descriptor`: a `botconf.v1.DescribeResponse`, serialized with protobuf,
+  listing the settings (its `sections` is ignored). Keys are relative to the
+  connector's section, e.g. `rendering.edit_mode`.
+- `json_schema`: a JSON Schema (draft 2020-12) of the whole section.
+- `base_json`: the connector's own file values for the section, as a JSON
+  object.
+
+The core keeps the section at `connector_settings.<connector id>`: it stores
+and validates every change with the schema (a panel's text answers are read as
+the booleans and numbers the schema asks for), and the connector's file values
+stay the base, so unsetting an override returns to them. The core's own
+configuration may not hold `[connector_settings]`.
+
+- **Live-safe keys only.** A runtime setting applies at once, so only
+  `rendering.*`, `sticker_metadata.*`, `log_level` and
+  `media_convert_timeout_ms` may be declared. Identity, addresses, session
+  files, `client_mode` and capabilities stay in the connector's file. A
+  declaration with any other key, or a schema that does not compile, refuses
+  the session with `INVALID_ARGUMENT` before it reaches the hub.
+- **Kept across restarts.** The core stores each connector's last
+  declaration and registers its section at startup, so overrides apply (and
+  can be edited, e.g. with `wuphf settings`) while the connector is down. A
+  registration without a declaration keeps the section declared before.
+- **Following them.** The connector watches its own section through the
+  settings service (`Watch` with the prefix `connector_settings.<id>`), with
+  its own token and no actor: that is the one thing a connector may do
+  without someone acting. Each event's values are laid over the base (an
+  `Initial` event starts again from it). The Go connectors use
+  `connectors/shared/settings` for all of this, reading the settings once per
+  dispatch.
 
 ## Connectors
 

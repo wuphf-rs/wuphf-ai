@@ -147,6 +147,16 @@ through the service's `Reload`, as the observer (`WUPHF_OBSERVER_TOKEN`).
 botconf's reload re-reads the stored overrides only; the config file is read
 when the core starts, so edits to it still need a restart.
 
+Connectors declare their own live-safe settings (rendering, sticker metadata,
+log level, the sticker conversion timeout) when they register: a botconf
+descriptor, a JSON Schema and their file values. The core registers each as a
+botconf section at `connector_settings.<id>` (`connector_settings` in
+`wuphf-runtime`), validates changes with the schema (the `jsonschema` crate),
+remembers the declaration in `connector_settings_declarations` so the section
+exists before the connector reconnects, and pushes changes back through
+`Watch`, which a connector may follow for its own section without an actor.
+See docs/connector-protocol.md, "A connector's own settings".
+
 ## Data Flow
 
 ```text

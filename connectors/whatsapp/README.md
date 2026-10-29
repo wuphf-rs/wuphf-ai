@@ -50,6 +50,11 @@ go run ./cmd/wuphf-whatsapp --config config.example.toml
 First run prints QR code; scan using WhatsApp linked-device flow. Session is
 stored at configured `session_database` path.
 
+The keys marked "Runtime." in `config.example.toml` can also change while the
+connector runs, from the core's settings panel or `wuphf settings`: the
+connector declares them to the core and applies each change the core pushes
+(see `docs/connector-protocol.md`, "A connector's own settings").
+
 ## Animated stickers
 
 WhatsApp stickers are WebP, so the connector converts animated stickers from

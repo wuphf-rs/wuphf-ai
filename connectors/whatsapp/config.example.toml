@@ -1,3 +1,9 @@
+# Keys marked "Runtime." can also change while the connector runs: the
+# connector declares them to the core, which keeps any change (made from its
+# settings panel or `wuphf settings`, under
+# `connector_settings.<connector id>`) and pushes it back here. The values in
+# this file are the base; unsetting a change returns to them.
+
 core_address = "127.0.0.1:50051"
 connector_id = "whatsapp-main"
 # Environment variable holding this connector's core token; must match the
@@ -15,7 +21,8 @@ supports_topic_create = false
 # where through the core's [rules.<id>] entries using WhatsApp JIDs such as
 # "12345@s.whatsapp.net" or "12345@g.us" as chat IDs.
 
-# Log verbosity: trace, debug, info, warn, error (WUPHF_LOG_LEVEL overrides).
+# Runtime. Log verbosity: trace, debug, info, warn, error (WUPHF_LOG_LEVEL
+# overrides).
 log_level = "info"
 
 # Which WhatsApp client the session registers as. Both pair as an Android client
@@ -33,11 +40,11 @@ client_mode = "android_business"
 # Environment variable holding the core's invoke token, when the core sets
 # [functions] invoke_token_env.
 # functions_token_env = "WUPHF_INVOKE_TOKEN"
-# Bound on one sticker conversion, including waiting for the converter. This
-# connector delivers in order, so later messages wait behind it.
+# Runtime. Bound on one sticker conversion, including waiting for the
+# converter. This connector delivers in order, so later messages wait behind it.
 # media_convert_timeout_ms = 20000
 
-# Sticker-pack metadata embedded in stickers bridged to WhatsApp, shown in
+# Runtime. Sticker-pack metadata embedded in stickers bridged to WhatsApp, shown in
 # WhatsApp's sticker info. Any field left blank falls back to the defaults shown
 # here. WhatsApp has no link field for received stickers, so the link is appended
 # to the publisher text (visible, not clickable). Requires webpmux (libwebp) on
@@ -47,8 +54,8 @@ pack_name = "wuphf"
 author_name = "wuphf-ai"
 link = "https://github.com/wuphf/wuphf-ai"
 
-# How replicated copies are rendered on WhatsApp. This connector's own policy;
-# the core dispatches content only.
+# Runtime. How replicated copies are rendered on WhatsApp. This connector's own
+# policy; the core dispatches content only.
 [rendering]
 # Send every attachment as a generic file/document instead of its origin kind.
 attachments_as_files = false

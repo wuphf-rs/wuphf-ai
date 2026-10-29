@@ -55,6 +55,11 @@ Run the core server, then the connector from this directory:
 go run ./cmd/wuphf-telegram --config config.example.toml
 ```
 
+The keys marked "Runtime." in `config.example.toml` can also change while the
+connector runs, from the core's settings panel or `wuphf settings`: the
+connector declares them to the core and applies each change the core pushes
+(see `docs/connector-protocol.md`, "A connector's own settings").
+
 ## Animated stickers
 
 Telegram shows an animated WebP sticker only as a still frame, so the connector

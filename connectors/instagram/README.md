@@ -47,3 +47,8 @@ Run core server, then connector:
 export WUPHF_CONNECTOR_INSTAGRAM_MAIN_TOKEN=replace-me
 go run ./cmd/wuphf-instagram --config config.example.toml
 ```
+
+The keys marked "Runtime." in `config.example.toml` can also change while the
+connector runs, from the core's settings panel or `wuphf settings`: the
+connector declares them to the core and applies each change the core pushes
+(see `docs/connector-protocol.md`, "A connector's own settings").
