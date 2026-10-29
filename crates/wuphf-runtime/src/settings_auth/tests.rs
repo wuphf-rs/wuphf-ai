@@ -386,3 +386,213 @@ async fn connectors_and_rules_are_named_and_offered() {
         .collect();
     assert_eq!(rules, [Value::String("wa-to-telegram".into())]);
 }
+
+// ---- the service, end to end ----
+
+use botconf_grpc::proto::{
+    self, ActRequest, EditRequest, Limits, RenderRequest, act_request,
+    settings_client::SettingsClient,
+};
+use tokio::net::TcpListener;
+use tokio_stream::wrappers::TcpListenerStream;
+use tonic::transport::{Channel, Server};
+use wuphf_settings::SettingsStorage;
+use wuphf_storage::{SettingsOverrides, SqliteStorage};
+
+/// A settings server over the SQLite database at `url`, as `serve` builds it,
+/// and a client of it. Abort the task to stop the server.
+async fn serve_settings(
+    url: &str,
+) -> (
+    SettingsClient<Channel>,
+    Arc<SettingsStore>,
+    Arc<SqliteStorage>,
+    tokio::task::JoinHandle<()>,
+) {
+    let sqlite = Arc::new(SqliteStorage::connect(url).await.unwrap());
+    let schema = WuphfSchema::with_env(|name| Some(format!("secret-{name}")));
+    let path = config_file(CONFIG);
+    let settings = Arc::new(
+        load(
+            schema,
+            base(&path).unwrap(),
+            SettingsStorage::new(Arc::clone(&sqlite)),
+        )
+        .await
+        .unwrap(),
+    );
+    let tokens = ConnectorTokens::new(settings.current().derived.connector_tokens.clone());
+    let service = settings_server(
+        Arc::clone(&settings),
+        Arc::clone(&sqlite),
+        Arc::new(tokens),
+        Some(OBSERVER_TOKEN.into()),
+    );
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let server = tokio::spawn(async move {
+        Server::builder()
+            .add_service(service)
+            .serve_with_incoming(TcpListenerStream::new(listener))
+            .await
+            .unwrap();
+    });
+    let client = SettingsClient::connect(format!("http://{address}"))
+        .await
+        .unwrap();
+    (client, settings, sqlite, server)
+}
+
+fn temp_database() -> String {
+    let path = std::env::temp_dir().join(format!(
+        "wuphf-settings-auth-{}.sqlite",
+        uuid::Uuid::new_v4()
+    ));
+    format!("sqlite://{}", path.display())
+}
+
+/// `message` with `token` as its bearer credential.
+fn with_token<T>(message: T, token: &str) -> tonic::Request<T> {
+    let mut request = tonic::Request::new(message);
+    request
+        .metadata_mut()
+        .insert("authorization", format!("Bearer {token}").parse().unwrap());
+    request
+}
+
+#[tokio::test]
+async fn settings_service_end_to_end() {
+    let (mut client, settings, sqlite, server) = serve_settings(&temp_database()).await;
+    let notify = |actor_id: &str| EditRequest {
+        actor: Some(actor(actor_id)),
+        key: "notify".into(),
+        value: r#"["telegram-main:telegram:user:704338780"]"#.into(),
+    };
+
+    let refused = client
+        .set(with_token(notify("111"), TELEGRAM_TOKEN))
+        .await
+        .unwrap_err();
+    assert_eq!(refused.code(), tonic::Code::PermissionDenied);
+    assert!(settings.current().config.notify.is_empty());
+    assert!(sqlite.settings_overrides().await.unwrap().is_empty());
+
+    client
+        .set(with_token(notify("704338780"), TELEGRAM_TOKEN))
+        .await
+        .unwrap();
+    assert_eq!(settings.current().config.notify.len(), 1);
+    let stored = sqlite.settings_overrides().await.unwrap();
+    assert_eq!(stored.len(), 1);
+    assert_eq!(stored[0].key, "notify");
+    assert_eq!(
+        stored[0].updated_by.as_deref(),
+        Some("telegram-main:704338780")
+    );
+    server.abort();
+}
+
+/// Limits so small that only a stored handle (11 bytes) or a very short
+/// stateless token fits.
+fn tiny_limits() -> Limits {
+    Limits {
+        token_bytes: 11,
+        text_chars: 4096,
+        max_rows: 0,
+        max_per_row: 0,
+    }
+}
+
+#[tokio::test]
+async fn panel_handles_survive_a_restart() {
+    let url = temp_database();
+    let (mut client, _, _, server) = serve_settings(&url).await;
+    let screen = client
+        .render(with_token(
+            RenderRequest {
+                actor: None,
+                page: None,
+                limits: Some(tiny_limits()),
+                pickers: false,
+            },
+            OBSERVER_TOKEN,
+        ))
+        .await
+        .unwrap()
+        .into_inner()
+        .screen
+        .unwrap();
+    // The rules page lists each rule by id: its buttons' actions name the
+    // rule, too long for 11 bytes, so they carry handles.
+    let rules = token_of(&screen, "Rules");
+    let rules = press(&mut client, rules).await.screen.unwrap();
+    let handle = rules
+        .rows
+        .iter()
+        .flat_map(|row| &row.buttons)
+        .map(|button| button.token.clone())
+        .find(|token| token.starts_with('~'))
+        .expect("a button whose action does not fit carries a handle");
+    server.abort();
+    drop(client);
+
+    // A new core over the same database still knows the handle.
+    let (mut client, _, _, server) = serve_settings(&url).await;
+    let response = press(&mut client, handle).await;
+    assert!(!response.stale, "the handle was kept: {response:?}");
+    assert!(response.rejected.is_none(), "{response:?}");
+    assert!(response.screen.is_some() || response.post.is_some());
+    server.abort();
+}
+
+#[tokio::test]
+async fn panel_requests_need_an_owner() {
+    let (mut client, _, _, server) = serve_settings(&temp_database()).await;
+    let render = |actor_id: &str| RenderRequest {
+        actor: Some(actor(actor_id)),
+        page: None,
+        limits: Some(tiny_limits()),
+        pickers: false,
+    };
+    let refused = client
+        .render(with_token(render("111"), TELEGRAM_TOKEN))
+        .await
+        .unwrap_err();
+    assert_eq!(refused.code(), tonic::Code::PermissionDenied);
+    let page: proto::RenderResponse = client
+        .render(with_token(render("704338780"), TELEGRAM_TOKEN))
+        .await
+        .unwrap()
+        .into_inner();
+    assert!(page.screen.is_some());
+    server.abort();
+}
+
+/// The token of the first button whose label contains `label`.
+fn token_of(screen: &proto::Screen, label: &str) -> String {
+    screen
+        .rows
+        .iter()
+        .flat_map(|row| &row.buttons)
+        .find(|button| button.label.contains(label))
+        .unwrap_or_else(|| panic!("no {label:?} button in {screen:?}"))
+        .token
+        .clone()
+}
+
+/// Presses a button as the observer.
+async fn press(client: &mut SettingsClient<Channel>, token: String) -> proto::ActResponse {
+    client
+        .act(with_token(
+            ActRequest {
+                actor: None,
+                limits: Some(tiny_limits()),
+                act: Some(act_request::Act::Press(token)),
+                pickers: false,
+            },
+            OBSERVER_TOKEN,
+        ))
+        .await
+        .unwrap()
+        .into_inner()
+}

@@ -17,8 +17,9 @@
 
 use crate::auth::{ConnectorTokens, bearer_token};
 use botconf_grpc::proto::Actor;
-use botconf_grpc::{Authorizer, Operation, Principal};
-use botconf_panel::{Name, Names};
+use botconf_grpc::proto::settings_server::SettingsServer;
+use botconf_grpc::{Authorizer, Operation, Principal, SettingsService};
+use botconf_panel::{Name, Names, Panel};
 use serde_json::Value;
 use std::future::Future;
 use std::pin::Pin;
@@ -28,13 +29,44 @@ use tonic::Status;
 use tonic::metadata::MetadataMap;
 use tracing::warn;
 use wuphf_model::{ChatAddress, ChatRef, ConnectorId};
-use wuphf_settings::{SettingsStore, domains};
-use wuphf_storage::{ObservationStore, StorageResult, TopologyStore};
+use wuphf_settings::{PanelTokenStore, SettingsStore, WuphfSchema, domains};
+use wuphf_storage::{ObservationStore, PanelTokens, StorageResult, TopologyStore};
 
 type BoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
 
 /// The principal recorded for changes made with the observer token.
 const OBSERVER: &str = "observer";
+
+/// The command a platform's settings panel is opened with, for the panel's
+/// texts (`/wuphf` on Telegram).
+pub const PANEL_COMMAND: &str = "wuphf";
+
+/// The core's `botconf.v1.Settings` service: the settings store and its
+/// panel, whose long buttons' handles are kept in `storage` so they survive a
+/// restart, behind [`WuphfAuthorizer`], with [`WuphfNames`] naming the
+/// references.
+pub fn settings_server<S>(
+    settings: Arc<SettingsStore>,
+    storage: Arc<S>,
+    connectors: Arc<ConnectorTokens>,
+    observer_token: Option<String>,
+) -> SettingsServer<SettingsService<WuphfSchema>>
+where
+    S: ObservationStore + TopologyStore + PanelTokens,
+{
+    let panel = domains::all().into_iter().fold(
+        Panel::new(Arc::clone(&settings))
+            .token_store(PanelTokenStore::new(Arc::clone(&storage)))
+            .command(PANEL_COMMAND),
+        Panel::domain,
+    );
+    SettingsService::new(
+        Arc::new(panel),
+        WuphfAuthorizer::new(Arc::clone(&settings), connectors, observer_token),
+    )
+    .names(WuphfNames::new(storage, settings))
+    .into_server()
+}
 
 /// Decides every settings request (see the module docs).
 pub struct WuphfAuthorizer {

@@ -18,6 +18,7 @@ use wuphf_runtime::{
     grpc::GrpcConnectorService,
     media::GrpcMediaService,
     observer_service::{GrpcObserverService, bearer_auth},
+    settings_auth::settings_server,
 };
 use wuphf_settings::{Configuration, LiveRouting, SettingsStorage, WuphfSchema};
 use wuphf_storage::SqliteStorage;
@@ -102,21 +103,31 @@ async fn serve(path: PathBuf) -> Result<()> {
         configuration.max_media_bytes,
         Duration::from_secs(configuration.orphan_media_retention_seconds),
     );
+    let observer_token = configuration
+        .observer_token
+        .as_ref()
+        .map(|token| token.expose().to_owned());
+    // Settings go through the core's settings service: connectors acting for
+    // their owners, and the observer token as the owner.
+    let settings_service = settings_server(
+        Arc::clone(&settings),
+        Arc::clone(&storage),
+        Arc::clone(&connector_tokens),
+        observer_token.clone(),
+    );
     let (runtime, channels, observer) = Runtime::channelled(
         Arc::new(Core::new(storage, LiveRouting::new(Arc::clone(&settings)))),
         128,
     );
     let observer_service = ObserverTransportServer::with_interceptor(
         GrpcObserverService::new(observer).with_sender(runtime.owner_sender()),
-        bearer_auth(
-            configuration
-                .observer_token
-                .as_ref()
-                .map(|token| token.expose().to_owned()),
-        ),
+        bearer_auth(observer_token),
     );
     if configuration.observer_token.is_none() {
         tracing::warn!("observer service has no token set; bind it to a local address only");
+        tracing::warn!(
+            "settings service: no observer token set; only connectors acting for their owners can change settings"
+        );
     }
     let functions = Arc::clone(&derived.functions);
     if functions.invoke_token().is_none() {
@@ -148,6 +159,9 @@ async fn serve(path: PathBuf) -> Result<()> {
             any_token_auth(media_tokens),
         ))
         .add_service(observer_service)
+        // No interceptor: the service's authorizer checks the token itself,
+        // since it must know which connector presented it.
+        .add_service(settings_service)
         .add_service(FunctionTransportServer::with_interceptor(
             GrpcFunctionService::new(function_handle.clone(), Arc::clone(&functions)),
             bearer_auth(functions.invoke_token().map(str::to_owned)),
