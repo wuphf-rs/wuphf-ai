@@ -61,6 +61,7 @@ code).
 | 041 | A settings panel in the Telegram connector | P2 | L | 039, 040, botconf 004–007 | TODO |
 | 042 | A `wuphf settings` command | P3 | S | 035, 036, 039 | DONE (see notes) |
 | 043 | Label user-session stickers through the helper bot | P3 | M | 041 | TODO |
+| 044 | Reload re-reads the config file; new rules go through panel drafts | P2 | S–M | 039, 040, 042, botconf 010, 011 | TODO |
 
 Status values: TODO | IN PROGRESS | DONE | BLOCKED (with one-line reason) |
 REJECTED (with one-line rationale).
@@ -434,6 +435,16 @@ Dependencies and ordering:
   - 042: the CLI edits the database directly, except `reload --address`.
   - 043: a 5-second inline budget before the fallback.
 - The botconf repo lives at `~/work/side_projects/Propheci/botconf`.
+- **044 (added 2026-10-29 at `da29ba9`)** closes the two gaps 039 found, after
+  the owner's decisions that day: a reload must re-read the config file
+  (botconf plan 010, `BaseSource`, `v0.8.0`), and the panel builds values that
+  need several fields at once in drafts (botconf plan 011, `v0.9.0`). 044 pins
+  `v0.9.0`, passes a re-reading base source, writes 039's missing
+  `owner_ids_follow_reload` test, removes the "file edits need a restart"
+  wording from 042's help and the docs (except for the keys `serve()` reads
+  only at startup), and marks the rule form's fields `required`/`when`. It
+  waits for both botconf tags; it does not conflict with 041/043 (different
+  files).
 - **034 done 2026-10-25** (on `plans/runtime-settings`). The drift check
   passed. Implemented as planned, with these deviations:
   - **Commit split:** the Rust SDK's `Options.token`, and the matching
