@@ -24,6 +24,24 @@ message Registration {
   string connector_id = 1;
   Platform platform = 2;
   Capabilities capabilities = 3;
+  // The connector's runtime settings, which the core stores, validates and
+  // pushes back through its botconf.v1.Settings service. Absent means the
+  // connector declares none; a section declared earlier is kept.
+  optional ConnectorSettingsDeclaration settings = 4;
+}
+
+// What a connector declares about its runtime settings at registration.
+message ConnectorSettingsDeclaration {
+  // A botconf.v1.DescribeResponse serialized with protobuf, listing only the
+  // settings (`sections` is ignored). Keys are relative to the connector's
+  // section, e.g. `rendering.edit_mode`. Carried as bytes so this proto does
+  // not import botconf's.
+  bytes descriptor = 1;
+  // A JSON Schema (draft 2020-12) of the whole section.
+  string json_schema = 2;
+  // The connector's own file values for the section, as a JSON object: the
+  // base the core's stored overrides are layered on.
+  string base_json = 3;
 }
 
 message Attachment {

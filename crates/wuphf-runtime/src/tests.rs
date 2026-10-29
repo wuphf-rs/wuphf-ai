@@ -709,6 +709,7 @@ fn registration_frame(
             connector_id: connector_id.into(),
             platform: platform.into(),
             capabilities,
+            settings: None,
         })),
     }
 }

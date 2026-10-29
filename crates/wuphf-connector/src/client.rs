@@ -146,6 +146,8 @@ impl Client {
                         supports_threads: self.opts.supports_threads,
                         supports_topic_create: self.opts.supports_topic_create,
                     }),
+                    // This SDK declares no runtime settings yet.
+                    settings: None,
                 })),
             })
             .map_err(|_| SessionError::StreamClosed)?;
