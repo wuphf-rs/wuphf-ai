@@ -45,11 +45,7 @@ impl<S: SettingsOverrides> botconf::Storage for SettingsStorage<S> {
                 .map(|setting| StoredOverride {
                     key: setting.key,
                     value: setting.value,
-                    // botconf's actor is still an integer, and only used when
-                    // writing; a non-numeric actor reads back as unknown.
-                    by: setting
-                        .updated_by
-                        .and_then(|actor| actor.parse::<i64>().ok()),
+                    by: setting.updated_by,
                 })
                 .collect())
         })
@@ -64,7 +60,7 @@ impl<S: SettingsOverrides> botconf::Storage for SettingsStorage<S> {
             let upserted = upserted.map(|stored| StoredSetting {
                 key: stored.key.clone(),
                 value: stored.value.clone(),
-                updated_by: stored.by.map(|by| by.to_string()),
+                updated_by: stored.by.clone(),
             });
             self.backend
                 .write_settings_overrides(deleted, upserted.as_ref(), (self.now_ms)())

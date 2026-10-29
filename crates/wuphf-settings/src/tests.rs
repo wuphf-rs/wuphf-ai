@@ -731,19 +731,25 @@ fn unset_rules_falls_back_to_the_file() {
 fn adapter_stores_the_actor_as_text() {
     runtime().block_on(async {
         let sqlite = Arc::new(SqliteStorage::connect(&temp_database()).await.unwrap());
-        SettingsStorage::new(Arc::clone(&sqlite))
+        let adapter = SettingsStorage::new(Arc::clone(&sqlite));
+        adapter
             .write(
                 &[],
                 Some(&StoredOverride {
                     key: "notify".into(),
                     value: "[]".into(),
-                    by: Some(42),
+                    by: Some("telegram-main:704338780".into()),
                 }),
             )
             .await
             .unwrap();
         let stored = sqlite.settings_overrides().await.unwrap();
-        assert_eq!(stored[0].updated_by.as_deref(), Some("42"));
+        assert_eq!(
+            stored[0].updated_by.as_deref(),
+            Some("telegram-main:704338780")
+        );
+        let loaded = adapter.load().await.unwrap();
+        assert_eq!(loaded[0].by.as_deref(), Some("telegram-main:704338780"));
     });
 }
 
