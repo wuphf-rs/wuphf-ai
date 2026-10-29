@@ -1,5 +1,6 @@
 use crate::auth::{ConnectorTokens, bearer_token};
 use crate::connector::{ConnectorConnection, ConnectorHubHandle, RegistrationError};
+use crate::connector_settings::{ConnectorSettings, declaration_from_wire};
 use std::pin::Pin;
 use std::sync::Arc;
 use thiserror::Error;
@@ -18,13 +19,26 @@ use wuphf_proto::connector::connector_transport_server::ConnectorTransport;
 pub struct GrpcConnectorService {
     hub: ConnectorHubHandle,
     tokens: Arc<ConnectorTokens>,
+    /// Where connectors' settings declarations go; `None` refuses them.
+    settings: Option<Arc<ConnectorSettings>>,
 }
 
 impl GrpcConnectorService {
     /// A session is accepted only when it presents the token configured for
     /// the connector id in its registration frame.
     pub fn new(hub: ConnectorHubHandle, tokens: Arc<ConnectorTokens>) -> Self {
-        Self { hub, tokens }
+        Self {
+            hub,
+            tokens,
+            settings: None,
+        }
+    }
+
+    /// Accept connectors' settings declarations, each registered as a section
+    /// of the core's settings.
+    pub fn with_settings(mut self, settings: Arc<ConnectorSettings>) -> Self {
+        self.settings = Some(settings);
+        self
     }
 }
 
@@ -43,10 +57,14 @@ impl ConnectorTransport for GrpcConnectorService {
             .message()
             .await?
             .ok_or_else(|| Status::invalid_argument("registration frame required"))?;
-        let registration = match first.body {
-            Some(pb::client_frame::Body::Registration(registration)) => {
-                registration_from_proto(registration)
-                    .map_err(|error| Status::invalid_argument(error.to_string()))?
+        let (registration, declaration) = match first.body {
+            Some(pb::client_frame::Body::Registration(mut registration)) => {
+                // The declaration is not part of the connector's identity: the
+                // hub matches the rest against the configured entry.
+                let declaration = registration.settings.take();
+                let registration = registration_from_proto(registration)
+                    .map_err(|error| Status::invalid_argument(error.to_string()))?;
+                (registration, declaration)
             }
             _ => return Err(Status::invalid_argument("first frame must be registration")),
         };
@@ -60,6 +78,25 @@ impl ConnectorTransport for GrpcConnectorService {
             );
             return Err(Status::unauthenticated("unknown connector or wrong token"));
         }
+        // A declaration is checked before the session is accepted, so a
+        // connector with bad settings never goes live; it is stored and
+        // registered once the session is. A connector that declares nothing
+        // keeps the section it declared before.
+        let declaration = match declaration {
+            None => None,
+            Some(declaration) => {
+                let Some(settings) = &self.settings else {
+                    return Err(Status::invalid_argument(
+                        "this core does not accept connector settings declarations",
+                    ));
+                };
+                let declaration = declaration_from_wire(&registration.id, declaration);
+                settings.section(&declaration).map_err(|error| {
+                    Status::invalid_argument(format!("invalid settings declaration: {error}"))
+                })?;
+                Some((Arc::clone(settings), declaration))
+            }
+        };
         let connector_id = registration.id.clone();
         let connection = self
             .hub
@@ -70,6 +107,15 @@ impl ConnectorTransport for GrpcConnectorService {
                 RegistrationError::AlreadyLive => Status::already_exists(error.to_string()),
                 RegistrationError::HubStopped => Status::unavailable(error.to_string()),
             })?;
+        if let Some((settings, declaration)) = declaration
+            && let Err(error) = settings.declare(declaration).await
+        {
+            tracing::warn!(
+                connector = %connector_id.0,
+                %error,
+                "could not register the connector's settings",
+            );
+        }
         let ConnectorConnection { input, mut output } = connection;
         // Fired when the reader returns for any reason, so the outgoing task
         // drops `output` at once and the hub sees the session as no longer live.

@@ -35,6 +35,11 @@ pub struct WuphfSchema {
     env: Arc<EnvReader>,
 }
 
+/// Where connectors' own runtime settings live: `connector_settings.<id>`.
+/// Not `connectors.<id>`, because `[[connectors]]` is an array of file-only
+/// entries, and a path into an array element is not a settings key.
+pub const CONNECTOR_SETTINGS: &str = "connector_settings";
+
 pub type SettingsStore = botconf::SettingsStore<WuphfSchema>;
 pub type Snapshot = botconf::Snapshot<WuphfSchema>;
 
@@ -61,6 +66,12 @@ impl botconf::Schema for WuphfSchema {
     type Derived = Derived;
 
     fn derive(&self, config: &Configuration) -> Result<Derived, String> {
+        if config.connector_settings.is_some() {
+            return Err(format!(
+                "remove [{CONNECTOR_SETTINGS}] from the core configuration: each connector \
+                 declares its own settings, based on its own config file"
+            ));
+        }
         let mut connectors = Vec::new();
         for connector in &config.connectors {
             if !is_valid_connector_id(&connector.id) {
@@ -101,6 +112,12 @@ impl botconf::Schema for WuphfSchema {
             connector_tokens,
             owners,
         })
+    }
+
+    /// Connectors register their own sections below this prefix when they
+    /// connect (see `wuphf_runtime::connector_settings`).
+    fn dynamic_namespaces(&self) -> Vec<&'static str> {
+        vec![CONNECTOR_SETTINGS]
     }
 
     /// The keys that may change while the core runs. Everything else (the

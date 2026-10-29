@@ -596,3 +596,59 @@ async fn press(client: &mut SettingsClient<Channel>, token: String) -> proto::Ac
         .unwrap()
         .into_inner()
 }
+
+#[tokio::test]
+async fn connector_follows_its_own_section_without_an_actor() {
+    let authorizer = authorizer(None).await;
+    let own = vec![
+        "connector_settings.telegram-main".to_owned(),
+        "connector_settings.telegram-main.rendering".to_owned(),
+    ];
+    for operation in [
+        Operation::Watch { prefixes: &own },
+        Operation::Read {
+            key: Some("connector_settings.telegram-main.log_level"),
+        },
+    ] {
+        let principal = authorizer
+            .authorize(&metadata(Some(TELEGRAM_TOKEN)), None, operation)
+            .unwrap();
+        assert_eq!(principal.actor.as_deref(), Some("telegram-main"));
+    }
+}
+
+#[tokio::test]
+async fn connector_cannot_follow_more_than_its_own_section() {
+    let authorizer = authorizer(None).await;
+    let others = [
+        vec!["connector_settings.whatsapp-main".to_owned()],
+        // A prefix that only starts with the connector's id.
+        vec!["connector_settings.telegram-main2".to_owned()],
+        vec![
+            "connector_settings.telegram-main".to_owned(),
+            "rules".to_owned(),
+        ],
+        // Every key.
+        Vec::new(),
+    ];
+    for prefixes in &others {
+        let result = authorizer.authorize(
+            &metadata(Some(TELEGRAM_TOKEN)),
+            None,
+            Operation::Watch { prefixes },
+        );
+        assert_eq!(code(result), tonic::Code::PermissionDenied, "{prefixes:?}");
+    }
+    for operation in [
+        Operation::Read { key: None },
+        Operation::Read { key: Some("rules") },
+        // Changing its own section still needs an owner.
+        Operation::Change {
+            key: "connector_settings.telegram-main.log_level",
+        },
+        Operation::Panel,
+    ] {
+        let result = authorizer.authorize(&metadata(Some(TELEGRAM_TOKEN)), None, operation);
+        assert_eq!(code(result), tonic::Code::PermissionDenied);
+    }
+}

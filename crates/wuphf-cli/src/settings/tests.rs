@@ -37,7 +37,7 @@ fn schema() -> WuphfSchema {
     WuphfSchema::with_env(|name| Some(format!("secret-{name}")))
 }
 
-async fn store(config: &Path) -> SettingsStore {
+async fn store(config: &Path) -> Arc<SettingsStore> {
     open(config, schema()).await.unwrap().1
 }
 
@@ -61,14 +61,14 @@ async fn listed(store: &SettingsStore, key: &str) -> String {
 #[tokio::test]
 async fn settings_set_then_list_shows_stored_value() {
     let config = config_file();
-    let outcome = run_local(&store(&config).await, set("notify", NOTIFY))
+    let outcome = run_local(&*store(&config).await, set("notify", NOTIFY))
         .await
         .unwrap();
     assert!(outcome.changed, "{}", outcome.output);
 
     // A new store over the same database (the next command, or the core)
     // sees the change: it went to the database, not just to memory.
-    let line = listed(&store(&config).await, "notify").await;
+    let line = listed(&*store(&config).await, "notify").await;
     assert_eq!(line, format!("notify = {NOTIFY} (stored)"));
 }
 
@@ -76,7 +76,7 @@ async fn settings_set_then_list_shows_stored_value() {
 async fn settings_set_rejects_invalid_value_and_stores_nothing() {
     let config = config_file();
     let error = run_local(
-        &store(&config).await,
+        &*store(&config).await,
         set("notify", r#"["no-such-connector:chat"]"#),
     )
     .await
@@ -115,7 +115,6 @@ async fn serve_settings(
     config: &Path,
 ) -> (String, Arc<SettingsStore>, tokio::task::JoinHandle<()>) {
     let (storage, settings) = open(config, schema()).await.unwrap();
-    let settings = Arc::new(settings);
     let tokens = ConnectorTokens::new(settings.current().derived.connector_tokens.clone());
     let service = settings_server(
         Arc::clone(&settings),
@@ -141,7 +140,7 @@ async fn settings_reload_calls_running_core() {
     let (address, core, server) = serve_settings(&config).await;
 
     // A local change, made while the core runs, reaches it on reload.
-    run_local(&store(&config).await, set("notify", NOTIFY))
+    run_local(&*store(&config).await, set("notify", NOTIFY))
         .await
         .unwrap();
     let before = core.current().value("notify");

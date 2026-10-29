@@ -15,6 +15,7 @@ use wuphf_runtime::{
     Runtime,
     auth::{ConnectorTokens, any_token_auth},
     connector::ConnectorHub,
+    connector_settings::ConnectorSettings,
     grpc::GrpcConnectorService,
     media::GrpcMediaService,
     observer_service::{GrpcObserverService, bearer_auth},
@@ -88,7 +89,12 @@ fn init_logging() {
 
 async fn serve(path: PathBuf) -> Result<()> {
     let (storage, settings) = settings::open(&path, WuphfSchema::new()).await?;
-    let settings = Arc::new(settings);
+    // Connectors declaring their own settings get a section in the store
+    // (stored declarations were restored by `open`).
+    let connector_settings = Arc::new(ConnectorSettings::new(
+        Arc::clone(&settings),
+        storage.clone(),
+    ));
     let snapshot = settings.current();
     let configuration = &snapshot.config;
     let derived = &snapshot.derived;
@@ -147,10 +153,9 @@ async fn serve(path: PathBuf) -> Result<()> {
         // Server-wide: also lets the core notice dead connector connections.
         .http2_keepalive_interval(Some(functions.keepalive_interval()))
         .http2_keepalive_timeout(Some(functions.keepalive_timeout()))
-        .add_service(ConnectorTransportServer::new(GrpcConnectorService::new(
-            handle,
-            connector_tokens,
-        )))
+        .add_service(ConnectorTransportServer::new(
+            GrpcConnectorService::new(handle, connector_tokens).with_settings(connector_settings),
+        ))
         .add_service(MediaTransportServer::with_interceptor(
             media_service,
             any_token_auth(media_tokens),

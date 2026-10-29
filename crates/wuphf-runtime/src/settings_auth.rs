@@ -7,7 +7,9 @@
 //! - A connector authenticates with its own connector token (plan 034). Its
 //!   request is allowed only when the actor's platform user id is one of
 //!   **that** connector's `owner_ids`, so a connector cannot act for another
-//!   connector's owner, and a request with no actor is refused.
+//!   connector's owner, and a request with no actor is refused, except that
+//!   a connector may read and watch its own settings section
+//!   (`connector_settings.<id>`) for itself, to apply them.
 //! - The observer token (held by the TUI, which can already send messages as
 //!   the owner) acts as the owner and needs no actor. With no observer token
 //!   configured, nothing is accepted as the observer.
@@ -97,7 +99,7 @@ impl Authorizer for WuphfAuthorizer {
         &self,
         metadata: &MetadataMap,
         actor: Option<&Actor>,
-        _operation: Operation<'_>,
+        operation: Operation<'_>,
     ) -> Result<Principal, Status> {
         let Some(token) = bearer_token(metadata).filter(|token| !token.is_empty()) else {
             return Err(Status::unauthenticated("valid bearer token required"));
@@ -110,6 +112,15 @@ impl Authorizer for WuphfAuthorizer {
         let Some(connector) = self.connectors.connector_for(token) else {
             return Err(Status::unauthenticated("valid bearer token required"));
         };
+        // A connector may read and follow its own settings section for
+        // itself, with no one acting: that is how it applies them (plan 040).
+        if actor.is_none_or(|actor| actor.id.is_empty())
+            && reads_only_own_section(connector, &operation)
+        {
+            return Ok(Principal {
+                actor: Some(connector.0.clone()),
+            });
+        }
         let Some(actor) = actor.filter(|actor| !actor.id.is_empty()) else {
             return Err(Status::permission_denied(
                 "a connector must say who is acting",
@@ -127,6 +138,26 @@ impl Authorizer for WuphfAuthorizer {
         Ok(Principal {
             actor: Some(format!("{}:{}", connector.0, actor.id)),
         })
+    }
+}
+
+/// Whether `operation` only reads `connector`'s own settings section: a
+/// `Watch` or `Get` at or below `connector_settings.<id>`. An empty `Watch`
+/// (every key) or a `List` reads more than that.
+fn reads_only_own_section(connector: &ConnectorId, operation: &Operation<'_>) -> bool {
+    let own = crate::connector_settings::section_path(connector);
+    let is_own = |key: &str| {
+        key == own
+            || key
+                .strip_prefix(own.as_str())
+                .is_some_and(|rest| rest.starts_with('.'))
+    };
+    match operation {
+        Operation::Watch { prefixes } => {
+            !prefixes.is_empty() && prefixes.iter().all(|prefix| is_own(prefix))
+        }
+        Operation::Read { key: Some(key) } => is_own(key),
+        _ => false,
     }
 }
 

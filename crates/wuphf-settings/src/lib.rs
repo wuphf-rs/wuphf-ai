@@ -22,6 +22,6 @@ pub use config::{
 };
 pub use load::{ENV_PREFIX, LoadError, base, load};
 pub use routing::LiveRouting;
-pub use schema::{Derived, SettingsStore, Snapshot, WuphfSchema};
+pub use schema::{CONNECTOR_SETTINGS, Derived, SettingsStore, Snapshot, WuphfSchema};
 pub use storage::SettingsStorage;
 pub use tokens::PanelTokenStore;

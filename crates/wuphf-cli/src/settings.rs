@@ -11,6 +11,7 @@ use botconf_grpc::proto::{ReloadRequest, settings_client::SettingsClient};
 use clap::Subcommand;
 use std::path::Path;
 use std::sync::Arc;
+use wuphf_runtime::connector_settings::ConnectorSettings;
 use wuphf_settings::{Configuration, SettingsStorage, SettingsStore, WuphfSchema};
 use wuphf_storage::SqliteStorage;
 
@@ -33,11 +34,12 @@ pub(crate) enum SettingsSubcommand {
 
 /// The core's database and the settings store over it, built from the config
 /// file and the environment exactly as `serve` builds them, without starting
-/// any server.
+/// any server. Connectors' stored settings declarations are restored, so their
+/// sections can be edited while they are down.
 pub(crate) async fn open(
     path: &Path,
     schema: WuphfSchema,
-) -> Result<(Arc<SqliteStorage>, SettingsStore)> {
+) -> Result<(Arc<SqliteStorage>, Arc<SettingsStore>)> {
     let base = wuphf_settings::base(path)
         .with_context(|| format!("failed to load configuration {}", path.display()))?;
     // The database holds the runtime overrides, so its URL comes from the file
@@ -47,6 +49,11 @@ pub(crate) async fn open(
     let settings = wuphf_settings::load(schema, base, SettingsStorage::new(Arc::clone(&storage)))
         .await
         .context("invalid configuration")?;
+    let settings = Arc::new(settings);
+    ConnectorSettings::new(Arc::clone(&settings), storage.clone())
+        .restore()
+        .await
+        .context("failed to restore connector settings declarations")?;
     Ok((storage, settings))
 }
 

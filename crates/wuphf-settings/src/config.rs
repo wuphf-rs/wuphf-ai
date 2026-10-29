@@ -37,6 +37,12 @@ pub struct Configuration {
     /// names, and the deadlines and limits calls run under.
     #[serde(default)]
     pub functions: FunctionsConfig,
+    /// Present only when the file holds a `[connector_settings]` table, which
+    /// `derive` refuses: a connector's settings take their base from the
+    /// connector's own file, so a second base here would make unsetting an
+    /// override ambiguous.
+    #[serde(default, skip_serializing)]
+    pub(crate) connector_settings: Option<serde::de::IgnoredAny>,
 }
 
 fn default_max_media_bytes() -> usize {
