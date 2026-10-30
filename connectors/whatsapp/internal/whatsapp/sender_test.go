@@ -584,3 +584,194 @@ func (a staticAddressing) Own(mode types.AddressingMode) types.JID {
 func liveRendering(rendering config.RenderingOptions) *settings.Live[config.Runtime] {
 	return settings.NewLive(config.Runtime{Rendering: rendering})
 }
+
+func dayTimer() *wuphfpb.DisappearingTimer {
+	at := int64(1700000000)
+	return &wuphfpb.DisappearingTimer{Seconds: 86400, SettingTimestamp: &at}
+}
+
+// contentContext is the ContextInfo of whatever content a message carries.
+func contentContext(message *waE2E.Message) *waE2E.ContextInfo {
+	switch {
+	case message.GetExtendedTextMessage() != nil:
+		return message.GetExtendedTextMessage().GetContextInfo()
+	case message.GetImageMessage() != nil:
+		return message.GetImageMessage().GetContextInfo()
+	case message.GetDocumentMessage() != nil:
+		return message.GetDocumentMessage().GetContextInfo()
+	case message.GetVideoMessage() != nil:
+		return message.GetVideoMessage().GetContextInfo()
+	case message.GetAudioMessage() != nil:
+		return message.GetAudioMessage().GetContextInfo()
+	case message.GetStickerMessage() != nil:
+		return message.GetStickerMessage().GetContextInfo()
+	default:
+		return nil
+	}
+}
+
+func assertStamped(t *testing.T, what string, message *waE2E.Message) {
+	t.Helper()
+	context := contentContext(message)
+	if context.GetExpiration() != 86400 || context.GetEphemeralSettingTimestamp() != 1700000000 {
+		t.Fatalf("%s: context = %v, want expiration 86400 set at 1700000000 (message %v)", what, context, message)
+	}
+}
+
+func TestSendStampsTheTimerOnText(t *testing.T) {
+	t.Parallel()
+	client := &stubSendClient{}
+	sender := NewSender(client, &stubBroker{}, stubConverter{}, staticAddressing{}, liveRendering(config.RenderingOptions{}))
+	text := "hi"
+	if _, _, err := sender.SendMessage(context.Background(), &wuphfpb.MessageCreateDispatch{
+		TargetChatId: "123@s.whatsapp.net",
+		Text:         &text,
+		Disappearing: dayTimer(),
+	}); err != nil {
+		t.Fatalf("SendMessage() error = %v", err)
+	}
+	if client.sent.Conversation != nil || client.sent.GetExtendedTextMessage().GetText() != "hi" {
+		t.Fatalf("sent %v, want the text promoted to an extended text message", client.sent)
+	}
+	assertStamped(t, "text", client.sent)
+}
+
+func TestSendStampsTheTimerOnEveryAttachmentKind(t *testing.T) {
+	t.Parallel()
+	for _, c := range []struct {
+		kind wuphfpb.Attachment_Kind
+		mime string
+		name string
+	}{
+		{wuphfpb.Attachment_KIND_IMAGE, "image/jpeg", "photo.jpg"},
+		{wuphfpb.Attachment_KIND_FILE, "application/pdf", "receipt.pdf"},
+		{wuphfpb.Attachment_KIND_VIDEO, "video/mp4", "clip.mp4"},
+		{wuphfpb.Attachment_KIND_AUDIO, "audio/ogg", "voice.ogg"},
+		{wuphfpb.Attachment_KIND_STICKER, "image/webp", "sticker.webp"},
+	} {
+		client := &stubSendClient{}
+		sender := NewSender(client, &stubBroker{bytes: []byte("data")}, stubConverter{}, staticAddressing{}, liveRendering(config.RenderingOptions{}))
+		mime, name := c.mime, c.name
+		if _, _, err := sender.SendMessage(context.Background(), &wuphfpb.MessageCreateDispatch{
+			TargetChatId: "123@s.whatsapp.net",
+			Attachments:  []*wuphfpb.Attachment{{MediaId: "media-1", Kind: c.kind, MimeType: &mime, FileName: &name}},
+			Disappearing: dayTimer(),
+		}); err != nil {
+			t.Fatalf("%v: SendMessage() error = %v", c.kind, err)
+		}
+		assertStamped(t, c.kind.String(), client.sent)
+	}
+
+	// Over-length text goes out as a file, stamped the same way.
+	client := &stubSendClient{}
+	sender := NewSender(client, &stubBroker{}, stubConverter{}, staticAddressing{}, liveRendering(config.RenderingOptions{MaxMessageLength: 5}))
+	text := "hello world"
+	if _, _, err := sender.SendMessage(context.Background(), &wuphfpb.MessageCreateDispatch{
+		TargetChatId: "123@s.whatsapp.net",
+		Text:         &text,
+		Disappearing: dayTimer(),
+	}); err != nil {
+		t.Fatalf("SendMessage() error = %v", err)
+	}
+	assertStamped(t, "text as a file", client.sent)
+}
+
+func TestSendStampsEveryPartOfAMultiAttachmentSend(t *testing.T) {
+	t.Parallel()
+	client := &recordingSendClient{}
+	ownJID := types.NewJID("15550001111", types.DefaultUserServer)
+	sender := NewSender(client, &stubBroker{bytes: []byte("data")}, stubConverter{}, staticAddressing{ownPN: ownJID}, liveRendering(config.RenderingOptions{}))
+	parent := "parent"
+	if _, _, err := sender.SendMessage(context.Background(), &wuphfpb.MessageCreateDispatch{
+		TargetChatId: "123@s.whatsapp.net",
+		Attachments:  imageAttachments(3),
+		ReplyContext: &wuphfpb.ReplyContext{PlatformMessageId: "parent-id", Text: &parent},
+		Disappearing: dayTimer(),
+	}); err != nil {
+		t.Fatalf("SendMessage() error = %v", err)
+	}
+	if len(client.sentAll) != 3 {
+		t.Fatalf("sent %d messages, want 3", len(client.sentAll))
+	}
+	for i, sent := range client.sentAll {
+		assertStamped(t, fmt.Sprintf("part %d", i+1), sent)
+		quoted := contentContext(sent).GetStanzaID()
+		if (i == 0) != (quoted == "parent-id") {
+			t.Fatalf("part %d quotes %q, want the reply context on the first part only", i+1, quoted)
+		}
+	}
+}
+
+func TestSendMergesTheTimerIntoAReplyContext(t *testing.T) {
+	t.Parallel()
+	client := &stubSendClient{}
+	ownJID := types.NewJID("15550001111", types.DefaultUserServer)
+	sender := NewSender(client, &stubBroker{}, stubConverter{}, staticAddressing{ownPN: ownJID}, liveRendering(config.RenderingOptions{}))
+	text, parent := "reply", "parent"
+	if _, _, err := sender.SendMessage(context.Background(), &wuphfpb.MessageCreateDispatch{
+		TargetChatId: "123@s.whatsapp.net",
+		Text:         &text,
+		ReplyContext: &wuphfpb.ReplyContext{PlatformMessageId: "parent-id", Text: &parent},
+		Disappearing: dayTimer(),
+	}); err != nil {
+		t.Fatalf("SendMessage() error = %v", err)
+	}
+	assertStamped(t, "reply", client.sent)
+	context := contentContext(client.sent)
+	if context.GetStanzaID() != "parent-id" || context.GetParticipant() != ownJID.String() {
+		t.Fatalf("reply context = %v, want the quote kept", context)
+	}
+}
+
+func TestSendWithAnOffOrMissingTimerSetsNoExpiration(t *testing.T) {
+	t.Parallel()
+	for _, timer := range []*wuphfpb.DisappearingTimer{nil, {Seconds: 0}} {
+		client := &stubSendClient{}
+		sender := NewSender(client, &stubBroker{}, stubConverter{}, staticAddressing{}, liveRendering(config.RenderingOptions{}))
+		text := "hi"
+		if _, _, err := sender.SendMessage(context.Background(), &wuphfpb.MessageCreateDispatch{
+			TargetChatId: "123@s.whatsapp.net",
+			Text:         &text,
+			Disappearing: timer,
+		}); err != nil {
+			t.Fatalf("SendMessage() error = %v", err)
+		}
+		if client.sent.GetConversation() != "hi" || contentContext(client.sent).GetExpiration() != 0 {
+			t.Fatalf("timer %v: sent %v, want plain text without an expiration", timer, client.sent)
+		}
+	}
+}
+
+func TestEditAndDeleteCarryNoTimer(t *testing.T) {
+	t.Parallel()
+	client := &stubSendClient{}
+	inputs := make(chan *wuphfpb.ClientFrame, 4)
+	sender := NewSender(client, &stubBroker{}, stubConverter{}, staticAddressing{}, liveRendering(config.RenderingOptions{})).
+		WithTimers(newTimerSource(&stubGroups{}, inputs, context.Background()))
+	text := "revised"
+	if _, err := sender.EditMessage(context.Background(), &wuphfpb.MessageEditDispatch{
+		TargetChatId:            "123@s.whatsapp.net",
+		TargetPlatformMessageId: "orig-id",
+		Text:                    &text,
+	}); err != nil {
+		t.Fatalf("EditMessage() error = %v", err)
+	}
+	if client.sent.GetConversation() != "revised" || contentContext(client.sent).GetExpiration() != 0 {
+		t.Fatalf("edit sent %v, want plain text without an expiration", client.sent)
+	}
+	if _, err := sender.DeleteMessage(context.Background(), &wuphfpb.MessageDeleteDispatch{
+		TargetChatId:            "123@s.whatsapp.net",
+		TargetPlatformMessageId: "orig-id",
+	}); err != nil {
+		t.Fatalf("DeleteMessage() error = %v", err)
+	}
+	if contentContext(client.sent).GetExpiration() != 0 {
+		t.Fatalf("delete sent %v, want no expiration", client.sent)
+	}
+	// Neither consulted the timer source: no lookup, no notice.
+	select {
+	case frame := <-inputs:
+		t.Fatalf("an edit or delete emitted %v", frame)
+	default:
+	}
+}

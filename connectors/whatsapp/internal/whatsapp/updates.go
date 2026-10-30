@@ -114,6 +114,11 @@ func (n Normalizer) Handle(ctx context.Context, message *events.Message) error {
 			Body: &wuphfpb.ClientFrame_MessageEdit{MessageEdit: edit},
 		})
 	}
+	// A timer change is a protocol message about the chat, not a message to
+	// bridge: it updates the chat's profile in the core.
+	if timer, ok := ephemeralSetting(message); ok {
+		return n.sendChatUpdates(ctx, []*wuphfpb.ChatUpdate{{ChatId: chat.String(), Disappearing: timer}})
+	}
 	if reaction, ok := n.normalizeReaction(ctx, message, chat); ok {
 		return n.send(ctx, &wuphfpb.ClientFrame{
 			Body: &wuphfpb.ClientFrame_Reaction{Reaction: reaction},
@@ -437,6 +442,7 @@ func (n Normalizer) normalize(ctx context.Context, message *events.Message) (*wu
 	if text != "" {
 		event.Text = &text
 	}
+	event.Disappearing = messageTimer(message.Message)
 	if context := messageContext(message.Message); context != nil && context.GetStanzaID() != "" {
 		reply := context.GetStanzaID()
 		event.ReplyToPlatformMessageId = &reply
@@ -556,4 +562,107 @@ func hasAttachment(message *waE2E.Message) bool {
 		message.GetVideoMessage() != nil ||
 		message.GetAudioMessage() != nil ||
 		message.GetStickerMessage() != nil
+}
+
+// chatUpdateBatch is the most chat updates one frame carries. A history sync
+// reports every conversation at once; batching keeps each frame well under
+// gRPC limits.
+const chatUpdateBatch = 500
+
+// messageTimer is the chat's disappearing timer as an inbound message carried
+// it: ContextInfo.Expiration when greater than 0, with its setting timestamp
+// when present. A message without one reports nil, which never turns a timer
+// off. The owner's own messages carry the timer too.
+func messageTimer(message *waE2E.Message) *wuphfpb.DisappearingTimer {
+	context := messageContext(message)
+	if context.GetExpiration() == 0 {
+		return nil
+	}
+	timer := &wuphfpb.DisappearingTimer{Seconds: context.GetExpiration()}
+	if at := context.GetEphemeralSettingTimestamp(); at > 0 {
+		timer.SettingTimestamp = &at
+	}
+	return timer
+}
+
+// ephemeralSetting reads an EPHEMERAL_SETTING protocol message: the chat's new
+// timer (0 = off), set at the message's setting timestamp or, when it has
+// none, at the message's own time.
+func ephemeralSetting(message *events.Message) (*wuphfpb.DisappearingTimer, bool) {
+	protocol := message.Message.GetProtocolMessage()
+	if protocol.GetType() != waE2E.ProtocolMessage_EPHEMERAL_SETTING {
+		return nil, false
+	}
+	at := protocol.GetEphemeralSettingTimestamp()
+	if at <= 0 {
+		at = message.Info.Timestamp.Unix()
+	}
+	return &wuphfpb.DisappearingTimer{
+		Seconds:          protocol.GetEphemeralExpiration(),
+		SettingTimestamp: &at,
+	}, true
+}
+
+// sendChatUpdates queues chat updates for the core in frames of at most
+// chatUpdateBatch updates.
+func (n Normalizer) sendChatUpdates(ctx context.Context, updates []*wuphfpb.ChatUpdate) error {
+	for start := 0; start < len(updates); start += chatUpdateBatch {
+		end := min(start+chatUpdateBatch, len(updates))
+		if err := n.send(ctx, &wuphfpb.ClientFrame{
+			Body: &wuphfpb.ClientFrame_ChatUpdate{ChatUpdate: &wuphfpb.ChatUpdateEvent{
+				Updates: updates[start:end],
+			}},
+		}); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// HandleGroupInfo reports a group's disappearing timer when a group
+// notification changes it. Other group changes report nothing.
+func (n Normalizer) HandleGroupInfo(ctx context.Context, evt *events.GroupInfo) error {
+	if evt.Ephemeral == nil {
+		return nil
+	}
+	timer := &wuphfpb.DisappearingTimer{}
+	if evt.Ephemeral.IsEphemeral {
+		timer.Seconds = evt.Ephemeral.DisappearingTimer
+	}
+	if !evt.Timestamp.IsZero() {
+		at := evt.Timestamp.Unix()
+		timer.SettingTimestamp = &at
+	}
+	return n.sendChatUpdates(ctx, []*wuphfpb.ChatUpdate{{
+		ChatId:       n.canonical(ctx, evt.JID).String(),
+		Disappearing: timer,
+	}})
+}
+
+// HandleHistorySync reports every DM's and group's timer in a history sync. A
+// sync snapshot omits the expiration when the timer is off, so an absent one
+// reports 0. Chat ids are canonicalized exactly like a message's chat, so the
+// core keys the profile under the id it routes.
+func (n Normalizer) HandleHistorySync(ctx context.Context, evt *events.HistorySync) error {
+	var updates []*wuphfpb.ChatUpdate
+	for _, conversation := range evt.Data.GetConversations() {
+		jid, err := types.ParseJID(conversation.GetID())
+		if err != nil {
+			continue
+		}
+		switch jid.Server {
+		case types.DefaultUserServer, types.HiddenUserServer, types.GroupServer:
+		default:
+			continue
+		}
+		timer := &wuphfpb.DisappearingTimer{Seconds: conversation.GetEphemeralExpiration()}
+		if at := conversation.GetEphemeralSettingTimestamp(); at > 0 {
+			timer.SettingTimestamp = &at
+		}
+		updates = append(updates, &wuphfpb.ChatUpdate{
+			ChatId:       n.canonical(ctx, jid).String(),
+			Disappearing: timer,
+		})
+	}
+	return n.sendChatUpdates(ctx, updates)
 }

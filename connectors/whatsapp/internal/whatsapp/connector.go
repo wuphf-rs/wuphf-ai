@@ -95,6 +95,10 @@ func (c Connector) Run(ctx context.Context) error {
 			err = normalizer.Handle(ctx, evt)
 		case *events.Receipt:
 			err = normalizer.HandleReceipt(ctx, evt)
+		case *events.GroupInfo:
+			err = normalizer.HandleGroupInfo(ctx, evt)
+		case *events.HistorySync:
+			err = normalizer.HandleHistorySync(ctx, evt)
 		default:
 			// Session-health events do not fail the connector: whatsmeow stops
 			// delivering messages but the core session stays up, which is what
@@ -122,17 +126,22 @@ func (c Connector) Run(ctx context.Context) error {
 	}
 	ownJID := *client.Store.ID
 	c.logger.Info().Str("jid", ownJID.String()).Msg("WhatsApp session connected")
+	sender := NewSender(client, media, converter, addresses, runtime.Live)
+	if c.cfg.SupportsDisappearingTimers {
+		sender = sender.WithTimers(newTimerSource(client, inputs, ctx))
+	}
 	runResult := make(chan error, 1)
 	go func() {
 		runResult <- coreclient.New(coreclient.Options{
-			CoreAddress:         c.cfg.CoreAddress,
-			Token:               coreToken,
-			ConnectorID:         c.cfg.ConnectorID,
-			Platform:            wuphfpb.Platform_PLATFORM_WHATSAPP,
-			SupportsThreads:     c.cfg.SupportsThreads,
-			SupportsTopicCreate: c.cfg.SupportsTopicCreate,
-			Settings:            runtime.Declaration,
-		}, c.logger).Run(ctx, NewSender(client, media, converter, addresses, runtime.Live), inputs)
+			CoreAddress:                c.cfg.CoreAddress,
+			Token:                      coreToken,
+			ConnectorID:                c.cfg.ConnectorID,
+			Platform:                   wuphfpb.Platform_PLATFORM_WHATSAPP,
+			SupportsThreads:            c.cfg.SupportsThreads,
+			SupportsTopicCreate:        c.cfg.SupportsTopicCreate,
+			SupportsDisappearingTimers: c.cfg.SupportsDisappearingTimers,
+			Settings:                   runtime.Declaration,
+		}, c.logger).Run(ctx, sender, inputs)
 	}()
 	select {
 	case <-ctx.Done():

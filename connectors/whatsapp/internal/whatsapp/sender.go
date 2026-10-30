@@ -44,10 +44,31 @@ type Sender struct {
 	// pinned is the value one dispatch read from runtime, so every part of
 	// the dispatch sees the same settings (see pin).
 	pinned *config.Runtime
+	// timers decides the disappearing timer of a send the core dispatched
+	// without one. Nil when the connector does not declare
+	// supports_disappearing_timers: sends then carry only what the core sent.
+	timers *timerSource
 }
 
 func NewSender(client SendClient, media MediaBroker, converter StickerConverter, addressing Addressing, runtime *settings.Live[config.Runtime]) Sender {
 	return Sender{client: client, media: media, converter: converter, addressing: addressing, runtime: runtime}
+}
+
+// WithTimers returns the sender with a fallback for sends whose dispatch
+// carries no disappearing timer.
+func (s Sender) WithTimers(timers *timerSource) Sender {
+	s.timers = timers
+	return s
+}
+
+// disappearing is the timer a send to chat carries: the dispatch's, or what
+// the fallback decides when it has none.
+func (s Sender) disappearing(ctx context.Context, dispatch *wuphfpb.MessageCreateDispatch, chat types.JID) *wuphfpb.DisappearingTimer {
+	timer := dispatch.GetDisappearing()
+	if s.timers != nil {
+		timer = s.timers.For(ctx, dispatch.GetTargetChatId(), chat, timer)
+	}
+	return timer
 }
 
 // settings are the runtime settings: the dispatch's pinned value, else the
@@ -84,8 +105,11 @@ func (s Sender) SendMessage(ctx context.Context, dispatch *wuphfpb.MessageCreate
 	if err != nil {
 		return "", "", err
 	}
+	// Every part of a content send carries the chat's timer, so it disappears
+	// like the rest of the chat instead of showing "will not disappear".
+	timer := s.disappearing(ctx, dispatch, chat)
 	if len(dispatch.Attachments) > 1 {
-		id, err := s.sendAttachments(ctx, chat, dispatch, contextInfo)
+		id, err := s.sendAttachments(ctx, chat, dispatch, contextInfo, timer)
 		return id, "", err
 	}
 	var message *waE2E.Message
@@ -103,7 +127,7 @@ func (s Sender) SendMessage(ctx context.Context, dispatch *wuphfpb.MessageCreate
 	default:
 		message = textMessage(dispatch.GetText())
 	}
-	message = withContext(message, contextInfo)
+	message = withDisappearing(withContext(message, contextInfo), timer)
 	response, err := s.client.SendMessage(ctx, chat, message)
 	if err != nil {
 		return "", "", fmt.Errorf("send WhatsApp message: %w", err)
@@ -114,7 +138,8 @@ func (s Sender) SendMessage(ctx context.Context, dispatch *wuphfpb.MessageCreate
 // sendAttachments delivers a multi-attachment dispatch. WhatsApp carries one
 // media per message and whatsmeow exposes no album primitive, so the group goes
 // out as consecutive messages: the first carries the dispatch text as its
-// caption and the quoted context, the rest are bare media. The first message's
+// caption and the quoted context, the rest are bare media. Every one carries
+// the chat's disappearing timer. The first message's
 // id is returned as the copy, so replies and edits against this message resolve
 // to the head of the group.
 //
@@ -127,6 +152,7 @@ func (s Sender) sendAttachments(
 	chat types.JID,
 	dispatch *wuphfpb.MessageCreateDispatch,
 	contextInfo *waE2E.ContextInfo,
+	timer *wuphfpb.DisappearingTimer,
 ) (string, error) {
 	var first string
 	for i, attachment := range dispatch.Attachments {
@@ -141,6 +167,7 @@ func (s Sender) sendAttachments(
 		if i == 0 {
 			message = withContext(message, contextInfo)
 		}
+		message = withDisappearing(message, timer)
 		response, err := s.client.SendMessage(ctx, chat, message)
 		if err != nil {
 			return "", attachmentGroupError(fmt.Errorf("send WhatsApp message: %w", err), i)

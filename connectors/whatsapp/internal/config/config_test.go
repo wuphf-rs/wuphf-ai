@@ -160,3 +160,22 @@ func TestRuntimeDefaultsAreExplicit(t *testing.T) {
 		t.Fatalf("WithDefaults() = %+v", got)
 	}
 }
+
+func TestSupportsDisappearingTimersParsesAndDefaultsOff(t *testing.T) {
+	t.Parallel()
+
+	var unset File
+	if err := toml.Unmarshal([]byte(`connector_id = "whatsapp-main"`), &unset); err != nil {
+		t.Fatal(err)
+	}
+	if unset.SupportsDisappearingTimers {
+		t.Fatal("supports_disappearing_timers should default to false")
+	}
+	var set File
+	if err := toml.Unmarshal([]byte(`supports_disappearing_timers = true`), &set); err != nil {
+		t.Fatal(err)
+	}
+	if !set.SupportsDisappearingTimers {
+		t.Fatal("supports_disappearing_timers = true did not parse")
+	}
+}

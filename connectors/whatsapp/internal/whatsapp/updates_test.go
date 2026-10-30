@@ -3,12 +3,14 @@ package whatsappconnector
 import (
 	"context"
 	"errors"
+	"strconv"
 	"testing"
 	"time"
 
 	wuphfpb "github.com/akshettrj/wuphf/proto/go/connector/v1"
 	waCommon "go.mau.fi/whatsmeow/proto/waCommon"
 	waE2E "go.mau.fi/whatsmeow/proto/waE2E"
+	waHistorySync "go.mau.fi/whatsmeow/proto/waHistorySync"
 	"go.mau.fi/whatsmeow/types"
 	"go.mau.fi/whatsmeow/types/events"
 	"google.golang.org/protobuf/proto"
@@ -703,5 +705,216 @@ func TestHandleDropsUnopenableOrNonEditSealedMessages(t *testing.T) {
 			default:
 			}
 		})
+	}
+}
+
+// nextChatUpdate reads frames until a chat update, skipping the identity
+// migrations a DM may report first.
+func nextChatUpdate(t *testing.T, inputs <-chan *wuphfpb.ClientFrame) *wuphfpb.ChatUpdateEvent {
+	t.Helper()
+	for {
+		select {
+		case frame := <-inputs:
+			if update := frame.GetChatUpdate(); update != nil {
+				return update
+			}
+		case <-time.After(time.Second):
+			t.Fatal("no chat update frame")
+		}
+	}
+}
+
+func timedText(expiration uint32, settingTimestamp int64) *waE2E.Message {
+	context := &waE2E.ContextInfo{Expiration: proto.Uint32(expiration)}
+	if settingTimestamp != 0 {
+		context.EphemeralSettingTimestamp = proto.Int64(settingTimestamp)
+	}
+	return &waE2E.Message{ExtendedTextMessage: &waE2E.ExtendedTextMessage{
+		Text:        proto.String("hi"),
+		ContextInfo: context,
+	}}
+}
+
+func TestNormalizeCarriesTheMessageTimer(t *testing.T) {
+	t.Parallel()
+	normalizer := NewNormalizer(make(chan *wuphfpb.ClientFrame), MediaCodec{}, nil, nil, nil, nil)
+	normalizeFrom := func(isFromMe bool, message *waE2E.Message) *wuphfpb.MessageCreateEvent {
+		event, ok, err := normalizer.normalize(context.Background(), &events.Message{
+			Info: types.MessageInfo{
+				MessageSource: types.MessageSource{
+					Chat:     types.NewJID("1555", types.DefaultUserServer),
+					Sender:   types.NewJID("1555", types.DefaultUserServer),
+					IsFromMe: isFromMe,
+				},
+				ID: "wa-1",
+			},
+			Message: message,
+		})
+		if err != nil || !ok {
+			t.Fatalf("normalize() ok=%v err=%v", ok, err)
+		}
+		return event
+	}
+
+	timer := normalizeFrom(false, timedText(86400, 1700000000)).GetDisappearing()
+	if timer.GetSeconds() != 86400 || timer.GetSettingTimestamp() != 1700000000 {
+		t.Fatalf("timer = %v, want 86400 set at 1700000000", timer)
+	}
+	if timer := normalizeFrom(false, timedText(86400, 0)).GetDisappearing(); timer.GetSeconds() != 86400 || timer.SettingTimestamp != nil {
+		t.Fatalf("timer = %v, want 86400 with no setting timestamp", timer)
+	}
+	if timer := normalizeFrom(false, timedText(0, 0)).GetDisappearing(); timer != nil {
+		t.Fatalf("an expiration of 0 reported %v", timer)
+	}
+	if timer := normalizeFrom(false, &waE2E.Message{Conversation: proto.String("hi")}).GetDisappearing(); timer != nil {
+		t.Fatalf("a message without a timer reported %v", timer)
+	}
+	// The owner's own messages carry the chat's timer too.
+	if timer := normalizeFrom(true, timedText(604800, 0)).GetDisappearing(); timer.GetSeconds() != 604800 {
+		t.Fatalf("own message timer = %v, want 604800", timer)
+	}
+}
+
+func ephemeralSettingEvent(chat types.JID, seconds uint32, settingTimestamp int64) *events.Message {
+	protocol := &waE2E.ProtocolMessage{
+		Type:                waE2E.ProtocolMessage_EPHEMERAL_SETTING.Enum(),
+		EphemeralExpiration: proto.Uint32(seconds),
+	}
+	if settingTimestamp != 0 {
+		protocol.EphemeralSettingTimestamp = proto.Int64(settingTimestamp)
+	}
+	return &events.Message{
+		Info: types.MessageInfo{
+			MessageSource: types.MessageSource{Chat: chat, Sender: chat},
+			ID:            "wa-setting",
+			Timestamp:     time.Unix(1700000500, 0),
+		},
+		Message: &waE2E.Message{ProtocolMessage: protocol},
+	}
+}
+
+func TestHandleReportsEphemeralSetting(t *testing.T) {
+	t.Parallel()
+	phone := types.NewJID("15550001111", types.DefaultUserServer)
+	lid := types.NewJID("88887777", types.HiddenUserServer)
+	identity := fakeIdentity{lids: map[string]types.JID{phone.String(): lid}}
+	inputs := make(chan *wuphfpb.ClientFrame, 8)
+	normalizer := NewNormalizer(inputs, MediaCodec{}, stubNamer{}, identity, nil, nil)
+
+	cases := []struct {
+		seconds          uint32
+		settingTimestamp int64
+		wantTimestamp    int64
+	}{
+		{604800, 1700000000, 1700000000},
+		{0, 1700000100, 1700000100},
+		// Without its own timestamp, the setting dates from the message.
+		{86400, 0, 1700000500},
+	}
+	for _, c := range cases {
+		if err := normalizer.Handle(context.Background(), ephemeralSettingEvent(phone, c.seconds, c.settingTimestamp)); err != nil {
+			t.Fatalf("Handle() error = %v", err)
+		}
+		updates := nextChatUpdate(t, inputs).GetUpdates()
+		if len(updates) != 1 || updates[0].GetChatId() != lid.String() {
+			t.Fatalf("updates = %v, want one for the canonical %s", updates, lid)
+		}
+		timer := updates[0].GetDisappearing()
+		if timer == nil || timer.GetSeconds() != c.seconds || timer.GetSettingTimestamp() != c.wantTimestamp {
+			t.Fatalf("timer = %v, want %d set at %d", timer, c.seconds, c.wantTimestamp)
+		}
+	}
+	select {
+	case frame := <-inputs:
+		t.Fatalf("a timer setting also produced %v", frame)
+	default:
+	}
+}
+
+func TestHandleGroupInfoReportsEphemeral(t *testing.T) {
+	t.Parallel()
+	inputs := make(chan *wuphfpb.ClientFrame, 4)
+	normalizer := NewNormalizer(inputs, MediaCodec{}, nil, nil, nil, nil)
+	group := types.NewJID("123", types.GroupServer)
+	at := time.Unix(1700000000, 0)
+
+	for _, c := range []struct {
+		ephemeral types.GroupEphemeral
+		want      uint32
+	}{
+		{types.GroupEphemeral{IsEphemeral: true, DisappearingTimer: 604800}, 604800},
+		{types.GroupEphemeral{IsEphemeral: false}, 0},
+	} {
+		ephemeral := c.ephemeral
+		if err := normalizer.HandleGroupInfo(context.Background(), &events.GroupInfo{JID: group, Timestamp: at, Ephemeral: &ephemeral}); err != nil {
+			t.Fatalf("HandleGroupInfo() error = %v", err)
+		}
+		updates := nextChatUpdate(t, inputs).GetUpdates()
+		if len(updates) != 1 || updates[0].GetChatId() != "123@g.us" ||
+			updates[0].GetDisappearing().GetSeconds() != c.want ||
+			updates[0].GetDisappearing().GetSettingTimestamp() != 1700000000 {
+			t.Fatalf("updates = %v, want %d set at 1700000000", updates, c.want)
+		}
+	}
+
+	name := "Renamed"
+	if err := normalizer.HandleGroupInfo(context.Background(), &events.GroupInfo{JID: group, Timestamp: at, Name: &types.GroupName{Name: name}}); err != nil {
+		t.Fatalf("HandleGroupInfo() error = %v", err)
+	}
+	select {
+	case frame := <-inputs:
+		t.Fatalf("a group change without a timer produced %v", frame)
+	default:
+	}
+}
+
+func TestHandleHistorySyncBatches(t *testing.T) {
+	t.Parallel()
+	phone := types.NewJID("15550001111", types.DefaultUserServer)
+	lid := types.NewJID("88887777", types.HiddenUserServer)
+	identity := fakeIdentity{lids: map[string]types.JID{phone.String(): lid}}
+	inputs := make(chan *wuphfpb.ClientFrame, 8)
+	normalizer := NewNormalizer(inputs, MediaCodec{}, nil, identity, nil, nil)
+
+	conversations := []*waHistorySync.Conversation{
+		{ID: proto.String(phone.String()), EphemeralExpiration: proto.Uint32(86400), EphemeralSettingTimestamp: proto.Int64(1700000000)},
+		{ID: proto.String("status@broadcast"), EphemeralExpiration: proto.Uint32(86400)},
+		{ID: proto.String("123@g.us")},
+	}
+	// Two of the three above are reported; fill up to 1201 reported chats.
+	for n := 2; n < 1201; n++ {
+		id := types.NewJID(strconv.Itoa(10000+n), types.DefaultUserServer).String()
+		conversations = append(conversations, &waHistorySync.Conversation{ID: proto.String(id)})
+	}
+	if err := normalizer.HandleHistorySync(context.Background(), &events.HistorySync{Data: &waHistorySync.HistorySync{
+		SyncType:      waHistorySync.HistorySync_INITIAL_BOOTSTRAP.Enum(),
+		Conversations: conversations,
+	}}); err != nil {
+		t.Fatalf("HandleHistorySync() error = %v", err)
+	}
+	var sizes []int
+	var updates []*wuphfpb.ChatUpdate
+	for len(updates) < 1201 {
+		batch := nextChatUpdate(t, inputs).GetUpdates()
+		sizes = append(sizes, len(batch))
+		updates = append(updates, batch...)
+	}
+	if len(sizes) != 3 || sizes[0] != 500 || sizes[1] != 500 || sizes[2] != 201 {
+		t.Fatalf("batch sizes = %v, want [500 500 201]", sizes)
+	}
+	first := updates[0]
+	if first.GetChatId() != lid.String() || first.GetDisappearing().GetSeconds() != 86400 ||
+		first.GetDisappearing().GetSettingTimestamp() != 1700000000 {
+		t.Fatalf("first update = %v, want the canonical LID with 86400 set at 1700000000", first)
+	}
+	group := updates[1]
+	if group.GetChatId() != "123@g.us" || group.GetDisappearing() == nil || group.GetDisappearing().GetSeconds() != 0 ||
+		group.GetDisappearing().SettingTimestamp != nil {
+		t.Fatalf("group update = %v, want an off timer with no setting timestamp", group)
+	}
+	for _, update := range updates {
+		if update.GetChatId() == "status@broadcast" {
+			t.Fatal("the status broadcast was reported")
+		}
 	}
 }

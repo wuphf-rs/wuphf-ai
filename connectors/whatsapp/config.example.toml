@@ -17,6 +17,13 @@ session_database = "file:whatsapp.session.db?_foreign_keys=on"
 supports_threads = false
 supports_topic_create = false
 
+# Stamp each chat's disappearing-messages timer on what this connector sends,
+# so contacts do not see "sent from an older version of WhatsApp, will not
+# disappear". It is part of the registration, so it must match
+# `supports_disappearing_timers` in the core's [[connectors]] entry for this
+# connector: when only one side sets it, the core refuses the connector.
+supports_disappearing_timers = true
+
 # Routing is owned entirely by the core. Configure which conversations map
 # where through the core's [rules.<id>] entries using WhatsApp JIDs such as
 # "12345@s.whatsapp.net" or "12345@g.us" as chat IDs.

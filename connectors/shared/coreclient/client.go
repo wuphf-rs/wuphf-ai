@@ -60,6 +60,11 @@ type Options struct {
 	Platform            wuphfpb.Platform
 	SupportsThreads     bool
 	SupportsTopicCreate bool
+	// SupportsDisappearingTimers declares that the connector stamps chats'
+	// disappearing-messages timers on what it sends and reports the timers it
+	// observes. Part of the registration, so it must match the connector's
+	// entry in the core config.
+	SupportsDisappearingTimers bool
 	// Token is the connector's core token, presented on the session as
 	// `authorization: Bearer <token>`.
 	Token string
@@ -211,8 +216,9 @@ func (c Client) runSession(
 			ConnectorId: c.opts.ConnectorID,
 			Platform:    c.opts.Platform,
 			Capabilities: &wuphfpb.Capabilities{
-				SupportsThreads:     c.opts.SupportsThreads,
-				SupportsTopicCreate: c.opts.SupportsTopicCreate,
+				SupportsThreads:            c.opts.SupportsThreads,
+				SupportsTopicCreate:        c.opts.SupportsTopicCreate,
+				SupportsDisappearingTimers: c.opts.SupportsDisappearingTimers,
 			},
 			Settings: c.opts.Settings,
 		}},

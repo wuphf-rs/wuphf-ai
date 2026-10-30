@@ -23,6 +23,12 @@ type File struct {
 	// capability gate is configured from one place.
 	SupportsThreads     bool `toml:"supports_threads"`
 	SupportsTopicCreate bool `toml:"supports_topic_create"`
+	// SupportsDisappearingTimers stamps each chat's disappearing-messages timer
+	// on what the connector sends, looks a group's timer up when the core does
+	// not know it, and warns the owner when a DM's timer is unknown. Part of the
+	// registration, so it must match supports_disappearing_timers in the core's
+	// [[connectors]] entry for this connector, or the core refuses it.
+	SupportsDisappearingTimers bool `toml:"supports_disappearing_timers"`
 	// ClientMode selects which WhatsApp client identity the session registers
 	// as. Empty defaults to ClientModeAndroid; see ClientMode for the choices.
 	ClientMode string `toml:"client_mode"`
