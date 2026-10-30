@@ -97,6 +97,21 @@ Without a helper bot, or when the trip through it fails (inline bots
 forbidden in a group, a timeout), the panel is sent as text with numbered
 options; replying with a number presses one.
 
+## Sticker labels
+
+Telegram stickers take no caption, so a mirrored sticker names its sender
+another way. A bot session puts the name ("🗣️: Alice") on an inline button
+under the sticker.
+
+A user session uses the settings panel's helper bot for the same button: the
+helper uploads the sticker and offers it as an inline result carrying the
+button, and the account sends that result. It is one message, so deleting the
+mirrored sticker leaves nothing behind, and Telegram shows "via @<helper bot>"
+under it. Without a helper bot, or when the helper fails or takes longer than
+5 seconds (delivery is sequential, so a stuck helper must not hold up the
+chat), the account posts the name as a short message and replies the sticker
+to it. Stickers the owner sends directly carry no label and are sent as usual.
+
 ## Animated stickers
 
 Telegram shows an animated WebP sticker only as a still frame, so the connector
