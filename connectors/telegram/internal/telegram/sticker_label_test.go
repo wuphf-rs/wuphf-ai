@@ -251,7 +251,7 @@ func newInlineFixture(helper *helperInvoker) inlineFixture {
 	stickers := NewInlineStickers(zerolog.Nop())
 	user := &userInvoker{
 		helper:     helper,
-		dispatcher: newHelperDispatcher(NewPanel("wuphf", NewPeerCache(), zerolog.Nop()), stickers, func() *tg.Client { return helperAPI }),
+		dispatcher: newHelperDispatcher(NewPanel("wuphf", NewPeerCache(), zerolog.Nop()), stickers, nil, func() *tg.Client { return helperAPI }),
 	}
 	userAPI := tg.NewClient(user)
 	stickers.attach(userAPI, helperAPI, &tg.InputUser{UserID: 2002, AccessHash: 3}, stickerOwner)

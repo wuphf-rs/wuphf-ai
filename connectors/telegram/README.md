@@ -104,6 +104,14 @@ Without a helper bot, or when the trip through it fails (inline bots
 forbidden in a group, a timeout), the panel is sent as text with numbered
 options; replying with a number presses one.
 
+**Messaging the helper bot.** When the bridge runs on an account that is not
+yours, open the panel by sending `/wuphf` to the helper bot in a private chat
+from your own account. There it is an ordinary bot panel with an inline
+keyboard, and the core obeys you if your Telegram user id is in `owner_ids`;
+anyone else gets no reply. The helper lists the command in its menu for
+private chats. It ignores groups it is in, and nothing it receives is
+mirrored: it is not the bridge account.
+
 ## Sticker labels
 
 Telegram stickers take no caption, so a mirrored sticker names its sender

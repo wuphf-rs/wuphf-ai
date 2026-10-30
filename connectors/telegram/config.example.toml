@@ -54,6 +54,11 @@ supports_topic_create = true
 # (the environment wins; keep this file private when it holds the token). It
 # also needs [panel] session_file. Without a helper bot the panel is sent as
 # text with numbered options. A bot session needs none of this.
+#
+# Owners can also send /wuphf to the helper bot in a private chat from their
+# own account, which gets an ordinary button panel there. Use that when the
+# bridge runs on an account other than yours: list your own user id in
+# owner_ids, not the bridge account's.
 # panel_bot_token = "123456789:replace-with-the-helper-bot-token"
 
 # Runtime. Log verbosity: trace, debug, info, warn, error (WUPHF_LOG_LEVEL
