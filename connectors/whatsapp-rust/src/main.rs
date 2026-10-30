@@ -15,6 +15,7 @@ mod health;
 mod media;
 mod names;
 mod normalize;
+mod receipts;
 mod sender;
 
 use std::path::PathBuf;
@@ -38,6 +39,7 @@ use crate::groups::GroupDirectory;
 use crate::health::Health;
 use crate::names::ChatTitles;
 use crate::normalize::Normalizer;
+use crate::receipts::Receipts;
 use crate::sender::WhatsAppSender;
 
 /// Buffers normalized inbound events ahead of the core session so a core
@@ -97,6 +99,7 @@ async fn main() -> anyhow::Result<()> {
     );
     let chat_events = ChatEvents::new(inputs_tx.clone(), titles, avatars);
     let health = Health::new(inputs_tx.clone());
+    let receipts = Receipts::new(inputs_tx.clone());
 
     let (profile, device_props) = device::client_identity(config.client_mode);
     warn!(
@@ -176,7 +179,12 @@ async fn main() -> anyhow::Result<()> {
                 let health = health.clone();
                 async move { health.handle(event).await }
             },
-        );
+        )
+        // Delivered and read receipts in direct chats mark the mirror copies.
+        .on_event_for(&[EventKind::Receipt], move |event, _client| {
+            let receipts = receipts.clone();
+            async move { receipts.handle(event).await }
+        });
     if let Some(phone_number) = config.phone_number.clone() {
         builder = builder.with_pair_code(PairCodeOptions::for_phone(phone_number));
     }
