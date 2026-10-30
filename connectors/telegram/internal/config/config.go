@@ -30,6 +30,13 @@ type File struct {
 	// once and never declared as a runtime setting, so it never leaves this
 	// process.
 	BotToken string `toml:"bot_token"`
+	// PanelBotToken is the helper bot's token, used by a user session to show
+	// the settings panel with buttons (see Panel). The
+	// WUPHF_TELEGRAM_PANEL_BOT_TOKEN environment variable wins over it. Like
+	// BotToken, it is read once and never a runtime setting.
+	PanelBotToken string `toml:"panel_bot_token"`
+	// Panel configures the settings panel opened with a command.
+	Panel PanelOptions `toml:"panel"`
 	// Runtime holds the settings that may change while the connector runs.
 	// Embedded, so the file keeps its layout (`log_level`, `[rendering]`).
 	Runtime
@@ -98,6 +105,41 @@ func (c Runtime) MediaConvertTimeout() time.Duration {
 	return time.Duration(c.MediaConvertTimeoutMs) * time.Millisecond
 }
 
+// DefaultPanelCommand opens the settings panel when panel.command is unset.
+const DefaultPanelCommand = "wuphf"
+
+// PanelOptions configure the settings panel. They are read once at startup.
+type PanelOptions struct {
+	// Command opens the panel, without the slash. Empty means
+	// DefaultPanelCommand.
+	Command string `toml:"command"`
+	// SessionFile is where the helper bot keeps its session (user sessions
+	// with a panel bot token only).
+	SessionFile string `toml:"session_file"`
+}
+
+// CommandName is the panel command without the slash, defaulted.
+func (p PanelOptions) CommandName() string {
+	if p.Command == "" {
+		return DefaultPanelCommand
+	}
+	return p.Command
+}
+
+// validPanelCommand says whether name can be a Telegram bot command: 1 to 32
+// lowercase letters, digits and underscores.
+func validPanelCommand(name string) bool {
+	if name == "" || len(name) > 32 {
+		return false
+	}
+	for _, r := range name {
+		if !(r >= 'a' && r <= 'z' || r >= '0' && r <= '9' || r == '_') {
+			return false
+		}
+	}
+	return true
+}
+
 // Rendering modes a configuration may name.
 const (
 	EditModeInPlace     = "in_place"
@@ -112,6 +154,8 @@ type Credentials struct {
 	Phone    string
 	Password string
 	BotToken string
+	// PanelBotToken is the helper bot's token for user-session panels.
+	PanelBotToken string
 }
 
 func Load(path string) (File, error) {
@@ -136,6 +180,9 @@ func (c File) Validate() error {
 	}
 	if c.CoreAddress == "" || c.ConnectorID == "" || c.CoreTokenEnv == "" || c.SessionFile == "" {
 		return errors.New("core_address, connector_id, core_token_env, and session_file are required")
+	}
+	if !validPanelCommand(c.Panel.CommandName()) {
+		return fmt.Errorf("panel.command %q must be 1 to 32 lowercase letters, digits or underscores", c.Panel.Command)
 	}
 	if c.SupportsTopicCreate && !c.SupportsThreads {
 		return errors.New("supports_topic_create requires supports_threads")
@@ -171,11 +218,18 @@ func LoadCredentials(file File) (Credentials, error) {
 	if credentials.BotToken == "" {
 		credentials.BotToken = strings.TrimSpace(file.BotToken)
 	}
+	credentials.PanelBotToken = strings.TrimSpace(os.Getenv("WUPHF_TELEGRAM_PANEL_BOT_TOKEN"))
+	if credentials.PanelBotToken == "" {
+		credentials.PanelBotToken = strings.TrimSpace(file.PanelBotToken)
+	}
 	if credentials.AppHash == "" {
 		return Credentials{}, errors.New("WUPHF_TELEGRAM_APP_HASH is required")
 	}
 	if credentials.BotToken == "" && credentials.Phone == "" {
 		return Credentials{}, errors.New("set bot_token (or WUPHF_TELEGRAM_BOT_TOKEN) or WUPHF_TELEGRAM_PHONE")
+	}
+	if credentials.BotToken == "" && credentials.PanelBotToken != "" && file.Panel.SessionFile == "" {
+		return Credentials{}, errors.New("panel.session_file is required for the panel bot (panel_bot_token)")
 	}
 	return credentials, nil
 }

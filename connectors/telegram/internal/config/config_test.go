@@ -191,7 +191,83 @@ func TestBotTokenIsNotARuntimeSetting(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if strings.Contains(string(encoded), "bot_token") {
-		t.Fatalf("Runtime carries bot_token:\n%s", encoded)
+	for _, secret := range []string{"bot_token", "panel_bot_token"} {
+		if strings.Contains(string(encoded), secret) {
+			t.Fatalf("Runtime carries %s:\n%s", secret, encoded)
+		}
+	}
+}
+
+// validFile is the smallest configuration Validate accepts.
+func validFile() File {
+	return File{
+		CoreAddress:  "127.0.0.1:50051",
+		ConnectorID:  "telegram-main",
+		CoreTokenEnv: "TOKEN",
+		SessionFile:  "./telegram.session.json",
+	}
+}
+
+func TestPanelCommandDefaultsToWuphf(t *testing.T) {
+	t.Parallel()
+
+	cfg := validFile()
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("Validate() error = %v", err)
+	}
+	if got := cfg.Panel.CommandName(); got != "wuphf" {
+		t.Fatalf("CommandName() = %q, want wuphf", got)
+	}
+	cfg.Panel.Command = "settings_2"
+	if got := cfg.Panel.CommandName(); got != "settings_2" {
+		t.Fatalf("CommandName() = %q, want the configured one", got)
+	}
+}
+
+func TestPanelCommandMustBeLowercaseWord(t *testing.T) {
+	t.Parallel()
+
+	for _, command := range []string{"Wuphf", "wu phf", "/wuphf", "wuphf-x", strings.Repeat("a", 33)} {
+		cfg := validFile()
+		cfg.Panel.Command = command
+		if err := cfg.Validate(); err == nil {
+			t.Errorf("Validate() accepted panel.command %q", command)
+		}
+	}
+	cfg := validFile()
+	cfg.Panel.Command = strings.Repeat("a", 32)
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("Validate() rejected a 32-character command: %v", err)
+	}
+}
+
+func TestPanelSessionFileRequiredWithPanelBot(t *testing.T) {
+	setTelegramEnv(t, "", "+10000000000")
+	t.Setenv("WUPHF_TELEGRAM_PANEL_BOT_TOKEN", "")
+
+	file := File{PanelBotToken: "333:panel"}
+	if _, err := LoadCredentials(file); err == nil {
+		t.Fatal("LoadCredentials() accepted a panel bot without panel.session_file")
+	}
+	file.Panel.SessionFile = "./telegram-panel.session.json"
+	credentials, err := LoadCredentials(file)
+	if err != nil {
+		t.Fatalf("LoadCredentials() error = %v", err)
+	}
+	if credentials.PanelBotToken != "333:panel" {
+		t.Fatalf("panel bot token = %q, want the file's", credentials.PanelBotToken)
+	}
+}
+
+func TestPanelBotTokenFromTheEnvironmentWins(t *testing.T) {
+	setTelegramEnv(t, "", "+10000000000")
+	t.Setenv("WUPHF_TELEGRAM_PANEL_BOT_TOKEN", "444:env")
+
+	credentials, err := LoadCredentials(File{PanelBotToken: "333:file", Panel: PanelOptions{SessionFile: "panel.json"}})
+	if err != nil {
+		t.Fatalf("LoadCredentials() error = %v", err)
+	}
+	if credentials.PanelBotToken != "444:env" {
+		t.Fatalf("panel bot token = %q, want the environment's", credentials.PanelBotToken)
 	}
 }
