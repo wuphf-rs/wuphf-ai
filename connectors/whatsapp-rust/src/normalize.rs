@@ -220,8 +220,12 @@ fn normalize(
     names: &Names,
 ) -> Option<pb::ClientFrame> {
     let chat = canonical(&info.source.chat);
+    // Ephemeral, view-once, device-sent and document-with-caption wrappers are
+    // looked through: in a chat with disappearing messages on, nearly every
+    // message arrives wrapped.
+    let base = message.get_base_message();
 
-    if let Some(protocol) = message.protocol_message.as_option() {
+    if let Some(protocol) = base.protocol_message.as_option() {
         return match protocol.r#type {
             // WhatsApp carries an edit as a protocol message whose key names the
             // original message and whose edited body holds the new content; the
@@ -272,7 +276,7 @@ fn normalize(
 
     // A reaction names the reacted message and holds the emoji (empty text
     // clears the reactor's reaction); the core fans it to the other endpoints.
-    if let Some(reaction) = message.reaction_message.as_option() {
+    if let Some(reaction) = base.reaction_message.as_option() {
         let target = reaction.key.as_option()?.id.clone()?;
         if target.is_empty() {
             return None;
@@ -291,7 +295,7 @@ fn normalize(
     let Some(text) = message.text_content() else {
         // Media messages are not bridged yet; dropping is deliberate rather
         // than delivering a caption that silently loses the attachment.
-        if has_attachment(message) {
+        if has_attachment(base) {
             warn!(
                 chat,
                 message_id = %info.id,
@@ -352,38 +356,36 @@ fn reply_target(message: &wa::Message) -> Option<String> {
     (!stanza_id.is_empty()).then_some(stanza_id)
 }
 
+/// The reply, mention and timer context of a message's content, read off the
+/// base message so ephemeral, view-once and device-sent wrappers are looked
+/// through.
 pub fn context_info(message: &wa::Message) -> Option<&wa::ContextInfo> {
-    message
-        .extended_text_message
+    let base = message.get_base_message();
+    base.extended_text_message
         .as_option()
         .and_then(|m| m.context_info.as_option())
         .or_else(|| {
-            message
-                .image_message
+            base.image_message
                 .as_option()
                 .and_then(|m| m.context_info.as_option())
         })
         .or_else(|| {
-            message
-                .video_message
+            base.video_message
                 .as_option()
                 .and_then(|m| m.context_info.as_option())
         })
         .or_else(|| {
-            message
-                .document_message
+            base.document_message
                 .as_option()
                 .and_then(|m| m.context_info.as_option())
         })
         .or_else(|| {
-            message
-                .audio_message
+            base.audio_message
                 .as_option()
                 .and_then(|m| m.context_info.as_option())
         })
         .or_else(|| {
-            message
-                .sticker_message
+            base.sticker_message
                 .as_option()
                 .and_then(|m| m.context_info.as_option())
         })
@@ -582,5 +584,114 @@ mod tests {
         info.source.is_from_me = true;
         let event = create(normalize(&info, &message, None, &names));
         assert_eq!(event.sender_name.as_deref(), Some("Me"));
+    }
+
+    /// `inner` inside a disappearing-messages wrapper, as WhatsApp sends nearly
+    /// every message in a chat with a timer on.
+    fn ephemeral(inner: wa::Message) -> wa::Message {
+        wa::Message {
+            ephemeral_message: MessageField::some(wa::message::FutureProofMessage {
+                message: MessageField::some(inner),
+                ..Default::default()
+            }),
+            ..Default::default()
+        }
+    }
+
+    fn key(id: &str) -> MessageField<wa::MessageKey> {
+        MessageField::some(wa::MessageKey {
+            id: Some(id.into()),
+            ..Default::default()
+        })
+    }
+
+    fn protocol(
+        kind: wa::message::protocol_message::Type,
+        edited: Option<wa::Message>,
+    ) -> wa::Message {
+        wa::Message {
+            protocol_message: MessageField::some(wa::message::ProtocolMessage {
+                r#type: Some(kind),
+                key: key("wa-0"),
+                edited_message: edited.map(MessageField::some).unwrap_or_default(),
+                ..Default::default()
+            }),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn a_wrapped_reaction_is_bridged() {
+        let message = ephemeral(wa::Message {
+            reaction_message: MessageField::some(wa::message::ReactionMessage {
+                key: key("wa-0"),
+                text: Some("👍".into()),
+                ..Default::default()
+            }),
+            ..Default::default()
+        });
+        match normalize(&info(None), &message, None, &Names::default()).and_then(|f| f.body) {
+            Some(pb::client_frame::Body::Reaction(event)) => {
+                assert_eq!(event.platform_message_id, "wa-0");
+                assert_eq!(event.emoji, "👍");
+            }
+            other => panic!("expected a reaction, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn a_wrapped_edit_is_bridged() {
+        let message = ephemeral(protocol(
+            wa::message::protocol_message::Type::MESSAGE_EDIT,
+            Some(wa::Message::text("new")),
+        ));
+        match normalize(&info(None), &message, None, &Names::default()).and_then(|f| f.body) {
+            Some(pb::client_frame::Body::MessageEdit(event)) => {
+                assert_eq!(event.platform_message_id, "wa-0");
+                assert_eq!(event.text.as_deref(), Some("new"));
+            }
+            other => panic!("expected an edit, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn a_wrapped_revoke_is_bridged() {
+        let message = ephemeral(protocol(wa::message::protocol_message::Type::REVOKE, None));
+        match normalize(&info(None), &message, None, &Names::default()).and_then(|f| f.body) {
+            Some(pb::client_frame::Body::MessageDelete(event)) => {
+                assert_eq!(event.platform_message_id, "wa-0");
+            }
+            other => panic!("expected a delete, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn a_wrapped_reply_keeps_its_parent() {
+        let message = ephemeral(wa::Message::text_with_context(
+            "sure",
+            wa::ContextInfo {
+                stanza_id: Some("wa-0".into()),
+                ..Default::default()
+            },
+        ));
+        let event = create(normalize(&info(None), &message, None, &Names::default()));
+        assert_eq!(event.reply_to_platform_message_id.as_deref(), Some("wa-0"));
+    }
+
+    #[test]
+    fn a_wrapped_message_carries_its_timer_timestamp() {
+        let event = create(normalize(
+            &info(Some(86_400)),
+            &ephemeral(timed_text()),
+            None,
+            &Names::default(),
+        ));
+        assert_eq!(
+            event.disappearing,
+            Some(pb::DisappearingTimer {
+                seconds: 86_400,
+                setting_timestamp: Some(1_700_000_000),
+            })
+        );
     }
 }
