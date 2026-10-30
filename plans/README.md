@@ -68,6 +68,12 @@ code).
 | 048 | Port the Instagram connector from messagix to instameow (upstream dropped IG lightspeed) | P0 | M–L | — | DONE |
 | 049 | Move to a botconf release that lifts the gotd (v0.161.0) and tonic/prost (0.12/0.13) pins | P3 | M | a new botconf release | TODO — blocked on botconf |
 | 050 | wuphf-misc: a host for non-bridging features, first an Instagram reel/post downloader | P3 | L | 011 | DONE (see notes; not yet tried against a live Instagram session) |
+| 051 | whatsapp-rust: inbound media, captions, view-once, and the Android client identity | P1 | M | — | TODO |
+| 052 | whatsapp-rust: owner notices, inbound receipts, staying up when the WhatsApp client stops | P2 | S–M | — | TODO |
+| 053 | whatsapp-rust: canonical ids, identity migrations, the addressing book, quote authors, channel titles | P1 | M–L | — (051 soft) | TODO |
+| 054 | whatsapp-rust: outbound media of every kind, rendering options, SDK media download | P1 | L | 051 (053 soft) | TODO |
+| 055 | whatsapp-rust: stickers — SDK functions client, media.convert, pure-Rust sticker EXIF | P2 | M–L | 054 | TODO |
+| 056 | Runtime settings in the Rust SDK; whatsapp-rust declares the Go connector's settings | P2 | L | botconf 013 (055 soft) | TODO |
 
 Status values: TODO | IN PROGRESS | DONE | BLOCKED (with one-line reason) |
 REJECTED (with one-line rationale).
@@ -1232,6 +1238,49 @@ Dependencies and ordering:
     36 → 44; clippy and fmt clean; Go `proto/go`, `shared`, `whatsapp`,
     `telegram` green, `instagram` builds. Not live-tested: the owner should
     watch for two sides changing a state back and forth (a STOP condition).
+
+### whatsapp-rust parity 051–056 (added 2026-10-31 at `313038d`)
+
+The owner settled on 2026-10-31 that both WhatsApp connectors stay in use:
+the Rust one becomes a full alternative with every Go capability, the same
+wire semantics and the same canonical chat ids, so a connector id can move
+between the implementations without splitting conversations. New shared
+pieces go into the Rust SDK (`crates/wuphf-connector`), mirroring Go's
+`connectors/shared`. Features neither connector has (sending reactions and
+read receipts, albums, polls, locations, vCards) wait for a later plan.
+
+- **Renumbered** (2026-11-22): written as 049–054 on a second checkout of
+  `v2` whose own plan 046 was later dropped for the one on `origin/v2`. The
+  `313038d` baseline the plans name is that checkout's commit, not an
+  ancestor of `v2`: a drift check reads `git log` from the 046 notes'
+  start (`e1dd7bc`) instead, and re-checks every "must still hold" fact
+  against this 046 and 047.
+- **Order**: 051 → 054 → 055 is a chain (shared media plumbing). 052 and 053
+  are independent; 053 is easier after 051. 056 can land any time, but it
+  declares only the keys the Rust connector already has, so it is meant to
+  go last. 053 and 054 both edit `sender.rs`; each plan says how to land
+  second.
+- **Owner decisions (answered 2026-10-31)** (library gaps in whatsapp-rust `5ca80c5c`):
+  - **D1 (051) = (b)**: the library's Android `ClientProfile` with OS version
+    `"0.1"` and device forced to `"Desktop"`, matching whatsmeow field for field.
+  - **D2 (054) = (a)**: `UploadResponse` cannot be built outside the library, so
+    tests cannot fake an upload result. A seam above the
+    builders (`WaClient::upload(bytes, OutboundMedia) -> wa::Message`).
+  - **D3 (054) = (a)**: the library builders always set a default mime type where
+    Go sends none. Accept the defaults; the attachment's own mime type is
+    passed whenever it has one.
+- **056 settings dependency (owner Q48)**: the SDK uses a new proto-only
+  `botconf-proto` crate (botconf plan 013, tag `v0.11.0`), so connectors do
+  not link the settings engine or the panel.
+- **Other owner answers (2026-10-31)**: Q49 — a media download failure raises
+  an owner notice (`NOTICE_KIND_MEDIA_UNAVAILABLE`, 052 Step 2b). Q50 — 053
+  reads `sender_alt` as well as `recipient_alt`.
+- **Go follow-ups (a later plan)**: the Go connector keeps running and raises
+  the same notice when a media download fails, instead of ending its run
+  (Q49); and it reads `SenderAlt` for identity migrations too (Q50).
+- **Every plan ends with a live test** and rebuilds only
+  `scripts/dev-bin/.bin/wuphf-whatsapp-rust`; 051 needs one re-pair of the
+  Rust session (agreed).
 
 ## Findings considered and rejected
 
