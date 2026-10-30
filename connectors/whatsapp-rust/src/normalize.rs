@@ -656,7 +656,6 @@ mod tests {
         wa::Message {
             ephemeral_message: MessageField::some(wa::message::FutureProofMessage {
                 message: MessageField::some(inner),
-                ..Default::default()
             }),
             ..Default::default()
         }
@@ -833,7 +832,6 @@ mod tests {
         let wrapped = wa::Message {
             document_with_caption_message: MessageField::some(wa::message::FutureProofMessage {
                 message: MessageField::some(document.clone()),
-                ..Default::default()
             }),
             ..Default::default()
         };
@@ -850,7 +848,6 @@ mod tests {
                 let mut message = wa::Message::default();
                 *field(&mut message) = MessageField::some(wa::message::FutureProofMessage {
                     message: MessageField::some(inner),
-                    ..Default::default()
                 });
                 message
             };

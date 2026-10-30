@@ -8,6 +8,7 @@ mod chat_state;
 mod chats;
 mod config;
 mod contacts;
+mod device;
 mod disappearing;
 mod groups;
 mod media;
@@ -22,7 +23,7 @@ use anyhow::Context as _;
 use clap::Parser;
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
-use tracing::{error, info};
+use tracing::{error, info, warn};
 use tracing_subscriber::EnvFilter;
 use whatsapp_rust::pair_code::PairCodeOptions;
 use whatsapp_rust::prelude::*;
@@ -94,8 +95,14 @@ async fn main() -> anyhow::Result<()> {
     );
     let chat_events = ChatEvents::new(inputs_tx.clone(), titles, avatars);
 
+    let (profile, device_props) = device::client_identity(config.client_mode);
+    warn!(
+        client_mode = ?config.client_mode,
+        "registering the WhatsApp session as an Android client (experimental)"
+    );
     let mut builder = Bot::builder()
         .with_backend(store)
+        .with_device_props(device_props)
         .on_qr_code(|code, timeout| async move {
             info!(
                 valid_for_seconds = timeout.as_secs(),
@@ -156,6 +163,10 @@ async fn main() -> anyhow::Result<()> {
         builder = builder.with_pair_code(PairCodeOptions::for_phone(phone_number));
     }
     let bot = builder.build().await.context("build WhatsApp bot")?;
+    // The profile is in-memory only, and the library reads it for every login
+    // and registration payload: set once before the first connect, it holds
+    // for every reconnect of this process.
+    bot.client().set_client_profile(profile).await;
     let mut handle = bot.spawn();
 
     let core_client = wuphf_connector::Client::new(wuphf_connector::Options {

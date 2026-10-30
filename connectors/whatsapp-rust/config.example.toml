@@ -25,6 +25,15 @@ log_level = "info"
 # connector: when only one side sets it, the core refuses the connector.
 supports_disappearing_timers = true
 
+# Which WhatsApp client the session registers as. Both pair as an Android client
+# (so WhatsApp delivers view-once media, which it withholds from a web companion);
+# they differ only in the account type they match. Use "android" (the default)
+# for a personal account and "android_business" for a WhatsApp Business (SMB)
+# account. Experimental, and only applied at the next fresh pairing: after a
+# change, unlink the device on the phone, move the session database aside and
+# pair again.
+client_mode = "android_business"
+
 # WhatsApp has no threads, so the thread capabilities are hardcoded false.
 # Routing is owned entirely by the core: configure [rules.<id>] entries there
 # using WhatsApp JIDs such as "12345@s.whatsapp.net" or "12345@g.us" as chat
