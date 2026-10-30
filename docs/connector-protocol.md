@@ -101,7 +101,10 @@ connection dies silently; the SDKs keep retrying with backoff until then.
   message went to a chat whose timer the connector could not learn, so it will
   not disappear (`detail` names the chat). The core relays it without folding it
   into the connector's health state; the connector limits repeats (once per chat
-  until the timer becomes known).
+  until the timer becomes known). `NOTICE_KIND_MEDIA_UNAVAILABLE` is not about
+  health either: an inbound message was not bridged because its media could not
+  be downloaded (`detail` names the media kind, the sender, the chat and the
+  error). It is relayed the same way, once per dropped message.
 
 ## Server frames (core → connector)
 

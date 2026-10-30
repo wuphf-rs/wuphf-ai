@@ -154,7 +154,12 @@ First launch pairs through a terminal QR code. Set `phone_number` in the
 connector config to use a pair code instead. Inbound, the connector bridges
 text, photos, videos, GIFs, voice notes, documents and stickers (captions
 become the text; view-once media is marked `👁️ View once`), edits, deletes and
-reactions, including those inside disappearing-messages wrappers. Outbound it
+reactions, including those inside disappearing-messages wrappers. It reports
+delivered and read receipts in direct chats, and tells the owner through the
+core when the WhatsApp session is lost (a logout, another client taking over,
+a temporary ban, an outdated client), when it is back, and when an incoming
+message's media could not be downloaded. After a logout it stays up so that
+notice is delivered: re-pair, then restart it. Outbound it
 sends text, edits and deletes; outbound media is still to come. It registers
 as an Android client so WhatsApp delivers view-once media: set `client_mode`
 to `"android"` for a personal account or `"android_business"` for a WhatsApp

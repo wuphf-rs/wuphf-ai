@@ -338,7 +338,9 @@ The unknown-timer notice (`NOTICE_KIND_DISAPPEARING_TIMER_UNKNOWN`: a message
 went to a chat whose timer the connector could not learn) is not a health
 state: it bypasses that suppression and leaves the connector's health state
 alone, and the connector itself limits it to once per chat until the timer is
-known.
+known. The media notice (`NOTICE_KIND_MEDIA_UNAVAILABLE`: an inbound message
+was dropped because its media could not be downloaded) bypasses it the same
+way, once per dropped message.
 
 ## Media
 
