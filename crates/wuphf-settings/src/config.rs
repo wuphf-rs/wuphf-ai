@@ -182,6 +182,11 @@ pub struct ConnectorConfiguration {
     pub supports_threads: bool,
     #[serde(default)]
     pub supports_topic_create: bool,
+    /// The core stamps a chat's disappearing-messages timer on sends to this
+    /// connector and the connector reports the timers it observes. Part of
+    /// the registration, so it must match the connector's own config.
+    #[serde(default)]
+    pub supports_disappearing_timers: bool,
     /// Platform user ids of the owner on this connector, as the connector
     /// reports actors (e.g. "704338780" for a Telegram user). Settings
     /// requests a connector makes on behalf of anyone else are refused.

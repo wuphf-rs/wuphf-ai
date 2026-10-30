@@ -17,7 +17,7 @@ use wuphf_proto::connector::connector_transport_server::ConnectorTransportServer
 use wuphf_proto::connector::media_transport_client::MediaTransportClient;
 use wuphf_proto::connector::media_transport_server::MediaTransportServer;
 use wuphf_storage::InMemoryStorage;
-use wuphf_storage::{DispatchStore, ObservationStore};
+use wuphf_storage::{ChatProfileStore, DispatchStore, ObservationStore};
 
 const WA: &str = "whatsapp-main";
 const TG: &str = "telegram-main";
@@ -1295,4 +1295,131 @@ async fn media_requires_a_known_token() {
         .await
         .expect("a connector token may download");
     server.abort();
+}
+
+/// End to end over gRPC: a WhatsApp connector that declares disappearing
+/// timers reports a chat's timer, and a Telegram reply into the mirrored chat
+/// reaches WhatsApp stamped with it.
+#[tokio::test]
+async fn a_reported_timer_reaches_the_whatsapp_send_over_grpc() {
+    let mut connectors = registrations();
+    connectors[0].capabilities.supports_disappearing_timers = true;
+    let storage = Arc::new(InMemoryStorage::default());
+    let core = Arc::new(Core::new(
+        Arc::clone(&storage),
+        Arc::new(RoutingConfig::new(rules(), connectors.clone())),
+    ));
+    let (runtime, runtime_channels, _observer) = Runtime::channelled(core, 8);
+    let (hub, handle) = ConnectorHub::new(runtime_channels, connectors);
+    let runtime_task = tokio::spawn(runtime.run());
+    let hub_task = tokio::spawn(hub.run());
+    let (uri, server_task) = serve_connectors(handle).await;
+
+    let (whatsapp_tx, whatsapp_rx) = mpsc::channel(8);
+    whatsapp_tx
+        .send(registration_frame(
+            WA,
+            pb::Platform::Whatsapp,
+            Some(pb::Capabilities {
+                supports_threads: false,
+                supports_topic_create: false,
+                supports_disappearing_timers: true,
+            }),
+        ))
+        .await
+        .unwrap();
+    let mut whatsapp_output = ConnectorTransportClient::connect(uri.clone())
+        .await
+        .unwrap()
+        .open_session(with_token(ReceiverStream::new(whatsapp_rx), WA_TOKEN))
+        .await
+        .unwrap()
+        .into_inner();
+    let (telegram_tx, telegram_rx) = mpsc::channel(8);
+    telegram_tx
+        .send(registration_frame(
+            TG,
+            pb::Platform::Telegram,
+            Some(pb::Capabilities {
+                supports_threads: true,
+                supports_topic_create: true,
+                supports_disappearing_timers: false,
+            }),
+        ))
+        .await
+        .unwrap();
+    let _telegram_output = ConnectorTransportClient::connect(uri)
+        .await
+        .unwrap()
+        .open_session(with_token(ReceiverStream::new(telegram_rx), TG_TOKEN))
+        .await
+        .unwrap()
+        .into_inner();
+
+    whatsapp_tx
+        .send(pb::ClientFrame {
+            body: Some(pb::client_frame::Body::ChatUpdate(pb::ChatUpdateEvent {
+                updates: vec![pb::ChatUpdate {
+                    chat_id: "wa-chat".into(),
+                    disappearing: Some(pb::DisappearingTimer {
+                        seconds: 604_800,
+                        setting_timestamp: Some(1_700_000_000),
+                    }),
+                }],
+            })),
+        })
+        .await
+        .unwrap();
+    // Each connector has its own ingest worker, so wait for the update to land
+    // before the reply is routed on the Telegram worker.
+    tokio::time::timeout(std::time::Duration::from_secs(5), async {
+        while storage
+            .chat_profile(&ConnectorId(WA.into()), "wa-chat")
+            .await
+            .unwrap()
+            .is_none()
+        {
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("the chat update is applied");
+
+    telegram_tx
+        .send(pb::ClientFrame {
+            body: Some(pb::client_frame::Body::MessageCreate(
+                pb::MessageCreateEvent {
+                    chat_id: "tg-chat".into(),
+                    thread_id: Some("topic".into()),
+                    chat_title: None,
+                    platform_message_id: "tg-reply".into(),
+                    sender: "owner".into(),
+                    participant: None,
+                    text: Some("reply".into()),
+                    attachments: vec![],
+                    reply_to_platform_message_id: None,
+                    timestamp_ms: 1,
+                    sender_name: None,
+                    disappearing: None,
+                },
+            )),
+        })
+        .await
+        .unwrap();
+    let frame = whatsapp_output.message().await.unwrap().unwrap();
+    let Some(pb::server_frame::Body::MessageCreate(dispatch)) = frame.body else {
+        panic!("WhatsApp should receive the reply as a message dispatch");
+    };
+    assert_eq!(dispatch.target_chat_id, "wa-chat");
+    assert_eq!(
+        dispatch.disappearing,
+        Some(pb::DisappearingTimer {
+            seconds: 604_800,
+            setting_timestamp: Some(1_700_000_000),
+        })
+    );
+
+    server_task.abort();
+    hub_task.abort();
+    runtime_task.abort();
 }

@@ -48,6 +48,11 @@ notify = ["telegram-main:telegram:user:704338780"]
 # rendering) is configured in each connector's own config file under
 # `[rendering]`, not here.
 #
+# `supports_disappearing_timers` lets the core stamp a chat's
+# disappearing-messages timer on sends to this connector (WhatsApp). It is part
+# of the connector's registration, so it must match the connector's own config:
+# when only one side sets it, the core refuses the connector.
+#
 # `owner_ids` lists the owner's platform user ids on a connector, as that
 # connector reports who acted. The core's settings service only obeys a
 # connector acting for one of its own owner ids (or the observer token), so
@@ -57,6 +62,7 @@ notify = ["telegram-main:telegram:user:704338780"]
 id = "whatsapp-main"
 platform = "whatsapp"
 token_env = "WUPHF_CONNECTOR_WHATSAPP_MAIN_TOKEN"
+supports_disappearing_timers = true
 # owner_ids = ["98765432101234@lid"]
 
 # Rust WhatsApp connector, an alternative to whatsapp-main. Uncomment it only
@@ -67,6 +73,7 @@ token_env = "WUPHF_CONNECTOR_WHATSAPP_MAIN_TOKEN"
 # id = "whatsapp-rust"
 # platform = "whatsapp"
 # token_env = "WUPHF_CONNECTOR_WHATSAPP_RUST_TOKEN"
+# supports_disappearing_timers = true
 
 [[connectors]]
 id = "instagram-main"

@@ -70,6 +70,26 @@ fn example_configuration_parses() {
     });
 }
 
+/// `supports_disappearing_timers` reaches the connector's registered
+/// capabilities, and defaults to off.
+#[test]
+fn the_disappearing_capability_reaches_the_registration() {
+    Jail::expect_with(|_| {
+        let store = store(every_token_set(), Path::new(EXAMPLE)).unwrap();
+        let routing = Arc::clone(&store.current().derived.routing);
+        let capable = |id: &str| {
+            routing
+                .connector(&ConnectorId(id.into()))
+                .expect("the example configures the connector")
+                .capabilities
+                .supports_disappearing_timers
+        };
+        assert!(capable("whatsapp-main"));
+        assert!(!capable("telegram-main"));
+        Ok(())
+    });
+}
+
 fn chat(chat_id: &str, thread_id: Option<&str>) -> ChatAddress {
     ChatAddress::new(chat_id, thread_id.map(Into::into))
 }

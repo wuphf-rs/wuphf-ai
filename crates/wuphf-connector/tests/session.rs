@@ -24,7 +24,7 @@ use wuphf_runtime::Runtime;
 use wuphf_runtime::auth::ConnectorTokens;
 use wuphf_runtime::connector::ConnectorHub;
 use wuphf_runtime::grpc::GrpcConnectorService;
-use wuphf_storage::{DispatchStore, InMemoryStorage};
+use wuphf_storage::{ChatProfileStore, DispatchStore, InMemoryStorage};
 
 const WA: &str = "whatsapp-main";
 const TG: &str = "telegram-main";
@@ -32,41 +32,13 @@ const WA_TOKEN: &str = "wa-token";
 const TG_TOKEN: &str = "tg-token";
 
 fn registrations() -> Vec<Connector> {
-    vec![
-        Connector {
-            id: ConnectorId(WA.into()),
-            platform: Platform::WhatsApp,
-            capabilities: ConnectorCapabilities::default(),
-        },
-        Connector {
-            id: ConnectorId(TG.into()),
-            platform: Platform::Telegram,
-            capabilities: ConnectorCapabilities {
-                supports_threads: true,
-                supports_topic_create: true,
-                supports_disappearing_timers: false,
-            },
-        },
-    ]
+    registrations_with(false)
 }
 
-fn routing() -> RoutingConfig {
-    let rules = vec![Rule {
-        id: RuleId("direct".into()),
-        flow: RuleKind::OneToOne {
-            source_connector: ConnectorId(WA.into()),
-            source_chat: ChatAddress {
-                chat_id: "wa-chat".into(),
-                thread_id: None,
-            },
-            destination_connector: ConnectorId(TG.into()),
-            destination_chat: ChatAddress {
-                chat_id: "tg-chat".into(),
-                thread_id: Some("topic".into()),
-            },
-        },
-    }];
-    let connectors = vec![
+/// The configured connectors, with WhatsApp declaring disappearing timers when
+/// `whatsapp_timers`.
+fn registrations_with(whatsapp_timers: bool) -> Vec<Connector> {
+    let mut connectors = vec![
         Connector {
             id: ConnectorId(WA.into()),
             platform: Platform::WhatsApp,
@@ -82,6 +54,26 @@ fn routing() -> RoutingConfig {
             },
         },
     ];
+    connectors[0].capabilities.supports_disappearing_timers = whatsapp_timers;
+    connectors
+}
+
+fn routing(connectors: Vec<Connector>) -> RoutingConfig {
+    let rules = vec![Rule {
+        id: RuleId("direct".into()),
+        flow: RuleKind::OneToOne {
+            source_connector: ConnectorId(WA.into()),
+            source_chat: ChatAddress {
+                chat_id: "wa-chat".into(),
+                thread_id: None,
+            },
+            destination_connector: ConnectorId(TG.into()),
+            destination_chat: ChatAddress {
+                chat_id: "tg-chat".into(),
+                thread_id: Some("topic".into()),
+            },
+        },
+    }];
     RoutingConfig::new(rules, connectors)
 }
 
@@ -102,11 +94,18 @@ struct Harness {
 
 impl Harness {
     async fn start() -> Self {
+        Self::start_with(registrations()).await
+    }
+
+    async fn start_with(connectors: Vec<Connector>) -> Self {
         let storage = Arc::new(InMemoryStorage::default());
-        let core = Arc::new(Core::new(storage.clone(), Arc::new(routing())));
+        let core = Arc::new(Core::new(
+            storage.clone(),
+            Arc::new(routing(connectors.clone())),
+        ));
         let (runtime, channels, _observer) = Runtime::channelled(core, 8);
         let inbound = channels.inbound.clone();
-        let (hub, handle) = ConnectorHub::new(channels, registrations());
+        let (hub, handle) = ConnectorHub::new(channels, connectors);
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let address = listener.local_addr().unwrap().to_string();
         let tasks = vec![
@@ -148,6 +147,7 @@ fn sdk_client(address: &str) -> Client {
         platform: pb::Platform::Telegram,
         supports_threads: true,
         supports_topic_create: true,
+        supports_disappearing_timers: false,
         token: TG_TOKEN.into(),
         is_permanent: None,
     })
@@ -345,6 +345,7 @@ async fn inbound_event_frames_are_forwarded_to_the_core() {
             platform: pb::Platform::Whatsapp,
             supports_threads: false,
             supports_topic_create: false,
+            supports_disappearing_timers: false,
             token: WA_TOKEN.into(),
             is_permanent: None,
         });
@@ -399,4 +400,68 @@ async fn wait_for<T>(what: &str, mut produce: impl FnMut() -> Option<T>) -> T {
         tokio::time::sleep(Duration::from_millis(20)).await;
     }
     panic!("timed out waiting for {what}");
+}
+
+/// The registration carries `supports_disappearing_timers` from `Options`:
+/// the hub only accepts a session whose registration equals the configured
+/// connector, so a chat update sent through it lands only when the capability
+/// went out on the wire.
+#[tokio::test]
+async fn the_registration_carries_the_disappearing_capability() {
+    let harness = Harness::start_with(registrations_with(true)).await;
+    let (inputs_tx, inputs_rx) = mpsc::channel(8);
+    let cancel = CancellationToken::new();
+    let session = tokio::spawn({
+        let cancel = cancel.clone();
+        let client = Client::new(Options {
+            core_address: harness.address.clone(),
+            connector_id: WA.into(),
+            platform: pb::Platform::Whatsapp,
+            supports_threads: false,
+            supports_topic_create: false,
+            supports_disappearing_timers: true,
+            token: WA_TOKEN.into(),
+            is_permanent: None,
+        });
+        let sender = HarnessSender::succeeding(Arc::new(StdMutex::new(Vec::new())));
+        async move { client.run(sender, inputs_rx, cancel).await }
+    });
+
+    inputs_tx
+        .send(pb::ClientFrame {
+            body: Some(pb::client_frame::Body::ChatUpdate(pb::ChatUpdateEvent {
+                updates: vec![pb::ChatUpdate {
+                    chat_id: "wa-chat".into(),
+                    disappearing: Some(pb::DisappearingTimer {
+                        seconds: 86_400,
+                        setting_timestamp: None,
+                    }),
+                }],
+            })),
+        })
+        .await
+        .unwrap();
+
+    let mut stored = None;
+    for _ in 0..100 {
+        stored = harness
+            .storage
+            .chat_profile(&ConnectorId(WA.into()), "wa-chat")
+            .await
+            .unwrap();
+        if stored.is_some() {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    let profile = stored.expect("the session registered and its chat update landed");
+    assert_eq!(
+        profile.disappearing.map(|timer| timer.seconds),
+        Some(86_400)
+    );
+
+    cancel.cancel();
+    session.await.unwrap().unwrap();
+    drop(inputs_tx);
+    harness.abort();
 }

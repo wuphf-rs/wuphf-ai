@@ -9,9 +9,10 @@ use tokio_stream::{Stream, wrappers::ReceiverStream};
 use tonic::{Request, Response, Status};
 use uuid::Uuid;
 use wuphf_model::{
-    Action, Attachment, AttachmentKind, ChatAddress, Connector, ConnectorCapabilities, ConnectorId,
-    ConnectorInput, ConnectorOutput, DispatchAck, DispatchFailed, Event, EventKind, InboundWork,
-    MediaId, NewMessage, NoticeKind, Platform, ReceiptKind, ReplyContext, SourceAddress,
+    Action, Attachment, AttachmentKind, ChatAddress, ChatUpdate, Connector, ConnectorCapabilities,
+    ConnectorId, ConnectorInput, ConnectorOutput, DisappearingTimer, DispatchAck, DispatchFailed,
+    Event, EventKind, InboundWork, MediaId, NewMessage, NoticeKind, Platform, ReceiptKind,
+    ReplyContext, SourceAddress,
 };
 use wuphf_proto::connector as pb;
 use wuphf_proto::connector::connector_transport_server::ConnectorTransport;
@@ -175,7 +176,7 @@ fn registration_from_proto(registration: pb::Registration) -> Result<Connector, 
             .map(|capabilities| ConnectorCapabilities {
                 supports_threads: capabilities.supports_threads,
                 supports_topic_create: capabilities.supports_topic_create,
-                supports_disappearing_timers: false,
+                supports_disappearing_timers: capabilities.supports_disappearing_timers,
             })
             .unwrap_or_default(),
     })
@@ -208,7 +209,7 @@ fn input_from_proto(
                     .collect::<Result<_, _>>()?,
                 reply_to_native_id: event.reply_to_platform_message_id,
                 timestamp_ms: event.timestamp_ms,
-                disappearing: None,
+                disappearing: event.disappearing.map(timer_from_proto),
             }),
         })),
         Some(pb::client_frame::Body::MessageEdit(event)) => Ok(ConnectorInput::event(Event {
@@ -270,11 +271,13 @@ fn input_from_proto(
                 Ok(pb::NoticeKind::AuthRequired) => NoticeKind::AuthRequired,
                 Ok(pb::NoticeKind::Degraded) => NoticeKind::Degraded,
                 Ok(pb::NoticeKind::Recovered) => NoticeKind::Recovered,
+                Ok(pb::NoticeKind::DisappearingTimerUnknown) => {
+                    NoticeKind::DisappearingTimerUnknown
+                }
                 // An unset or unknown kind still means the connector is trying
                 // to say something is wrong, so it is reported as a degradation
                 // rather than dropped.
-                Ok(pb::NoticeKind::Unspecified | pb::NoticeKind::DisappearingTimerUnknown)
-                | Err(_) => NoticeKind::Degraded,
+                Ok(pb::NoticeKind::Unspecified) | Err(_) => NoticeKind::Degraded,
             };
             Ok(ConnectorInput::Work(Box::new(InboundWork::Notice {
                 connector_id: connector_id.clone(),
@@ -294,8 +297,20 @@ fn input_from_proto(
         Some(pb::client_frame::Body::Registration(_)) => {
             Err(WireError("registration already completed".into()))
         }
-        Some(pb::client_frame::Body::ChatUpdate(_)) => {
-            Err(WireError("chat updates are not accepted yet".into()))
+        Some(pb::client_frame::Body::ChatUpdate(event)) => {
+            Ok(ConnectorInput::Work(Box::new(InboundWork::ChatUpdate {
+                connector_id: connector_id.clone(),
+                updates: event
+                    .updates
+                    .into_iter()
+                    .map(|update| {
+                        Ok(ChatUpdate {
+                            chat_id: required_string(update.chat_id, "chat_id")?,
+                            disappearing: update.disappearing.map(timer_from_proto),
+                        })
+                    })
+                    .collect::<Result<_, WireError>>()?,
+            })))
         }
         Some(pb::client_frame::Body::Reaction(event)) => {
             Ok(ConnectorInput::event(Event {
@@ -357,7 +372,7 @@ fn output_to_proto(output: ConnectorOutput) -> pb::ServerFrame {
                 Action::Send {
                     message,
                     reply: reply_context,
-                    disappearing: _,
+                    disappearing,
                 } => {
                     let container = target.address.chat_id.clone();
                     let reply_to_platform_message_id = reply_context
@@ -383,7 +398,7 @@ fn output_to_proto(output: ConnectorOutput) -> pb::ServerFrame {
                         timestamp_ms: message.timestamp_ms,
                         reply_context: reply_context.map(reply_context_to_proto),
                         sender_name: message.author_name,
-                        disappearing: None,
+                        disappearing: disappearing.map(timer_to_proto),
                     }))
                 }
                 Action::Edit {
@@ -472,6 +487,20 @@ fn reply_context_to_proto(context: ReplyContext) -> pb::ReplyContext {
             .map(attachment_to_proto)
             .collect(),
         authored_by_bridge: context.authored_by_bridge,
+    }
+}
+
+fn timer_from_proto(timer: pb::DisappearingTimer) -> DisappearingTimer {
+    DisappearingTimer {
+        seconds: timer.seconds,
+        setting_timestamp: timer.setting_timestamp,
+    }
+}
+
+fn timer_to_proto(timer: DisappearingTimer) -> pb::DisappearingTimer {
+    pb::DisappearingTimer {
+        seconds: timer.seconds,
+        setting_timestamp: timer.setting_timestamp,
     }
 }
 
@@ -624,5 +653,177 @@ mod tests {
                 title: "Priya".into(),
             })
         );
+    }
+
+    fn whatsapp() -> ConnectorId {
+        ConnectorId("whatsapp".into())
+    }
+
+    fn work(frame: pb::client_frame::Body) -> InboundWork {
+        let input = input_from_proto(pb::ClientFrame { body: Some(frame) }, &whatsapp()).unwrap();
+        let ConnectorInput::Work(work) = input else {
+            panic!("expected inbound work, got {input:?}");
+        };
+        *work
+    }
+
+    fn send_with(disappearing: Option<DisappearingTimer>) -> pb::MessageCreateDispatch {
+        let message = Message {
+            id: MessageId::new(),
+            conversation_id: ConversationId::new(),
+            author_id: "priya".into(),
+            participant: None,
+            author_name: None,
+            text: Some("hi".into()),
+            attachments: Vec::new(),
+            reply_to: None,
+            timestamp_ms: 0,
+            deleted: false,
+        };
+        let send = Action::Send {
+            message,
+            reply: None,
+            disappearing,
+        };
+        let pb::server_frame::Body::MessageCreate(create) = body(dispatch(send, None)) else {
+            panic!("a send is a MessageCreate frame");
+        };
+        *create
+    }
+
+    #[test]
+    fn chat_update_frames_become_inbound_work() {
+        let frame = pb::client_frame::Body::ChatUpdate(pb::ChatUpdateEvent {
+            updates: vec![
+                pb::ChatUpdate {
+                    chat_id: "1@g.us".into(),
+                    disappearing: Some(pb::DisappearingTimer {
+                        seconds: 604_800,
+                        setting_timestamp: Some(1_700_000_000),
+                    }),
+                },
+                pb::ChatUpdate {
+                    chat_id: "2@s.whatsapp.net".into(),
+                    disappearing: None,
+                },
+            ],
+        });
+        assert_eq!(
+            work(frame),
+            InboundWork::ChatUpdate {
+                connector_id: whatsapp(),
+                updates: vec![
+                    ChatUpdate {
+                        chat_id: "1@g.us".into(),
+                        disappearing: Some(DisappearingTimer {
+                            seconds: 604_800,
+                            setting_timestamp: Some(1_700_000_000),
+                        }),
+                    },
+                    ChatUpdate {
+                        chat_id: "2@s.whatsapp.net".into(),
+                        disappearing: None,
+                    },
+                ],
+            }
+        );
+
+        let empty_chat = pb::client_frame::Body::ChatUpdate(pb::ChatUpdateEvent {
+            updates: vec![pb::ChatUpdate {
+                chat_id: String::new(),
+                disappearing: None,
+            }],
+        });
+        assert!(
+            input_from_proto(
+                pb::ClientFrame {
+                    body: Some(empty_chat)
+                },
+                &whatsapp()
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn a_create_event_carries_its_timer() {
+        let frame = pb::client_frame::Body::MessageCreate(pb::MessageCreateEvent {
+            chat_id: "1@s.whatsapp.net".into(),
+            thread_id: None,
+            chat_title: None,
+            platform_message_id: "wa-1".into(),
+            sender: "1@s.whatsapp.net".into(),
+            participant: None,
+            text: Some("hi".into()),
+            attachments: vec![],
+            reply_to_platform_message_id: None,
+            timestamp_ms: 1,
+            sender_name: None,
+            disappearing: Some(pb::DisappearingTimer {
+                seconds: 86_400,
+                setting_timestamp: None,
+            }),
+        });
+        let InboundWork::Event(event) = work(frame) else {
+            panic!("a create is an event");
+        };
+        let EventKind::NewMessage(message) = event.payload else {
+            panic!("a create is a new message");
+        };
+        assert_eq!(
+            message.disappearing,
+            Some(DisappearingTimer {
+                seconds: 86_400,
+                setting_timestamp: None,
+            })
+        );
+    }
+
+    #[test]
+    fn a_send_carries_the_target_timer_to_the_wire() {
+        let timer = DisappearingTimer {
+            seconds: 604_800,
+            setting_timestamp: Some(1_700_000_000),
+        };
+        assert_eq!(
+            send_with(Some(timer)).disappearing,
+            Some(pb::DisappearingTimer {
+                seconds: 604_800,
+                setting_timestamp: Some(1_700_000_000),
+            })
+        );
+        assert_eq!(send_with(None).disappearing, None);
+    }
+
+    #[test]
+    fn the_timer_notice_kind_maps_to_its_own_kind() {
+        let frame = pb::client_frame::Body::OwnerNotice(pb::OwnerNotice {
+            kind: pb::NoticeKind::DisappearingTimerUnknown.into(),
+            detail: "chat 1@s.whatsapp.net".into(),
+        });
+        assert_eq!(
+            work(frame),
+            InboundWork::Notice {
+                connector_id: whatsapp(),
+                kind: NoticeKind::DisappearingTimerUnknown,
+                detail: "chat 1@s.whatsapp.net".into(),
+            }
+        );
+    }
+
+    #[test]
+    fn registration_maps_the_disappearing_capability() {
+        let connector = registration_from_proto(pb::Registration {
+            connector_id: "whatsapp".into(),
+            platform: pb::Platform::Whatsapp.into(),
+            capabilities: Some(pb::Capabilities {
+                supports_threads: false,
+                supports_topic_create: false,
+                supports_disappearing_timers: true,
+            }),
+            settings: None,
+        })
+        .unwrap();
+        assert!(connector.capabilities.supports_disappearing_timers);
     }
 }

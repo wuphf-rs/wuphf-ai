@@ -43,6 +43,10 @@ pub struct Options {
     pub platform: pb::Platform,
     pub supports_threads: bool,
     pub supports_topic_create: bool,
+    /// Whether the connector stamps chats' disappearing-messages timers on what
+    /// it sends and reports the timers it observes. Part of the registration,
+    /// so it must match the connector's entry in the core config.
+    pub supports_disappearing_timers: bool,
     /// The connector's core token, sent as `authorization: Bearer <token>` on
     /// the session.
     pub token: String,
@@ -145,7 +149,7 @@ impl Client {
                     capabilities: Some(pb::Capabilities {
                         supports_threads: self.opts.supports_threads,
                         supports_topic_create: self.opts.supports_topic_create,
-                        supports_disappearing_timers: false,
+                        supports_disappearing_timers: self.opts.supports_disappearing_timers,
                     }),
                     // This SDK declares no runtime settings yet.
                     settings: None,
