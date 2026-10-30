@@ -553,14 +553,19 @@ func TestHandleReportsThePhoneFormOfALIDAddressedChat(t *testing.T) {
 }
 
 // fakeDecryptor stands in for the whatsmeow client's message-secret decryption,
-// returning a fixed reaction or an error without a live session.
+// returning a fixed reaction, opened message or error without a live session.
 type fakeDecryptor struct {
 	reaction *waE2E.ReactionMessage
+	secret   *waE2E.Message
 	err      error
 }
 
 func (f fakeDecryptor) DecryptReaction(context.Context, *events.Message) (*waE2E.ReactionMessage, error) {
 	return f.reaction, f.err
+}
+
+func (f fakeDecryptor) DecryptSecretEncryptedMessage(context.Context, *events.Message) (*waE2E.Message, error) {
+	return f.secret, f.err
 }
 
 func encryptedReaction() *events.Message {
@@ -600,7 +605,7 @@ func TestNormalizeReactionDecryptsGroupReaction(t *testing.T) {
 
 func TestNormalizeReactionSkipsUndecryptableReaction(t *testing.T) {
 	t.Parallel()
-	cases := map[string]reactionDecryptor{
+	cases := map[string]messageDecryptor{
 		"no decryptor wired": nil,
 		"decryption failed":  fakeDecryptor{err: errors.New("no message secret")},
 	}
@@ -611,6 +616,91 @@ func TestNormalizeReactionSkipsUndecryptableReaction(t *testing.T) {
 			chat := normalizer.canonical(context.Background(), message.Info.Chat)
 			if event, ok := normalizer.normalizeReaction(context.Background(), message, chat); ok {
 				t.Fatalf("normalizeReaction() = %#v, want no reaction", event)
+			}
+		})
+	}
+}
+
+// sealedEdit is an edit made on the account's main device, as WhatsApp
+// delivers it: a SecretEncryptedMessage naming the original message.
+func sealedEdit(kind waE2E.SecretEncryptedMessage_SecretEncType) *events.Message {
+	return &events.Message{
+		Info: types.MessageInfo{
+			MessageSource: types.MessageSource{
+				Chat:     types.NewJID("123456789", types.GroupServer),
+				Sender:   types.NewJID("9988", types.DefaultUserServer),
+				IsGroup:  true,
+				IsFromMe: true,
+			},
+			ID: "wa-sealed-edit",
+		},
+		Message: &waE2E.Message{SecretEncryptedMessage: &waE2E.SecretEncryptedMessage{
+			TargetMessageKey: &waCommon.MessageKey{ID: proto.String("wa-original")},
+			SecretEncType:    kind.Enum(),
+		}},
+	}
+}
+
+func TestHandleBridgesASealedEdit(t *testing.T) {
+	t.Parallel()
+	for name, opened := range map[string]*waE2E.Message{
+		"plain content": {Conversation: proto.String("fixed text")},
+		"protocol edit": {ProtocolMessage: &waE2E.ProtocolMessage{
+			Type:          waE2E.ProtocolMessage_MESSAGE_EDIT.Enum(),
+			EditedMessage: &waE2E.Message{Conversation: proto.String("fixed text")},
+		}},
+		"edited wrapper": {EditedMessage: &waE2E.FutureProofMessage{
+			Message: &waE2E.Message{Conversation: proto.String("fixed text")},
+		}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			inputs := make(chan *wuphfpb.ClientFrame, 4)
+			normalizer := NewNormalizer(inputs, MediaCodec{}, stubNamer{}, nil, fakeDecryptor{secret: opened}, nil)
+			if err := normalizer.Handle(context.Background(), sealedEdit(waE2E.SecretEncryptedMessage_MESSAGE_EDIT)); err != nil {
+				t.Fatalf("Handle() error = %v", err)
+			}
+			// Handle sends synchronously into the buffered channel, so the frame
+			// is already there or was never sent.
+			var edit *wuphfpb.MessageEditEvent
+			select {
+			case frame := <-inputs:
+				edit = frame.GetMessageEdit()
+			default:
+			}
+			if edit == nil {
+				t.Fatal("Handle() did not report the sealed edit")
+			}
+			if edit.GetPlatformMessageId() != "wa-original" || edit.GetText() != "fixed text" {
+				t.Fatalf("edit = %#v, want the original message id and the opened text", edit)
+			}
+			if edit.GetChatId() != "123456789@g.us" {
+				t.Fatalf("edit chat = %q", edit.GetChatId())
+			}
+		})
+	}
+}
+
+func TestHandleDropsUnopenableOrNonEditSealedMessages(t *testing.T) {
+	t.Parallel()
+	cases := map[string]struct {
+		decryptor messageDecryptor
+		kind      waE2E.SecretEncryptedMessage_SecretEncType
+	}{
+		"no decryptor wired": {nil, waE2E.SecretEncryptedMessage_MESSAGE_EDIT},
+		"decryption failed":  {fakeDecryptor{err: errors.New("no message secret")}, waE2E.SecretEncryptedMessage_MESSAGE_EDIT},
+		"poll edit":          {fakeDecryptor{secret: &waE2E.Message{Conversation: proto.String("x")}}, waE2E.SecretEncryptedMessage_POLL_EDIT},
+	}
+	for name, c := range cases {
+		t.Run(name, func(t *testing.T) {
+			inputs := make(chan *wuphfpb.ClientFrame, 4)
+			normalizer := NewNormalizer(inputs, MediaCodec{}, stubNamer{}, nil, c.decryptor, nil)
+			if err := normalizer.Handle(context.Background(), sealedEdit(c.kind)); err != nil {
+				t.Fatalf("Handle() error = %v", err)
+			}
+			select {
+			case frame := <-inputs:
+				t.Fatalf("Handle() reported %#v, want nothing", frame)
+			default:
 			}
 		})
 	}

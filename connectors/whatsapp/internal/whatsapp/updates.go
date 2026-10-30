@@ -21,13 +21,17 @@ type ChatNamer interface {
 	PersonName(ctx context.Context, jid types.JID, pushHint string) string
 }
 
-// reactionDecryptor opens a reaction WhatsApp delivered encrypted. Group
-// reactions travel as an EncReactionMessage sealed with the target message's
-// secret, which only the client holding the session can open. Kept as a seam so
-// the normalizer stays testable without a live client; a nil decryptor simply
-// leaves encrypted reactions unreported.
-type reactionDecryptor interface {
+// messageDecryptor opens what WhatsApp seals with the target message's secret,
+// which only the client holding the session can open:
+//   - group reactions, which travel as an EncReactionMessage;
+//   - SecretEncryptedMessage, which carries, among others, edits made on the
+//     account's main device.
+//
+// Kept as a seam so the normalizer stays testable without a live client; a nil
+// decryptor leaves such messages unreported.
+type messageDecryptor interface {
 	DecryptReaction(ctx context.Context, message *events.Message) (*waE2E.ReactionMessage, error)
+	DecryptSecretEncryptedMessage(ctx context.Context, message *events.Message) (*waE2E.Message, error)
 }
 
 type Normalizer struct {
@@ -35,7 +39,7 @@ type Normalizer struct {
 	media     MediaCodec
 	namer     ChatNamer
 	identity  identityResolver
-	decryptor reactionDecryptor
+	decryptor messageDecryptor
 	// migrations dedupes the phone-to-LID address changes already reported to
 	// the core, so a long-lived chat does not re-emit the same migration on
 	// every message. It is a pointer so the shared gate survives the value
@@ -52,7 +56,7 @@ func NewNormalizer(
 	media MediaCodec,
 	namer ChatNamer,
 	identity identityResolver,
-	decryptor reactionDecryptor,
+	decryptor messageDecryptor,
 	addresses addressRecorder,
 ) Normalizer {
 	return Normalizer{
@@ -96,6 +100,19 @@ func (n Normalizer) Handle(ctx context.Context, message *events.Message) error {
 		}); err != nil {
 			return err
 		}
+	}
+	// A SecretEncryptedMessage carries no content of its own: it is a revision
+	// sealed with the target message's secret, e.g. an edit made on the
+	// account's main device. Only edits are bridged; poll and event revisions
+	// are dropped like the polls and events they revise.
+	if message.Message.GetSecretEncryptedMessage() != nil {
+		edit, ok := n.normalizeSecretEdit(ctx, message, chat)
+		if !ok {
+			return nil
+		}
+		return n.send(ctx, &wuphfpb.ClientFrame{
+			Body: &wuphfpb.ClientFrame_MessageEdit{MessageEdit: edit},
+		})
 	}
 	if reaction, ok := n.normalizeReaction(ctx, message, chat); ok {
 		return n.send(ctx, &wuphfpb.ClientFrame{
@@ -188,6 +205,38 @@ func (n Normalizer) normalizeEdit(ctx context.Context, message *events.Message) 
 		PlatformMessageId: originalID,
 	}
 	if text := messageText(protocol.GetEditedMessage()); text != "" {
+		event.Text = &text
+	}
+	return event, true
+}
+
+// normalizeSecretEdit opens a sealed edit and reports it like a plain one: the
+// target key names the original message, and the opened message holds the new
+// content, either directly or wrapped as a protocol or edited message.
+func (n Normalizer) normalizeSecretEdit(ctx context.Context, message *events.Message, chat types.JID) (*wuphfpb.MessageEditEvent, bool) {
+	secret := message.Message.GetSecretEncryptedMessage()
+	if n.decryptor == nil || secret.GetSecretEncType() != waE2E.SecretEncryptedMessage_MESSAGE_EDIT {
+		return nil, false
+	}
+	originalID := secret.GetTargetMessageKey().GetID()
+	if originalID == "" {
+		return nil, false
+	}
+	opened, err := n.decryptor.DecryptSecretEncryptedMessage(ctx, message)
+	if err != nil {
+		return nil, false
+	}
+	content := opened
+	if edited := opened.GetProtocolMessage().GetEditedMessage(); edited != nil {
+		content = edited
+	} else if edited := opened.GetEditedMessage().GetMessage(); edited != nil {
+		content = edited
+	}
+	event := &wuphfpb.MessageEditEvent{
+		ChatId:            chat.String(),
+		PlatformMessageId: originalID,
+	}
+	if text := messageText(content); text != "" {
 		event.Text = &text
 	}
 	return event, true
