@@ -139,7 +139,7 @@ cargo run -p wuphf-cli -- serve --config config/example.toml
 
 ### Rust WhatsApp connector
 
-The text-first Rust connector lives in a separate Cargo workspace because
+The Rust connector lives in a separate Cargo workspace because
 `whatsapp-rust` and the core require incompatible `libsqlite3-sys` versions:
 
 ```sh
@@ -151,13 +151,25 @@ export WUPHF_CONNECTOR_WHATSAPP_RUST_TOKEN=replace-me   # core_token_env
 ```
 
 First launch pairs through a terminal QR code. Set `phone_number` in the
-connector config to use a pair code instead. The connector supports inbound
-text, edits, deletes, and reactions plus outbound create/edit/delete; media is
-deliberately unsupported in this first version. It names mirror threads
-like the Go connector (`[G]` group subject, `[P]` push name and number) and
-stamps disappearing timers when `supports_disappearing_timers = true` is set in
-both `connectors/whatsapp-rust/config.example.toml` (or your copy) and the
-core's `whatsapp-rust` `[[connectors]]` entry.
+connector config to use a pair code instead. Inbound, the connector bridges
+text, photos, videos, GIFs, voice notes, documents and stickers (captions
+become the text; view-once media is marked `👁️ View once`), edits, deletes and
+reactions, including those inside disappearing-messages wrappers. Outbound it
+sends text, edits and deletes; outbound media is still to come. It registers
+as an Android client so WhatsApp delivers view-once media: set `client_mode`
+to `"android"` for a personal account or `"android_business"` for a WhatsApp
+Business account. The mode is sent at pairing, so changing it needs a fresh
+pairing (unlink the device on the phone, move the session database aside,
+start again).
+
+It names mirror threads like the Go connector (`[G]` group subject, `[P]` saved
+name, else push name and number, from its own `wuphf_contacts` table in the
+session database), reports chat profiles (group subject, description, members,
+pictures) for the core's info cards and notes, syncs pin, mute and archive with
+the mirror topics, and stamps disappearing timers when
+`supports_disappearing_timers = true` is set in both
+`connectors/whatsapp-rust/config.example.toml` (or your copy) and the core's
+`whatsapp-rust` `[[connectors]]` entry.
 
 ## Verify
 
