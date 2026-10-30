@@ -11,6 +11,7 @@ mod contacts;
 mod device;
 mod disappearing;
 mod groups;
+mod health;
 mod media;
 mod names;
 mod normalize;
@@ -34,6 +35,7 @@ use crate::config::Config;
 use crate::contacts::Contacts;
 use crate::disappearing::TimerFallback;
 use crate::groups::GroupDirectory;
+use crate::health::Health;
 use crate::names::ChatTitles;
 use crate::normalize::Normalizer;
 use crate::sender::WhatsAppSender;
@@ -94,6 +96,7 @@ async fn main() -> anyhow::Result<()> {
         media,
     );
     let chat_events = ChatEvents::new(inputs_tx.clone(), titles, avatars);
+    let health = Health::new(inputs_tx.clone());
 
     let (profile, device_props) = device::client_identity(config.client_mode);
     warn!(
@@ -157,6 +160,21 @@ async fn main() -> anyhow::Result<()> {
             move |event, client| {
                 let chat_events = chat_events.clone();
                 async move { chat_events.handle(event, client).await }
+            },
+        )
+        // Session loss and recovery become owner notices, like the Go
+        // connector's.
+        .on_event_for(
+            &[
+                EventKind::LoggedOut,
+                EventKind::StreamReplaced,
+                EventKind::ClientOutdated,
+                EventKind::TemporaryBan,
+                EventKind::Connected,
+            ],
+            move |event, _client| {
+                let health = health.clone();
+                async move { health.handle(event).await }
             },
         );
     if let Some(phone_number) = config.phone_number.clone() {
