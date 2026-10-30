@@ -167,6 +167,10 @@ pub struct NewMessage {
     pub attachments: Vec<Attachment>,
     pub reply_to_native_id: Option<String>,
     pub timestamp_ms: i64,
+    /// The chat's disappearing-messages timer as this message carried it, when
+    /// it carried one. `None` never turns a known timer off.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub disappearing: Option<DisappearingTimer>,
 }
 
 /// The kind of inbound event a connector reports for a chat.

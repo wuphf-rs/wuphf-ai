@@ -12,6 +12,7 @@
 //! without this the mirrors would silently miss owner-sent messages, because
 //! the platform echo that would normally replicate them is suppressed.
 
+use crate::profile::target_disappearing;
 use crate::{Core, CoreError, RoutingConfig};
 use std::sync::Arc;
 use wuphf_model::{
@@ -82,17 +83,20 @@ where
             author_name: None,
             ..message.clone()
         };
+        let target = Target {
+            endpoint_id,
+            connector_id: outbound.connector_id.clone(),
+            address,
+            create_thread: None,
+        };
+        let disappearing = target_disappearing(&*self.storage, routing, &target).await?;
         let direct = Dispatch::new(
-            Target {
-                endpoint_id,
-                connector_id: outbound.connector_id.clone(),
-                address,
-                create_thread: None,
-            },
+            target,
             conversation_id,
             Action::Send {
                 message: unlabelled,
                 reply: reply_context,
+                disappearing,
             },
             None,
         );

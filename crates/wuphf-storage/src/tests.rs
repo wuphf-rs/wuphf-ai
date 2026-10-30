@@ -712,6 +712,7 @@ fn send(
         Action::Send {
             message,
             reply: None,
+            disappearing: None,
         },
         waiting_for,
     )

@@ -11,6 +11,7 @@ mod acknowledge;
 mod config;
 mod ingest;
 mod notify;
+mod profile;
 mod resolve;
 mod router;
 mod send;
@@ -82,6 +83,11 @@ where
     pub async fn ingest(&self, event: Event) -> Result<IngestOutcome, CoreError> {
         let routing = self.routing.routing();
         let source = event.source;
+        // Before routing, so a chat no rule matches still learns its timer.
+        if let EventKind::NewMessage(inbound) = &event.payload {
+            self.observe_message_timer(&routing, &source, inbound.disappearing)
+                .await?;
+        }
         let Some(origin_endpoint) = self.resolve_origin(&routing, &source).await? else {
             return Ok(IngestOutcome::Ignored(IgnoreReason::Unmatched));
         };

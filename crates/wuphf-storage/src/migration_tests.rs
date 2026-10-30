@@ -590,6 +590,7 @@ fn sample_dispatches() -> Vec<Dispatch> {
                 attachments: Vec::new(),
                 authored_by_bridge: true,
             }),
+            disappearing: None,
         },
     };
     vec![

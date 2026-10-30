@@ -12,6 +12,11 @@ use serde::{Deserialize, Serialize};
 pub struct ConnectorCapabilities {
     pub supports_threads: bool,
     pub supports_topic_create: bool,
+    /// The connector stamps a chat's disappearing-messages timer on what it
+    /// sends and reports the timers it observes; the core fills the target
+    /// timer on sends only to connectors that declare it.
+    #[serde(default)]
+    pub supports_disappearing_timers: bool,
 }
 
 /// A connector's report that a dispatch can never succeed, so the core should
@@ -38,6 +43,10 @@ pub enum NoticeKind {
     Degraded,
     /// Back to normal after one of the above.
     Recovered,
+    /// Not about the connector's health: a message went to a chat whose
+    /// disappearing-messages timer the connector could not learn, so it was
+    /// sent without one and will not disappear.
+    DisappearingTimerUnknown,
 }
 
 impl NoticeKind {
@@ -50,15 +59,26 @@ impl NoticeKind {
             NoticeKind::AuthRequired => "needs new credentials before it can bridge again",
             NoticeKind::Degraded => "is degraded and may be dropping or delaying messages",
             NoticeKind::Recovered => "is working again",
+            NoticeKind::DisappearingTimerUnknown => {
+                "sent a message to a chat whose disappearing-messages timer it could not learn, so that message will not disappear"
+            }
         }
+    }
+
+    /// Whether the kind reports the connector's health. The core keeps one
+    /// health state per connector and drops a repeat of it; a kind that is not
+    /// about health bypasses that state.
+    pub fn is_health(self) -> bool {
+        !matches!(self, NoticeKind::DisappearingTimerUnknown)
     }
 }
 
 /// Ordered inbound work from one connector: a normalized event, an identity
-/// migration or a health notice. All travel one per-connector path so the
-/// connector's frame order is preserved end to end. A migration that precedes
-/// a message is applied before that message is ingested, so the message cannot
-/// mint a fresh endpoint under an address the migration was meant to rebind.
+/// migration, a health notice or a chat update. All travel one per-connector
+/// path so the connector's frame order is preserved end to end. A migration
+/// that precedes a message is applied before that message is ingested, so the
+/// message cannot mint a fresh endpoint under an address the migration was
+/// meant to rebind.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum InboundWork {
     Event(Event),
@@ -79,6 +99,12 @@ pub enum InboundWork {
         kind: NoticeKind,
         detail: String,
     },
+    /// The platform reported chat properties (a timer setting, a group
+    /// notification, a history sync); batched.
+    ChatUpdate {
+        connector_id: ConnectorId,
+        updates: Vec<ChatUpdate>,
+    },
 }
 
 impl InboundWork {
@@ -88,6 +114,7 @@ impl InboundWork {
             InboundWork::Event(event) => &event.source.connector_id,
             InboundWork::Migration { connector_id, .. } => connector_id,
             InboundWork::Notice { connector_id, .. } => connector_id,
+            InboundWork::ChatUpdate { connector_id, .. } => connector_id,
         }
     }
 
@@ -98,7 +125,8 @@ impl InboundWork {
         match self {
             InboundWork::Event(event) => event.source.connector_id = id,
             InboundWork::Migration { connector_id, .. }
-            | InboundWork::Notice { connector_id, .. } => *connector_id = id,
+            | InboundWork::Notice { connector_id, .. }
+            | InboundWork::ChatUpdate { connector_id, .. } => *connector_id = id,
         }
     }
 }

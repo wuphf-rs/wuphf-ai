@@ -4,13 +4,14 @@
 //! not yet exist.
 
 use crate::config::RoutingConfig;
+use crate::profile::target_disappearing;
 use std::sync::Arc;
 use thiserror::Error;
 use wuphf_model::{
     Action, ConnectorId, Conversation, ConversationId, Dispatch, Endpoint, EndpointId, Message,
     MessageId, ReceiptKind, ReplyContext, Rule, RuleKind, Target,
 };
-use wuphf_storage::{MessageStore, StorageError, TopologyStore};
+use wuphf_storage::{ChatProfileStore, MessageStore, StorageError, TopologyStore};
 
 /// Routes against one operation's routing snapshot; the core builds one per
 /// operation (see [`crate::RoutingSource`]).
@@ -21,7 +22,7 @@ pub(crate) struct Router<S> {
 
 impl<S> Router<S>
 where
-    S: TopologyStore + MessageStore,
+    S: TopologyStore + MessageStore + ChatProfileStore,
 {
     pub fn new(storage: Arc<S>, routing: Arc<RoutingConfig>) -> Self {
         Self { storage, routing }
@@ -53,7 +54,7 @@ pub enum RouterError {
 
 impl<S> Router<S>
 where
-    S: TopologyStore + MessageStore,
+    S: TopologyStore + MessageStore + ChatProfileStore,
 {
     /// Fan a new message out to every other endpoint in its conversation. A
     /// reply whose parent has no copy at a target yet is blocked on the parent
@@ -77,6 +78,7 @@ where
             let target = self
                 .resolve_target(&endpoint, &conversation, provision_title)
                 .await?;
+            let disappearing = target_disappearing(&*self.storage, &self.routing, &target).await?;
 
             let (reply, waiting_for) = match message.reply_to {
                 Some(parent_id) => {
@@ -114,6 +116,7 @@ where
                 Action::Send {
                     message: message.clone(),
                     reply,
+                    disappearing,
                 },
                 waiting_for,
             ));

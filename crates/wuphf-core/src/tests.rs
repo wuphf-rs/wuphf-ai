@@ -1,10 +1,13 @@
 use super::*;
 use wuphf_model::{
-    Action, Attachment, AttachmentKind, ChatAddress, ChatFilter, ChatRef, Connector,
-    ConnectorCapabilities, Dispatch, DispatchAck, MediaBlob, MediaId, NewMessage, NoticeKind,
-    OWNER_AUTHOR, OwnerMessage, Platform, ReceiptKind, Rule, RuleId, RuleKind, SourceAddress,
+    Action, Attachment, AttachmentKind, ChatAddress, ChatFilter, ChatRef, ChatUpdate, Connector,
+    ConnectorCapabilities, DisappearingTimer, Dispatch, DispatchAck, MediaBlob, MediaId,
+    NewMessage, NoticeKind, OWNER_AUTHOR, OwnerMessage, Platform, ReceiptKind, Rule, RuleId,
+    RuleKind, SourceAddress,
 };
-use wuphf_storage::{InMemoryStorage, MediaStore, ObservationStore, TopologyStore};
+use wuphf_storage::{
+    ChatProfileStore, InMemoryStorage, MediaStore, ObservationStore, TopologyStore,
+};
 
 const WHATSAPP: &str = "whatsapp-main";
 const TELEGRAM: &str = "telegram-main";
@@ -22,6 +25,7 @@ fn connectors() -> Vec<Connector> {
             capabilities: ConnectorCapabilities {
                 supports_threads: true,
                 supports_topic_create: true,
+                supports_disappearing_timers: false,
             },
         },
     ]
@@ -103,6 +107,7 @@ fn event_in(
             attachments: vec![],
             reply_to_native_id: reply_to.map(str::to_owned),
             timestamp_ms: 1,
+            disappearing: None,
         }),
     }
 }
@@ -1957,4 +1962,369 @@ async fn each_operation_reads_routing_once() {
     .await
     .unwrap();
     read_once(before);
+}
+
+// Chat profiles and disappearing timers (plan 045).
+
+/// The test connectors, with WhatsApp declaring disappearing timers when
+/// `capable`.
+fn timer_connectors(capable: bool) -> Vec<Connector> {
+    let mut connectors = connectors();
+    connectors[0].capabilities.supports_disappearing_timers = capable;
+    connectors
+}
+
+fn timer_core(rules: Vec<Rule>, capable: bool) -> Core<InMemoryStorage> {
+    let config = RoutingConfig::new(rules, timer_connectors(capable));
+    Core::new(Arc::new(InMemoryStorage::default()), Arc::new(config))
+}
+
+/// `event` carrying `timer` as its message's disappearing timer.
+fn with_timer(mut event: Event, timer: DisappearingTimer) -> Event {
+    let EventKind::NewMessage(message) = &mut event.payload else {
+        panic!("only a new message carries a timer");
+    };
+    message.disappearing = Some(timer);
+    event
+}
+
+async fn stored_timer(
+    core: &Core<InMemoryStorage>,
+    connector: &str,
+    chat_id: &str,
+) -> Option<DisappearingTimer> {
+    core.storage()
+        .chat_profile(&ConnectorId(connector.into()), chat_id)
+        .await
+        .unwrap()
+        .and_then(|profile| profile.disappearing)
+}
+
+async fn report(core: &Core<InMemoryStorage>, chat_id: &str, timer: DisappearingTimer) {
+    core.update_chats(
+        &ConnectorId(WHATSAPP.into()),
+        vec![ChatUpdate {
+            chat_id: chat_id.into(),
+            disappearing: Some(timer),
+        }],
+    )
+    .await
+    .unwrap();
+}
+
+fn sent_timer(dispatch: &Dispatch) -> Option<DisappearingTimer> {
+    let Action::Send { disappearing, .. } = &dispatch.action else {
+        panic!("expected a send, got {:?}", dispatch.action);
+    };
+    *disappearing
+}
+
+/// A Telegram reply in the direct rule's topic, routed back to WhatsApp.
+async fn telegram_reply(core: &Core<InMemoryStorage>, native_id: &str) -> Dispatch {
+    let outcome = core
+        .ingest(event_in(TELEGRAM, "-100123", Some("12"), native_id, None))
+        .await
+        .unwrap();
+    let dispatches = outcome.dispatches();
+    assert_eq!(dispatches.len(), 1, "{outcome:?}");
+    assert_eq!(dispatches[0].to.connector_id, ConnectorId(WHATSAPP.into()));
+    dispatches[0].clone()
+}
+
+#[test]
+fn merge_disappearing_follows_the_setting_timestamp() {
+    use crate::profile::merge_disappearing;
+    let at = DisappearingTimer::set_at;
+    let plain = DisappearingTimer::new;
+    let cases = [
+        // (stored, incoming, expected change)
+        (None, plain(86_400), Some(plain(86_400))),
+        (Some(at(86_400, 10)), at(604_800, 20), Some(at(604_800, 20))),
+        (Some(at(86_400, 20)), at(604_800, 10), None),
+        (Some(at(86_400, 20)), at(604_800, 20), Some(at(604_800, 20))),
+        (Some(plain(86_400)), plain(604_800), Some(plain(604_800))),
+        (Some(at(86_400, 20)), plain(86_400), None),
+        (Some(at(86_400, 20)), plain(604_800), Some(plain(604_800))),
+        (Some(plain(86_400)), at(86_400, 30), Some(at(86_400, 30))),
+        (Some(plain(86_400)), plain(0), Some(plain(0))),
+        (Some(at(86_400, 10)), at(0, 20), Some(at(0, 20))),
+    ];
+    for (stored, incoming, expected) in cases {
+        assert_eq!(
+            merge_disappearing(stored, incoming),
+            expected,
+            "stored {stored:?}, incoming {incoming:?}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn a_message_with_a_timer_records_the_chat_profile() {
+    let core = core(vec![direct_rule()]);
+    let outcome = core
+        .ingest(with_timer(
+            event(WHATSAPP, "99999@s.whatsapp.net", "wa-1", None),
+            DisappearingTimer::new(86_400),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(outcome, IngestOutcome::Ignored(IgnoreReason::Unmatched));
+    assert_eq!(
+        stored_timer(&core, WHATSAPP, "99999@s.whatsapp.net").await,
+        Some(DisappearingTimer::new(86_400))
+    );
+}
+
+#[tokio::test]
+async fn chat_updates_apply_in_order_and_count_changes() {
+    let core = timer_core(vec![], true);
+    report(
+        &core,
+        "1@s.whatsapp.net",
+        DisappearingTimer::set_at(86_400, 5),
+    )
+    .await;
+
+    let update = |chat_id: &str, timer| ChatUpdate {
+        chat_id: chat_id.into(),
+        disappearing: Some(timer),
+    };
+    let changed = core
+        .update_chats(
+            &ConnectorId(WHATSAPP.into()),
+            vec![
+                update("1@s.whatsapp.net", DisappearingTimer::set_at(86_400, 5)),
+                update("2@s.whatsapp.net", DisappearingTimer::new(604_800)),
+                update("3@g.us", DisappearingTimer::set_at(0, 7)),
+                ChatUpdate {
+                    chat_id: "4@g.us".into(),
+                    disappearing: None,
+                },
+            ],
+        )
+        .await
+        .unwrap();
+    assert_eq!(changed, 2);
+    assert_eq!(
+        stored_timer(&core, WHATSAPP, "2@s.whatsapp.net").await,
+        Some(DisappearingTimer::new(604_800))
+    );
+    assert_eq!(
+        stored_timer(&core, WHATSAPP, "3@g.us").await,
+        Some(DisappearingTimer::set_at(0, 7))
+    );
+    // An update that reports nothing writes nothing.
+    assert_eq!(
+        core.storage()
+            .chat_profile(&ConnectorId(WHATSAPP.into()), "4@g.us")
+            .await
+            .unwrap(),
+        None
+    );
+}
+
+#[tokio::test]
+async fn a_reply_into_a_chat_with_a_timer_carries_it() {
+    let core = timer_core(vec![direct_rule()], true);
+    let timer = DisappearingTimer::set_at(86_400, 1_700_000_000);
+    let outcome = core
+        .ingest(with_timer(
+            event(WHATSAPP, "12345@s.whatsapp.net", "wa-1", None),
+            timer,
+        ))
+        .await
+        .unwrap();
+    // Telegram does not stamp timers, so its copy carries none.
+    assert_eq!(sent_timer(&outcome.dispatches()[0]), None);
+
+    let reply = telegram_reply(&core, "tg-1").await;
+    assert_eq!(sent_timer(&reply), Some(timer));
+}
+
+#[tokio::test]
+async fn a_chat_known_to_be_off_carries_zero() {
+    let core = timer_core(vec![direct_rule()], true);
+    report(
+        &core,
+        "12345@s.whatsapp.net",
+        DisappearingTimer::set_at(0, 9),
+    )
+    .await;
+
+    let reply = telegram_reply(&core, "tg-1").await;
+    assert_eq!(sent_timer(&reply), Some(DisappearingTimer::set_at(0, 9)));
+}
+
+#[tokio::test]
+async fn a_target_without_the_capability_gets_no_timer() {
+    let core = timer_core(vec![direct_rule()], false);
+    core.ingest(with_timer(
+        event(WHATSAPP, "12345@s.whatsapp.net", "wa-1", None),
+        DisappearingTimer::new(86_400),
+    ))
+    .await
+    .unwrap();
+    // Recorded regardless, but never stamped on a send to this connector.
+    assert_eq!(
+        stored_timer(&core, WHATSAPP, "12345@s.whatsapp.net").await,
+        Some(DisappearingTimer::new(86_400))
+    );
+
+    let reply = telegram_reply(&core, "tg-1").await;
+    assert_eq!(sent_timer(&reply), None);
+}
+
+#[tokio::test]
+async fn a_timer_learned_under_a_linked_form_is_found() {
+    let lid_rule = Rule {
+        flow: RuleKind::OneToOne {
+            source_connector: ConnectorId(WHATSAPP.into()),
+            source_chat: ChatAddress::new("88887777@lid", None),
+            destination_connector: ConnectorId(TELEGRAM.into()),
+            destination_chat: ChatAddress::new("-100123", Some("12".into())),
+        },
+        ..direct_rule()
+    };
+    let core = timer_core(vec![lid_rule], true);
+    report(
+        &core,
+        "15550001111@s.whatsapp.net",
+        DisappearingTimer::new(604_800),
+    )
+    .await;
+    link_phone_to_lid(&core).await;
+
+    let reply = telegram_reply(&core, "tg-1").await;
+    assert_eq!(reply.to.address.chat_id, "88887777@lid");
+    assert_eq!(sent_timer(&reply), Some(DisappearingTimer::new(604_800)));
+}
+
+#[tokio::test]
+async fn owner_messages_carry_the_target_timer() {
+    let core = timer_core(vec![direct_rule()], true);
+    report(
+        &core,
+        "12345@s.whatsapp.net",
+        DisappearingTimer::new(86_400),
+    )
+    .await;
+
+    let outcome = core
+        .send_owner_message(owner_message("12345@s.whatsapp.net", "hi", None))
+        .await
+        .unwrap();
+    assert_eq!(
+        sent_timer(&outcome.direct),
+        Some(DisappearingTimer::new(86_400))
+    );
+    // The Telegram mirror of the owner's message carries none.
+    assert_eq!(sent_timer(&outcome.mirrored[0]), None);
+}
+
+#[tokio::test]
+async fn timer_notices_bypass_the_health_state() {
+    let core = notifying_core();
+    let whatsapp = ConnectorId(WHATSAPP.into());
+    let notify = |kind| core.notify_owners(whatsapp.clone(), kind, "chat 1@s.whatsapp.net", 1);
+
+    assert_eq!(notify(NoticeKind::Degraded).await.unwrap().len(), 1);
+    let first = notify(NoticeKind::DisappearingTimerUnknown).await.unwrap();
+    assert_eq!(first.len(), 1);
+    let text = notice_text(&first[0]);
+    assert!(text.contains("will not disappear"), "{text}");
+    assert!(text.contains("chat 1@s.whatsapp.net"), "{text}");
+    assert_eq!(
+        notify(NoticeKind::DisappearingTimerUnknown)
+            .await
+            .unwrap()
+            .len(),
+        1
+    );
+    // The timer notices left the health state alone: still a repeat.
+    assert!(notify(NoticeKind::Degraded).await.unwrap().is_empty());
+
+    // A recovery after only timer notices is not news.
+    let fresh = notifying_core();
+    fresh
+        .notify_owners(
+            whatsapp.clone(),
+            NoticeKind::DisappearingTimerUnknown,
+            "",
+            1,
+        )
+        .await
+        .unwrap();
+    assert!(
+        fresh
+            .notify_owners(whatsapp, NoticeKind::Recovered, "", 2)
+            .await
+            .unwrap()
+            .is_empty()
+    );
+}
+
+#[tokio::test]
+async fn a_message_without_a_timer_fills_an_unknown_chat_with_off() {
+    let core = timer_core(vec![direct_rule()], true);
+    core.ingest(event(WHATSAPP, "12345@s.whatsapp.net", "wa-1", None))
+        .await
+        .unwrap();
+    assert_eq!(
+        stored_timer(&core, WHATSAPP, "12345@s.whatsapp.net").await,
+        Some(DisappearingTimer::new(0))
+    );
+
+    let reply = telegram_reply(&core, "tg-1").await;
+    assert_eq!(sent_timer(&reply), Some(DisappearingTimer::new(0)));
+}
+
+#[tokio::test]
+async fn a_message_without_a_timer_never_overrides_a_known_one() {
+    for known in [
+        DisappearingTimer::new(86_400),
+        DisappearingTimer::set_at(86_400, 1_700_000_000),
+    ] {
+        let core = timer_core(vec![direct_rule()], true);
+        report(&core, "12345@s.whatsapp.net", known).await;
+        core.ingest(event(WHATSAPP, "12345@s.whatsapp.net", "wa-1", None))
+            .await
+            .unwrap();
+        assert_eq!(
+            stored_timer(&core, WHATSAPP, "12345@s.whatsapp.net").await,
+            Some(known)
+        );
+    }
+}
+
+#[tokio::test]
+async fn no_fill_from_a_connector_without_the_capability() {
+    let core = timer_core(vec![direct_rule()], false);
+    core.ingest(event(WHATSAPP, "12345@s.whatsapp.net", "wa-1", None))
+        .await
+        .unwrap();
+    assert_eq!(
+        core.storage()
+            .chat_profile(&ConnectorId(WHATSAPP.into()), "12345@s.whatsapp.net")
+            .await
+            .unwrap(),
+        None
+    );
+}
+
+#[tokio::test]
+async fn a_reported_timer_replaces_the_fill() {
+    let core = timer_core(vec![direct_rule()], true);
+    core.ingest(event(WHATSAPP, "12345@s.whatsapp.net", "wa-1", None))
+        .await
+        .unwrap();
+    core.ingest(with_timer(
+        event(WHATSAPP, "12345@s.whatsapp.net", "wa-2", None),
+        DisappearingTimer::new(604_800),
+    ))
+    .await
+    .unwrap();
+    assert_eq!(
+        stored_timer(&core, WHATSAPP, "12345@s.whatsapp.net").await,
+        Some(DisappearingTimer::new(604_800))
+    );
 }

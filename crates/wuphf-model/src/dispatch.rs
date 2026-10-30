@@ -89,6 +89,12 @@ pub enum Action {
     Send {
         message: Message,
         reply: Option<ReplyContext>,
+        /// The target chat's disappearing-messages timer when the send was
+        /// routed: `None` when unknown or when the target connector does not
+        /// stamp timers. Content sends carry it; edits, deletes and reactions
+        /// do not.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        disappearing: Option<DisappearingTimer>,
     },
     /// Revise an already-delivered copy. `native_id` is the native id of the
     /// copy to edit at the target endpoint; it is empty while the dispatch is
@@ -263,6 +269,7 @@ mod tests {
                 Action::Send {
                     message: message.clone(),
                     reply: None,
+                    disappearing: None,
                 },
                 true,
             ),

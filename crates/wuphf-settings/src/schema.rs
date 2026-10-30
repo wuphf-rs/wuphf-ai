@@ -86,6 +86,7 @@ impl botconf::Schema for WuphfSchema {
                 capabilities: ConnectorCapabilities {
                     supports_threads: connector.supports_threads,
                     supports_topic_create: connector.supports_topic_create,
+                    supports_disappearing_timers: false,
                 },
             });
         }

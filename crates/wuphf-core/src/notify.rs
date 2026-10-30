@@ -18,10 +18,10 @@ impl<S> Core<S>
 where
     S: Storage,
 {
-    /// Relay a connector's health report to the owner, returning the dispatches
-    /// to deliver. Empty when no target is configured, when every target is
-    /// served by the reporting connector, or when the notice repeats one
-    /// already sent.
+    /// Relay a connector's notice to the owner, returning the dispatches to
+    /// deliver. Empty when no target is configured, when every target is
+    /// served by the reporting connector, or when a health notice repeats the
+    /// state already sent.
     pub async fn notify_owners(
         &self,
         connector_id: ConnectorId,
@@ -29,7 +29,10 @@ where
         detail: &str,
         timestamp_ms: i64,
     ) -> Result<Vec<Dispatch>, CoreError> {
-        if !self.notice_is_new(&connector_id, kind) {
+        // Only health kinds go through the per-connector state: a notice about
+        // one chat (an unknown timer) neither repeats a health state nor
+        // resets one, and the connector limits its own repeats.
+        if kind.is_health() && !self.notice_is_new(&connector_id, kind) {
             return Ok(Vec::new());
         }
         let text = notice_text(&connector_id, kind, detail);

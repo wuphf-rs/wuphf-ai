@@ -234,9 +234,9 @@ where
 }
 
 /// Apply one unit of inbound work and return any dispatches it produced. An
-/// event is ingested through the core; a migration rebinds an address and yields
-/// no dispatches. Both run on the connector's worker so they apply in the order
-/// the connector sent them.
+/// event is ingested through the core; a migration rebinds an address and a
+/// chat update records chat profiles, and neither yields dispatches. All run on
+/// the connector's worker so they apply in the order the connector sent them.
 async fn process_work<S>(
     core: &Core<S>,
     observer: &Observer<S>,
@@ -279,6 +279,20 @@ where
                 "migrating chat identity",
             );
             core.migrate_identity(connector_id, old, new).await?;
+            Ok(Vec::new())
+        }
+        InboundWork::ChatUpdate {
+            connector_id,
+            updates,
+        } => {
+            let reported = updates.len();
+            let changed = core.update_chats(&connector_id, updates).await?;
+            debug!(
+                connector = %connector_id.0,
+                updates = reported,
+                changed,
+                "chat profiles updated",
+            );
             Ok(Vec::new())
         }
     }

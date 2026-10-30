@@ -44,6 +44,7 @@ fn telegram_capabilities() -> ConnectorCapabilities {
     ConnectorCapabilities {
         supports_threads: true,
         supports_topic_create: true,
+        supports_disappearing_timers: false,
     }
 }
 
@@ -763,6 +764,7 @@ fn source_event(
             attachments: vec![],
             reply_to_native_id: reply_to.map(str::to_owned),
             timestamp_ms: 1,
+            disappearing: None,
         }),
     }
 }

@@ -6,7 +6,7 @@ use wuphf_model::{
     AddressSet, Alias, ChatAddress, ChatRef, ConnectorId, Conversation, ConversationId, Endpoint,
     EndpointId, RuleEnd, RuleId, RuleKind, SourceAddress,
 };
-use wuphf_storage::{Storage, StorageError};
+use wuphf_storage::{Storage, StorageError, TopologyStore};
 
 impl<S> Core<S>
 where
@@ -119,30 +119,14 @@ where
 
     /// Every platform address known to name this chat: the one the event
     /// arrived on plus the transitive closure of the equivalences the platform
-    /// has reported (a chain, since a chat can migrate more than once). The
-    /// closure is walked breadth-first over a visited set, so a cycle — links
-    /// are stored symmetrically, so every link is one — terminates.
+    /// has reported (a chain, since a chat can migrate more than once). See
+    /// [`address_forms`].
     pub(crate) async fn address_set(
         &self,
         connector_id: &ConnectorId,
         address: &ChatAddress,
     ) -> Result<AddressSet, CoreError> {
-        let mut addresses = AddressSet::single(address.clone());
-        let mut frontier = vec![address.clone()];
-        while let Some(address) = frontier.pop() {
-            for linked in self
-                .storage
-                .linked_addresses(connector_id, &address)
-                .await?
-            {
-                if addresses.iter().any(|known| *known == linked) {
-                    continue;
-                }
-                addresses.insert(linked.clone());
-                frontier.push(linked);
-            }
-        }
-        Ok(addresses)
+        Ok(address_forms(&*self.storage, connector_id, address).await?)
     }
 
     /// Make every known form of a chat resolve straight to its endpoint, so
@@ -299,4 +283,28 @@ where
         }
         Ok(None)
     }
+}
+
+/// Every platform address known to name the chat at `address` on a connector:
+/// `address` itself plus the transitive closure of the address links the
+/// platform has reported. Walked breadth-first over a visited set, so a cycle —
+/// links are stored symmetrically, so every link is one — terminates. Shared by
+/// rule matching and by the timer lookup on sends.
+pub(crate) async fn address_forms<S: TopologyStore>(
+    storage: &S,
+    connector_id: &ConnectorId,
+    address: &ChatAddress,
+) -> Result<AddressSet, StorageError> {
+    let mut addresses = AddressSet::single(address.clone());
+    let mut frontier = vec![address.clone()];
+    while let Some(address) = frontier.pop() {
+        for linked in storage.linked_addresses(connector_id, &address).await? {
+            if addresses.iter().any(|known| *known == linked) {
+                continue;
+            }
+            addresses.insert(linked.clone());
+            frontier.push(linked);
+        }
+    }
+    Ok(addresses)
 }

@@ -44,6 +44,7 @@ fn registrations() -> Vec<Connector> {
             capabilities: ConnectorCapabilities {
                 supports_threads: true,
                 supports_topic_create: true,
+                supports_disappearing_timers: false,
             },
         },
     ]
@@ -77,6 +78,7 @@ fn routing() -> RoutingConfig {
             capabilities: ConnectorCapabilities {
                 supports_threads: true,
                 supports_topic_create: true,
+                supports_disappearing_timers: false,
             },
         },
     ];
@@ -167,6 +169,7 @@ fn wa_event(native_id: &str, text: &str) -> Event {
             attachments: vec![],
             reply_to_native_id: None,
             timestamp_ms: 1,
+            disappearing: None,
         }),
     }
 }

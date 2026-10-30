@@ -175,6 +175,7 @@ fn registration_from_proto(registration: pb::Registration) -> Result<Connector, 
             .map(|capabilities| ConnectorCapabilities {
                 supports_threads: capabilities.supports_threads,
                 supports_topic_create: capabilities.supports_topic_create,
+                supports_disappearing_timers: false,
             })
             .unwrap_or_default(),
     })
@@ -207,6 +208,7 @@ fn input_from_proto(
                     .collect::<Result<_, _>>()?,
                 reply_to_native_id: event.reply_to_platform_message_id,
                 timestamp_ms: event.timestamp_ms,
+                disappearing: None,
             }),
         })),
         Some(pb::client_frame::Body::MessageEdit(event)) => Ok(ConnectorInput::event(Event {
@@ -355,6 +357,7 @@ fn output_to_proto(output: ConnectorOutput) -> pb::ServerFrame {
                 Action::Send {
                     message,
                     reply: reply_context,
+                    disappearing: _,
                 } => {
                     let container = target.address.chat_id.clone();
                     let reply_to_platform_message_id = reply_context
@@ -606,6 +609,7 @@ mod tests {
         let send = Action::Send {
             message,
             reply: None,
+            disappearing: None,
         };
         let pb::server_frame::Body::MessageCreate(create) =
             body(dispatch(send, Some("Priya".into())))
