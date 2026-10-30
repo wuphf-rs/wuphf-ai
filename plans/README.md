@@ -60,7 +60,7 @@ code).
 | 040 | Connectors declare their own settings to the core | P2 | L | 039, botconf 005, 006, 009 | DONE (botconf v0.5.0, migration 0018; see notes) |
 | 041 | A settings panel in the Telegram connector | P2 | L | 039, 040, botconf 004–007 | DONE (botconf go/v0.9.0; live inline test pending the owner; see notes) |
 | 042 | A `wuphf settings` command | P3 | S | 035, 036, 039 | DONE (see notes) |
-| 043 | Label user-session stickers through the helper bot | P3 | M | 041 | TODO |
+| 043 | Label user-session stickers through the helper bot | P3 | M | 041 | DONE (see notes) |
 | 044 | Reload re-reads the config file; new rules go through panel drafts | P2 | S–M | 039, 040, 042, botconf 010, 011 | DONE (botconf v0.9.0; see notes) |
 
 Status values: TODO | IN PROGRESS | DONE | BLOCKED (with one-line reason) |
@@ -1037,6 +1037,49 @@ Dependencies and ordering:
     press one and the message should be edited. If Telegram refuses
     `sendInlineBotResult` for the private result, the panel falls back to
     text; report that.
+- **043 done 2026-10-30** (on `plans/runtime-settings`). The drift check showed
+  041 had replaced the plan's "helper bot with its own dispatcher" with a
+  second gotd client under an errgroup whose dispatcher was built inline in
+  `runHelper`, and 040's live settings in the sender; `sendSticker` still took
+  a label and still sent the bold label message for user sessions, so no STOP.
+  F1 (5 s budget), F2 (single-use nonce, account only, its own map) and F3
+  (unlabelled stickers keep the normal upload) hold as planned. Deviations:
+  - **One helper dispatcher:** `runHelper`'s handlers moved into
+    `newHelperDispatcher(panel, stickers, api)` (connector.go): the panel's
+    inline queries and presses first, then sticker queries (nonces start with
+    `sticker:`, which never collides with the panel's 22-character tokens),
+    then an empty answer; every other press, the `wuphf:label` button among
+    them, is answered silently (decision 3). Tests drive this dispatcher.
+  - **Upload inside the inline query, not before it:** the helper uploads the
+    sticker when the account's query arrives, because that query is what lets
+    the bot address the account. `messages.uploadMedia` tries `InputPeerSelf`
+    first, then the account as the query's entities give it (the plan's two
+    peers, in that order). Which one Telegram accepts is not settled; the
+    live test will show it. If neither works, the helper answers empty and the
+    sticker falls back, so the plan's STOP becomes a logged fallback.
+  - **Route attached with the panel:** `InlineStickers` is created up front and
+    attached in `attachHelper` once the helper has logged in and the account
+    has resolved it, so stickers use the label-message fallback until then.
+  - **Send target:** `sendAttachment` and `sendSticker` take a `sendTarget`
+    (peer and reply id), since the inline send bypasses the message builder.
+    The existing sticker test helper passes one; no assertion changed.
+  - **Budget field:** `InlineStickers.budget` (default `inlineStickerBudget`)
+    lets the timeout test use 50 ms; the helper fake waits on the deadline,
+    not a sleep.
+  - **Animated stickers** are converted once, before choosing the route.
+  - Tests: Telegram 75 top-level pass with `-race` (68 + 7: the plan's 1–7).
+    `go vet` and `gofmt` clean. Mutation checks, each made a test fail:
+    ignoring a successful inline send, failing instead of falling back,
+    reusing a nonce, answering any user, and no deadline on the route (the
+    timeout test hangs).
+  - **Live test (with 041's):** with the helper bot running for a user
+    session, have someone send a sticker into a mirrored chat. The mirrored
+    copy should be one sticker with a "🗣️: name" button and "via @<helper>";
+    pressing the button does nothing. Delete the original: the copy should go
+    with no label left behind. Stop the helper bot and send another: it should
+    arrive as the bold label message with the sticker replying to it within
+    5 seconds. If the helper cannot upload (the log says "inline sticker
+    failed"), report the error.
 
 ## Findings considered and rejected
 
