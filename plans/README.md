@@ -62,6 +62,9 @@ code).
 | 042 | A `wuphf settings` command | P3 | S | 035, 036, 039 | DONE (see notes) |
 | 043 | Label user-session stickers through the helper bot | P3 | M | 041 | DONE (see notes) |
 | 044 | Reload re-reads the config file; new rules go through panel drafts | P2 | S–M | 039, 040, 042, botconf 010, 011 | DONE (botconf v0.9.0; see notes) |
+| 045 | Disappearing-message timers as core chat profiles; whatsapp-rust chat titles | P1 | L | — | TODO |
+| 046 | Chat profiles: titles, descriptions, avatars, participants; notes and info cards in mirror threads | P2 | L | 045 | TODO |
+| 047 | Two-way pin / mute / archive between WhatsApp chats and Telegram mirror topics | P3 | L | 046 | TODO |
 | 048 | Port the Instagram connector from messagix to instameow (upstream dropped IG lightspeed) | P0 | M–L | — | DONE |
 
 Status values: TODO | IN PROGRESS | DONE | BLOCKED (with one-line reason) |
