@@ -60,6 +60,43 @@ connector runs, from the core's settings panel or `wuphf settings`: the
 connector declares them to the core and applies each change the core pushes
 (see `docs/connector-protocol.md`, "A connector's own settings").
 
+## Settings panel
+
+`/wuphf` (`panel.command` changes it) opens the core's settings as a panel of
+buttons, like `wuphf settings` in a chat. The command is taken before
+anything is mirrored and is never mirrored, whoever sends it. The connector
+only says who is acting; the core obeys the Telegram user ids in its
+`[[connectors]].owner_ids` for this connector and ignores everyone else (an
+unauthorized `/wuphf` gets no reply, an unauthorized button press gets a
+refusal toast).
+
+- `/wuphf` opens the panel; `/wuphf help` lists the text subcommands, e.g.
+  `/wuphf set notify ["telegram-main:telegram:user:123"]`.
+- When the panel asks for a value, answer with your next message in that chat
+  (`/cancel` gives up). The answer is not mirrored, and it and the question
+  are deleted once answered.
+- The command message is deleted once the panel opens, where the account may
+  delete it.
+
+**Bot sessions** draw the panel with an inline keyboard directly.
+
+**User sessions** cannot attach buttons to their messages, so the panel goes
+through a **helper bot** in inline mode: the account asks the helper bot for
+an inline result holding the panel and sends it, and Telegram shows "via
+@<helper bot>" under it. Presses reach the helper bot, which the connector
+runs as a second client in the same process. To set it up:
+
+1. Create a bot with @BotFather and turn on inline mode (`/setinline`).
+2. Give the connector its token in `panel_bot_token` or
+   `WUPHF_TELEGRAM_PANEL_BOT_TOKEN`, and a `[panel] session_file` for its
+   session.
+3. Add the user session's own account id to the core's `owner_ids` for this
+   connector: in a user session, only the account itself drives its panel.
+
+Without a helper bot, or when the trip through it fails (inline bots
+forbidden in a group, a timeout), the panel is sent as text with numbered
+options; replying with a number presses one.
+
 ## Animated stickers
 
 Telegram shows an animated WebP sticker only as a still frame, so the connector

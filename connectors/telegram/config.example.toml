@@ -43,6 +43,19 @@ supports_topic_create = true
 # where through the core's [rules.<id>] entries using typed chat IDs such as
 # "telegram:channel:1234567890", "telegram:chat:7", or "telegram:user:88".
 
+# Settings panel: /wuphf (see [panel] below) opens the core's settings with
+# buttons. The core only obeys the Telegram user ids listed in its
+# [[connectors]].owner_ids for this connector; for a user session that is the
+# session's own account id. The command is never mirrored, whoever sends it.
+#
+# A user session cannot attach buttons to its messages, so it shows the panel
+# through a helper bot: create one with @BotFather, turn on inline mode
+# (/setinline), and set its token here or in WUPHF_TELEGRAM_PANEL_BOT_TOKEN
+# (the environment wins; keep this file private when it holds the token). It
+# also needs [panel] session_file. Without a helper bot the panel is sent as
+# text with numbered options. A bot session needs none of this.
+# panel_bot_token = "123456789:replace-with-the-helper-bot-token"
+
 # Runtime. Log verbosity: trace, debug, info, warn, error (WUPHF_LOG_LEVEL
 # overrides).
 log_level = "info"
@@ -72,3 +85,11 @@ edit_mode = "in_place"
 # "revoke" (default) deletes the mirrored copy; "tombstone" leaves it and posts
 # a deletion notice replying to it.
 delete_mode = "revoke"
+
+# The settings panel. Read once at startup.
+# [panel]
+# The command that opens it, without the slash (default "wuphf").
+# command = "wuphf"
+# Where the helper bot keeps its session (user sessions with
+# panel_bot_token only).
+# session_file = "./telegram-panel.session.json"
