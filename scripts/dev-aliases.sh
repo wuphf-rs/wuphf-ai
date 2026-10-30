@@ -42,8 +42,9 @@ instead of building on every start; re-run it after changing code, or delete
 scripts/dev-bin/.bin/ to build on start again.
 
 Every connector authenticates to the server with a token, and the server
-refuses to start until all of them are set. Export the same values in every
-tab (from your shell profile or a local env file you source):
+refuses to start until all of them are set. Put them in the git-ignored
+.env.local at the repo root, which dev-session.sh exports into every tab
+(elsewhere: set -a; . ./.env.local; set +a):
   WUPHF_CONNECTOR_TELEGRAM_MAIN_TOKEN, WUPHF_CONNECTOR_WHATSAPP_MAIN_TOKEN,
   WUPHF_CONNECTOR_INSTAGRAM_MAIN_TOKEN. wwr also needs
   WUPHF_CONNECTOR_WHATSAPP_RUST_TOKEN, and its [[connectors]] entry uncommented

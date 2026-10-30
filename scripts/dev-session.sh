@@ -85,6 +85,14 @@ fi
 export PATH="$REPO/scripts/dev-bin:$PATH"
 export WUPHF_DEV_SESSION="$SESSION"
 
+# Local secrets (connector tokens, Telegram credentials) live in the git-ignored
+# .env.local; every tab inherits them from here.
+if [ -f "$REPO/.env.local" ]; then
+    set -a
+    . "$REPO/.env.local"
+    set +a
+fi
+
 # Aliases need the shell's own rc file, which only zsh lets us redirect through
 # the environment. Everything still works without this — the dev-bin commands
 # are on PATH regardless — so a different shell just misses the shorthand.
