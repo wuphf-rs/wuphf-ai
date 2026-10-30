@@ -17,6 +17,7 @@ mod names;
 mod normalize;
 mod receipts;
 mod sender;
+mod supervise;
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -41,6 +42,7 @@ use crate::names::ChatTitles;
 use crate::normalize::Normalizer;
 use crate::receipts::Receipts;
 use crate::sender::WhatsAppSender;
+use crate::supervise::{Stop, supervise};
 
 /// Buffers normalized inbound events ahead of the core session so a core
 /// reconnect applies backpressure instead of losing messages.
@@ -220,14 +222,26 @@ async fn main() -> anyhow::Result<()> {
     );
     tokio::pin!(session);
 
-    tokio::select! {
-        result = &mut session => result?,
-        _ = tokio::signal::ctrl_c() => {
+    let shutdown = async {
+        // A failure to listen for Ctrl-C leaves the connector to its session.
+        if tokio::signal::ctrl_c().await.is_err() {
+            std::future::pending::<()>().await;
+        }
+    };
+    let stop = supervise(&mut session, &mut handle, shutdown, || {
+        error!(
+            "the WhatsApp client stopped and will not reconnect (the owner was sent a notice); \
+             the connector stays up so the notice reaches the core: fix the session and restart it"
+        );
+    })
+    .await;
+    match stop {
+        Stop::SessionEnded(result) => result?,
+        Stop::Shutdown => {
             info!("shutting down");
             cancel.cancel();
             session.await?;
         }
-        _ = &mut handle => anyhow::bail!("WhatsApp client stopped unexpectedly"),
     }
     handle.shutdown().await;
     Ok(())
