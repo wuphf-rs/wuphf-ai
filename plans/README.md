@@ -62,7 +62,7 @@ code).
 | 042 | A `wuphf settings` command | P3 | S | 035, 036, 039 | DONE (see notes) |
 | 043 | Label user-session stickers through the helper bot | P3 | M | 041 | DONE (see notes) |
 | 044 | Reload re-reads the config file; new rules go through panel drafts | P2 | S–M | 039, 040, 042, botconf 010, 011 | DONE (botconf v0.9.0; see notes) |
-| 045 | Disappearing-message timers as core chat profiles; whatsapp-rust chat titles | P1 | L | — | TODO |
+| 045 | Disappearing-message timers as core chat profiles; whatsapp-rust chat titles | P1 | L | — | DONE (migration 0019; owner sets `supports_disappearing_timers` on both sides; see notes) |
 | 046 | Chat profiles: titles, descriptions, avatars, participants; notes and info cards in mirror threads | P2 | L | 045 | TODO |
 | 047 | Two-way pin / mute / archive between WhatsApp chats and Telegram mirror topics | P3 | L | 046 | TODO |
 | 048 | Port the Instagram connector from messagix to instameow (upstream dropped IG lightspeed) | P0 | M–L | — | DONE |
@@ -1084,6 +1084,45 @@ Dependencies and ordering:
     arrive as the bold label message with the sticker replying to it within
     5 seconds. If the helper cannot upload (the log says "inline sticker
     failed"), report the error.
+- **045 done 2026-10-31** (on `v2`, commits `a0ccd8f`..`67e2f8e`). Migration
+  `0019_chat_profiles`. The drift check showed only `b08e50e`'s one-line
+  Instagram wording in `README.md` (outside every section 045 touches); every
+  "must still hold" fact held, as did the whatsapp-rust and whatsmeow library
+  facts. Done as planned, with these notes:
+  - **Tests:** `cargo test --workspace` 296 passed, 2 ignored (Step 0: 269):
+    model +2, storage +4, core +13, runtime +6, settings +1 (the example
+    config's capability reaches the registration), SDK +1. whatsapp-rust 16
+    (it had none). Go WhatsApp 89 top-level passes (74 + 15); coreclient +1.
+    clippy, `cargo fmt --check`, `go vet` clean; Telegram and Instagram build.
+    whatsapp-rust `Cargo.lock` and every `go.sum` unchanged.
+  - **Mutation checks**, each made a test fail: SQLite lookup without the
+    connector key; no `reported < known` guard; `route` stamping `None`;
+    recording the timer after `resolve_origin`; the fill through
+    `merge_disappearing`; the fill without the capability check;
+    `output_to_proto` dropping the timer (grpc and end-to-end tests); `stamp`
+    without the setting timestamp; Go stamping only the first attachment;
+    Go `withDisappearing` replacing the `ContextInfo`.
+  - **whatsapp-rust client per call:** the bot's `Client` exists only after
+    `build()`, which comes after the handlers are registered, so
+    `GroupDirectory::facts`, `ChatTitles::title`, `chat_forms` and
+    `TimerFallback::resolve` take `&Client` per call (handlers get it from the
+    event; the sender has its own) instead of holding an `Arc<Client>`.
+    `GroupUpdate` is `#[non_exhaustive]`, so the group mapping is tested
+    through `group_action_update` over its parts.
+  - **Step 1 slip:** step 1's neutral `disappearing: None` landed on the Rust
+    connector's `ReactionEvent` instead of its create event (that crate is not
+    built until step 5); step 5 fixed it.
+  - **Linked-form lookup:** `target_disappearing` reads the target's own form
+    first and lets a linked form win only with a strictly newer setting
+    timestamp (`None` sorts below any timestamp).
+  - **Go config test** is in `internal/config/config_test.go`; the coreclient
+    registration test is in `client_test.go`, reusing `credentials_test.go`'s
+    recording core.
+  - **Owner action:** set `supports_disappearing_timers = true` for each
+    WhatsApp connector in the core's `config.local.toml` (`[[connectors]]`
+    entry) and in that connector's own config, in the same restart; one side
+    alone makes the core refuse the connector ("registration does not match
+    configuration").
 
 ## Findings considered and rejected
 
