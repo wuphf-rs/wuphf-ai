@@ -14,9 +14,14 @@ their native address and executes dispatches addressed the same way. The
 connector id is stamped by the runtime from the session, never trusted from the
 wire.
 
-Registration must match core configuration. Declared capabilities
-(`supports_threads`, `supports_topic_create`) gate whether the connector may
-host a threaded mirror.
+Registration must match core configuration, capabilities included: a connector
+whose registration differs from its `[[connectors]]` entry is refused.
+Declared capabilities (`supports_threads`, `supports_topic_create`) gate
+whether the connector may host a threaded mirror. `supports_disappearing_timers`
+declares that the connector stamps a chat's disappearing-messages timer on what
+it sends and reports the timers it observes; the core fills
+`MessageCreateDispatch.disappearing` only for connectors that declare it. Set
+it on both sides (the core's entry and the connector's own config) together.
 
 `OpenSession` requires the connector's token as `authorization: Bearer <token>`.
 The core reads each connector's token from the environment variable its
@@ -34,6 +39,19 @@ connection dies silently; the SDKs keep retrying with backoff until then.
 - `MessageCreateEvent` — raw `chat_id`, optional `thread_id`/`chat_title`,
   `platform_message_id`, `sender`, optional `participant`/`sender_name`,
   text/attachments, optional native `reply_to_platform_message_id`.
+  `disappearing` is the chat's timer as the message carried it (WhatsApp:
+  `ContextInfo.expiration`, the owner's own messages included), set only when
+  greater than 0. A message without one never turns a known timer off; when
+  the chat's timer is still unknown and the connector declares
+  `supports_disappearing_timers`, the core records it as off. The core records
+  the timer before routing, so chats no rule matches count too.
+- `ChatUpdateEvent` — a batch of `ChatUpdate`s, each a chat's properties as
+  the platform reported them (today its `disappearing` timer, from a timer
+  setting message, a group notification or a history sync). `chat_id`s are
+  canonical, exactly as the connector reports them in `MessageCreateEvent`; an
+  absent field leaves what the core knows unchanged. With a setting timestamp
+  on both the stored and the reported timer the newer wins; otherwise the later
+  report wins.
 - `MessageEditEvent` / `MessageDeleteEvent` — the original message's native id
   plus the change; the core resolves it to the logical message and fans it out.
 - `Acknowledgement` — echoes the `dispatch_id`, supplies the resulting native
@@ -51,19 +69,24 @@ connection dies silently; the SDKs keep retrying with backoff until then.
   happened, not how it should read — the core composes the message, picks the
   chats, and drops a repeat of a state it has already reported. It is relayed
   only through *other* connectors, so a connector cannot be asked to announce
-  its own outage.
+  its own outage. `NOTICE_KIND_DISAPPEARING_TIMER_UNKNOWN` is not about health: a
+  message went to a chat whose timer the connector could not learn, so it will
+  not disappear (`detail` names the chat). The core relays it without folding it
+  into the connector's health state; the connector limits repeats (once per chat
+  until the timer becomes known).
 
 ## Server frames (core → connector)
 
 - `MessageCreateDispatch` — addressed by `target_chat_id`/`target_thread_id`,
   with reply context and attachments. If a threaded mirror has no thread yet it
   carries `provision_thread { container, title }`; the connector creates the
-  thread, sends, and reports the new thread id in the acknowledgement. Carries a
-  `delivery { attachments_as_files, max_message_length }` block resolved
-  server-side from the target connector's delivery options: when
-  `attachments_as_files` is set the connector sends every attachment as a generic
-  file, and when the text exceeds `max_message_length` it sends the text as a
-  plain-text file instead of an inline message.
+  thread, sends, and reports the new thread id in the acknowledgement. How the
+  copy is rendered (attachments as files, text spillover) is the connector's
+  own configuration; the dispatch carries content only. `disappearing` is the
+  target chat's timer as the core knew it when the send was routed: absent when
+  never learned, `seconds` 0 when known to be off, and set only for connectors
+  that declare `supports_disappearing_timers`. The connector puts it on every
+  part of a content send; edits, deletes and reactions carry none.
 - `MessageEditDispatch` / `MessageDeleteDispatch` — the target copy's native id
   plus an `edit_mode` / `delete_mode` resolved server-side from the target
   connector's delivery options, so the connector renders the operation without

@@ -14,6 +14,12 @@ Implemented slice:
 - phone-to-LID identity migration reported to the core so both addresses
   resolve to one conversation
 - media bytes transferred through core-owned `MediaId` broker
+- disappearing-message timers: each chat's timer is reported to the core
+  (from messages, timer changes, group notifications and history syncs) and
+  stamped on every outgoing part, so bridged replies disappear with the chat;
+  a group's unknown timer is looked up, and a DM's raises one owner notice.
+  Needs `supports_disappearing_timers = true` here and in the core's
+  `[[connectors]]` entry
 
 Deferred connector work:
 
@@ -25,7 +31,7 @@ Routing, identity, deduplication, echo suppression, reply mapping, and media
 retention remain in Rust core. The connector is a raw pipe: it emits WhatsApp
 events tagged with their native chat JID and executes dispatches addressed by
 chat JID, owning no mapping itself. WhatsApp has no threads, so this connector
-declares no capabilities and is never used as a threaded mirror. It
+declares no thread capabilities and is never used as a threaded mirror. It
 intentionally submits messages authored by the linked account; core decides
 whether each is user input or a bridge echo.
 

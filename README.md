@@ -30,6 +30,12 @@ For a human-friendly tour, open [`docs/index.html`](docs/index.html).
 - Owner notices: a connector that loses its session (a WhatsApp logout) reports
   it, and the core relays the alert through the connectors that still work, so a
   bridge that stopped bridging says so instead of going quiet.
+- Disappearing messages: the core keeps each chat's disappearing-messages
+  timer (from messages, timer changes, group notifications and history syncs)
+  and both WhatsApp connectors stamp it on what they send, so a reply bridged
+  from Telegram disappears like the rest of the chat instead of showing "will
+  not disappear". Enable it with `supports_disappearing_timers = true` in the
+  core's `[[connectors]]` entry and in the connector's own config, together.
 - Go connectors: Telegram (`gotd/td`, forum topics, albums), WhatsApp
   (`whatsmeow`, QR pairing), and Instagram (`mautrix-meta` instameow).
 
@@ -132,7 +138,11 @@ export WUPHF_CONNECTOR_WHATSAPP_RUST_TOKEN=replace-me   # core_token_env
 First launch pairs through a terminal QR code. Set `phone_number` in the
 connector config to use a pair code instead. The connector supports inbound
 text, edits, deletes, and reactions plus outbound create/edit/delete; media is
-deliberately unsupported in this first version.
+deliberately unsupported in this first version. It names mirror threads
+like the Go connector (`[G]` group subject, `[P]` push name and number) and
+stamps disappearing timers when `supports_disappearing_timers = true` is set in
+both `connectors/whatsapp-rust/config.example.toml` (or your copy) and the
+core's `whatsapp-rust` `[[connectors]]` entry.
 
 ## Verify
 

@@ -175,8 +175,8 @@ dedup, reply mapping, loop prevention, or address mapping.
 
 | Crate | Responsibility |
 |-------|----------------|
-| `wuphf-model` | Shared domain types, grouped into `ids` / `routing` / `connector` / `message` / `dispatch`. |
-| `wuphf-storage` | The `Storage` trait — the sum of six role traits (topology, messages, media, dispatch queue, provisioning stash, observation log) — plus two backends: `memory` (tests) and `sqlite` (durable). A consumer that needs only part of storage bounds on its roles. The same database holds runtime settings overrides (`settings` table, the `SettingsOverrides` role, outside `Storage`), read through `wuphf-settings`, and the settings panel's button handles (`panel_tokens`, the `PanelTokens` role, also outside `Storage`). |
+| `wuphf-model` | Shared domain types, grouped into `ids` / `routing` / `connector` / `message` / `dispatch` / `chat`. |
+| `wuphf-storage` | The `Storage` trait — the sum of seven role traits (topology, messages, media, dispatch queue, provisioning stash, observation log, chat profiles) — plus two backends: `memory` (tests) and `sqlite` (durable). A consumer that needs only part of storage bounds on its roles. The same database holds runtime settings overrides (`settings` table, the `SettingsOverrides` role, outside `Storage`), read through `wuphf-settings`, and the settings panel's button handles (`panel_tokens`, the `PanelTokens` role, also outside `Storage`). |
 | `wuphf-core` | Owns logical identity, dedup, echo suppression, reply resolution and identity migration; evaluates rules and computes dispatch targets (`config.rs`, `router.rs`). |
 | `wuphf-runtime` | Tokio event bus + dispatch pipeline; connector session hub; bounded media broker; gRPC transport adapter; the settings service's authorizer and reference names (`settings_auth`). |
 | `wuphf-functions` | Brokers remote function calls between callers and provider processes; independent of the core and storage. |
@@ -206,6 +206,32 @@ dedup, reply mapping, loop prevention, or address mapping.
   and otherwise as consecutive messages with the caption on the first, whose id
   becomes the recorded copy.
 
+## Chat Profiles
+
+The core keeps what it knows about each platform chat apart from routing in a
+chat profile (`chat_profiles` table, the `ChatProfileStore` role): a JSON
+payload keyed by the connector and the chat's native id, never by endpoint,
+so a later field needs no schema change. Today a profile holds the chat's
+disappearing-messages timer.
+
+- **Reported by connectors.** A `MessageCreateEvent` carries the timer the
+  message had (only when greater than 0); a `ChatUpdateEvent` reports chats in
+  a batch (a timer setting, a group notification, a history sync). Reports are
+  merged by setting timestamp: with one on both sides the newer wins, otherwise
+  the later report wins. A message without a timer, from a connector that
+  declares `supports_disappearing_timers`, settles a chat whose timer is still
+  unknown as off; it never overrides a known timer.
+- **Recorded before routing.** The ingest path records the timer before it
+  resolves the origin, so a chat no rule matches still learns it, and a later
+  owner reply into it carries it.
+- **Read when a send is routed.** Every routed send and every owner send to a
+  connector that declares `supports_disappearing_timers` carries the target
+  chat's timer, looked up under the chat id and then under every address
+  linked to it (newest setting timestamp first). A dispatch that waits keeps
+  the value it was routed with.
+
+Profiles are the extension point for chat titles, descriptions, avatars and
+participants (plan 046) and for pin, mute and archive state (plan 047).
 
 ## Owner Notices
 
@@ -235,6 +261,13 @@ Two rules make it useful rather than noisy:
   clock-free. A recovery is only news after trouble, so a healthy start-up says
   nothing. The state is in memory, so a restart re-notifies about a connector
   that is still down — the moment the owner most wants to know.
+
+The unknown-timer notice (`NOTICE_KIND_DISAPPEARING_TIMER_UNKNOWN`: a message
+went to a chat whose timer the connector could not learn) is not a health
+state: it bypasses that suppression and leaves the connector's health state
+alone, and the connector itself limits it to once per chat until the timer is
+known.
+
 ## Media
 
 The runtime exposes a bounded media broker. A source connector uploads bytes
