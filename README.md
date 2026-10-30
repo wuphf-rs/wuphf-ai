@@ -31,7 +31,7 @@ For a human-friendly tour, open [`docs/index.html`](docs/index.html).
   it, and the core relays the alert through the connectors that still work, so a
   bridge that stopped bridging says so instead of going quiet.
 - Go connectors: Telegram (`gotd/td`, forum topics, albums), WhatsApp
-  (`whatsmeow`, QR pairing), and Instagram (`mautrix-meta` lightspeed).
+  (`whatsmeow`, QR pairing), and Instagram (`mautrix-meta` instameow).
 
 Reactions, delivery/read receipts, and mirror-thread retitling are executed
 end to end. Instagram sends text only; its outbound attachments are not

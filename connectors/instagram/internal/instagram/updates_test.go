@@ -2,6 +2,8 @@ package instagramconnector
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"strconv"
@@ -10,14 +12,15 @@ import (
 
 	wuphfpb "github.com/akshettrj/wuphf/proto/go/connector/v1"
 	"github.com/rs/zerolog"
+	"go.mau.fi/mautrix-meta/pkg/instameow"
+	"go.mau.fi/mautrix-meta/pkg/instameow/slidetypes"
 	"go.mau.fi/mautrix-meta/pkg/messagix/responses"
-	"go.mau.fi/mautrix-meta/pkg/messagix/table"
 )
 
-type stubBroker struct{ uploaded [][]byte }
+type stubBroker struct{ uploaded []*wuphfpb.MediaMetadata }
 
-func (s *stubBroker) Upload(_ context.Context, meta *wuphfpb.MediaMetadata, data []byte) (*wuphfpb.Attachment, error) {
-	s.uploaded = append(s.uploaded, data)
+func (s *stubBroker) Upload(_ context.Context, meta *wuphfpb.MediaMetadata, _ []byte) (*wuphfpb.Attachment, error) {
+	s.uploaded = append(s.uploaded, meta)
 	return &wuphfpb.Attachment{
 		MediaId:  "media-" + strconv.Itoa(len(s.uploaded)),
 		Kind:     meta.GetKind(),
@@ -27,16 +30,21 @@ func (s *stubBroker) Upload(_ context.Context, meta *wuphfpb.MediaMetadata, data
 }
 
 type stubDoer struct {
-	body     string
+	status   int
 	requests []string
 }
 
 func (s *stubDoer) Do(req *http.Request) (*http.Response, error) {
 	s.requests = append(s.requests, req.URL.String())
+	status := s.status
+	if status == 0 {
+		status = http.StatusOK
+	}
 	return &http.Response{
-		StatusCode: http.StatusOK,
-		Status:     "200 OK",
-		Body:       io.NopCloser(strings.NewReader(s.body)),
+		StatusCode: status,
+		Status:     http.StatusText(status),
+		Header:     http.Header{"Content-Type": {"image/jpeg; charset=binary"}},
+		Body:       io.NopCloser(strings.NewReader("bytes")),
 	}, nil
 }
 
@@ -49,13 +57,85 @@ func (s stubFetcher) FetchMedia(context.Context, string, string) (*responses.Fet
 	return s.resp, s.err
 }
 
+// stubThreads answers thread lookups from a fixed set of thread objects and
+// counts the round trips a cache miss costs.
+type stubThreads struct {
+	byShort    map[string]*slidetypes.ThreadInfo
+	ids        map[int64]*instameow.ThreadIGIDs
+	getThreads int
+	fetchIDs   int
+}
+
+func (s *stubThreads) GetThread(_ context.Context, req *slidetypes.GetThreadInfoRequest) (*slidetypes.ThreadInfoResponse, error) {
+	s.getThreads++
+	info, ok := s.byShort[req.ThreadFBID]
+	if !ok {
+		return nil, errors.New("not found")
+	}
+	return &slidetypes.ThreadInfoResponse{ThreadInfo: slidetypes.WrappedThreadInfo{AsIGDirectThread: info}}, nil
+}
+
+func (s *stubThreads) FetchThreadID(_ context.Context, threadKey int64) (*instameow.ThreadIGIDs, error) {
+	s.fetchIDs++
+	ids, ok := s.ids[threadKey]
+	if !ok {
+		return nil, instameow.ErrThreadNotFound
+	}
+	return ids, nil
+}
+
 // testOwnUserID is the logged-in account id used by test normalizers; senders
 // with this id are labelled "Me".
 const testOwnUserID int64 = 555000
 
-func newTestNormalizer(broker MediaBroker, doer HTTPDoer) (*Normalizer, chan *wuphfpb.ClientFrame) {
+// Thread fixtures: a group known from the inbox listing and a one-to-one
+// thread only reachable through a lookup.
+const (
+	groupShortID       = "340282366841710300949128100000000001"
+	groupKey     int64 = 42
+	dmShortID          = "340282366841710300949128100000000002"
+	dmKey        int64 = 77
+	peerID       int64 = 7
+)
+
+func newTestDirectory() (*ThreadDirectory, *stubThreads) {
+	fetcher := &stubThreads{
+		byShort: map[string]*slidetypes.ThreadInfo{
+			dmShortID: {
+				ThreadKey: dmKey,
+				Users:     []*slidetypes.User{{InteropMessagingUserFBID: peerID, FullName: "Pam"}},
+			},
+		},
+		ids: map[int64]*instameow.ThreadIGIDs{},
+	}
+	threads := NewThreadDirectory(fetcher, testOwnUserID)
+	threads.RecordThread(&slidetypes.ThreadInfo{
+		ID: groupShortID, ThreadKey: groupKey, ThreadID: "long-42",
+		IsGroup: true, ThreadTitle: "Squad",
+	})
+	return threads, fetcher
+}
+
+func newTestNormalizer(broker MediaBroker, doer HTTPDoer, fetcher MediaFetcher) (*Normalizer, chan *wuphfpb.ClientFrame) {
 	ch := make(chan *wuphfpb.ClientFrame, 16)
-	return NewNormalizer(ch, NewMediaCodec(broker, doer, nil), testOwnUserID, zerolog.Nop()), ch
+	threads, _ := newTestDirectory()
+	return NewNormalizer(ch, NewMediaCodec(broker, doer, fetcher), threads, testOwnUserID, zerolog.Nop()), ch
+}
+
+func decodeDelta(t *testing.T, raw string) *slidetypes.Delta {
+	t.Helper()
+	var delta slidetypes.Delta
+	if err := json.Unmarshal([]byte(raw), &delta); err != nil {
+		t.Fatalf("decode delta: %v", err)
+	}
+	return &delta
+}
+
+// messageDelta builds a new-message delta in the shape Instagram sends.
+func messageDelta(thread, id string, sender int64, content string) string {
+	return `{"__typename":"SlideUQPPNewMessage","uq_seq_id":"10","thread_fbid":"` + thread + `",
+		"message":{"id":"` + id + `","sender_fbid":"` + strconv.FormatInt(sender, 10) + `",
+		"timestamp_ms":"1700000000000","content":` + content + `}}`
 }
 
 func drain(ch <-chan *wuphfpb.ClientFrame) []*wuphfpb.ClientFrame {
@@ -70,338 +150,239 @@ func drain(ch <-chan *wuphfpb.ClientFrame) []*wuphfpb.ClientFrame {
 	}
 }
 
-func TestHandleCreateCarriesGroupTitle(t *testing.T) {
-	t.Parallel()
-	n, ch := newTestNormalizer(&stubBroker{}, &stubDoer{})
-	err := n.Handle(context.Background(), &table.LSTable{
-		LSDeleteThenInsertThread: []*table.LSDeleteThenInsertThread{{ThreadKey: 42, ThreadName: "Squad"}},
-		LSInsertMessage: []*table.LSInsertMessage{{
-			Text: "hello", ThreadKey: 42, SenderId: 7, MessageId: "m1",
-			TimestampMs: 1700000000000, ReplySourceId: "m0",
-		}},
-	})
-	if err != nil {
+func handle(t *testing.T, n *Normalizer, raw string) {
+	t.Helper()
+	if err := n.Handle(context.Background(), decodeDelta(t, raw)); err != nil {
 		t.Fatalf("Handle() error = %v", err)
 	}
+}
+
+func TestHandleCreateCarriesGroupTitleAndReply(t *testing.T) {
+	t.Parallel()
+	n, ch := newTestNormalizer(&stubBroker{}, &stubDoer{}, nil)
+	handle(t, n, `{"__typename":"SlideUQPPNewMessage","thread_fbid":"`+groupShortID+`",
+		"message":{"id":"mid.1","sender_fbid":"7","timestamp_ms":"1700000000000",
+		"replied_to_message_id":"mid.0",
+		"sender":{"name":"Pam","user_dict":{"full_name":"Pam Beesly","interop_messaging_user_fbid":"7"}},
+		"content":{"__typename":"SlideMessageText","text_body":"hello"}}}`)
+
 	frames := drain(ch)
 	if len(frames) != 1 {
 		t.Fatalf("frames = %d, want 1", len(frames))
 	}
-	event := frames[0].GetMessageCreate()
-	if event == nil {
-		t.Fatalf("frame = %#v, want create", frames[0])
+	create := frames[0].GetMessageCreate()
+	if create.GetChatId() != "42" || create.GetChatTitle() != "[G] Squad" {
+		t.Fatalf("chat = %q title = %q", create.GetChatId(), create.GetChatTitle())
 	}
-	if event.ChatId != "42" || event.GetChatTitle() != "[G] Squad" {
-		t.Fatalf("chat = %q title = %q", event.ChatId, event.GetChatTitle())
+	if create.GetPlatformMessageId() != "mid.1" || create.GetText() != "hello" || create.GetTimestampMs() != 1700000000000 {
+		t.Fatalf("create = %+v", create)
 	}
-	if event.GetText() != "hello" || event.GetReplyToPlatformMessageId() != "m0" {
-		t.Fatalf("text = %q reply = %q", event.GetText(), event.GetReplyToPlatformMessageId())
+	if create.GetSender() != "7" || create.GetParticipant() != "7" || create.GetSenderName() != "Pam Beesly" {
+		t.Fatalf("sender = %q participant = %q name = %q", create.GetSender(), create.GetParticipant(), create.GetSenderName())
+	}
+	if create.GetReplyToPlatformMessageId() != "mid.0" {
+		t.Fatalf("reply = %q", create.GetReplyToPlatformMessageId())
 	}
 }
 
-func TestHandleCreateTitleFromContactForDM(t *testing.T) {
+// A thread first seen in a live delta is looked up once, named after the peer
+// for a one-to-one chat, and served from the cache afterwards.
+func TestHandleCreateResolvesUnknownThreadOnce(t *testing.T) {
 	t.Parallel()
-	n, ch := newTestNormalizer(&stubBroker{}, &stubDoer{})
-	err := n.Handle(context.Background(), &table.LSTable{
-		LSVerifyContactRowExists: []*table.LSVerifyContactRowExists{{ContactId: 99, Name: "Alice"}},
-		LSInsertMessage:          []*table.LSInsertMessage{{Text: "hi", ThreadKey: 99, SenderId: 99, MessageId: "m1"}},
-	})
-	if err != nil {
-		t.Fatalf("Handle() error = %v", err)
-	}
+	threads, fetcher := newTestDirectory()
+	ch := make(chan *wuphfpb.ClientFrame, 16)
+	n := NewNormalizer(ch, NewMediaCodec(&stubBroker{}, &stubDoer{}, nil), threads, testOwnUserID, zerolog.Nop())
+	text := `{"__typename":"SlideMessageText","text_body":"hi"}`
+	handle(t, n, messageDelta(dmShortID, "mid.1", peerID, text))
+	handle(t, n, messageDelta(dmShortID, "mid.2", peerID, text))
+
 	frames := drain(ch)
-	if len(frames) != 1 || frames[0].GetMessageCreate().GetChatTitle() != "[P] Alice" {
-		t.Fatalf("frames = %#v, want DM titled [P] Alice", frames)
+	if len(frames) != 2 || fetcher.getThreads != 1 {
+		t.Fatalf("frames = %d, lookups = %d; want 2 frames from 1 lookup", len(frames), fetcher.getThreads)
+	}
+	create := frames[0].GetMessageCreate()
+	if create.GetChatId() != "77" || create.GetChatTitle() != "[P] Pam" || create.GetSenderName() != "Pam" {
+		t.Fatalf("chat = %q title = %q name = %q", create.GetChatId(), create.GetChatTitle(), create.GetSenderName())
 	}
 }
 
-func TestHandleCreateLabelsSenders(t *testing.T) {
+func TestHandleSkipsDeltaForUnresolvableThread(t *testing.T) {
 	t.Parallel()
-	n, ch := newTestNormalizer(&stubBroker{}, &stubDoer{})
-	err := n.Handle(context.Background(), &table.LSTable{
-		LSVerifyContactRowExists: []*table.LSVerifyContactRowExists{{ContactId: 99, Name: "Alice"}},
-		LSInsertMessage: []*table.LSInsertMessage{
-			{Text: "hi", ThreadKey: 99, SenderId: 99, MessageId: "m1"},
-			{Text: "yo", ThreadKey: 99, SenderId: testOwnUserID, MessageId: "m2"},
+	n, ch := newTestNormalizer(&stubBroker{}, &stubDoer{}, nil)
+	handle(t, n, messageDelta("unknown", "mid.1", peerID, `{"__typename":"SlideMessageText","text_body":"hi"}`))
+	if frames := drain(ch); len(frames) != 0 {
+		t.Fatalf("frames = %d, want 0", len(frames))
+	}
+}
+
+func TestHandleOwnMessageLabelledMe(t *testing.T) {
+	t.Parallel()
+	n, ch := newTestNormalizer(&stubBroker{}, &stubDoer{}, nil)
+	handle(t, n, messageDelta(groupShortID, "mid.1", testOwnUserID, `{"__typename":"SlideMessageText","text_body":"mine"}`))
+	if name := drain(ch)[0].GetMessageCreate().GetSenderName(); name != "Me" {
+		t.Fatalf("sender name = %q, want Me", name)
+	}
+}
+
+// A message whose thread id is only on the message itself still resolves.
+func TestHandleCreateFallsBackToMessageThreadID(t *testing.T) {
+	t.Parallel()
+	n, ch := newTestNormalizer(&stubBroker{}, &stubDoer{}, nil)
+	handle(t, n, `{"__typename":"SlideUQPPNewRavenMessage","thread_fbid":"",
+		"message":{"id":"mid.1","sender_fbid":"7","thread_fbid":"`+groupShortID+`","timestamp_ms":"1",
+		"content":{"__typename":"SlideMessageRavenImageContent","view_mode":0}}}`)
+	create := drain(ch)[0].GetMessageCreate()
+	if create.GetChatId() != "42" || create.GetText() != viewOnceNotice {
+		t.Fatalf("chat = %q text = %q", create.GetChatId(), create.GetText())
+	}
+}
+
+func TestHandleImageDownloadsAndUploads(t *testing.T) {
+	t.Parallel()
+	broker, doer := &stubBroker{}, &stubDoer{}
+	n, ch := newTestNormalizer(broker, doer, nil)
+	handle(t, n, messageDelta(groupShortID, "mid.1", peerID, `{"__typename":"SlideMessageImageContent",
+		"attachments":[{"attachment_cdn_url":"https://cdn/a.jpg"},{"preview_cdn_url":"https://cdn/b.jpg"}]}`))
+
+	create := drain(ch)[0].GetMessageCreate()
+	if len(create.GetAttachments()) != 2 || create.Text != nil {
+		t.Fatalf("attachments = %d text = %v", len(create.GetAttachments()), create.Text)
+	}
+	if strings.Join(doer.requests, ",") != "https://cdn/a.jpg,https://cdn/b.jpg" {
+		t.Fatalf("requests = %v", doer.requests)
+	}
+	if broker.uploaded[0].GetKind() != wuphfpb.Attachment_KIND_IMAGE || broker.uploaded[0].GetMimeType() != "image/jpeg" {
+		t.Fatalf("metadata = %+v", broker.uploaded[0])
+	}
+}
+
+// A failed download must not lose the message: the text still bridges.
+func TestHandleMediaFailureKeepsText(t *testing.T) {
+	t.Parallel()
+	n, ch := newTestNormalizer(&stubBroker{}, &stubDoer{status: http.StatusForbidden}, nil)
+	handle(t, n, messageDelta(groupShortID, "mid.1", peerID, `{"__typename":"SlideMessageXMAContent",
+		"xma_text_body":"look",
+		"xma":{"target_url":"https://example.com","preview_image":{"url":"https://cdn/p.jpg"}}}`))
+	create := drain(ch)[0].GetMessageCreate()
+	if create.GetText() != "look\nhttps://example.com" || len(create.GetAttachments()) != 0 {
+		t.Fatalf("text = %q attachments = %d", create.GetText(), len(create.GetAttachments()))
+	}
+}
+
+func TestHandleReelShareFetchesFullQualityVideo(t *testing.T) {
+	t.Parallel()
+	doer := &stubDoer{}
+	fetcher := stubFetcher{resp: &responses.FetchMediaResponse{Items: []*responses.Items{{
+		VideoVersions: []responses.VideoVersions{
+			{URL: "https://cdn/small.mp4", Width: 320, Height: 568},
+			{URL: "https://cdn/large.mp4", Width: 720, Height: 1280},
 		},
-	})
-	if err != nil {
-		t.Fatalf("Handle() error = %v", err)
-	}
-	frames := drain(ch)
-	if len(frames) != 2 {
-		t.Fatalf("frames = %d, want 2", len(frames))
-	}
-	peer := frames[0].GetMessageCreate()
-	if peer.GetParticipant() != "99" || peer.GetSenderName() != "Alice" {
-		t.Fatalf("peer participant = %q name = %q, want 99/Alice", peer.GetParticipant(), peer.GetSenderName())
-	}
-	own := frames[1].GetMessageCreate()
-	if own.GetSenderName() != "Me" {
-		t.Fatalf("own sender name = %q, want Me", own.GetSenderName())
-	}
-}
-
-func TestHandleUnsentInsertEmitsDelete(t *testing.T) {
-	t.Parallel()
-	n, ch := newTestNormalizer(&stubBroker{}, &stubDoer{})
-	err := n.Handle(context.Background(), &table.LSTable{
-		LSInsertMessage: []*table.LSInsertMessage{{ThreadKey: 42, MessageId: "m1", IsUnsent: true}},
-	})
-	if err != nil {
-		t.Fatalf("Handle() error = %v", err)
-	}
-	frames := drain(ch)
-	del := frames[0].GetMessageDelete()
-	if len(frames) != 1 || del == nil || del.ChatId != "42" || del.PlatformMessageId != "m1" {
-		t.Fatalf("frames = %#v, want delete for m1", frames)
-	}
-}
-
-func TestHandleReactionEmitsReactionEvent(t *testing.T) {
-	t.Parallel()
-	n, ch := newTestNormalizer(&stubBroker{}, &stubDoer{})
-	// Seed the message so the reaction's thread can be resolved from the cache.
-	if err := n.Handle(context.Background(), &table.LSTable{
-		LSInsertMessage: []*table.LSInsertMessage{{Text: "hi", ThreadKey: 42, MessageId: "m1", SenderId: 7}},
-	}); err != nil {
-		t.Fatalf("seed Handle() error = %v", err)
-	}
-	drain(ch) // discard the seed message's create frame
-	if err := n.Handle(context.Background(), &table.LSTable{
-		LSUpsertReaction: []*table.LSUpsertReaction{{ThreadKey: 42, MessageId: "m1", ActorId: testOwnUserID, Reaction: "❤️"}},
-		LSDeleteReaction: []*table.LSDeleteReaction{{ThreadKey: 42, MessageId: "m1", ActorId: 7}},
-	}); err != nil {
-		t.Fatalf("reaction Handle() error = %v", err)
-	}
-	frames := drain(ch)
-	set := frames[0].GetReaction()
-	if set == nil || set.GetChatId() != "42" || set.GetPlatformMessageId() != "m1" ||
-		set.GetEmoji() != "❤️" || !set.GetFromMe() {
-		t.Fatalf("frames[0] = %#v, want own ❤️ reaction set", frames[0])
-	}
-	cleared := frames[1].GetReaction()
-	if cleared == nil || cleared.GetEmoji() != "" || cleared.GetSender() != "7" || cleared.GetFromMe() {
-		t.Fatalf("frames[1] = %#v, want peer reaction cleared", frames[1])
-	}
-}
-
-func TestHandleReactionForUnknownMessageIsSkipped(t *testing.T) {
-	t.Parallel()
-	n, ch := newTestNormalizer(&stubBroker{}, &stubDoer{})
-	if err := n.Handle(context.Background(), &table.LSTable{
-		LSUpsertReaction: []*table.LSUpsertReaction{{ThreadKey: 42, MessageId: "ghost", ActorId: 7, Reaction: "👍"}},
-	}); err != nil {
-		t.Fatalf("Handle() error = %v", err)
-	}
-	if frames := drain(ch); len(frames) != 0 {
-		t.Fatalf("frames = %#v, want none for unknown message", frames)
-	}
-}
-
-func TestHandleDeleteRow(t *testing.T) {
-	t.Parallel()
-	n, ch := newTestNormalizer(&stubBroker{}, &stubDoer{})
-	err := n.Handle(context.Background(), &table.LSTable{
-		LSDeleteMessage: []*table.LSDeleteMessage{{ThreadKey: 42, MessageId: "m1"}},
-	})
-	if err != nil {
-		t.Fatalf("Handle() error = %v", err)
-	}
-	frames := drain(ch)
-	if len(frames) != 1 || frames[0].GetMessageDelete().GetChatId() != "42" {
-		t.Fatalf("frames = %#v, want delete", frames)
-	}
-}
-
-func TestHandleEditResolvesThreadFromCache(t *testing.T) {
-	t.Parallel()
-	n, ch := newTestNormalizer(&stubBroker{}, &stubDoer{})
-	if err := n.Handle(context.Background(), &table.LSTable{
-		LSInsertMessage: []*table.LSInsertMessage{{Text: "v1", ThreadKey: 42, MessageId: "m1"}},
-	}); err != nil {
-		t.Fatalf("seed Handle() error = %v", err)
-	}
-	if err := n.Handle(context.Background(), &table.LSTable{
-		LSEditMessage: []*table.LSEditMessage{{MessageID: "m1", Text: "v2"}},
-	}); err != nil {
-		t.Fatalf("edit Handle() error = %v", err)
-	}
-	frames := drain(ch)
-	if len(frames) != 2 {
-		t.Fatalf("frames = %d, want 2", len(frames))
-	}
-	edit := frames[1].GetMessageEdit()
-	if edit == nil || edit.ChatId != "42" || edit.GetText() != "v2" {
-		t.Fatalf("edit = %#v", edit)
-	}
-}
-
-func TestHandleEditSkipsUnknownMessage(t *testing.T) {
-	t.Parallel()
-	n, ch := newTestNormalizer(&stubBroker{}, &stubDoer{})
-	err := n.Handle(context.Background(), &table.LSTable{
-		LSEditMessage: []*table.LSEditMessage{{MessageID: "ghost", Text: "v2"}},
-	})
-	if err != nil {
-		t.Fatalf("Handle() error = %v", err)
-	}
-	if frames := drain(ch); len(frames) != 0 {
-		t.Fatalf("frames = %#v, want none", frames)
-	}
-}
-
-func TestHandleCreateDownloadsAttachment(t *testing.T) {
-	t.Parallel()
+	}}}}
 	broker := &stubBroker{}
-	n, ch := newTestNormalizer(broker, &stubDoer{body: "imgdata"})
-	err := n.Handle(context.Background(), &table.LSTable{
-		LSInsertMessage: []*table.LSInsertMessage{{ThreadKey: 42, MessageId: "m1"}},
-		LSInsertBlobAttachment: []*table.LSInsertBlobAttachment{{
-			MessageId: "m1", PlayableUrl: "https://cdn/x.jpg",
-			AttachmentType: table.AttachmentTypeImage, AttachmentMimeType: "image/jpeg",
-		}},
-	})
-	if err != nil {
-		t.Fatalf("Handle() error = %v", err)
+	n, ch := newTestNormalizer(broker, doer, fetcher)
+	handle(t, n, messageDelta(groupShortID, "mid.1", peerID, `{"__typename":"SlideMessageXMAContent",
+		"xma":{"target_id":"999","target_url":"https://www.instagram.com/reel/AbC_1/","title_text":"funny",
+		"preview_image":{"url":"https://cdn/preview.jpg"}}}`))
+
+	create := drain(ch)[0].GetMessageCreate()
+	if create.GetText() != "funny\nhttps://www.instagram.com/reel/AbC_1/" {
+		t.Fatalf("text = %q", create.GetText())
 	}
+	if len(doer.requests) != 1 || doer.requests[0] != "https://cdn/large.mp4" {
+		t.Fatalf("requests = %v, want the largest rendition", doer.requests)
+	}
+	if broker.uploaded[0].GetKind() != wuphfpb.Attachment_KIND_VIDEO {
+		t.Fatalf("kind = %v, want video", broker.uploaded[0].GetKind())
+	}
+}
+
+func TestHandleReactionAdminLineDropped(t *testing.T) {
+	t.Parallel()
+	n, ch := newTestNormalizer(&stubBroker{}, &stubDoer{}, nil)
+	handle(t, n, `{"__typename":"SlideUQPPAdminTextMessage","thread_fbid":"`+groupShortID+`",
+		"message":{"id":"mid.1","sender_fbid":"7","timestamp_ms":"1",
+		"content":{"__typename":"SlideMessageAdminText","is_reaction_action_log":true,
+		"text_fragments":[{"plaintext":"Pam reacted"}]}}}`)
+	if frames := drain(ch); len(frames) != 0 {
+		t.Fatalf("frames = %d, want 0", len(frames))
+	}
+}
+
+func TestHandleEditAndDelete(t *testing.T) {
+	t.Parallel()
+	n, ch := newTestNormalizer(&stubBroker{}, &stubDoer{}, nil)
+	handle(t, n, `{"__typename":"SlideUQPPEditMessage","thread_fbid":"`+groupShortID+`","message_id":"mid.1","text_body":"fixed"}`)
+	handle(t, n, `{"__typename":"SlideUQPPDeleteMessage","thread_fbid":"`+groupShortID+`","message_id":"mid.2"}`)
+
 	frames := drain(ch)
-	event := frames[0].GetMessageCreate()
-	if len(frames) != 1 || event == nil || len(event.Attachments) != 1 {
-		t.Fatalf("frames = %#v, want one create with one attachment", frames)
+	if len(frames) != 2 {
+		t.Fatalf("frames = %d, want 2", len(frames))
 	}
-	if event.Attachments[0].GetKind() != wuphfpb.Attachment_KIND_IMAGE {
-		t.Fatalf("attachment kind = %v", event.Attachments[0].GetKind())
+	edit := frames[0].GetMessageEdit()
+	if edit.GetChatId() != "42" || edit.GetPlatformMessageId() != "mid.1" || edit.GetText() != "fixed" {
+		t.Fatalf("edit = %+v", edit)
 	}
-	if string(broker.uploaded[0]) != "imgdata" {
-		t.Fatalf("uploaded = %q", broker.uploaded[0])
-	}
-}
-
-func TestCollectMediaGroupsByMessage(t *testing.T) {
-	t.Parallel()
-	bundles := collectMedia(&table.LSTable{
-		LSInsertBlobAttachment: []*table.LSInsertBlobAttachment{
-			{MessageId: "m1", PlayableUrl: "u1", AttachmentType: table.AttachmentTypeImage},
-			{MessageId: "m1", PlayableUrl: "u2", AttachmentType: table.AttachmentTypeVideo},
-		},
-		LSInsertXmaAttachment: []*table.LSInsertXmaAttachment{
-			{MessageId: "m1", TitleText: "Reel", ActionUrl: "https://reel"},
-		},
-	})
-	bundle := bundles["m1"]
-	if bundle == nil || len(bundle.attachments) != 2 {
-		t.Fatalf("bundle = %#v, want two attachments", bundle)
-	}
-	if bundle.suffix != "Reel\nhttps://reel" {
-		t.Fatalf("suffix = %q", bundle.suffix)
+	del := frames[1].GetMessageDelete()
+	if del.GetChatId() != "42" || del.GetPlatformMessageId() != "mid.2" {
+		t.Fatalf("delete = %+v", del)
 	}
 }
 
-func TestCollectMediaReelDownloadsVideo(t *testing.T) {
+// A reaction removal that names only the reaction's log id is matched to the
+// reaction seen earlier, so the right reactor's emoji is cleared.
+func TestHandleReactionCreateAndRemoval(t *testing.T) {
 	t.Parallel()
-	bundles := collectMedia(&table.LSTable{
-		LSInsertXmaAttachment: []*table.LSInsertXmaAttachment{
-			{
-				MessageId:           "m1",
-				AttachmentFbid:      "fb1",
-				PlayableUrl:         "https://cdn/reel.mp4",
-				PlayableUrlMimeType: "video/mp4",
-				ImageUrl:            "https://cdn/reel-thumb.jpg",
-				TitleText:           "Reel",
-			},
-		},
-		LSInsertAttachmentCta: []*table.LSInsertAttachmentCta{
-			{AttachmentFbid: "fb1", NativeUrl: "instagram://reels_share/?shortcode=ABC123"},
-		},
-	})
-	bundle := bundles["m1"]
-	if bundle == nil || len(bundle.attachments) != 1 {
-		t.Fatalf("bundle = %#v, want one attachment", bundle)
+	n, ch := newTestNormalizer(&stubBroker{}, &stubDoer{}, nil)
+	handle(t, n, `{"__typename":"SlideUQPPCreateReaction","thread_fbid":"`+groupShortID+`","message_id":"mid.1",
+		"reaction":{"log_message_id":"log.1","reaction":"❤","sender_fbid":"555000"}}`)
+	handle(t, n, `{"__typename":"SlideUQPPDeleteReaction","thread_fbid":"`+groupShortID+`","message_id":"log.1",
+		"reaction":{"log_message_id":"log.1"}}`)
+	handle(t, n, `{"__typename":"SlideUQPPDeleteReaction","thread_fbid":"`+groupShortID+`","message_id":"x",
+		"reaction":{"log_message_id":"log.unknown"}}`)
+
+	frames := drain(ch)
+	if len(frames) != 2 {
+		t.Fatalf("frames = %d, want 2 (unknown removal skipped)", len(frames))
 	}
-	ref := bundle.attachments[0]
-	if ref.url != "https://cdn/reel.mp4" {
-		t.Fatalf("url = %q, want the playable video url", ref.url)
+	added, removed := frames[0].GetReaction(), frames[1].GetReaction()
+	if added.GetEmoji() != "❤" || !added.GetFromMe() || added.GetSenderName() != "Me" || added.GetPlatformMessageId() != "mid.1" {
+		t.Fatalf("added = %+v", added)
 	}
-	if ref.metadata.Kind != wuphfpb.Attachment_KIND_VIDEO {
-		t.Fatalf("kind = %v, want KIND_VIDEO", ref.metadata.Kind)
-	}
-	if bundle.suffix != "Reel\nhttps://www.instagram.com/reel/ABC123/" {
-		t.Fatalf("suffix = %q", bundle.suffix)
+	if removed.GetEmoji() != "" || removed.GetPlatformMessageId() != "mid.1" || removed.GetSender() != "555000" {
+		t.Fatalf("removed = %+v", removed)
 	}
 }
 
-func TestCollectMediaShareCarriesFetchRef(t *testing.T) {
+func TestHandleRenameRetitlesLaterMessages(t *testing.T) {
 	t.Parallel()
-	bundles := collectMedia(&table.LSTable{
-		LSInsertXmaAttachment: []*table.LSInsertXmaAttachment{
-			{MessageId: "m1", AttachmentFbid: "fb1", PlayableUrl: "https://cdn/preview.mp4"},
-		},
-		LSInsertAttachmentCta: []*table.LSInsertAttachmentCta{
-			{AttachmentFbid: "fb1", TargetId: 555, NativeUrl: "instagram://reels_share/?shortcode=ABC123"},
-		},
-	})
-	share := bundles["m1"].attachments[0].share
-	if share == nil || share.mediaID != "555" || share.shortcode != "ABC123" {
-		t.Fatalf("share = %#v, want media 555 shortcode ABC123", share)
+	n, ch := newTestNormalizer(&stubBroker{}, &stubDoer{}, nil)
+	handle(t, n, `{"__typename":"SlideUQPPThreadName","thread_fbid":"`+groupShortID+`","thread_name":"Office"}`)
+	handle(t, n, messageDelta(groupShortID, "mid.1", peerID, `{"__typename":"SlideMessageText","text_body":"hi"}`))
+	if title := drain(ch)[0].GetMessageCreate().GetChatTitle(); title != "[G] Office" {
+		t.Fatalf("title = %q", title)
 	}
 }
 
-func TestFetchSharePrefersLargestVersion(t *testing.T) {
+func TestHandleIgnoresUnbridgedDeltas(t *testing.T) {
 	t.Parallel()
-	doer := &stubDoer{body: "video"}
-	codec := NewMediaCodec(&stubBroker{}, doer, stubFetcher{resp: &responses.FetchMediaResponse{
-		Items: []*responses.Items{{
-			VideoVersions: []responses.VideoVersions{
-				{Width: 480, Height: 854, URL: "https://cdn/low.mp4"},
-				{Width: 1080, Height: 1920, URL: "https://cdn/full.mp4"},
-			},
-		}},
-	}})
-	ref := mediaRef{
-		messageID: "m1",
-		metadata:  &wuphfpb.MediaMetadata{Kind: wuphfpb.Attachment_KIND_VIDEO},
-		url:       "https://cdn/preview.mp4",
-		share:     &shareMedia{mediaID: "555", shortcode: "ABC123"},
-	}
-	if _, err := codec.fetch(context.Background(), ref); err != nil {
-		t.Fatalf("fetch() error = %v", err)
-	}
-	if len(doer.requests) != 1 || doer.requests[0] != "https://cdn/full.mp4" {
-		t.Fatalf("requests = %v, want the largest video version", doer.requests)
+	n, ch := newTestNormalizer(&stubBroker{}, &stubDoer{}, nil)
+	handle(t, n, `{"__typename":"SlideUQPPMarkRead","thread_fbid":"`+groupShortID+`","read_timestamp_ms":"1"}`)
+	handle(t, n, `{"__typename":"SlideUQPPSomethingNew","thread_fbid":"`+groupShortID+`"}`)
+	if frames := drain(ch); len(frames) != 0 {
+		t.Fatalf("frames = %d, want 0", len(frames))
 	}
 }
 
-func TestFetchShareFallsBackToPreviewOnError(t *testing.T) {
+// A canceled context is the one failure surfaced, so instameow redelivers the
+// delta after reconnecting instead of acknowledging a message never queued.
+func TestHandleReturnsContextErrorWhenInputBlocked(t *testing.T) {
 	t.Parallel()
-	doer := &stubDoer{body: "video"}
-	codec := NewMediaCodec(&stubBroker{}, doer, stubFetcher{err: context.DeadlineExceeded})
-	ref := mediaRef{
-		messageID: "m1",
-		metadata:  &wuphfpb.MediaMetadata{Kind: wuphfpb.Attachment_KIND_VIDEO},
-		url:       "https://cdn/preview.mp4",
-		share:     &shareMedia{mediaID: "555", shortcode: "ABC123"},
-	}
-	if _, err := codec.fetch(context.Background(), ref); err != nil {
-		t.Fatalf("fetch() error = %v", err)
-	}
-	if len(doer.requests) != 1 || doer.requests[0] != "https://cdn/preview.mp4" {
-		t.Fatalf("requests = %v, want the preview fallback", doer.requests)
-	}
-}
-
-func TestBlobKindMapping(t *testing.T) {
-	t.Parallel()
-	cases := map[table.AttachmentType]wuphfpb.Attachment_Kind{
-		table.AttachmentTypeImage:   wuphfpb.Attachment_KIND_IMAGE,
-		table.AttachmentTypeVideo:   wuphfpb.Attachment_KIND_VIDEO,
-		table.AttachmentTypeAudio:   wuphfpb.Attachment_KIND_AUDIO,
-		table.AttachmentTypeSticker: wuphfpb.Attachment_KIND_STICKER,
-		table.AttachmentTypeFile:    wuphfpb.Attachment_KIND_FILE,
-	}
-	for in, want := range cases {
-		if got := blobKind(in); got != want {
-			t.Fatalf("blobKind(%v) = %v, want %v", in, got, want)
-		}
+	threads, _ := newTestDirectory()
+	n := NewNormalizer(make(chan *wuphfpb.ClientFrame), NewMediaCodec(&stubBroker{}, &stubDoer{}, nil), threads, testOwnUserID, zerolog.Nop())
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	delta := decodeDelta(t, messageDelta(groupShortID, "mid.1", peerID, `{"__typename":"SlideMessageText","text_body":"hi"}`))
+	if err := n.Handle(ctx, delta); !errors.Is(err, context.Canceled) {
+		t.Fatalf("err = %v, want context.Canceled", err)
 	}
 }

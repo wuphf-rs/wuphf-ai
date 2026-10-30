@@ -33,9 +33,14 @@ supports_topic_create = false
 # overrides).
 log_level = "info"
 
-# Replay the inbox snapshot on connect so messages exchanged while the connector
-# was down are bridged (the Instagram counterpart to WhatsApp's offline history
-# sync). The core dedups by native id, so a restart re-bridges only newly-missed
-# messages; on a fresh install the recent inbox is bridged once. Defaults to
-# true when unset; set to false to skip the replay.
+# Where the connector records its position in Instagram's delta stream.
+# Optional; defaults to "instagram.state.json".
+state_file = "instagram.state.json"
+
+# Resume the delta stream from the position in state_file, so messages
+# exchanged while the connector was down are bridged (the Instagram counterpart
+# to WhatsApp's offline history sync). The core dedups by native id, so nothing
+# already bridged is repeated. If the saved position is too old, Instagram
+# forces a fresh start and that gap is not replayed. Defaults to true when
+# unset; set to false to bridge only what arrives from now on.
 backfill_on_start = true

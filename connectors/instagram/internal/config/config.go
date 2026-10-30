@@ -25,6 +25,10 @@ type File struct {
 	// restart without re-exporting from the browser. Falls back to CookiesFile
 	// when it does not yet exist.
 	SessionFile string `toml:"session_file"`
+	// StateFile is where the connector records its position in Instagram's
+	// delta stream, so a restart replays what arrived while it was down.
+	// Optional; defaults to DefaultStateFile.
+	StateFile string `toml:"state_file"`
 	// Instagram has no topics; these stay false but are surfaced so the core's
 	// capability gate is configured from one place.
 	SupportsThreads     bool `toml:"supports_threads"`
@@ -32,13 +36,24 @@ type File struct {
 	// Runtime holds the settings that may change while the connector runs.
 	// Embedded, so the file keeps its layout (`log_level`).
 	Runtime
-	// BackfillOnStart replays the inbox snapshot on connect so messages that
-	// arrived while the connector was down are bridged, the same offline-sync
-	// behaviour WhatsApp gets from history sync. The core dedups by native id
-	// (persisted), so a restart re-bridges only newly-missed messages. Nil means
-	// enabled; set it to false to skip the replay (e.g. to avoid bridging the
-	// recent inbox on a fresh install).
+	// BackfillOnStart resumes Instagram's delta stream from the position in
+	// StateFile, so messages that arrived while the connector was down are
+	// bridged, the same offline-sync behaviour WhatsApp gets from history
+	// sync. The core dedups by native id (persisted), so anything already
+	// bridged is dropped. Nil means enabled; set it to false to ignore the saved
+	// position and bridge only what arrives from now on.
 	BackfillOnStart *bool `toml:"backfill_on_start"`
+}
+
+// DefaultStateFile is the sync state path used when state_file is unset.
+const DefaultStateFile = "instagram.state.json"
+
+// StatePath returns the configured sync state path, or the default.
+func (c File) StatePath() string {
+	if c.StateFile == "" {
+		return DefaultStateFile
+	}
+	return c.StateFile
 }
 
 // Runtime holds the settings that can change while the connector runs. The
@@ -62,8 +77,8 @@ func (c Runtime) WithDefaults() Runtime {
 	return c
 }
 
-// ShouldBackfill reports whether the inbox snapshot is replayed on connect,
-// defaulting to true when the option is unset.
+// ShouldBackfill reports whether the connector resumes from its saved stream
+// position, defaulting to true when the option is unset.
 func (c File) ShouldBackfill() bool {
 	return c.BackfillOnStart == nil || *c.BackfillOnStart
 }
