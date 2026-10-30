@@ -10,6 +10,7 @@ mod config;
 mod contacts;
 mod disappearing;
 mod groups;
+mod media;
 mod names;
 mod normalize;
 mod sender;
