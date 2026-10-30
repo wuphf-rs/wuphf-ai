@@ -69,7 +69,7 @@ code).
 | 049 | Move to a botconf release that lifts the gotd (v0.161.0) and tonic/prost (0.12/0.13) pins | P3 | M | a new botconf release | TODO — blocked on botconf |
 | 050 | wuphf-misc: a host for non-bridging features, first an Instagram reel/post downloader | P3 | L | 011 | DONE (see notes; not yet tried against a live Instagram session) |
 | 051 | whatsapp-rust: inbound media, captions, view-once, and the Android client identity | P1 | M | — | DONE (see notes) |
-| 052 | whatsapp-rust: owner notices, inbound receipts, staying up when the WhatsApp client stops | P2 | S–M | — | TODO |
+| 052 | whatsapp-rust: owner notices, inbound receipts, staying up when the WhatsApp client stops | P2 | S–M | — | DONE (see notes) |
 | 053 | whatsapp-rust: canonical ids, identity migrations, the addressing book, quote authors, channel titles | P1 | M–L | — (051 soft) | TODO |
 | 054 | whatsapp-rust: outbound media of every kind, rendering options, SDK media download | P1 | L | 051 (053 soft) | TODO |
 | 055 | whatsapp-rust: stickers — SDK functions client, media.convert, pure-Rust sticker EXIF | P2 | M–L | 054 | TODO |
@@ -1303,6 +1303,25 @@ read receipts, albums, polls, locations, vCards) wait for a later plan.
   caption, a video, a GIF, a voice note, a PDF and a sticker reach the mirror;
   a view-once photo and voice note arrive marked `👁️ View once`; in a
   disappearing chat, reactions, edits and reply links come through.
+- **052 done 2026-10-31** (on `v2`, commits `5db5e0b`..`4f6b9b6`; carried
+  onto `origin/v2`'s 046 and 047 on 2026-11-22). SDK tests 7 → 11 (notice
+  helper); whatsapp-rust 65 → 77 (+4 health, +1 media notice detail, +4
+  receipts, +3 supervise); core and runtime +1 each for
+  `NOTICE_KIND_MEDIA_UNAVAILABLE` (proto value 6, Go bindings regenerated).
+  clippy and fmt clean; no lock file changed. Mutations: blocking send in the
+  helper, `StreamReplaced` as degraded, group receipts reported, the media
+  kind counted as health, and returning when WhatsApp stops each failed a
+  test. Deviations: the supervise test that WhatsApp stopping keeps the
+  connector up ends the session from the callback (a shutdown-based version
+  did not catch the mutation); `Stop` is generic over the session error;
+  the media notice detail reads "a photo from Alice in <chat>: <error>", the
+  chat named by the title the message's handler already resolved.
+  Also landed alongside: `293d943`, Telegram files keep their name and MIME
+  type (a bridged PDF showed as `file.unknown`). Owner: restart the server
+  and whatsapp-rust. Live test: from Telegram, write into a mirrored DM and
+  watch for the delivered and read marks; unlink the device on the phone and
+  check the logged-out notice arrives while the connector keeps running;
+  re-pair and check the "working again" notice.
 
 ## Findings considered and rejected
 
