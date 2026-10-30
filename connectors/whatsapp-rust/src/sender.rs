@@ -12,13 +12,18 @@ use whatsapp_rust::{Jid, SendError};
 use wuphf_connector::{Delivery, Failure, Sender};
 use wuphf_proto::connector as pb;
 
+use crate::disappearing::{TimerFallback, stamp};
+
 pub struct WhatsAppSender {
     client: Arc<Client>,
+    /// Set when the connector stamps disappearing timers: what to do with a
+    /// dispatch that arrives without one.
+    fallback: Option<TimerFallback>,
 }
 
 impl WhatsAppSender {
-    pub fn new(client: Arc<Client>) -> Self {
-        Self { client }
+    pub fn new(client: Arc<Client>, fallback: Option<TimerFallback>) -> Self {
+        Self { client, fallback }
     }
 }
 
@@ -45,7 +50,7 @@ impl Sender for WhatsAppSender {
         }
         let chat = parse_chat(&dispatch.target_chat_id)?;
         let text = dispatch.text.unwrap_or_default();
-        let message = match dispatch.reply_context {
+        let mut message = match dispatch.reply_context {
             Some(reply) => wa::Message::text_with_context(text, self.quote_context(&chat, &reply)?),
             None => {
                 if dispatch.reply_to_platform_message_id.is_some() {
@@ -56,6 +61,22 @@ impl Sender for WhatsAppSender {
                 wa::Message::text(text)
             }
         };
+        // Every content send carries the chat's timer, so it disappears like
+        // the rest of the chat instead of showing "will not disappear".
+        let timer = match &self.fallback {
+            Some(fallback) => {
+                fallback
+                    .resolve(
+                        &self.client,
+                        &dispatch.target_chat_id,
+                        &chat,
+                        dispatch.disappearing,
+                    )
+                    .await
+            }
+            None => dispatch.disappearing,
+        };
+        stamp(&mut message, timer.as_ref());
         let result = self
             .client
             .send_message(chat, message)

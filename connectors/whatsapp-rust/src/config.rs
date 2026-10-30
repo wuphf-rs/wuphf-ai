@@ -25,6 +25,13 @@ pub struct Config {
     /// (country code, digits only) instead of requiring a QR scan.
     #[serde(default)]
     pub phone_number: Option<String>,
+    /// Stamp each chat's disappearing-messages timer on what this connector
+    /// sends, look a group's timer up when the core does not know it, and
+    /// warn the owner when a DM's timer is unknown. Part of the registration,
+    /// so it must match `supports_disappearing_timers` in the core's
+    /// `[[connectors]]` entry for this connector, or the core refuses it.
+    #[serde(default)]
+    pub supports_disappearing_timers: bool,
 }
 
 fn default_log_level() -> String {

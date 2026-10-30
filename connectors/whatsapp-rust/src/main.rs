@@ -3,11 +3,16 @@
 //! core events and executes dispatch commands; all routing decisions live in
 //! the core.
 
+mod chats;
 mod config;
+mod disappearing;
+mod groups;
+mod names;
 mod normalize;
 mod sender;
 
 use std::path::PathBuf;
+use std::sync::Arc;
 
 use anyhow::Context as _;
 use clap::Parser;
@@ -18,7 +23,11 @@ use tracing_subscriber::EnvFilter;
 use whatsapp_rust::pair_code::PairCodeOptions;
 use whatsapp_rust::prelude::*;
 
+use crate::chats::ChatEvents;
 use crate::config::Config;
+use crate::disappearing::TimerFallback;
+use crate::groups::GroupDirectory;
+use crate::names::ChatTitles;
 use crate::normalize::Normalizer;
 use crate::sender::WhatsAppSender;
 
@@ -44,7 +53,13 @@ async fn main() -> anyhow::Result<()> {
         .await
         .context("open WhatsApp session store")?;
     let (inputs_tx, inputs_rx) = mpsc::channel(EVENT_CAPACITY);
-    let normalizer = Normalizer::new(inputs_tx);
+    // One group directory serves the namer (subjects) and the sender (timers).
+    let groups = Arc::new(GroupDirectory::new());
+    let normalizer = Normalizer::new(
+        inputs_tx.clone(),
+        Arc::new(ChatTitles::new(Arc::clone(&groups))),
+    );
+    let chat_events = ChatEvents::new(inputs_tx.clone(), Arc::clone(&groups));
 
     let mut builder = Bot::builder()
         .with_backend(store)
@@ -83,7 +98,17 @@ async fn main() -> anyhow::Result<()> {
         .on_message(move |ctx| {
             let normalizer = normalizer.clone();
             async move { normalizer.handle(ctx).await }
-        });
+        })
+        // Chat timers come from group notifications and history syncs too.
+        // DisappearingModeChanged is deliberately not handled: a contact's
+        // account-wide default applies only to chats started after it changes.
+        .on_event_for(
+            &[EventKind::GroupUpdate, EventKind::HistorySync],
+            move |event, _client| {
+                let chat_events = chat_events.clone();
+                async move { chat_events.handle(event).await }
+            },
+        );
     if let Some(phone_number) = config.phone_number.clone() {
         builder = builder.with_pair_code(PairCodeOptions::for_phone(phone_number));
     }
@@ -109,12 +134,18 @@ async fn main() -> anyhow::Result<()> {
         // as a single target or an identity source, never as a threaded mirror.
         supports_threads: false,
         supports_topic_create: false,
+        supports_disappearing_timers: config.supports_disappearing_timers,
         token: core_token,
         is_permanent: None,
     });
+    // With the flag off the sender stamps only what the core sends: no group
+    // lookups, no owner notices.
+    let fallback = config
+        .supports_disappearing_timers
+        .then(|| TimerFallback::new(Arc::clone(&groups), inputs_tx.clone()));
     let cancel = CancellationToken::new();
     let session = core_client.run(
-        WhatsAppSender::new(handle.client()),
+        WhatsAppSender::new(handle.client(), fallback),
         inputs_rx,
         cancel.clone(),
     );
