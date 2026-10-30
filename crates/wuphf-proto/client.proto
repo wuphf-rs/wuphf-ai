@@ -205,6 +205,11 @@ enum NoticeKind {
   // without one and will not disappear. `detail` names the chat. The core does
   // not fold it into the connector's health state.
   NOTICE_KIND_DISAPPEARING_TIMER_UNKNOWN = 5;
+  // Not about the connector's health: an inbound message's media could not be
+  // downloaded, so the message was not bridged. `detail` names the media kind,
+  // the sender, the chat and the error. The core does not fold it into the
+  // connector's health state.
+  NOTICE_KIND_MEDIA_UNAVAILABLE = 6;
 }
 
 // A connector reporting its own operational state to the account owner. A

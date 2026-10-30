@@ -47,6 +47,9 @@ pub enum NoticeKind {
     /// disappearing-messages timer the connector could not learn, so it was
     /// sent without one and will not disappear.
     DisappearingTimerUnknown,
+    /// Not about the connector's health: an inbound message's media could not be
+    /// downloaded, so the message was not bridged.
+    MediaUnavailable,
 }
 
 impl NoticeKind {
@@ -62,6 +65,9 @@ impl NoticeKind {
             NoticeKind::DisappearingTimerUnknown => {
                 "sent a message to a chat whose disappearing-messages timer it could not learn, so that message will not disappear"
             }
+            NoticeKind::MediaUnavailable => {
+                "could not download the media of an incoming message, so that message was not bridged"
+            }
         }
     }
 
@@ -69,7 +75,10 @@ impl NoticeKind {
     /// health state per connector and drops a repeat of it; a kind that is not
     /// about health bypasses that state.
     pub fn is_health(self) -> bool {
-        !matches!(self, NoticeKind::DisappearingTimerUnknown)
+        !matches!(
+            self,
+            NoticeKind::DisappearingTimerUnknown | NoticeKind::MediaUnavailable
+        )
     }
 }
 

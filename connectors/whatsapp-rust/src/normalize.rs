@@ -86,6 +86,13 @@ impl Normalizer {
                         %error,
                         "dropping a WhatsApp media message: the media could not be fetched"
                     );
+                    // The owner is told, so the drop is never silent.
+                    let chat = title.unwrap_or_else(|| canonical(&info.source.chat));
+                    wuphf_connector::send_notice(
+                        &self.inputs,
+                        pb::NoticeKind::MediaUnavailable,
+                        media_failure_detail(base, info, &chat, &error),
+                    );
                     return;
                 }
             }
@@ -226,6 +233,33 @@ async fn with_other_forms(client: &Client, info: &MessageInfo, event: &mut pb::C
             });
         }
     }
+}
+
+/// The detail of the owner notice for media that could not be fetched: what it
+/// was, who sent it, where, and why it failed.
+fn media_failure_detail(
+    base: &wa::Message,
+    info: &MessageInfo,
+    chat: &str,
+    error: &media::InboundMediaError,
+) -> String {
+    use pb::attachment::Kind;
+    let what = match media::inbound_media(base).map(|media| media.metadata.kind()) {
+        Some(Kind::Image) => "a photo",
+        Some(Kind::Video) => "a video",
+        Some(Kind::Audio) => "an audio message",
+        Some(Kind::File) => "a document",
+        Some(Kind::Sticker) => "a sticker",
+        _ => "media",
+    };
+    let sender = if info.source.is_from_me {
+        "you".to_owned()
+    } else if info.push_name.trim().is_empty() {
+        canonical(&info.source.sender)
+    } else {
+        info.push_name.trim().to_owned()
+    };
+    format!("{what} from {sender} in {chat}: {error}")
 }
 
 /// The device part of a JID is always stripped so a per-device address never
@@ -894,5 +928,30 @@ mod tests {
             &stored(),
         ));
         assert_eq!(event.text.as_deref(), Some("hey @Bob"));
+    }
+
+    #[test]
+    fn a_failed_download_tells_the_owner_what_where_and_why() {
+        let error = media::InboundMediaError::Download(anyhow::anyhow!("media expired"));
+        let detail = media_failure_detail(
+            &photo(Some("look"), None),
+            &info(None),
+            "[P] Alice (1555)",
+            &error,
+        );
+        assert_eq!(
+            detail,
+            "a photo from Alice in [P] Alice (1555): download from WhatsApp: media expired"
+        );
+        let mut own = info(None);
+        own.source.is_from_me = true;
+        let voice = wa::Message {
+            audio_message: MessageField::some(wa::message::AudioMessage::default()),
+            ..Default::default()
+        };
+        assert_eq!(
+            media_failure_detail(&voice, &own, "1555@s.whatsapp.net", &error),
+            "an audio message from you in 1555@s.whatsapp.net: download from WhatsApp: media expired"
+        );
     }
 }

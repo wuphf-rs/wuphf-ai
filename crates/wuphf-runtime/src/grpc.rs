@@ -274,6 +274,7 @@ fn input_from_proto(
                 Ok(pb::NoticeKind::DisappearingTimerUnknown) => {
                     NoticeKind::DisappearingTimerUnknown
                 }
+                Ok(pb::NoticeKind::MediaUnavailable) => NoticeKind::MediaUnavailable,
                 // An unset or unknown kind still means the connector is trying
                 // to say something is wrong, so it is reported as a degradation
                 // rather than dropped.
@@ -1116,6 +1117,22 @@ mod tests {
                 connector_id: whatsapp(),
                 kind: NoticeKind::DisappearingTimerUnknown,
                 detail: "chat 1@s.whatsapp.net".into(),
+            }
+        );
+    }
+
+    #[test]
+    fn the_media_notice_kind_maps_to_its_own_kind() {
+        let frame = pb::client_frame::Body::OwnerNotice(pb::OwnerNotice {
+            kind: pb::NoticeKind::MediaUnavailable.into(),
+            detail: "image from Alice".into(),
+        });
+        assert_eq!(
+            work(frame),
+            InboundWork::Notice {
+                connector_id: whatsapp(),
+                kind: NoticeKind::MediaUnavailable,
+                detail: "image from Alice".into(),
             }
         );
     }

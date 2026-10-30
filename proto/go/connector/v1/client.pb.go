@@ -94,6 +94,11 @@ const (
 	// without one and will not disappear. `detail` names the chat. The core does
 	// not fold it into the connector's health state.
 	NoticeKind_NOTICE_KIND_DISAPPEARING_TIMER_UNKNOWN NoticeKind = 5
+	// Not about the connector's health: an inbound message's media could not be
+	// downloaded, so the message was not bridged. `detail` names the media kind,
+	// the sender, the chat and the error. The core does not fold it into the
+	// connector's health state.
+	NoticeKind_NOTICE_KIND_MEDIA_UNAVAILABLE NoticeKind = 6
 )
 
 // Enum value maps for NoticeKind.
@@ -105,6 +110,7 @@ var (
 		3: "NOTICE_KIND_DEGRADED",
 		4: "NOTICE_KIND_RECOVERED",
 		5: "NOTICE_KIND_DISAPPEARING_TIMER_UNKNOWN",
+		6: "NOTICE_KIND_MEDIA_UNAVAILABLE",
 	}
 	NoticeKind_value = map[string]int32{
 		"NOTICE_KIND_UNSPECIFIED":                0,
@@ -113,6 +119,7 @@ var (
 		"NOTICE_KIND_DEGRADED":                   3,
 		"NOTICE_KIND_RECOVERED":                  4,
 		"NOTICE_KIND_DISAPPEARING_TIMER_UNKNOWN": 5,
+		"NOTICE_KIND_MEDIA_UNAVAILABLE":          6,
 	}
 )
 
@@ -1622,7 +1629,7 @@ const file_client_proto_rawDesc = "" +
 	"\vReceiptKind\x12\x1c\n" +
 	"\x18RECEIPT_KIND_UNSPECIFIED\x10\x00\x12\x1a\n" +
 	"\x16RECEIPT_KIND_DELIVERED\x10\x01\x12\x15\n" +
-	"\x11RECEIPT_KIND_READ\x10\x02*\xc5\x01\n" +
+	"\x11RECEIPT_KIND_READ\x10\x02*\xe8\x01\n" +
 	"\n" +
 	"NoticeKind\x12\x1b\n" +
 	"\x17NOTICE_KIND_UNSPECIFIED\x10\x00\x12\x1a\n" +
@@ -1630,7 +1637,8 @@ const file_client_proto_rawDesc = "" +
 	"\x19NOTICE_KIND_AUTH_REQUIRED\x10\x02\x12\x18\n" +
 	"\x14NOTICE_KIND_DEGRADED\x10\x03\x12\x19\n" +
 	"\x15NOTICE_KIND_RECOVERED\x10\x04\x12*\n" +
-	"&NOTICE_KIND_DISAPPEARING_TIMER_UNKNOWN\x10\x05B:Z8github.com/akshettrj/wuphf/proto/go/connector/v1;wuphfpbb\x06proto3"
+	"&NOTICE_KIND_DISAPPEARING_TIMER_UNKNOWN\x10\x05\x12!\n" +
+	"\x1dNOTICE_KIND_MEDIA_UNAVAILABLE\x10\x06B:Z8github.com/akshettrj/wuphf/proto/go/connector/v1;wuphfpbb\x06proto3"
 
 var (
 	file_client_proto_rawDescOnce sync.Once

@@ -2341,6 +2341,25 @@ async fn timer_notices_bypass_the_health_state() {
 }
 
 #[tokio::test]
+async fn a_media_notice_never_changes_health() {
+    let core = notifying_core();
+    let whatsapp = ConnectorId(WHATSAPP.into());
+    let detail = "image from Alice in [P] Alice: download from WhatsApp: media expired";
+    let notify = |kind| core.notify_owners(whatsapp.clone(), kind, detail, 1);
+
+    assert_eq!(notify(NoticeKind::Degraded).await.unwrap().len(), 1);
+    // Every failed download is told, and none of them touches the health state.
+    for _ in 0..2 {
+        let sent = notify(NoticeKind::MediaUnavailable).await.unwrap();
+        assert_eq!(sent.len(), 1);
+        let text = notice_text(&sent[0]);
+        assert!(text.contains("was not bridged"), "{text}");
+        assert!(text.contains("media expired"), "{text}");
+    }
+    assert!(notify(NoticeKind::Degraded).await.unwrap().is_empty());
+}
+
+#[tokio::test]
 async fn a_message_without_a_timer_fills_an_unknown_chat_with_off() {
     let core = timer_core(vec![direct_rule()], true);
     core.ingest(event(WHATSAPP, "12345@s.whatsapp.net", "wa-1", None))
