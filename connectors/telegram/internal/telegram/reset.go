@@ -55,7 +55,7 @@ func (c Connector) Reset(ctx context.Context, targetChatID string, confirm bool)
 }
 
 func resetForum(ctx context.Context, api *tg.Client, peers *PeerCache, targetChatID string, confirm bool) error {
-	peer, err := peers.InputPeer(targetChatID)
+	peer, err := peers.InputPeer(ctx, targetChatID)
 	if err != nil {
 		return err
 	}

@@ -6,7 +6,9 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	coreclient "github.com/akshettrj/wuphf/connectors/shared/coreclient"
@@ -112,15 +114,20 @@ func (c Connector) Run(ctx context.Context) error {
 	// A user session with a panel bot token shows the settings panel through
 	// a helper bot (runHelper), a second client in this process; either
 	// session ending ends the connector, so reconnecting stays in one place.
+	// The helper starts only once the main session is known to be a user
+	// session (see serve).
 	group, ctx := errgroup.WithContext(ctx)
 	helperReady := make(chan *gotd.Client, 1)
-	if c.credentials.BotToken == "" && c.credentials.PanelBotToken != "" {
-		group.Go(func() error { return c.runHelper(ctx, panel, stickers, helperReady) })
+	var helperOnce sync.Once
+	startHelper := func() {
+		helperOnce.Do(func() {
+			group.Go(func() error { return c.runHelper(ctx, panel, stickers, helperReady) })
+		})
 	}
 	group.Go(func() error {
 		return client.Run(ctx, func(ctx context.Context) error {
-			return c.serve(ctx, client, peers, panel, stickers, panelClient, helperReady, func(ctx context.Context) error {
-				sender := NewSender(client.API(), peers, media, converter, runtime.Live, c.credentials.BotToken != "").WithInlineStickers(stickers)
+			return c.serve(ctx, client, peers, panel, stickers, panelClient, helperReady, startHelper, func(ctx context.Context, bot bool) error {
+				sender := NewSender(client.API(), peers, media, converter, runtime.Live, bot).WithInlineStickers(stickers)
 				return coreclient.New(coreclient.Options{
 					CoreAddress:         c.cfg.CoreAddress,
 					Token:               coreToken,
@@ -147,34 +154,85 @@ func (c Connector) serve(
 	stickers *InlineStickers,
 	panelClient *botconf.Client,
 	helperReady <-chan *gotd.Client,
-	bridge func(context.Context) error,
+	startHelper func(),
+	bridge func(ctx context.Context, bot bool) error,
 ) error {
 	if err := c.authenticate(ctx, client); err != nil {
 		return err
 	}
-	// Cold-start peer addressing differs by session kind. A user session
-	// primes access hashes from its dialog list; messages.getDialogs is
-	// user-only, so a bot instead relies on Telegram accepting a zero hash
-	// for peers it already has access to.
-	if c.credentials.BotToken != "" {
-		peers.UseBotAddressing()
-	} else if err := primePeers(ctx, client.API(), peers); err != nil {
-		return err
-	}
-	c.logger.Info().Msg("Telegram session connected")
+	// The stored session decides what this connector is: a reused session
+	// file may hold a bot or a user whatever the credentials say now, and
+	// the session is what Telegram sees.
 	self, err := client.Self(ctx)
 	if err != nil {
 		return fmt.Errorf("resolve Telegram session identity: %w", err)
 	}
+	if warning := sessionMismatch(c.cfg.SessionFile, c.credentials.BotToken != "", self); warning != "" {
+		c.logger.Warn().Msg(warning)
+	}
+	if err := prepareAddressing(ctx, self, client.API(), peers, c.logger); err != nil {
+		return err
+	}
+	c.logger.Info().Bool("bot", self.Bot).Str("account", accountName(self)).Msg("Telegram session connected")
 	session := panelSession{self: self.ID, names: []string{self.Username}}
 	if self.Bot {
 		panel.startBot(panelClient, client.API(), session)
+		if c.credentials.PanelBotToken != "" {
+			c.logger.Info().Msg("the session is a bot, so it shows the settings panel itself; the panel bot token is not used")
+		}
 	} else {
 		// Text panels until the helper bot (if any) is up.
 		panel.startUser(panelClient, client.API(), render.NewInlinePanel(panelClient, client.API(), nil, nil, self.ID), session)
-		go c.attachHelper(ctx, client.API(), panel, stickers, panelClient, session, helperReady)
+		switch {
+		case c.credentials.PanelBotToken == "":
+		case c.cfg.Panel.SessionFile == "":
+			c.logger.Warn().Msg("a panel bot token is set but panel.session_file is not; the settings panel stays text")
+		default:
+			startHelper()
+			go c.attachHelper(ctx, client.API(), panel, stickers, panelClient, session, helperReady)
+		}
 	}
-	return bridge(ctx)
+	return bridge(ctx, self.Bot)
+}
+
+// prepareAddressing readies the peer cache for the session's kind. A user
+// session primes access hashes from its dialog list; messages.getDialogs is
+// user-only, so a bot instead looks up each peer it has not seen an update
+// from on its first send (see UseBotAddressing).
+func prepareAddressing(ctx context.Context, self *tg.User, api *tg.Client, peers *PeerCache, logger zerolog.Logger) error {
+	if self.Bot {
+		peers.UseBotAddressing(apiPeerResolver{api: api}, logger)
+		return nil
+	}
+	return primePeers(ctx, api, peers)
+}
+
+// sessionMismatch explains a stored session whose kind contradicts the
+// configured credentials, or returns "" when they agree. The stored session
+// still wins: it is valid and is what Telegram sees, so the bridge keeps
+// working, and the warning says how to switch.
+func sessionMismatch(sessionFile string, hasBotToken bool, self *tg.User) string {
+	switch {
+	case hasBotToken && !self.Bot:
+		return fmt.Sprintf("session file %q is logged in as the user account %s, but a bot token is configured; "+
+			"running as that user. To run as the bot, stop the connector, delete %q and start it again",
+			sessionFile, accountName(self), sessionFile)
+	case !hasBotToken && self.Bot:
+		return fmt.Sprintf("session file %q is logged in as the bot %s, but no bot token is configured, so a user session was expected; "+
+			"running as that bot. To run as your account, stop the connector, delete %q, make sure WUPHF_TELEGRAM_BOT_TOKEN "+
+			"and bot_token are unset, and start it again to log in with WUPHF_TELEGRAM_PHONE",
+			sessionFile, accountName(self), sessionFile)
+	default:
+		return ""
+	}
+}
+
+// accountName names a Telegram account for logs: @username, else its id.
+func accountName(user *tg.User) string {
+	if user.Username != "" {
+		return "@" + user.Username
+	}
+	return strconv.FormatInt(user.ID, 10)
 }
 
 // attachHelper switches a user session's panel and labelled stickers to the

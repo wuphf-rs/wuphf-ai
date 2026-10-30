@@ -133,7 +133,7 @@ func (p *Panel) Take(ctx context.Context, _ tg.Entities, message *tg.Message) bo
 	ctx, cancel := context.WithTimeout(ctx, panelCallTimeout)
 	defer cancel()
 
-	peer, err := p.peers.InputPeer(formatPeer(message.PeerID))
+	peer, err := p.peers.InputPeer(ctx, formatPeer(message.PeerID))
 	if err != nil {
 		if isCommand {
 			p.logger.Warn().Err(err).Msg("cannot address the chat of a panel command")

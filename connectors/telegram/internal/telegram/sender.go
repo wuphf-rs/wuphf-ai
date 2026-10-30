@@ -79,7 +79,7 @@ func (s Sender) SendMessage(ctx context.Context, dispatch *wuphfpb.MessageCreate
 			albumLimit, len(dispatch.Attachments),
 		))
 	}
-	peer, err := s.peers.InputPeer(dispatch.TargetChatId)
+	peer, err := s.peers.InputPeer(ctx, dispatch.TargetChatId)
 	if err != nil {
 		return "", "", err
 	}
@@ -142,7 +142,7 @@ func (s Sender) SendMessage(ctx context.Context, dispatch *wuphfpb.MessageCreate
 // marked as an edit. Either way the original native id is returned unchanged,
 // so the copy mapping continues to point at the message future edits revise.
 func (s Sender) EditMessage(ctx context.Context, dispatch *wuphfpb.MessageEditDispatch) (string, error) {
-	peer, err := s.peers.InputPeer(dispatch.TargetChatId)
+	peer, err := s.peers.InputPeer(ctx, dispatch.TargetChatId)
 	if err != nil {
 		return "", err
 	}
@@ -169,7 +169,7 @@ func (s Sender) EditMessage(ctx context.Context, dispatch *wuphfpb.MessageEditDi
 // leaves it in place and posts a notice replying to it. The original native id
 // is returned unchanged for the acknowledgement.
 func (s Sender) DeleteMessage(ctx context.Context, dispatch *wuphfpb.MessageDeleteDispatch) (string, error) {
-	peer, err := s.peers.InputPeer(dispatch.TargetChatId)
+	peer, err := s.peers.InputPeer(ctx, dispatch.TargetChatId)
 	if err != nil {
 		return "", err
 	}
@@ -208,7 +208,7 @@ func (s Sender) DeleteMessage(ctx context.Context, dispatch *wuphfpb.MessageDele
 // dispatch leaves the parent's copy mapping intact (the posted note is not
 // tracked as a copy).
 func (s Sender) ApplyReaction(ctx context.Context, dispatch *wuphfpb.ReactionDispatch) (string, error) {
-	peer, err := s.peers.InputPeer(dispatch.TargetChatId)
+	peer, err := s.peers.InputPeer(ctx, dispatch.TargetChatId)
 	if err != nil {
 		return "", err
 	}
@@ -248,7 +248,7 @@ func (s Sender) MarkSeen(ctx context.Context, dispatch *wuphfpb.SeenReceiptDispa
 // only for the bridge's signalling emoji (delivery 👍, seen 👀); mirrored source
 // reactions render as text instead.
 func (s Sender) react(ctx context.Context, chatID, messageID, emoji string) (string, error) {
-	peer, err := s.peers.InputPeer(chatID)
+	peer, err := s.peers.InputPeer(ctx, chatID)
 	if err != nil {
 		return "", err
 	}
@@ -268,7 +268,7 @@ func (s Sender) react(ctx context.Context, chatID, messageID, emoji string) (str
 // conversation's title changes. The thread id is returned unchanged for the
 // acknowledgement, as a retitle creates no new message.
 func (s Sender) RetitleThread(ctx context.Context, dispatch *wuphfpb.MessageRetitleDispatch) (string, error) {
-	peer, err := s.peers.InputPeer(dispatch.TargetChatId)
+	peer, err := s.peers.InputPeer(ctx, dispatch.TargetChatId)
 	if err != nil {
 		return "", err
 	}

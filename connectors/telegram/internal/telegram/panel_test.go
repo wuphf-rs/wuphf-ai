@@ -119,7 +119,7 @@ type panelFixture struct {
 func newPanelFixture(t *testing.T, server *settingstest.Server) panelFixture {
 	t.Helper()
 	peers := NewPeerCache()
-	peers.UseBotAddressing()
+	peers.UseBotAddressing(nil, zerolog.Nop())
 	inputs := make(chan *wuphfpb.ClientFrame, 8)
 	panel := NewPanel("wuphf", peers, zerolog.Nop())
 	return panelFixture{

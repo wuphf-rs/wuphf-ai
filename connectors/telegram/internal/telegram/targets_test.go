@@ -1,9 +1,11 @@
 package telegramconnector
 
 import (
+	"context"
 	"testing"
 
 	"github.com/gotd/td/tg"
+	"github.com/rs/zerolog"
 )
 
 func TestFormatPeerRendersTypedChatID(t *testing.T) {
@@ -34,14 +36,14 @@ func TestPeerCacheResolvesObservedHashes(t *testing.T) {
 		Channels: map[int64]*tg.Channel{99: channel},
 	})
 
-	peer, err := cache.InputPeer("telegram:user:88")
+	peer, err := cache.InputPeer(context.Background(), "telegram:user:88")
 	if err != nil {
 		t.Fatalf("InputPeer(user) error = %v", err)
 	}
 	if got, ok := peer.(*tg.InputPeerUser); !ok || got.AccessHash != 111 {
 		t.Fatalf("InputPeer(user) = %#v", peer)
 	}
-	peer, err = cache.InputPeer("telegram:channel:99")
+	peer, err = cache.InputPeer(context.Background(), "telegram:channel:99")
 	if err != nil {
 		t.Fatalf("InputPeer(channel) error = %v", err)
 	}
@@ -58,7 +60,7 @@ func TestPeerCacheObserveClassesPrimesChannel(t *testing.T) {
 	channel.SetAccessHash(222)
 	cache.ObserveClasses(nil, []tg.ChatClass{&tg.Chat{ID: 7}, channel})
 
-	peer, err := cache.InputPeer("telegram:channel:99")
+	peer, err := cache.InputPeer(context.Background(), "telegram:channel:99")
 	if err != nil {
 		t.Fatalf("InputPeer(channel) error = %v", err)
 	}
@@ -70,7 +72,7 @@ func TestPeerCacheObserveClassesPrimesChannel(t *testing.T) {
 func TestPeerCacheChatNeedsNoHash(t *testing.T) {
 	t.Parallel()
 
-	peer, err := NewPeerCache().InputPeer("telegram:chat:7")
+	peer, err := NewPeerCache().InputPeer(context.Background(), "telegram:chat:7")
 	if err != nil {
 		t.Fatalf("InputPeer(chat) error = %v", err)
 	}
@@ -82,7 +84,7 @@ func TestPeerCacheChatNeedsNoHash(t *testing.T) {
 func TestPeerCacheUnknownChannelHashFails(t *testing.T) {
 	t.Parallel()
 
-	if _, err := NewPeerCache().InputPeer("telegram:channel:99"); err == nil {
+	if _, err := NewPeerCache().InputPeer(context.Background(), "telegram:channel:99"); err == nil {
 		t.Fatal("InputPeer() resolved channel without a known access hash")
 	}
 }
@@ -90,13 +92,13 @@ func TestPeerCacheUnknownChannelHashFails(t *testing.T) {
 // A bot never sees an update for its own sends, so a target it has not observed
 // has to stay addressable — otherwise the mirror stalls after every restart
 // until somebody else posts in the chat.
-func TestBotAddressingResolvesUnseenPeers(t *testing.T) {
+func TestBotAddressingFallsBackToAZeroHashWithoutAResolver(t *testing.T) {
 	t.Parallel()
 
 	cache := NewPeerCache()
-	cache.UseBotAddressing()
+	cache.UseBotAddressing(nil, zerolog.Nop())
 
-	peer, err := cache.InputPeer("telegram:channel:99")
+	peer, err := cache.InputPeer(context.Background(), "telegram:channel:99")
 	if err != nil {
 		t.Fatalf("InputPeer() error = %v, want a zero-hash peer", err)
 	}
@@ -105,7 +107,7 @@ func TestBotAddressingResolvesUnseenPeers(t *testing.T) {
 		t.Fatalf("InputPeer() = %#v, want channel 99 with a zero hash", peer)
 	}
 
-	user, err := cache.InputPeer("telegram:user:7")
+	user, err := cache.InputPeer(context.Background(), "telegram:user:7")
 	if err != nil {
 		t.Fatalf("InputPeer() error = %v, want a zero-hash peer", err)
 	}
@@ -120,12 +122,12 @@ func TestBotAddressingPrefersAnObservedHash(t *testing.T) {
 	t.Parallel()
 
 	cache := NewPeerCache()
-	cache.UseBotAddressing()
+	cache.UseBotAddressing(nil, zerolog.Nop())
 	channel := &tg.Channel{ID: 5}
 	channel.SetAccessHash(4242)
 	cache.Observe(tg.Entities{Channels: map[int64]*tg.Channel{5: channel}})
 
-	peer, err := cache.InputPeer("telegram:channel:5")
+	peer, err := cache.InputPeer(context.Background(), "telegram:channel:5")
 	if err != nil {
 		t.Fatalf("InputPeer() error = %v", err)
 	}

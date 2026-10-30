@@ -18,7 +18,14 @@ Implemented slice:
 - acknowledgement of the resulting Telegram message identifier, plus the newly
   provisioned topic ID when a thread was created
 - access-hash peer cache populated from update entities so observed peers can
-  be addressed without preconfiguration
+  be addressed without preconfiguration. A user session also primes it from
+  its dialog list; a bot session looks up a peer it has not seen
+  (`channels.getChannels` / `users.getUsers`) on its first send, since
+  Telegram rejects a zero hash for media
+- the session kind (bot or user) comes from the account the stored session is
+  logged in as, not from which credentials are set. When the two disagree the
+  connector says so at startup and runs as the stored account; delete the
+  session file to log in again
 - core media broker upload/download for one image or file attachment per
   message
 
