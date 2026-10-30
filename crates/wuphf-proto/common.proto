@@ -18,6 +18,19 @@ enum Platform {
 message Capabilities {
   bool supports_threads = 1;
   bool supports_topic_create = 2;
+  // The connector stamps a chat's disappearing-messages timer on what it
+  // sends, and reports the timers it observes. The core fills
+  // MessageCreateDispatch.disappearing only for connectors that declare it.
+  bool supports_disappearing_timers = 3;
+}
+
+// A chat's disappearing-messages timer, a platform-neutral chat property.
+// `seconds` 0 means off. `setting_timestamp` is when the timer was set, in
+// Unix seconds, when the platform says; the core keeps the newer of two
+// timestamped reports, and otherwise the later one.
+message DisappearingTimer {
+  uint32 seconds = 1;
+  optional int64 setting_timestamp = 2;
 }
 
 message Registration {

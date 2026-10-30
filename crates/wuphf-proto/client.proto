@@ -21,6 +21,28 @@ message MessageCreateEvent {
   optional string reply_to_platform_message_id = 9;
   int64 timestamp_ms = 10;
   optional string sender_name = 11;
+  // The chat's timer as this message carried it (WhatsApp: the message's
+  // ContextInfo.expiration, on the owner's own messages too). Set only when the
+  // message carries one greater than 0. A message without one never turns a
+  // known timer off; when the chat's timer is unknown and the connector
+  // declares supports_disappearing_timers, the core records it as off.
+  optional DisappearingTimer disappearing = 12;
+}
+
+// One chat's properties as the platform reported them. An absent field was not
+// reported and leaves what the core knows unchanged. Later plans add fields
+// (title, pins, mutes) here.
+message ChatUpdate {
+  string chat_id = 1;
+  optional DisappearingTimer disappearing = 2;
+}
+
+// Chat properties changed or were learned (a timer setting message, a group
+// notification, a history sync). A batch, since a history sync reports
+// hundreds of chats at once. `chat_id`s are canonical, exactly as the
+// connector reports them in MessageCreateEvent.
+message ChatUpdateEvent {
+  repeated ChatUpdate updates = 1;
 }
 
 // The platform reported that an existing message's content changed. The
@@ -126,6 +148,11 @@ enum NoticeKind {
   NOTICE_KIND_DEGRADED = 3;
   // Back to normal after one of the above.
   NOTICE_KIND_RECOVERED = 4;
+  // Not about the connector's health: a message went to a chat whose
+  // disappearing-messages timer the connector could not learn, so it was sent
+  // without one and will not disappear. `detail` names the chat. The core does
+  // not fold it into the connector's health state.
+  NOTICE_KIND_DISAPPEARING_TIMER_UNKNOWN = 5;
 }
 
 // A connector reporting its own operational state to the account owner. A
@@ -153,5 +180,6 @@ message ClientFrame {
     ReactionEvent reaction = 8;
     ReceiptEvent receipt = 9;
     OwnerNotice owner_notice = 10;
+    ChatUpdateEvent chat_update = 11;
   }
 }

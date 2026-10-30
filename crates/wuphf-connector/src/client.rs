@@ -145,6 +145,7 @@ impl Client {
                     capabilities: Some(pb::Capabilities {
                         supports_threads: self.opts.supports_threads,
                         supports_topic_create: self.opts.supports_topic_create,
+                        supports_disappearing_timers: false,
                     }),
                     // This SDK declares no runtime settings yet.
                     settings: None,

@@ -97,6 +97,7 @@ fn normalize(ctx: &MessageContext) -> Option<pb::ClientFrame> {
             platform_message_id: target,
             sender: canonical(&info.source.sender),
             sender_name: sender_name(ctx),
+            disappearing: None,
             emoji: reaction.text.clone().unwrap_or_default(),
             from_me: info.source.is_from_me,
         })));

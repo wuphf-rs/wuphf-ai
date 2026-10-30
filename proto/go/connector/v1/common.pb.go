@@ -140,15 +140,19 @@ func (x Attachment_Kind) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use Attachment_Kind.Descriptor instead.
 func (Attachment_Kind) EnumDescriptor() ([]byte, []int) {
-	return file_common_proto_rawDescGZIP(), []int{3, 0}
+	return file_common_proto_rawDescGZIP(), []int{4, 0}
 }
 
 type Capabilities struct {
 	state               protoimpl.MessageState `protogen:"open.v1"`
 	SupportsThreads     bool                   `protobuf:"varint,1,opt,name=supports_threads,json=supportsThreads,proto3" json:"supports_threads,omitempty"`
 	SupportsTopicCreate bool                   `protobuf:"varint,2,opt,name=supports_topic_create,json=supportsTopicCreate,proto3" json:"supports_topic_create,omitempty"`
-	unknownFields       protoimpl.UnknownFields
-	sizeCache           protoimpl.SizeCache
+	// The connector stamps a chat's disappearing-messages timer on what it
+	// sends, and reports the timers it observes. The core fills
+	// MessageCreateDispatch.disappearing only for connectors that declare it.
+	SupportsDisappearingTimers bool `protobuf:"varint,3,opt,name=supports_disappearing_timers,json=supportsDisappearingTimers,proto3" json:"supports_disappearing_timers,omitempty"`
+	unknownFields              protoimpl.UnknownFields
+	sizeCache                  protoimpl.SizeCache
 }
 
 func (x *Capabilities) Reset() {
@@ -195,6 +199,69 @@ func (x *Capabilities) GetSupportsTopicCreate() bool {
 	return false
 }
 
+func (x *Capabilities) GetSupportsDisappearingTimers() bool {
+	if x != nil {
+		return x.SupportsDisappearingTimers
+	}
+	return false
+}
+
+// A chat's disappearing-messages timer, a platform-neutral chat property.
+// `seconds` 0 means off. `setting_timestamp` is when the timer was set, in
+// Unix seconds, when the platform says; the core keeps the newer of two
+// timestamped reports, and otherwise the later one.
+type DisappearingTimer struct {
+	state            protoimpl.MessageState `protogen:"open.v1"`
+	Seconds          uint32                 `protobuf:"varint,1,opt,name=seconds,proto3" json:"seconds,omitempty"`
+	SettingTimestamp *int64                 `protobuf:"varint,2,opt,name=setting_timestamp,json=settingTimestamp,proto3,oneof" json:"setting_timestamp,omitempty"`
+	unknownFields    protoimpl.UnknownFields
+	sizeCache        protoimpl.SizeCache
+}
+
+func (x *DisappearingTimer) Reset() {
+	*x = DisappearingTimer{}
+	mi := &file_common_proto_msgTypes[1]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *DisappearingTimer) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*DisappearingTimer) ProtoMessage() {}
+
+func (x *DisappearingTimer) ProtoReflect() protoreflect.Message {
+	mi := &file_common_proto_msgTypes[1]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use DisappearingTimer.ProtoReflect.Descriptor instead.
+func (*DisappearingTimer) Descriptor() ([]byte, []int) {
+	return file_common_proto_rawDescGZIP(), []int{1}
+}
+
+func (x *DisappearingTimer) GetSeconds() uint32 {
+	if x != nil {
+		return x.Seconds
+	}
+	return 0
+}
+
+func (x *DisappearingTimer) GetSettingTimestamp() int64 {
+	if x != nil && x.SettingTimestamp != nil {
+		return *x.SettingTimestamp
+	}
+	return 0
+}
+
 type Registration struct {
 	state        protoimpl.MessageState `protogen:"open.v1"`
 	ConnectorId  string                 `protobuf:"bytes,1,opt,name=connector_id,json=connectorId,proto3" json:"connector_id,omitempty"`
@@ -210,7 +277,7 @@ type Registration struct {
 
 func (x *Registration) Reset() {
 	*x = Registration{}
-	mi := &file_common_proto_msgTypes[1]
+	mi := &file_common_proto_msgTypes[2]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -222,7 +289,7 @@ func (x *Registration) String() string {
 func (*Registration) ProtoMessage() {}
 
 func (x *Registration) ProtoReflect() protoreflect.Message {
-	mi := &file_common_proto_msgTypes[1]
+	mi := &file_common_proto_msgTypes[2]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -235,7 +302,7 @@ func (x *Registration) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Registration.ProtoReflect.Descriptor instead.
 func (*Registration) Descriptor() ([]byte, []int) {
-	return file_common_proto_rawDescGZIP(), []int{1}
+	return file_common_proto_rawDescGZIP(), []int{2}
 }
 
 func (x *Registration) GetConnectorId() string {
@@ -285,7 +352,7 @@ type ConnectorSettingsDeclaration struct {
 
 func (x *ConnectorSettingsDeclaration) Reset() {
 	*x = ConnectorSettingsDeclaration{}
-	mi := &file_common_proto_msgTypes[2]
+	mi := &file_common_proto_msgTypes[3]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -297,7 +364,7 @@ func (x *ConnectorSettingsDeclaration) String() string {
 func (*ConnectorSettingsDeclaration) ProtoMessage() {}
 
 func (x *ConnectorSettingsDeclaration) ProtoReflect() protoreflect.Message {
-	mi := &file_common_proto_msgTypes[2]
+	mi := &file_common_proto_msgTypes[3]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -310,7 +377,7 @@ func (x *ConnectorSettingsDeclaration) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ConnectorSettingsDeclaration.ProtoReflect.Descriptor instead.
 func (*ConnectorSettingsDeclaration) Descriptor() ([]byte, []int) {
-	return file_common_proto_rawDescGZIP(), []int{2}
+	return file_common_proto_rawDescGZIP(), []int{3}
 }
 
 func (x *ConnectorSettingsDeclaration) GetDescriptor_() []byte {
@@ -353,7 +420,7 @@ type Attachment struct {
 
 func (x *Attachment) Reset() {
 	*x = Attachment{}
-	mi := &file_common_proto_msgTypes[3]
+	mi := &file_common_proto_msgTypes[4]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -365,7 +432,7 @@ func (x *Attachment) String() string {
 func (*Attachment) ProtoMessage() {}
 
 func (x *Attachment) ProtoReflect() protoreflect.Message {
-	mi := &file_common_proto_msgTypes[3]
+	mi := &file_common_proto_msgTypes[4]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -378,7 +445,7 @@ func (x *Attachment) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Attachment.ProtoReflect.Descriptor instead.
 func (*Attachment) Descriptor() ([]byte, []int) {
-	return file_common_proto_rawDescGZIP(), []int{3}
+	return file_common_proto_rawDescGZIP(), []int{4}
 }
 
 func (x *Attachment) GetMediaId() string {
@@ -436,7 +503,7 @@ type MediaMetadata struct {
 
 func (x *MediaMetadata) Reset() {
 	*x = MediaMetadata{}
-	mi := &file_common_proto_msgTypes[4]
+	mi := &file_common_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -448,7 +515,7 @@ func (x *MediaMetadata) String() string {
 func (*MediaMetadata) ProtoMessage() {}
 
 func (x *MediaMetadata) ProtoReflect() protoreflect.Message {
-	mi := &file_common_proto_msgTypes[4]
+	mi := &file_common_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -461,7 +528,7 @@ func (x *MediaMetadata) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MediaMetadata.ProtoReflect.Descriptor instead.
 func (*MediaMetadata) Descriptor() ([]byte, []int) {
-	return file_common_proto_rawDescGZIP(), []int{4}
+	return file_common_proto_rawDescGZIP(), []int{5}
 }
 
 func (x *MediaMetadata) GetKind() Attachment_Kind {
@@ -503,10 +570,15 @@ var File_common_proto protoreflect.FileDescriptor
 
 const file_common_proto_rawDesc = "" +
 	"\n" +
-	"\fcommon.proto\x12\x12wuphf.connector.v1\"m\n" +
+	"\fcommon.proto\x12\x12wuphf.connector.v1\"\xaf\x01\n" +
 	"\fCapabilities\x12)\n" +
 	"\x10supports_threads\x18\x01 \x01(\bR\x0fsupportsThreads\x122\n" +
-	"\x15supports_topic_create\x18\x02 \x01(\bR\x13supportsTopicCreate\"\x91\x02\n" +
+	"\x15supports_topic_create\x18\x02 \x01(\bR\x13supportsTopicCreate\x12@\n" +
+	"\x1csupports_disappearing_timers\x18\x03 \x01(\bR\x1asupportsDisappearingTimers\"u\n" +
+	"\x11DisappearingTimer\x12\x18\n" +
+	"\aseconds\x18\x01 \x01(\rR\aseconds\x120\n" +
+	"\x11setting_timestamp\x18\x02 \x01(\x03H\x00R\x10settingTimestamp\x88\x01\x01B\x14\n" +
+	"\x12_setting_timestamp\"\x91\x02\n" +
 	"\fRegistration\x12!\n" +
 	"\fconnector_id\x18\x01 \x01(\tR\vconnectorId\x128\n" +
 	"\bplatform\x18\x02 \x01(\x0e2\x1c.wuphf.connector.v1.PlatformR\bplatform\x12D\n" +
@@ -579,20 +651,21 @@ func file_common_proto_rawDescGZIP() []byte {
 }
 
 var file_common_proto_enumTypes = make([]protoimpl.EnumInfo, 2)
-var file_common_proto_msgTypes = make([]protoimpl.MessageInfo, 5)
+var file_common_proto_msgTypes = make([]protoimpl.MessageInfo, 6)
 var file_common_proto_goTypes = []any{
 	(Platform)(0),                        // 0: wuphf.connector.v1.Platform
 	(Attachment_Kind)(0),                 // 1: wuphf.connector.v1.Attachment.Kind
 	(*Capabilities)(nil),                 // 2: wuphf.connector.v1.Capabilities
-	(*Registration)(nil),                 // 3: wuphf.connector.v1.Registration
-	(*ConnectorSettingsDeclaration)(nil), // 4: wuphf.connector.v1.ConnectorSettingsDeclaration
-	(*Attachment)(nil),                   // 5: wuphf.connector.v1.Attachment
-	(*MediaMetadata)(nil),                // 6: wuphf.connector.v1.MediaMetadata
+	(*DisappearingTimer)(nil),            // 3: wuphf.connector.v1.DisappearingTimer
+	(*Registration)(nil),                 // 4: wuphf.connector.v1.Registration
+	(*ConnectorSettingsDeclaration)(nil), // 5: wuphf.connector.v1.ConnectorSettingsDeclaration
+	(*Attachment)(nil),                   // 6: wuphf.connector.v1.Attachment
+	(*MediaMetadata)(nil),                // 7: wuphf.connector.v1.MediaMetadata
 }
 var file_common_proto_depIdxs = []int32{
 	0, // 0: wuphf.connector.v1.Registration.platform:type_name -> wuphf.connector.v1.Platform
 	2, // 1: wuphf.connector.v1.Registration.capabilities:type_name -> wuphf.connector.v1.Capabilities
-	4, // 2: wuphf.connector.v1.Registration.settings:type_name -> wuphf.connector.v1.ConnectorSettingsDeclaration
+	5, // 2: wuphf.connector.v1.Registration.settings:type_name -> wuphf.connector.v1.ConnectorSettingsDeclaration
 	1, // 3: wuphf.connector.v1.Attachment.kind:type_name -> wuphf.connector.v1.Attachment.Kind
 	1, // 4: wuphf.connector.v1.MediaMetadata.kind:type_name -> wuphf.connector.v1.Attachment.Kind
 	5, // [5:5] is the sub-list for method output_type
@@ -608,15 +681,16 @@ func file_common_proto_init() {
 		return
 	}
 	file_common_proto_msgTypes[1].OneofWrappers = []any{}
-	file_common_proto_msgTypes[3].OneofWrappers = []any{}
+	file_common_proto_msgTypes[2].OneofWrappers = []any{}
 	file_common_proto_msgTypes[4].OneofWrappers = []any{}
+	file_common_proto_msgTypes[5].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_common_proto_rawDesc), len(file_common_proto_rawDesc)),
 			NumEnums:      2,
-			NumMessages:   5,
+			NumMessages:   6,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

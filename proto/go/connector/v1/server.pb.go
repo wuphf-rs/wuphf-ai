@@ -191,8 +191,13 @@ type MessageCreateDispatch struct {
 	TimestampMs              int64                  `protobuf:"varint,10,opt,name=timestamp_ms,json=timestampMs,proto3" json:"timestamp_ms,omitempty"`
 	ReplyContext             *ReplyContext          `protobuf:"bytes,11,opt,name=reply_context,json=replyContext,proto3,oneof" json:"reply_context,omitempty"`
 	SenderName               *string                `protobuf:"bytes,12,opt,name=sender_name,json=senderName,proto3,oneof" json:"sender_name,omitempty"`
-	unknownFields            protoimpl.UnknownFields
-	sizeCache                protoimpl.SizeCache
+	// The target chat's disappearing-messages timer as the core knows it: absent
+	// when never learned, `seconds` 0 when known to be off. Set only for
+	// connectors that declare supports_disappearing_timers. The connector puts
+	// it on every part of the send; edits, deletes and reactions carry none.
+	Disappearing  *DisappearingTimer `protobuf:"bytes,13,opt,name=disappearing,proto3,oneof" json:"disappearing,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *MessageCreateDispatch) Reset() {
@@ -307,6 +312,13 @@ func (x *MessageCreateDispatch) GetSenderName() string {
 		return *x.SenderName
 	}
 	return ""
+}
+
+func (x *MessageCreateDispatch) GetDisappearing() *DisappearingTimer {
+	if x != nil {
+		return x.Disappearing
+	}
+	return nil
 }
 
 // Instruction to revise an already-delivered copy. `target_platform_message_id`
@@ -1025,7 +1037,7 @@ const file_server_proto_rawDesc = "" +
 	"\x05_text\"E\n" +
 	"\x0fProvisionThread\x12\x1c\n" +
 	"\tcontainer\x18\x01 \x01(\tR\tcontainer\x12\x14\n" +
-	"\x05title\x18\x02 \x01(\tR\x05title\"\xdc\x05\n" +
+	"\x05title\x18\x02 \x01(\tR\x05title\"\xbd\x06\n" +
 	"\x15MessageCreateDispatch\x12\x1f\n" +
 	"\vdispatch_id\x18\x01 \x01(\tR\n" +
 	"dispatchId\x12$\n" +
@@ -1041,14 +1053,16 @@ const file_server_proto_rawDesc = "" +
 	" \x01(\x03R\vtimestampMs\x12J\n" +
 	"\rreply_context\x18\v \x01(\v2 .wuphf.connector.v1.ReplyContextH\x05R\freplyContext\x88\x01\x01\x12$\n" +
 	"\vsender_name\x18\f \x01(\tH\x06R\n" +
-	"senderName\x88\x01\x01B\x13\n" +
+	"senderName\x88\x01\x01\x12N\n" +
+	"\fdisappearing\x18\r \x01(\v2%.wuphf.connector.v1.DisappearingTimerH\aR\fdisappearing\x88\x01\x01B\x13\n" +
 	"\x11_target_thread_idB\x13\n" +
 	"\x11_provision_threadB\x0e\n" +
 	"\f_participantB\a\n" +
 	"\x05_textB\x1f\n" +
 	"\x1d_reply_to_platform_message_idB\x10\n" +
 	"\x0e_reply_contextB\x0e\n" +
-	"\f_sender_name\"\xec\x02\n" +
+	"\f_sender_nameB\x0f\n" +
+	"\r_disappearing\"\xec\x02\n" +
 	"\x13MessageEditDispatch\x12\x1f\n" +
 	"\vdispatch_id\x18\x01 \x01(\tR\n" +
 	"dispatchId\x12$\n" +
@@ -1140,25 +1154,27 @@ var file_server_proto_goTypes = []any{
 	(*Rejected)(nil),               // 9: wuphf.connector.v1.Rejected
 	(*ServerFrame)(nil),            // 10: wuphf.connector.v1.ServerFrame
 	(*Attachment)(nil),             // 11: wuphf.connector.v1.Attachment
+	(*DisappearingTimer)(nil),      // 12: wuphf.connector.v1.DisappearingTimer
 }
 var file_server_proto_depIdxs = []int32{
 	11, // 0: wuphf.connector.v1.ReplyContext.attachments:type_name -> wuphf.connector.v1.Attachment
 	1,  // 1: wuphf.connector.v1.MessageCreateDispatch.provision_thread:type_name -> wuphf.connector.v1.ProvisionThread
 	11, // 2: wuphf.connector.v1.MessageCreateDispatch.attachments:type_name -> wuphf.connector.v1.Attachment
 	0,  // 3: wuphf.connector.v1.MessageCreateDispatch.reply_context:type_name -> wuphf.connector.v1.ReplyContext
-	2,  // 4: wuphf.connector.v1.ServerFrame.message_create:type_name -> wuphf.connector.v1.MessageCreateDispatch
-	9,  // 5: wuphf.connector.v1.ServerFrame.rejected:type_name -> wuphf.connector.v1.Rejected
-	3,  // 6: wuphf.connector.v1.ServerFrame.message_edit:type_name -> wuphf.connector.v1.MessageEditDispatch
-	4,  // 7: wuphf.connector.v1.ServerFrame.message_delete:type_name -> wuphf.connector.v1.MessageDeleteDispatch
-	5,  // 8: wuphf.connector.v1.ServerFrame.message_retitle:type_name -> wuphf.connector.v1.MessageRetitleDispatch
-	6,  // 9: wuphf.connector.v1.ServerFrame.reaction:type_name -> wuphf.connector.v1.ReactionDispatch
-	7,  // 10: wuphf.connector.v1.ServerFrame.delivery_ack:type_name -> wuphf.connector.v1.DeliveryAckDispatch
-	8,  // 11: wuphf.connector.v1.ServerFrame.seen_receipt:type_name -> wuphf.connector.v1.SeenReceiptDispatch
-	12, // [12:12] is the sub-list for method output_type
-	12, // [12:12] is the sub-list for method input_type
-	12, // [12:12] is the sub-list for extension type_name
-	12, // [12:12] is the sub-list for extension extendee
-	0,  // [0:12] is the sub-list for field type_name
+	12, // 4: wuphf.connector.v1.MessageCreateDispatch.disappearing:type_name -> wuphf.connector.v1.DisappearingTimer
+	2,  // 5: wuphf.connector.v1.ServerFrame.message_create:type_name -> wuphf.connector.v1.MessageCreateDispatch
+	9,  // 6: wuphf.connector.v1.ServerFrame.rejected:type_name -> wuphf.connector.v1.Rejected
+	3,  // 7: wuphf.connector.v1.ServerFrame.message_edit:type_name -> wuphf.connector.v1.MessageEditDispatch
+	4,  // 8: wuphf.connector.v1.ServerFrame.message_delete:type_name -> wuphf.connector.v1.MessageDeleteDispatch
+	5,  // 9: wuphf.connector.v1.ServerFrame.message_retitle:type_name -> wuphf.connector.v1.MessageRetitleDispatch
+	6,  // 10: wuphf.connector.v1.ServerFrame.reaction:type_name -> wuphf.connector.v1.ReactionDispatch
+	7,  // 11: wuphf.connector.v1.ServerFrame.delivery_ack:type_name -> wuphf.connector.v1.DeliveryAckDispatch
+	8,  // 12: wuphf.connector.v1.ServerFrame.seen_receipt:type_name -> wuphf.connector.v1.SeenReceiptDispatch
+	13, // [13:13] is the sub-list for method output_type
+	13, // [13:13] is the sub-list for method input_type
+	13, // [13:13] is the sub-list for extension type_name
+	13, // [13:13] is the sub-list for extension extendee
+	0,  // [0:13] is the sub-list for field type_name
 }
 
 func init() { file_server_proto_init() }

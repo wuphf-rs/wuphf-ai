@@ -271,7 +271,8 @@ fn input_from_proto(
                 // An unset or unknown kind still means the connector is trying
                 // to say something is wrong, so it is reported as a degradation
                 // rather than dropped.
-                Ok(pb::NoticeKind::Unspecified) | Err(_) => NoticeKind::Degraded,
+                Ok(pb::NoticeKind::Unspecified | pb::NoticeKind::DisappearingTimerUnknown)
+                | Err(_) => NoticeKind::Degraded,
             };
             Ok(ConnectorInput::Work(Box::new(InboundWork::Notice {
                 connector_id: connector_id.clone(),
@@ -290,6 +291,9 @@ fn input_from_proto(
         }
         Some(pb::client_frame::Body::Registration(_)) => {
             Err(WireError("registration already completed".into()))
+        }
+        Some(pb::client_frame::Body::ChatUpdate(_)) => {
+            Err(WireError("chat updates are not accepted yet".into()))
         }
         Some(pb::client_frame::Body::Reaction(event)) => {
             Ok(ConnectorInput::event(Event {
@@ -376,6 +380,7 @@ fn output_to_proto(output: ConnectorOutput) -> pb::ServerFrame {
                         timestamp_ms: message.timestamp_ms,
                         reply_context: reply_context.map(reply_context_to_proto),
                         sender_name: message.author_name,
+                        disappearing: None,
                     }))
                 }
                 Action::Edit {

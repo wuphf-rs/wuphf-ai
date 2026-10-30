@@ -365,6 +365,7 @@ async fn inbound_event_frames_are_forwarded_to_the_core() {
                     reply_to_platform_message_id: None,
                     timestamp_ms: 1,
                     sender_name: None,
+                    disappearing: None,
                 },
             )),
         })

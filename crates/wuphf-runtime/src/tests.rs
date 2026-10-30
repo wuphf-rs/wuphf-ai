@@ -644,6 +644,7 @@ async fn grpc_transport_delivers_dispatch_to_registered_connector() {
             Some(pb::Capabilities {
                 supports_threads: true,
                 supports_topic_create: true,
+                supports_disappearing_timers: false,
             }),
         ))
         .await
@@ -681,6 +682,7 @@ async fn grpc_transport_delivers_dispatch_to_registered_connector() {
                     reply_to_platform_message_id: None,
                     timestamp_ms: 1,
                     sender_name: None,
+                    disappearing: None,
                 },
             )),
         })
@@ -1082,6 +1084,7 @@ async fn open_telegram_session(
             Some(pb::Capabilities {
                 supports_threads: true,
                 supports_topic_create: true,
+                supports_disappearing_timers: false,
             }),
         ))
         .await

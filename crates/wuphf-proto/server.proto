@@ -46,6 +46,11 @@ message MessageCreateDispatch {
   int64 timestamp_ms = 10;
   optional ReplyContext reply_context = 11;
   optional string sender_name = 12;
+  // The target chat's disappearing-messages timer as the core knows it: absent
+  // when never learned, `seconds` 0 when known to be off. Set only for
+  // connectors that declare supports_disappearing_timers. The connector puts
+  // it on every part of the send; edits, deletes and reactions carry none.
+  optional DisappearingTimer disappearing = 13;
 }
 
 // Instruction to revise an already-delivered copy. `target_platform_message_id`
