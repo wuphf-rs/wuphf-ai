@@ -77,17 +77,21 @@ async fn main() -> anyhow::Result<()> {
             .await
             .context("prepare the WhatsApp contacts table")?,
     );
-    // Chat pictures are uploaded to the core's media store.
-    let avatars = Arc::new(Avatars::new(
-        wuphf_connector::MediaClient::connect(&config.core_address, &core_token)
-            .context("prepare the core media client")?,
-    ));
+    // One core media client stores inbound attachments and chat pictures.
+    let media = wuphf_connector::MediaClient::connect(&config.core_address, &core_token)
+        .context("prepare the core media client")?;
+    let avatars = Arc::new(Avatars::new(media.clone()));
     let (inputs_tx, inputs_rx) = mpsc::channel(EVENT_CAPACITY);
     // One group directory serves the namer (subjects), the first-sighting
     // report (description, members) and the sender (timers).
     let groups = Arc::new(GroupDirectory::new());
     let titles = Arc::new(ChatTitles::new(Arc::clone(&groups), contacts));
-    let normalizer = Normalizer::new(inputs_tx.clone(), Arc::clone(&titles), Arc::clone(&avatars));
+    let normalizer = Normalizer::new(
+        inputs_tx.clone(),
+        Arc::clone(&titles),
+        Arc::clone(&avatars),
+        media,
+    );
     let chat_events = ChatEvents::new(inputs_tx.clone(), titles, avatars);
 
     let mut builder = Bot::builder()

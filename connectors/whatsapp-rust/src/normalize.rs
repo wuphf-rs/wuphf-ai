@@ -13,6 +13,7 @@ use whatsapp_rust::types::message::MessageInfo;
 use whatsapp_rust::wacore::proto_helpers::MessageExt;
 use whatsapp_rust::waproto::whatsapp as wa;
 use whatsapp_rust::{Jid, Server};
+use wuphf_connector::MediaClient;
 use wuphf_proto::connector as pb;
 
 use crate::avatars::Avatars;
@@ -20,6 +21,7 @@ use crate::chats::{Sightings, chat_forms, sighting_updates};
 use crate::disappearing::{
     CHAT_UPDATE_BATCH, chat_update_frames, ephemeral_setting, message_timer,
 };
+use crate::media;
 use crate::names::ChatTitles;
 
 /// Maps inbound WhatsApp messages onto core event frames and queues them for
@@ -29,6 +31,7 @@ pub struct Normalizer {
     inputs: mpsc::Sender<pb::ClientFrame>,
     titles: Arc<ChatTitles>,
     avatars: Arc<Avatars>,
+    media: MediaClient,
     sightings: Arc<Sightings>,
 }
 
@@ -47,11 +50,13 @@ impl Normalizer {
         inputs: mpsc::Sender<pb::ClientFrame>,
         titles: Arc<ChatTitles>,
         avatars: Arc<Avatars>,
+        media: MediaClient,
     ) -> Self {
         Self {
             inputs,
             titles,
             avatars,
+            media,
             sightings: Arc::new(Sightings::default()),
         }
     }
@@ -67,11 +72,30 @@ impl Normalizer {
                 .await;
         }
         let title = self.titles.title(client, info).await;
+        // A message's media is fetched before it is mapped: the create names the
+        // stored attachment. Protocol messages and reactions carry none.
+        let base = ctx.message.get_base_message();
+        let mut attachments = Vec::new();
+        if !base.protocol_message.is_set() && !base.reaction_message.is_set() {
+            match media::fetch(client, &self.media, base).await {
+                Ok(attachment) => attachments.extend(attachment),
+                Err(error) => {
+                    warn!(
+                        chat = %info.source.chat,
+                        message_id = %info.id,
+                        %error,
+                        "dropping a WhatsApp media message: the media could not be fetched"
+                    );
+                    return;
+                }
+            }
+        }
         let names = Names {
             sender: self.sender_display_name(client, info).await,
             mentions: self.mentions(client, &ctx.message).await,
         };
-        let Some(mut frame) = normalize(info, &ctx.message, title.clone(), &names) else {
+        let Some(mut frame) = normalize(info, &ctx.message, title.clone(), &names, &attachments)
+        else {
             return;
         };
         // A DM's timer is reported under both its LID and phone forms: the core
@@ -212,12 +236,14 @@ pub fn canonical(jid: &whatsapp_rust::Jid) -> String {
 
 /// One inbound message as a core frame, or `None` when it is not bridged.
 /// `chat_title` is the chat's title as the namer resolved it.
-/// `names` holds the sender's and the mentioned people's names.
+/// `names` holds the sender's and the mentioned people's names; `attachments`
+/// the message's media, already stored in the core.
 fn normalize(
     info: &MessageInfo,
     message: &wa::Message,
     chat_title: Option<String>,
     names: &Names,
+    attachments: &[pb::Attachment],
 ) -> Option<pb::ClientFrame> {
     let chat = canonical(&info.source.chat);
     // Ephemeral, view-once, device-sent and document-with-caption wrappers are
@@ -292,18 +318,17 @@ fn normalize(
         })));
     }
 
-    let Some(text) = message.text_content() else {
-        // Media messages are not bridged yet; dropping is deliberate rather
-        // than delivering a caption that silently loses the attachment.
-        if has_attachment(base) {
-            warn!(
-                chat,
-                message_id = %info.id,
-                "dropping WhatsApp media message: attachments are not yet supported"
-            );
-        }
+    // A message whose media was not fetched is not bridged: delivering its
+    // caption alone would silently lose the attachment (the Go connector
+    // drops it too).
+    if has_attachment(base) && attachments.is_empty() {
         return None;
-    };
+    }
+    let text = mark_view_once(message, base, message_text(base));
+    let text = render_mentions(&text, &names.mentions);
+    if text.is_empty() && attachments.is_empty() {
+        return None;
+    }
     let sender = canonical(&info.source.sender);
     Some(frame(pb::client_frame::Body::MessageCreate(
         pb::MessageCreateEvent {
@@ -317,8 +342,8 @@ fn normalize(
             // it, a direct chat's two sides are indistinguishable on a mirror.
             participant: Some(sender.clone()),
             sender,
-            text: Some(render_mentions(text, &names.mentions)),
-            attachments: vec![],
+            text: (!text.is_empty()).then_some(text),
+            attachments: attachments.to_vec(),
             reply_to_platform_message_id: reply_target(message),
             timestamp_ms: info.timestamp.timestamp_millis(),
             sender_name: sender_name(info, names.sender.as_deref()),
@@ -349,6 +374,34 @@ fn sender_name(info: &MessageInfo, resolved: Option<&str>) -> Option<String> {
         return Some(format!("{name} (linked device)"));
     }
     Some(name)
+}
+
+/// The message's text: its body, else the caption of its image, video or
+/// document, as the Go connector's `messageText` reads it.
+fn message_text(base: &wa::Message) -> String {
+    base.text_content()
+        .or_else(|| base.get_caption())
+        .unwrap_or_default()
+        .to_owned()
+}
+
+/// Labels a bridged view-once photo, video or voice note so the mirror copy is
+/// recognisable as one (the original disappears once opened on WhatsApp).
+const VIEW_ONCE_MARKER: &str = "👁️ View once";
+
+/// Prefixes the view-once marker to a view-once photo, video or voice note's
+/// text: the marker alone when it has no caption. Anything else is returned
+/// unchanged, as in the Go connector, which marks only those three.
+fn mark_view_once(message: &wa::Message, base: &wa::Message, text: String) -> String {
+    let plays_once = message.is_view_once()
+        && (base.image_message.is_set()
+            || base.video_message.is_set()
+            || base.audio_message.is_set());
+    match (plays_once, text.is_empty()) {
+        (false, _) => text,
+        (true, true) => VIEW_ONCE_MARKER.to_owned(),
+        (true, false) => format!("{VIEW_ONCE_MARKER}\n{text}"),
+    }
 }
 
 fn reply_target(message: &wa::Message) -> Option<String> {
@@ -455,6 +508,7 @@ mod tests {
             &timed_text(),
             None,
             &Names::default(),
+            &[],
         ));
         assert_eq!(
             event.disappearing,
@@ -469,6 +523,7 @@ mod tests {
                 &timed_text(),
                 None,
                 &Names::default(),
+                &[],
             ));
             assert_eq!(event.disappearing, None);
         }
@@ -482,9 +537,16 @@ mod tests {
             &message,
             Some("[P] Alice (1555)".into()),
             &Names::default(),
+            &[],
         ));
         assert_eq!(titled.chat_title.as_deref(), Some("[P] Alice (1555)"));
-        let untitled = create(normalize(&info(None), &message, None, &Names::default()));
+        let untitled = create(normalize(
+            &info(None),
+            &message,
+            None,
+            &Names::default(),
+            &[],
+        ));
         assert_eq!(untitled.chat_title, None);
     }
 
@@ -508,6 +570,7 @@ mod tests {
                 &ephemeral_setting_message(seconds, Some(1_700_000_000)),
                 None,
                 &Names::default(),
+                &[],
             ));
             assert_eq!(
                 event.updates,
@@ -527,6 +590,7 @@ mod tests {
             &ephemeral_setting_message(86_400, None),
             None,
             &Names::default(),
+            &[],
         ));
         assert_eq!(
             event.updates[0].disappearing,
@@ -575,14 +639,14 @@ mod tests {
             sender: Some("Alice Smith".into()),
             mentions: vec![("1777".into(), "Bob (1777)".into())],
         };
-        let event = create(normalize(&info, &message, None, &names));
+        let event = create(normalize(&info, &message, None, &names, &[]));
         assert_eq!(event.sender_name.as_deref(), Some("Alice Smith"));
         assert_eq!(event.text.as_deref(), Some("ping @Bob (1777)"));
         // Without a resolved name, the push name; the owner is "Me".
-        let event = create(normalize(&info, &message, None, &Names::default()));
+        let event = create(normalize(&info, &message, None, &Names::default(), &[]));
         assert_eq!(event.sender_name.as_deref(), Some("Alice"));
         info.source.is_from_me = true;
-        let event = create(normalize(&info, &message, None, &names));
+        let event = create(normalize(&info, &message, None, &names, &[]));
         assert_eq!(event.sender_name.as_deref(), Some("Me"));
     }
 
@@ -630,7 +694,7 @@ mod tests {
             }),
             ..Default::default()
         });
-        match normalize(&info(None), &message, None, &Names::default()).and_then(|f| f.body) {
+        match normalize(&info(None), &message, None, &Names::default(), &[]).and_then(|f| f.body) {
             Some(pb::client_frame::Body::Reaction(event)) => {
                 assert_eq!(event.platform_message_id, "wa-0");
                 assert_eq!(event.emoji, "👍");
@@ -645,7 +709,7 @@ mod tests {
             wa::message::protocol_message::Type::MESSAGE_EDIT,
             Some(wa::Message::text("new")),
         ));
-        match normalize(&info(None), &message, None, &Names::default()).and_then(|f| f.body) {
+        match normalize(&info(None), &message, None, &Names::default(), &[]).and_then(|f| f.body) {
             Some(pb::client_frame::Body::MessageEdit(event)) => {
                 assert_eq!(event.platform_message_id, "wa-0");
                 assert_eq!(event.text.as_deref(), Some("new"));
@@ -657,7 +721,7 @@ mod tests {
     #[test]
     fn a_wrapped_revoke_is_bridged() {
         let message = ephemeral(protocol(wa::message::protocol_message::Type::REVOKE, None));
-        match normalize(&info(None), &message, None, &Names::default()).and_then(|f| f.body) {
+        match normalize(&info(None), &message, None, &Names::default(), &[]).and_then(|f| f.body) {
             Some(pb::client_frame::Body::MessageDelete(event)) => {
                 assert_eq!(event.platform_message_id, "wa-0");
             }
@@ -674,7 +738,13 @@ mod tests {
                 ..Default::default()
             },
         ));
-        let event = create(normalize(&info(None), &message, None, &Names::default()));
+        let event = create(normalize(
+            &info(None),
+            &message,
+            None,
+            &Names::default(),
+            &[],
+        ));
         assert_eq!(event.reply_to_platform_message_id.as_deref(), Some("wa-0"));
     }
 
@@ -685,6 +755,7 @@ mod tests {
             &ephemeral(timed_text()),
             None,
             &Names::default(),
+            &[],
         ));
         assert_eq!(
             event.disappearing,
@@ -693,5 +764,138 @@ mod tests {
                 setting_timestamp: Some(1_700_000_000),
             })
         );
+    }
+
+    fn stored() -> Vec<pb::Attachment> {
+        vec![pb::Attachment {
+            media_id: "m-1".into(),
+            ..Default::default()
+        }]
+    }
+
+    /// `message` normalized with a stored attachment and no names.
+    fn with_media(message: &wa::Message) -> pb::MessageCreateEvent {
+        create(normalize(
+            &info(None),
+            message,
+            None,
+            &Names::default(),
+            &stored(),
+        ))
+    }
+
+    fn photo(caption: Option<&str>, view_once: Option<bool>) -> wa::Message {
+        wa::Message {
+            image_message: MessageField::some(wa::message::ImageMessage {
+                caption: caption.map(str::to_owned),
+                view_once,
+                ..Default::default()
+            }),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn a_photo_with_a_caption_is_bridged() {
+        let event = with_media(&photo(Some("look"), None));
+        assert_eq!(event.text.as_deref(), Some("look"));
+        assert_eq!(event.attachments, stored());
+    }
+
+    #[test]
+    fn a_photo_without_a_caption_is_bridged() {
+        let event = with_media(&photo(None, None));
+        assert_eq!(event.text, None);
+        assert_eq!(event.attachments.len(), 1);
+    }
+
+    #[test]
+    fn media_that_was_not_fetched_is_dropped() {
+        let dropped = normalize(
+            &info(None),
+            &photo(Some("look"), None),
+            None,
+            &Names::default(),
+            &[],
+        );
+        assert!(dropped.is_none());
+    }
+
+    #[test]
+    fn a_document_caption_is_read() {
+        let document = wa::Message {
+            document_message: MessageField::some(wa::message::DocumentMessage {
+                caption: Some("the report".into()),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        let wrapped = wa::Message {
+            document_with_caption_message: MessageField::some(wa::message::FutureProofMessage {
+                message: MessageField::some(document.clone()),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        for message in [document, wrapped] {
+            assert_eq!(with_media(&message).text.as_deref(), Some("the report"));
+        }
+    }
+
+    #[test]
+    fn view_once_media_is_marked() {
+        let wrap =
+            |field: fn(&mut wa::Message) -> &mut MessageField<wa::message::FutureProofMessage>,
+             inner: wa::Message| {
+                let mut message = wa::Message::default();
+                *field(&mut message) = MessageField::some(wa::message::FutureProofMessage {
+                    message: MessageField::some(inner),
+                    ..Default::default()
+                });
+                message
+            };
+        let wrappers: [fn(&mut wa::Message) -> &mut MessageField<wa::message::FutureProofMessage>;
+            3] = [
+            |message| &mut message.view_once_message,
+            |message| &mut message.view_once_message_v2,
+            |message| &mut message.view_once_message_v2_extension,
+        ];
+        for field in wrappers {
+            let event = with_media(&wrap(field, photo(Some("hi"), Some(true))));
+            assert_eq!(event.text.as_deref(), Some("👁️ View once\nhi"));
+        }
+        let video = wa::Message {
+            video_message: MessageField::some(wa::message::VideoMessage::default()),
+            ..Default::default()
+        };
+        let event = with_media(&wrap(wrappers[1], video));
+        assert_eq!(event.text.as_deref(), Some("👁️ View once"));
+        let voice = wa::Message {
+            audio_message: MessageField::some(wa::message::AudioMessage {
+                view_once: Some(true),
+                ptt: Some(true),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        assert_eq!(with_media(&voice).text.as_deref(), Some("👁️ View once"));
+        let event = with_media(&photo(Some("hi"), None));
+        assert_eq!(event.text.as_deref(), Some("hi"));
+    }
+
+    #[test]
+    fn mentions_render_in_captions() {
+        let names = Names {
+            mentions: vec![("1666".into(), "Bob".into())],
+            ..Names::default()
+        };
+        let event = create(normalize(
+            &info(None),
+            &photo(Some("hey @1666"), None),
+            None,
+            &names,
+            &stored(),
+        ));
+        assert_eq!(event.text.as_deref(), Some("hey @Bob"));
     }
 }
