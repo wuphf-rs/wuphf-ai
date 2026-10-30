@@ -262,3 +262,43 @@ func TestAnimatedStickerWebMReturnsConverterError(t *testing.T) {
 		t.Errorf("err = %v, want the converter's error", err)
 	}
 }
+
+func TestAFileKeepsItsNameAndType(t *testing.T) {
+	api := &recordingAPI{}
+	mime := "application/pdf"
+	dispatch := &wuphfpb.MessageCreateDispatch{
+		DispatchId:     "d-1",
+		TargetChatId:   "telegram:chat:42",
+		TargetThreadId: ptr("7"),
+		Participant:    ptr("p1"),
+		Attachments: []*wuphfpb.Attachment{{
+			MediaId:  "m",
+			Kind:     wuphfpb.Attachment_KIND_FILE,
+			MimeType: &mime,
+			FileName: ptr("file.pdf"),
+		}},
+	}
+	if _, _, err := noteSender(api).SendMessage(context.Background(), dispatch); err != nil {
+		t.Fatal(err)
+	}
+	sends := sent[*tg.MessagesSendMediaRequest](api)
+	if len(sends) != 1 {
+		t.Fatalf("got %d media sends, want 1", len(sends))
+	}
+	document, ok := sends[0].Media.(*tg.InputMediaUploadedDocument)
+	if !ok {
+		t.Fatalf("media = %T, want an uploaded document", sends[0].Media)
+	}
+	if document.MimeType != mime {
+		t.Fatalf("mime type = %q, want %q", document.MimeType, mime)
+	}
+	var named string
+	for _, attribute := range document.Attributes {
+		if filename, ok := attribute.(*tg.DocumentAttributeFilename); ok {
+			named = filename.FileName
+		}
+	}
+	if named != "file.pdf" {
+		t.Fatalf("file name = %q, want %q", named, "file.pdf")
+	}
+}

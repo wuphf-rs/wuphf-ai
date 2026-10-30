@@ -365,8 +365,11 @@ func (s Sender) sendTextAsFile(
 	senderName, participant, text string,
 ) (tg.UpdatesClass, error) {
 	content := plainAttributedText(senderName, participant, text)
-	upload := builder.Upload(message.FromBytes("message.txt", []byte(content)))
-	return upload.File(ctx)
+	file, err := builder.Upload(message.FromBytes("message.txt", []byte(content))).AsInputFile(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("upload Telegram text file: %w", err)
+	}
+	return builder.Media(ctx, namedFile(file, "message.txt", "text/plain; charset=utf-8"))
 }
 
 // createTopic creates a forum topic in the container and returns its root
@@ -432,10 +435,25 @@ func (s Sender) sendAttachment(
 	case wuphfpb.Attachment_KIND_AUDIO:
 		return upload.Audio(ctx, captionOptions...)
 	case wuphfpb.Attachment_KIND_FILE:
-		return upload.File(ctx, captionOptions...)
+		file, err := upload.AsInputFile(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("upload Telegram file: %w", err)
+		}
+		return builder.Media(ctx, namedFile(file, name, attachment.GetMimeType(), captionOptions...))
 	default:
 		return nil, coreclient.Permanent(fmt.Errorf("unsupported outbound attachment kind %s", attachment.Kind))
 	}
+}
+
+// namedFile is a plain-file document that carries its file name and MIME type.
+// Telegram does not read either from the uploaded file, so without them a file
+// shows as "file.unknown" and opens with no type.
+func namedFile(file tg.InputFileClass, name, mimeType string, caption ...message.StyledTextOption) *message.UploadedDocumentBuilder {
+	document := message.File(file, caption...).Filename(name)
+	if mimeType != "" {
+		document = document.MIME(mimeType)
+	}
+	return document
 }
 
 // albumLimit is the number of items Telegram accepts in one grouped media
@@ -509,7 +527,7 @@ func (s Sender) albumItem(
 	case wuphfpb.Attachment_KIND_AUDIO:
 		return message.Audio(file, captionOptions...), nil
 	case wuphfpb.Attachment_KIND_FILE:
-		return message.File(file, captionOptions...).Filename(name), nil
+		return namedFile(file, name, attachment.GetMimeType(), captionOptions...), nil
 	default:
 		return nil, coreclient.Permanent(fmt.Errorf("unsupported outbound attachment kind %s", attachment.Kind))
 	}
