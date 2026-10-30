@@ -7,8 +7,11 @@ require (
 	github.com/akshettrj/wuphf/proto/go v0.0.0
 	github.com/gotd/td v0.144.0
 	github.com/pelletier/go-toml/v2 v2.2.4
+	github.com/propheci/botconf/go v0.9.0
 	github.com/rs/zerolog v1.35.1
+	golang.org/x/sync v0.20.0
 	golang.org/x/term v0.41.0
+	google.golang.org/grpc v1.81.1
 )
 
 replace github.com/akshettrj/wuphf/proto/go => ../../proto/go
@@ -37,7 +40,6 @@ require (
 	github.com/mattn/go-isatty v0.0.20 // indirect
 	github.com/ogen-go/ogen v1.19.0 // indirect
 	github.com/pb33f/ordered-map/v2 v2.3.1 // indirect
-	github.com/propheci/botconf/go v0.6.0 // indirect
 	github.com/segmentio/asm v1.2.1 // indirect
 	github.com/shopspring/decimal v1.4.0 // indirect
 	go.opentelemetry.io/otel v1.43.0 // indirect
@@ -51,12 +53,10 @@ require (
 	golang.org/x/exp v0.0.0-20230725093048-515e97ebf090 // indirect
 	golang.org/x/mod v0.34.0 // indirect
 	golang.org/x/net v0.52.0 // indirect
-	golang.org/x/sync v0.20.0 // indirect
 	golang.org/x/sys v0.42.0 // indirect
 	golang.org/x/text v0.35.0 // indirect
 	golang.org/x/tools v0.43.0 // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20260226221140-a57be14db171 // indirect
-	google.golang.org/grpc v1.81.1 // indirect
 	google.golang.org/protobuf v1.36.11 // indirect
 	gopkg.in/yaml.v2 v2.4.0 // indirect
 	rsc.io/qr v0.2.0 // indirect

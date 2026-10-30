@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"strconv"
+	"sync"
+	"time"
 
 	"github.com/akshettrj/wuphf/proto/go/connector/v1"
 	"github.com/gotd/td/tg"
@@ -13,6 +15,18 @@ type Normalizer struct {
 	peers  *PeerCache
 	inputs chan<- *wuphfpb.ClientFrame
 	media  MediaCodec
+	// panel, when set, takes the messages that drive the settings panel
+	// before anything is mirrored; taken remembers them so that their edits
+	// are not mirrored either.
+	panel PanelRouter
+	taken *takenMessages
+}
+
+// PanelRouter takes the messages that drive the settings panel: the panel
+// command and answers to a pending question. It reports whether it took the
+// message; a taken message is never mirrored.
+type PanelRouter interface {
+	Take(ctx context.Context, entities tg.Entities, message *tg.Message) bool
 }
 
 func NewNormalizer(
@@ -21,6 +35,14 @@ func NewNormalizer(
 	media MediaCodec,
 ) Normalizer {
 	return Normalizer{peers: peers, inputs: inputs, media: media}
+}
+
+// WithPanel returns the normalizer with router taking the settings panel's
+// messages before they are mirrored.
+func (n Normalizer) WithPanel(router PanelRouter) Normalizer {
+	n.panel = router
+	n.taken = newTakenMessages(takenMessageTTL)
+	return n
 }
 
 func (n Normalizer) Dispatcher() tg.UpdateDispatcher {
@@ -108,6 +130,9 @@ func (n Normalizer) normalizeEdit(class tg.MessageClass) (*wuphfpb.MessageEditEv
 	if !ok {
 		return nil, false
 	}
+	if n.taken.has(formatPeer(message.PeerID), message.ID) {
+		return nil, false
+	}
 	if message.Out {
 		return nil, false
 	}
@@ -132,6 +157,12 @@ func (n Normalizer) normalize(
 ) (*wuphfpb.MessageCreateEvent, bool, error) {
 	message, ok := class.(*tg.Message)
 	if !ok {
+		return nil, false, nil
+	}
+	// The panel goes first: a user session's owner types the command from
+	// the session's own account, so it would otherwise be dropped as Out.
+	if n.panel != nil && n.panel.Take(ctx, entities, message) {
+		n.taken.add(formatPeer(message.PeerID), message.ID)
 		return nil, false, nil
 	}
 	if message.Out {
@@ -234,4 +265,52 @@ func replyMessageID(message *tg.Message) (int, bool) {
 		}
 	}
 	return replyID, true
+}
+
+// takenMessageTTL is how long the ids of taken messages are kept, so that
+// their edits are not mirrored either.
+const takenMessageTTL = time.Hour
+
+// takenMessages remembers the messages the panel took, by chat and id, for a
+// while. A nil *takenMessages remembers nothing.
+type takenMessages struct {
+	ttl time.Duration
+	now func() time.Time
+
+	mu       sync.Mutex
+	expiries map[takenKey]time.Time
+}
+
+type takenKey struct {
+	chat string
+	id   int
+}
+
+func newTakenMessages(ttl time.Duration) *takenMessages {
+	return &takenMessages{ttl: ttl, now: time.Now, expiries: map[takenKey]time.Time{}}
+}
+
+func (t *takenMessages) add(chat string, id int) {
+	if t == nil {
+		return
+	}
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	now := t.now()
+	for key, expires := range t.expiries {
+		if !now.Before(expires) {
+			delete(t.expiries, key)
+		}
+	}
+	t.expiries[takenKey{chat: chat, id: id}] = now.Add(t.ttl)
+}
+
+func (t *takenMessages) has(chat string, id int) bool {
+	if t == nil {
+		return false
+	}
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	expires, ok := t.expiries[takenKey{chat: chat, id: id}]
+	return ok && t.now().Before(expires)
 }
