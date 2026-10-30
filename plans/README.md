@@ -58,7 +58,7 @@ code).
 | 038 | Key routing rules by id; chats as `connector:chat#thread` | P2 | M | 037 | DONE (migration 0016; see notes) |
 | 039 | Owner ids, chat names, and the core serving its settings | P2 | M–L | 034–038, botconf 003–005 | DONE (botconf v0.5.0, migration 0017; see notes) |
 | 040 | Connectors declare their own settings to the core | P2 | L | 039, botconf 005, 006, 009 | DONE (botconf v0.5.0, migration 0018; see notes) |
-| 041 | A settings panel in the Telegram connector | P2 | L | 039, 040, botconf 004–007 | TODO |
+| 041 | A settings panel in the Telegram connector | P2 | L | 039, 040, botconf 004–007 | DONE (botconf go/v0.9.0; live inline test pending the owner; see notes) |
 | 042 | A `wuphf settings` command | P3 | S | 035, 036, 039 | DONE (see notes) |
 | 043 | Label user-session stickers through the helper bot | P3 | M | 041 | TODO |
 | 044 | Reload re-reads the config file; new rules go through panel drafts | P2 | S–M | 039, 040, 042, botconf 010, 011 | DONE (botconf v0.9.0; see notes) |
@@ -955,6 +955,88 @@ Dependencies and ordering:
     the core's address with their existing core token. A connector config
     with a `log_level` other than trace/debug/info/warn/error now fails to
     load.
+- **041 done 2026-10-30** (on `plans/runtime-settings`). The drift check
+  showed 040's split config (`Runtime` embedded in `File`, senders reading
+  `settings.Live`), d2c224c's `bot_token` and 044's changes; the `message.Out`
+  drop and the one dispatcher answering `wuphf:label` still held, so no STOP.
+  Every concept the plan needs exists in botconf's Go SDK, under the names
+  007 landed. Deviations:
+  - **botconf's renderer, not the plan's sketch:** the connector uses
+    `render/telegram`'s `BotPanel` and `InlinePanel` (go/v0.9.0; the
+    Telegram module moved from go/v0.6.0) instead of `Markup`/`Result`
+    helpers. The renderer keeps the questions, the inline nonces (random, 22
+    characters, single use, two minutes, answered only for the account) and
+    the text fallback, so the connector only routes: `Panel` in
+    `internal/telegram/panel.go` implements the plan's `PanelRouter`, and the
+    normalizer calls it right after the `*tg.Message` assertion, before the
+    `Out` drop. Taken messages are remembered for an hour, so their edits are
+    not mirrored either.
+  - **Text commands** go through the renderer's `Command`, with empty
+    arguments opening the panel (the core answers an empty command with
+    `post`); `Render` is used as an authorization probe first, since the
+    renderer itself replies "You may not change these settings." to a
+    refused command and decision 3 wants no reply. A refused **press** gets
+    the renderer's refusal as an alert toast ("You may not change these
+    settings."), not the plan's "not allowed".
+  - **Forum topics:** a bot session's panel and replies answer the topic
+    root. A user session's inline panel cannot be placed in a topic
+    (`messages.sendInlineBotResult` is sent without a reply target by the
+    renderer), so it lands in the group's General topic; its text fallback
+    does answer the topic.
+  - **User sessions:** only the account itself drives its panel. A stranger's
+    `/wuphf` in a group the account is in is taken (never mirrored) and
+    ignored, since the renderer acts as the account. The account's id must be
+    in the core's `owner_ids` for this connector.
+  - **Helper bot:** its token is `panel_bot_token` or
+    `WUPHF_TELEGRAM_PANEL_BOT_TOKEN` (the environment wins, never a runtime
+    setting), following d2c224c's `bot_token`. The connector runs the main
+    session and the helper under one `errgroup`. The user session's panel
+    starts as text and switches to the helper bot once it has logged in and
+    the account has resolved it by username (`contacts.resolveUsername`), so
+    registration with the core never waits for the helper. The helper
+    answers inline queries and presses that are not the panel's with
+    nothing. `/wuphf@<helper bot>` is accepted too. Bot-session auth and the
+    helper share `authenticateBot` (stored session reused, as before).
+  - **No pickers:** Telegram's user and chat pickers only serve the
+    `telegram.user`/`telegram.chat` domains; wuphf's settings use
+    `wuphf.chat`, `wuphf.connector` and `wuphf.rule`, so `WithPickers` and
+    `HandleService` are not wired.
+  - **Commits:** three instead of four (config; the panel with
+    interception, bot sessions and the helper bot; docs), since the router,
+    the bot front and the inline front share `panel.go` and its tests.
+  - **Extra tests:** `TestCommandIsTakenWhileThePanelIsNotReady`,
+    `TestCommandInATopicAnswersInTheTopic`,
+    `TestOtherCallbacksAreLeftToTheConnector`,
+    `TestStrangerCannotDriveAUserSessionsPanel`, `TestMatchCommand`, and
+    `TestPanelBotTokenFromTheEnvironmentWins`.
+  - **Mutation checks:** each change below made a test fail.
+    - Taking after the `Out` drop: the user-session tests
+      (`TestOwnCommandIsTakenBeforeOutDrop` among them).
+    - No edit memory: `TestEditOfTakenMessageIsNotMirrored`.
+    - A stranger driving a user session's panel:
+      `TestStrangerCannotDriveAUserSessionsPanel`.
+    - No authorization probe: `TestUnauthorizedCommandGetsNoReply`.
+    - Prefix or any-addressee command matching: `TestMatchCommand`,
+      `TestLookalikeTextIsMirrored`.
+    - Not deleting the command: `TestBotPanelSendsInlineKeyboard`.
+    - Ignoring the topic: `TestCommandInATopicAnswersInTheTopic`.
+    - Mirroring the command before the panel is ready:
+      `TestCommandIsTakenWhileThePanelIsNotReady`.
+  - **Builds:** Go only (no Rust change), niced with `GOMAXPROCS=2` and
+    `-p=2`, touched packages first, one `go vet ./...` and
+    `go test -race ./...` at the end. `go mod tidy` made `x/sync` and `grpc`
+    direct and dropped unused `go.sum` lines.
+  - **Results:** Telegram: 68 top-level tests pass under `-race` (43 + 25);
+    `go vet` and `gofmt` clean.
+  - **Owner action:** for a bot session, put your own Telegram user id in
+    `owner_ids`. For a user session, create the helper bot, enable inline
+    mode, set `panel_bot_token` and `[panel] session_file`, and put the
+    account id in `owner_ids`. The inline route needs one live test, which
+    the fakes cannot cover: send `/wuphf` from the account in a chat; the
+    message it sends should show the helper bot's buttons ("via @<helper>");
+    press one and the message should be edited. If Telegram refuses
+    `sendInlineBotResult` for the private result, the panel falls back to
+    text; report that.
 
 ## Findings considered and rejected
 
