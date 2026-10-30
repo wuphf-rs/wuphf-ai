@@ -68,7 +68,7 @@ code).
 | 048 | Port the Instagram connector from messagix to instameow (upstream dropped IG lightspeed) | P0 | M–L | — | DONE |
 | 049 | Move to a botconf release that lifts the gotd (v0.161.0) and tonic/prost (0.12/0.13) pins | P3 | M | a new botconf release | TODO — blocked on botconf |
 | 050 | wuphf-misc: a host for non-bridging features, first an Instagram reel/post downloader | P3 | L | 011 | DONE (see notes; not yet tried against a live Instagram session) |
-| 051 | whatsapp-rust: inbound media, captions, view-once, and the Android client identity | P1 | M | — | TODO |
+| 051 | whatsapp-rust: inbound media, captions, view-once, and the Android client identity | P1 | M | — | DONE (see notes) |
 | 052 | whatsapp-rust: owner notices, inbound receipts, staying up when the WhatsApp client stops | P2 | S–M | — | TODO |
 | 053 | whatsapp-rust: canonical ids, identity migrations, the addressing book, quote authors, channel titles | P1 | M–L | — (051 soft) | TODO |
 | 054 | whatsapp-rust: outbound media of every kind, rendering options, SDK media download | P1 | L | 051 (053 soft) | TODO |
@@ -1281,6 +1281,28 @@ read receipts, albums, polls, locations, vCards) wait for a later plan.
 - **Every plan ends with a live test** and rebuilds only
   `scripts/dev-bin/.bin/wuphf-whatsapp-rust`; 051 needs one re-pair of the
   Rust session (agreed).
+- **051 done 2026-10-31** (on `v2`, commits `66fd022`..`bb4b6b2`; carried
+  onto `origin/v2`'s 046 and 047 on 2026-11-22). whatsapp-rust tests 44 → 65
+  (+5 wrapped messages, +6 media, +6 media in normalize, +1 identity, +3
+  config); clippy and fmt clean; `Cargo.lock` unchanged. Mutations: reading
+  the raw message for reactions and for the context failed the wrapped
+  reaction, reply and timer tests; dropping the unfetched-media guard and
+  marking only the first view-once wrapper failed their tests; mapping
+  business to the personal profile failed the identity test. D1 = (b).
+  Deviations:
+  - The example config sets `client_mode = "android_business"`, like the Go
+    example, because the owner's account is a WhatsApp Business account.
+  - `media::fetch` also has a test for a message without media, and
+    `Config::parse` was split out of `load` for the config tests.
+  - One core `MediaClient` now serves both the avatars and inbound media.
+  - `normalize` takes the stored attachments as their own argument beside
+    `Names`, which holds only names.
+  Owner: restart only whatsapp-rust after re-pairing it once (unlink the
+  device on the phone; move `whatsapp-rust.session.db` and its `-shm` / `-wal`
+  files aside; start and pair). Live test: a photo with and without a
+  caption, a video, a GIF, a voice note, a PDF and a sticker reach the mirror;
+  a view-once photo and voice note arrive marked `👁️ View once`; in a
+  disappearing chat, reactions, edits and reply links come through.
 
 ## Findings considered and rejected
 
