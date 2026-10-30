@@ -88,6 +88,8 @@ func (c Connector) Run(ctx context.Context) error {
 	}
 	defer panelClient.Close()
 	panel := NewPanel(c.cfg.Panel.CommandName(), peers, c.logger)
+	// Labelled stickers of a user session go through the same helper bot.
+	stickers := NewInlineStickers(c.logger)
 	dispatcher := NewNormalizer(peers, inputs, codec).WithPanel(panel).Dispatcher()
 	// Presses of the settings panel's buttons (bot sessions). A bot also labels
 	// stickers with an inline button (see sendSticker); pressing it does
@@ -113,12 +115,12 @@ func (c Connector) Run(ctx context.Context) error {
 	group, ctx := errgroup.WithContext(ctx)
 	helperReady := make(chan *gotd.Client, 1)
 	if c.credentials.BotToken == "" && c.credentials.PanelBotToken != "" {
-		group.Go(func() error { return c.runHelper(ctx, panel, helperReady) })
+		group.Go(func() error { return c.runHelper(ctx, panel, stickers, helperReady) })
 	}
 	group.Go(func() error {
 		return client.Run(ctx, func(ctx context.Context) error {
-			return c.serve(ctx, client, peers, panel, panelClient, helperReady, func(ctx context.Context) error {
-				sender := NewSender(client.API(), peers, media, converter, runtime.Live, c.credentials.BotToken != "")
+			return c.serve(ctx, client, peers, panel, stickers, panelClient, helperReady, func(ctx context.Context) error {
+				sender := NewSender(client.API(), peers, media, converter, runtime.Live, c.credentials.BotToken != "").WithInlineStickers(stickers)
 				return coreclient.New(coreclient.Options{
 					CoreAddress:         c.cfg.CoreAddress,
 					Token:               coreToken,
@@ -142,6 +144,7 @@ func (c Connector) serve(
 	client *gotd.Client,
 	peers *PeerCache,
 	panel *Panel,
+	stickers *InlineStickers,
 	panelClient *botconf.Client,
 	helperReady <-chan *gotd.Client,
 	bridge func(context.Context) error,
@@ -169,14 +172,14 @@ func (c Connector) serve(
 	} else {
 		// Text panels until the helper bot (if any) is up.
 		panel.startUser(panelClient, client.API(), render.NewInlinePanel(panelClient, client.API(), nil, nil, self.ID), session)
-		go c.attachHelper(ctx, client.API(), panel, panelClient, session, helperReady)
+		go c.attachHelper(ctx, client.API(), panel, stickers, panelClient, session, helperReady)
 	}
 	return bridge(ctx)
 }
 
-// attachHelper switches a user session's panel to the helper bot once it has
-// logged in, so the panel gets buttons.
-func (c Connector) attachHelper(ctx context.Context, api *tg.Client, panel *Panel, panelClient *botconf.Client, session panelSession, helperReady <-chan *gotd.Client) {
+// attachHelper switches a user session's panel and labelled stickers to the
+// helper bot once it has logged in, so both get buttons.
+func (c Connector) attachHelper(ctx context.Context, api *tg.Client, panel *Panel, stickers *InlineStickers, panelClient *botconf.Client, session panelSession, helperReady <-chan *gotd.Client) {
 	var helper *gotd.Client
 	select {
 	case helper = <-helperReady:
@@ -195,6 +198,7 @@ func (c Connector) attachHelper(ctx context.Context, api *tg.Client, panel *Pane
 	}
 	panel.startUser(panelClient, api, render.NewInlinePanel(panelClient, api, helper, botUser, session.self), session)
 	panel.addNames(helperSelf.Username)
+	stickers.attach(api, helper.API(), botUser, session.self)
 	c.logger.Info().Str("helper", helperSelf.Username).Msg("settings panel uses the helper bot")
 }
 
@@ -219,28 +223,9 @@ func resolveHelperBot(ctx context.Context, api *tg.Client, helper *tg.User) (tg.
 // runHelper runs the helper bot a user session shows the settings panel
 // through: it answers the panel's inline queries and its button presses.
 // Once logged in it hands itself to the main session over ready.
-func (c Connector) runHelper(ctx context.Context, panel *Panel, ready chan<- *gotd.Client) error {
-	dispatcher := tg.NewUpdateDispatcher()
+func (c Connector) runHelper(ctx context.Context, panel *Panel, stickers *InlineStickers, ready chan<- *gotd.Client) error {
 	var helper *gotd.Client
-	dispatcher.OnBotInlineQuery(func(ctx context.Context, _ tg.Entities, update *tg.UpdateBotInlineQuery) error {
-		if taken, err := panel.HandleInlineQuery(ctx, update); taken {
-			return err
-		}
-		// Anything else typed after @<helper bot> gets nothing.
-		_, err := helper.API().MessagesSetInlineBotResults(ctx, &tg.MessagesSetInlineBotResultsRequest{
-			QueryID:   update.QueryID,
-			CacheTime: 0,
-			Private:   true,
-		})
-		return err
-	})
-	dispatcher.OnInlineBotCallbackQuery(func(ctx context.Context, _ tg.Entities, update *tg.UpdateInlineBotCallbackQuery) error {
-		if taken, err := panel.HandleInlineCallback(ctx, update); taken {
-			return err
-		}
-		_, err := helper.API().MessagesSetBotCallbackAnswer(ctx, &tg.MessagesSetBotCallbackAnswerRequest{QueryID: update.QueryID})
-		return err
-	})
+	dispatcher := newHelperDispatcher(panel, stickers, func() *tg.Client { return helper.API() })
 	helper = gotd.NewClient(c.credentials.AppID, c.credentials.AppHash, gotd.Options{
 		SessionStorage: &session.FileStorage{Path: c.cfg.Panel.SessionFile},
 		UpdateHandler:  dispatcher,
@@ -254,6 +239,37 @@ func (c Connector) runHelper(ctx context.Context, panel *Panel, ready chan<- *go
 		<-ctx.Done()
 		return ctx.Err()
 	})
+}
+
+// newHelperDispatcher routes the helper bot's updates: the settings panel's
+// inline queries and presses first, then the inline stickers' queries.
+// Anything else typed after @<helper bot> gets nothing, and every other press
+// (a sticker's label button among them) is answered silently, since an
+// unanswered press leaves the client spinning.
+func newHelperDispatcher(panel *Panel, stickers *InlineStickers, api func() *tg.Client) tg.UpdateDispatcher {
+	dispatcher := tg.NewUpdateDispatcher()
+	dispatcher.OnBotInlineQuery(func(ctx context.Context, entities tg.Entities, update *tg.UpdateBotInlineQuery) error {
+		if taken, err := panel.HandleInlineQuery(ctx, update); taken {
+			return err
+		}
+		if taken, err := stickers.HandleInlineQuery(ctx, api(), entities, update); taken {
+			return err
+		}
+		_, err := api().MessagesSetInlineBotResults(ctx, &tg.MessagesSetInlineBotResultsRequest{
+			QueryID:   update.QueryID,
+			CacheTime: 0,
+			Private:   true,
+		})
+		return err
+	})
+	dispatcher.OnInlineBotCallbackQuery(func(ctx context.Context, _ tg.Entities, update *tg.UpdateInlineBotCallbackQuery) error {
+		if taken, err := panel.HandleInlineCallback(ctx, update); taken {
+			return err
+		}
+		_, err := api().MessagesSetBotCallbackAnswer(ctx, &tg.MessagesSetBotCallbackAnswerRequest{QueryID: update.QueryID})
+		return err
+	})
+	return dispatcher
 }
 
 // primePeers seeds the peer cache from the account's dialog list so the core can

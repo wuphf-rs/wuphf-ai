@@ -39,6 +39,9 @@ type Sender struct {
 	// rendered (the core dispatches content only). It is a runtime setting:
 	// each dispatch reads it once.
 	runtime *settings.Live[config.Runtime]
+	// stickers sends a user session's labelled stickers through the helper
+	// bot, when there is one (see sendSticker).
+	stickers *InlineStickers
 }
 
 func NewSender(api *tg.Client, peers *PeerCache, media MediaBroker, converter StickerConverter, runtime *settings.Live[config.Runtime], bot bool) Sender {
@@ -51,6 +54,13 @@ func NewSender(api *tg.Client, peers *PeerCache, media MediaBroker, converter St
 		bot:       bot,
 		runtime:   runtime,
 	}
+}
+
+// WithInlineStickers lets a user session label its stickers with a button,
+// through the helper bot.
+func (s Sender) WithInlineStickers(stickers *InlineStickers) Sender {
+	s.stickers = stickers
+	return s
 }
 
 // rendering is the current rendering policy; the zero value when the sender
@@ -90,14 +100,17 @@ func (s Sender) SendMessage(ctx context.Context, dispatch *wuphfpb.MessageCreate
 	}
 
 	builder := s.sender.To(peer).CloneBuilder()
+	target := sendTarget{peer: peer}
 	if nativeReplyID := replyTargetMessageID(dispatch); nativeReplyID != "" {
 		replyID, err := strconv.Atoi(nativeReplyID)
 		if err != nil {
 			return "", "", coreclient.Permanent(fmt.Errorf("invalid Telegram reply message ID %q: %w", nativeReplyID, err))
 		}
 		builder = builder.Reply(replyID)
+		target.replyTo = replyID
 	} else if topicRoot != 0 {
 		builder = builder.Reply(topicRoot)
+		target.replyTo = topicRoot
 	}
 
 	rendering := s.rendering()
@@ -107,7 +120,7 @@ func (s Sender) SendMessage(ctx context.Context, dispatch *wuphfpb.MessageCreate
 	case len(dispatch.Attachments) > 1:
 		updates, err = s.sendAlbum(ctx, builder, dispatch.Attachments, body, rendering.AttachmentsAsFiles)
 	case len(dispatch.Attachments) > 0:
-		updates, err = s.sendAttachment(ctx, builder, dispatch.Attachments[0], body, senderLabel(dispatch.GetSenderName(), dispatch.GetParticipant()), rendering.AttachmentsAsFiles)
+		updates, err = s.sendAttachment(ctx, builder, target, dispatch.Attachments[0], body, senderLabel(dispatch.GetSenderName(), dispatch.GetParticipant()), rendering.AttachmentsAsFiles)
 	case textExceedsLimit(dispatch.GetText(), rendering.MaxMessageLength):
 		updates, err = s.sendTextAsFile(ctx, builder, dispatch.GetSenderName(), dispatch.GetParticipant(), dispatch.GetText())
 	default:
@@ -370,6 +383,7 @@ func (s Sender) createTopic(ctx context.Context, peer tg.InputPeerClass, title s
 func (s Sender) sendAttachment(
 	ctx context.Context,
 	builder *message.Builder,
+	target sendTarget,
 	attachment *wuphfpb.Attachment,
 	captionOptions []message.StyledTextOption,
 	label string,
@@ -384,7 +398,7 @@ func (s Sender) sendAttachment(
 	// media. An animated sticker is rendered as a Telegram WebM video sticker; a
 	// GIF (an animated video) as a Telegram animation.
 	if attachment.Kind == wuphfpb.Attachment_KIND_STICKER {
-		return s.sendSticker(ctx, builder, attachment, bytes, label)
+		return s.sendSticker(ctx, builder, target, attachment, bytes, label)
 	}
 	if attachment.Kind == wuphfpb.Attachment_KIND_VIDEO && attachment.GetAnimated() && !asFile {
 		return builder.Upload(message.FromBytes(gifUploadName(attachment), bytes)).GIF(ctx, captionOptions...)
@@ -545,20 +559,40 @@ func albumGroup(attachment *wuphfpb.Attachment) string {
 //
 // Telegram stickers take no caption, so the sender label a captioned message
 // carries in its text (see senderLabel) is attached another way: a bot session
-// shows it as an inline button under the sticker. A user session, which cannot
-// send inline keyboards, posts it as a short message ("(Sticker)" on a second
-// line) and sends the sticker as a reply to it.
+// shows it as an inline button under the sticker. A user session cannot attach
+// buttons itself, so it sends the sticker as the helper bot's inline result,
+// which carries the same button (InlineStickers). Without a helper, or when the
+// helper fails or takes longer than inlineStickerBudget, it posts the label as
+// a short message ("(Sticker)" on a second line) and sends the sticker as a
+// reply to it.
 func (s Sender) sendSticker(
 	ctx context.Context,
 	builder *message.Builder,
+	target sendTarget,
 	attachment *wuphfpb.Attachment,
 	data []byte,
 	label string,
 ) (tg.UpdatesClass, error) {
+	// Convert an animated sticker once, whichever route sends it.
+	payload, mime, filename := data, "image/webp", "sticker.webp"
+	if attachment.GetAnimated() {
+		if webm, err := s.animatedStickerWebM(ctx, attachment, data); err == nil {
+			payload, mime, filename = webm, "video/webm", "sticker.webm"
+		}
+		// Otherwise deliver the original as a static sticker (first frame).
+	}
 	if label != "" {
 		if s.bot {
 			builder = builder.Markup(markup.InlineRow(markup.Callback(label, []byte(labelCallbackData))))
 		} else {
+			if s.stickers.Ready() {
+				inlineCtx, cancel := context.WithTimeout(ctx, s.stickers.budget)
+				updates, err := s.stickers.Send(inlineCtx, target.peer, target.replyTo, payload, mime, filename, label)
+				cancel()
+				if err == nil {
+					return updates, nil
+				}
+			}
 			// The label message stands in for the caption: it names the sender
 			// and what follows, and the sticker replies to it so the two read as
 			// one message.
@@ -573,16 +607,22 @@ func (s Sender) sendSticker(
 			builder = builder.Reply(labelID)
 		}
 	}
-	if attachment.GetAnimated() {
-		if webm, err := s.animatedStickerWebM(ctx, attachment, data); err == nil {
-			if file, ferr := builder.Upload(message.FromBytes("sticker.webm", webm)).AsInputFile(ctx); ferr == nil {
-				media := message.UploadedDocument(file).MIME("video/webm").Filename("sticker.webm").UploadedSticker()
-				return builder.Media(ctx, media)
-			}
+	if mime == "video/webm" {
+		if file, err := builder.Upload(message.FromBytes(filename, payload)).AsInputFile(ctx); err == nil {
+			media := message.UploadedDocument(file).MIME(mime).Filename(filename).UploadedSticker()
+			return builder.Media(ctx, media)
 		}
-		// Fall through: deliver the original as a static sticker (first frame).
+		// Fall back to the original as a static sticker (first frame).
+		payload = data
 	}
-	return builder.Upload(message.FromBytes("sticker.webp", data)).Sticker(ctx)
+	return builder.Upload(message.FromBytes("sticker.webp", payload)).Sticker(ctx)
+}
+
+// sendTarget is where a message goes: the peer, and the message it replies to
+// (0 for none), which a send that bypasses the builder needs.
+type sendTarget struct {
+	peer    tg.InputPeerClass
+	replyTo int
 }
 
 // animatedStickerWebM returns the sticker as WebM/VP9 bytes, transcoding from
