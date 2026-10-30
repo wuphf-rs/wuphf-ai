@@ -14,10 +14,10 @@ use std::fmt::Debug;
 use std::str::FromStr;
 use uuid::Uuid;
 use wuphf_model::{
-    Action, Attachment, AttachmentKind, ChatAddress, ChatRef, ConnectorId, Conversation,
-    ConversationId, Dispatch, DispatchId, DispatchState, Endpoint, EndpointId, MediaId, Message,
-    MessageCopy, MessageId, ObservedChat, ObservedDirection, ObservedMessage, Platform,
-    ReceiptKind, ReplyContext, RuleId, Target,
+    Action, Attachment, AttachmentKind, ChatAddress, ChatProfile, ChatRef, ConnectorId,
+    Conversation, ConversationId, DisappearingTimer, Dispatch, DispatchId, DispatchState, Endpoint,
+    EndpointId, MediaId, Message, MessageCopy, MessageId, ObservedChat, ObservedDirection,
+    ObservedMessage, Platform, ReceiptKind, ReplyContext, RuleId, Target,
 };
 
 /// A fresh database migrated up to, but not including, `version`.
@@ -370,6 +370,38 @@ async fn migration_0018_adds_connector_settings_declarations() {
     assert_eq!(kept.get::<String, _>("value"), "[]");
 }
 
+/// 0019 only adds the chat profiles table: dispatches stored before it still
+/// decode, and a stored profile decodes into today's model.
+#[tokio::test]
+async fn migration_0019_adds_chat_profiles() {
+    let pool = database_before(19).await;
+    insert_dispatches(&pool, &DISPATCHES_BEFORE_0019).await;
+
+    MIGRATOR.run(&pool).await.unwrap();
+
+    assert_dispatches(&pool).await;
+    sqlx::query("INSERT INTO chat_profiles (connector_id, chat_id, payload) VALUES (?, ?, ?)")
+        .bind("whatsapp-main")
+        .bind("1@s.whatsapp.net")
+        .bind(
+            r#"{"connector_id":"whatsapp-main","chat_id":"1@s.whatsapp.net","disappearing":{"seconds":86400,"setting_timestamp":1700000000}}"#,
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+    let profiles = decode_all::<ChatProfile>(&pool, "chat_profiles").await;
+    assert_eq!(
+        profiles,
+        [ChatProfile {
+            disappearing: Some(DisappearingTimer {
+                seconds: 86_400,
+                setting_timestamp: Some(1_700_000_000),
+            }),
+            ..ChatProfile::new(ConnectorId("whatsapp-main".into()), "1@s.whatsapp.net")
+        }]
+    );
+}
+
 /// Seed one `dispatches` row per sample, in the JSON shape given.
 async fn insert_dispatches(pool: &SqlitePool, payloads: &[&str]) {
     for (dispatch, payload) in sample_dispatches().iter().zip(payloads) {
@@ -422,6 +454,7 @@ async fn real_database_migrates_and_decodes() {
     decode_all::<Dispatch>(&pool, "dispatches").await;
     decode_all::<ObservedMessage>(&pool, "observed_messages").await;
     decode_all::<ObservedChat>(&pool, "observed_chats").await;
+    decode_all::<ChatProfile>(&pool, "chat_profiles").await;
 
     // Every endpoint a conversation lists resolves back to that conversation
     // through the index, and every listed endpoint exists.
@@ -660,4 +693,17 @@ const DISPATCHES_BEFORE_0013: [&str; 7] = [
     r#"{"id":"00000000-0000-0000-0000-000000000068","command":{"target_endpoint":"00000000-0000-0000-0000-000000000002","target_connector":"telegram","target":{"address":{"chat_id":"-100","thread_id":"7"},"create_thread":null},"payload":{"React":{"message_id":"00000000-0000-0000-0000-000000000001","replica_set_id":"00000000-0000-0000-0000-000000000003","native_id":"tg-1","reactor":"15550002222@s.whatsapp.net","reactor_name":"Bob","emoji":"👍"}}},"state":"Pending"}"#,
     r#"{"id":"00000000-0000-0000-0000-000000000069","command":{"target_endpoint":"00000000-0000-0000-0000-000000000002","target_connector":"telegram","target":{"address":{"chat_id":"-100","thread_id":"7"},"create_thread":null},"payload":{"DeliveryAck":{"message_id":"00000000-0000-0000-0000-000000000001","replica_set_id":"00000000-0000-0000-0000-000000000003","native_id":"wa-1"}}},"state":"Pending"}"#,
     r#"{"id":"00000000-0000-0000-0000-00000000006a","command":{"target_endpoint":"00000000-0000-0000-0000-000000000002","target_connector":"telegram","target":{"address":{"chat_id":"-100","thread_id":"7"},"create_thread":null},"payload":{"SeenReceipt":{"message_id":"00000000-0000-0000-0000-000000000001","replica_set_id":"00000000-0000-0000-0000-000000000003","native_id":"wa-1"}}},"state":"Pending"}"#,
+];
+
+/// The sample dispatches as the model wrote them before 0019, captured with
+/// `print_current_json`. Later fields are additive and absent when unset, so
+/// these rows must still be stored exactly as today's model writes them.
+const DISPATCHES_BEFORE_0019: [&str; 7] = [
+    r#"{"id":"00000000-0000-0000-0000-000000000064","state":{"Acknowledged":{"native_id":"tg-1"}},"to":{"endpoint_id":"00000000-0000-0000-0000-000000000002","connector_id":"telegram","address":{"chat_id":"-100","thread_id":"7"},"create_thread":"Alice"},"conversation_id":"00000000-0000-0000-0000-000000000003","action":{"Send":{"message":{"id":"00000000-0000-0000-0000-000000000001","conversation_id":"00000000-0000-0000-0000-000000000003","author_id":"15550001111@s.whatsapp.net","participant":"15550001111@s.whatsapp.net","author_name":"Alice","text":"hello","attachments":[{"media_id":"00000000-0000-0000-0000-000000000004","kind":"image","file_name":"photo.jpg","mime_type":"image/jpeg","size_bytes":1234,"animated":false}],"reply_to":"00000000-0000-0000-0000-000000000005","timestamp_ms":1000,"deleted":false},"reply":{"message_id":"00000000-0000-0000-0000-000000000005","native_id":"tg-parent","author_id":"15550002222@s.whatsapp.net","participant":null,"text":"parent","attachments":[],"authored_by_bridge":true}}}}"#,
+    r#"{"id":"00000000-0000-0000-0000-000000000065","state":"Pending","to":{"endpoint_id":"00000000-0000-0000-0000-000000000002","connector_id":"telegram","address":{"chat_id":"-100","thread_id":"7"},"create_thread":null},"conversation_id":"00000000-0000-0000-0000-000000000003","action":{"Edit":{"message":{"id":"00000000-0000-0000-0000-000000000001","conversation_id":"00000000-0000-0000-0000-000000000003","author_id":"15550001111@s.whatsapp.net","participant":"15550001111@s.whatsapp.net","author_name":"Alice","text":"hello","attachments":[{"media_id":"00000000-0000-0000-0000-000000000004","kind":"image","file_name":"photo.jpg","mime_type":"image/jpeg","size_bytes":1234,"animated":false}],"reply_to":"00000000-0000-0000-0000-000000000005","timestamp_ms":1000,"deleted":false},"native_id":"tg-1"}}}"#,
+    r#"{"id":"00000000-0000-0000-0000-000000000066","state":"Pending","to":{"endpoint_id":"00000000-0000-0000-0000-000000000002","connector_id":"telegram","address":{"chat_id":"-100","thread_id":"7"},"create_thread":null},"conversation_id":"00000000-0000-0000-0000-000000000003","action":{"Delete":{"message_id":"00000000-0000-0000-0000-000000000001","native_id":"tg-1"}}}"#,
+    r#"{"id":"00000000-0000-0000-0000-000000000067","state":"Pending","to":{"endpoint_id":"00000000-0000-0000-0000-000000000002","connector_id":"telegram","address":{"chat_id":"-100","thread_id":"7"},"create_thread":null},"conversation_id":"00000000-0000-0000-0000-000000000003","action":{"RenameThread":{"title":"Alice (renamed)"}}}"#,
+    r#"{"id":"00000000-0000-0000-0000-000000000068","state":"Pending","to":{"endpoint_id":"00000000-0000-0000-0000-000000000002","connector_id":"telegram","address":{"chat_id":"-100","thread_id":"7"},"create_thread":null},"conversation_id":"00000000-0000-0000-0000-000000000003","action":{"React":{"message_id":"00000000-0000-0000-0000-000000000001","native_id":"tg-1","reactor":"15550002222@s.whatsapp.net","reactor_name":"Bob","emoji":"👍"}}}"#,
+    r#"{"id":"00000000-0000-0000-0000-000000000069","state":"Pending","to":{"endpoint_id":"00000000-0000-0000-0000-000000000002","connector_id":"telegram","address":{"chat_id":"-100","thread_id":"7"},"create_thread":null},"conversation_id":"00000000-0000-0000-0000-000000000003","action":{"Receipt":{"message_id":"00000000-0000-0000-0000-000000000001","native_id":"wa-1","kind":"delivered"}}}"#,
+    r#"{"id":"00000000-0000-0000-0000-00000000006a","state":"Pending","to":{"endpoint_id":"00000000-0000-0000-0000-000000000002","connector_id":"telegram","address":{"chat_id":"-100","thread_id":"7"},"create_thread":null},"conversation_id":"00000000-0000-0000-0000-000000000003","action":{"Receipt":{"message_id":"00000000-0000-0000-0000-000000000001","native_id":"wa-1","kind":"read"}}}"#,
 ];

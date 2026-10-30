@@ -12,9 +12,9 @@ pub use sqlite::SqliteStorage;
 use async_trait::async_trait;
 use thiserror::Error;
 use wuphf_model::{
-    AddressLink, Alias, ChatAddress, ConnectorId, Conversation, ConversationId, DedupKey, Dispatch,
-    DispatchId, Endpoint, EndpointId, MediaBlob, MediaId, Message, MessageCopy, MessageId,
-    ObservedChat, ObservedMessage, RuleId,
+    AddressLink, Alias, ChatAddress, ChatProfile, ConnectorId, Conversation, ConversationId,
+    DedupKey, Dispatch, DispatchId, Endpoint, EndpointId, MediaBlob, MediaId, Message, MessageCopy,
+    MessageId, ObservedChat, ObservedMessage, RuleId,
 };
 
 #[derive(Debug, Error)]
@@ -251,6 +251,20 @@ pub trait ObservationStore: Send + Sync + 'static {
     ) -> StorageResult<Vec<ObservedMessage>>;
 }
 
+/// What the core knows about each platform chat, keyed by connector and the
+/// chat's native id (threads are not part of the key).
+#[async_trait]
+pub trait ChatProfileStore: Send + Sync + 'static {
+    /// The chat's profile, or `None` when nothing is known about it.
+    async fn chat_profile(
+        &self,
+        connector_id: &ConnectorId,
+        chat_id: &str,
+    ) -> StorageResult<Option<ChatProfile>>;
+    /// Insert or replace the profile.
+    async fn put_chat_profile(&self, profile: &ChatProfile) -> StorageResult<()>;
+}
+
 /// One stored runtime settings override.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct StoredSetting {
@@ -333,7 +347,13 @@ pub trait SettingsDeclarations: Send + Sync + 'static {
 /// Blanket-implemented, so a backend implements the roles and gets `Storage`;
 /// a consumer that needs only part of it bounds on the roles it uses.
 pub trait Storage:
-    TopologyStore + MessageStore + MediaStore + DispatchStore + ProvisioningStash + ObservationStore
+    TopologyStore
+    + MessageStore
+    + MediaStore
+    + DispatchStore
+    + ProvisioningStash
+    + ObservationStore
+    + ChatProfileStore
 {
 }
 
@@ -344,6 +364,7 @@ impl<T> Storage for T where
         + DispatchStore
         + ProvisioningStash
         + ObservationStore
+        + ChatProfileStore
 {
 }
 

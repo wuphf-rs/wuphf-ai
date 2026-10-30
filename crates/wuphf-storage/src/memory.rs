@@ -3,17 +3,17 @@
 
 use crate::shared::{acknowledged_copy, release_blocked};
 use crate::{
-    DispatchStore, MediaStore, MessageStore, ObservationStore, PanelTokens, ProvisioningStash,
-    SettingsDeclaration, SettingsDeclarations, SettingsOverrides, StorageError, StorageResult,
-    StoredSetting, TopologyStore,
+    ChatProfileStore, DispatchStore, MediaStore, MessageStore, ObservationStore, PanelTokens,
+    ProvisioningStash, SettingsDeclaration, SettingsDeclarations, SettingsOverrides, StorageError,
+    StorageResult, StoredSetting, TopologyStore,
 };
 use async_trait::async_trait;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use tokio::sync::RwLock;
 use wuphf_model::{
-    AddressLink, Alias, ChatAddress, ConnectorId, Conversation, ConversationId, DedupKey, Dispatch,
-    DispatchId, DispatchState, Endpoint, EndpointId, MediaBlob, MediaId, Message, MessageCopy,
-    MessageId, ObservedChat, ObservedDirection, ObservedMessage, RuleId,
+    AddressLink, Alias, ChatAddress, ChatProfile, ConnectorId, Conversation, ConversationId,
+    DedupKey, Dispatch, DispatchId, DispatchState, Endpoint, EndpointId, MediaBlob, MediaId,
+    Message, MessageCopy, MessageId, ObservedChat, ObservedDirection, ObservedMessage, RuleId,
 };
 
 #[derive(Default)]
@@ -52,6 +52,9 @@ struct State {
     /// Connector settings declarations by connector id, mirroring the SQLite
     /// `connector_settings_declarations` table (the write time is not kept).
     settings_declarations: BTreeMap<String, SettingsDeclaration>,
+    /// Chat profiles by connector and native chat id, mirroring the SQLite
+    /// `chat_profiles` table.
+    chat_profiles: HashMap<(ConnectorId, String), ChatProfile>,
 }
 
 struct StoredMedia {
@@ -801,6 +804,31 @@ impl SettingsDeclarations for InMemoryStorage {
             .values()
             .cloned()
             .collect())
+    }
+}
+
+#[async_trait]
+impl ChatProfileStore for InMemoryStorage {
+    async fn chat_profile(
+        &self,
+        connector_id: &ConnectorId,
+        chat_id: &str,
+    ) -> StorageResult<Option<ChatProfile>> {
+        Ok(self
+            .state
+            .read()
+            .await
+            .chat_profiles
+            .get(&(connector_id.clone(), chat_id.to_owned()))
+            .cloned())
+    }
+
+    async fn put_chat_profile(&self, profile: &ChatProfile) -> StorageResult<()> {
+        self.state.write().await.chat_profiles.insert(
+            (profile.connector_id.clone(), profile.chat_id.clone()),
+            profile.clone(),
+        );
+        Ok(())
     }
 }
 

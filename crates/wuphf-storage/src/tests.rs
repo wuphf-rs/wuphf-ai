@@ -1224,3 +1224,105 @@ async fn settings_declarations_replace_by_connector<S: SettingsDeclarations>(sto
         [telegram2, whatsapp]
     );
 }
+
+fn chat_profile(connector: &str, chat_id: &str, seconds: Option<u32>) -> ChatProfile {
+    ChatProfile {
+        disappearing: seconds.map(|seconds| wuphf_model::DisappearingTimer {
+            seconds,
+            setting_timestamp: Some(1_700_000_000),
+        }),
+        ..ChatProfile::new(ConnectorId(connector.into()), chat_id)
+    }
+}
+
+#[tokio::test]
+async fn memory_chat_profiles_round_trip() {
+    chat_profiles_round_trip(InMemoryStorage::default()).await;
+}
+
+#[tokio::test]
+async fn sqlite_chat_profiles_round_trip() {
+    chat_profiles_round_trip(temp_sqlite().await).await;
+}
+
+/// Profiles are keyed by connector and chat: a put replaces, the same chat id
+/// on another connector is a separate profile, and an unknown timer survives.
+async fn chat_profiles_round_trip<S: ChatProfileStore>(storage: S) {
+    let whatsapp = ConnectorId("whatsapp".into());
+    assert_eq!(
+        storage
+            .chat_profile(&whatsapp, "1@s.whatsapp.net")
+            .await
+            .unwrap(),
+        None
+    );
+
+    let day = chat_profile("whatsapp", "1@s.whatsapp.net", Some(86_400));
+    storage.put_chat_profile(&day).await.unwrap();
+    assert_eq!(
+        storage
+            .chat_profile(&whatsapp, "1@s.whatsapp.net")
+            .await
+            .unwrap(),
+        Some(day)
+    );
+
+    let week = chat_profile("whatsapp", "1@s.whatsapp.net", Some(604_800));
+    storage.put_chat_profile(&week).await.unwrap();
+    assert_eq!(
+        storage
+            .chat_profile(&whatsapp, "1@s.whatsapp.net")
+            .await
+            .unwrap(),
+        Some(week.clone())
+    );
+
+    let other = chat_profile("whatsapp-2", "1@s.whatsapp.net", Some(0));
+    storage.put_chat_profile(&other).await.unwrap();
+    assert_eq!(
+        storage
+            .chat_profile(&whatsapp, "1@s.whatsapp.net")
+            .await
+            .unwrap(),
+        Some(week)
+    );
+    assert_eq!(
+        storage
+            .chat_profile(&ConnectorId("whatsapp-2".into()), "1@s.whatsapp.net")
+            .await
+            .unwrap(),
+        Some(other)
+    );
+
+    let unknown = chat_profile("whatsapp", "2@s.whatsapp.net", None);
+    storage.put_chat_profile(&unknown).await.unwrap();
+    assert_eq!(
+        storage
+            .chat_profile(&whatsapp, "2@s.whatsapp.net")
+            .await
+            .unwrap(),
+        Some(unknown)
+    );
+}
+
+#[tokio::test]
+async fn sqlite_chat_profiles_survive_reopen() {
+    let path = std::env::temp_dir().join(format!("wuphf-{}.sqlite", DispatchId::new()));
+    let url = format!("sqlite://{}", path.display());
+    let stored = chat_profile("whatsapp", "1@g.us", Some(604_800));
+    SqliteStorage::connect(&url)
+        .await
+        .unwrap()
+        .put_chat_profile(&stored)
+        .await
+        .unwrap();
+
+    let reopened = SqliteStorage::connect(&url).await.unwrap();
+    assert_eq!(
+        reopened
+            .chat_profile(&ConnectorId("whatsapp".into()), "1@g.us")
+            .await
+            .unwrap(),
+        Some(stored)
+    );
+}

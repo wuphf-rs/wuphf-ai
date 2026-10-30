@@ -3,9 +3,9 @@
 
 use crate::shared::{acknowledged_copy, release_blocked};
 use crate::{
-    DispatchStore, MediaStore, MessageStore, ObservationStore, PanelTokens, ProvisioningStash,
-    SettingsDeclaration, SettingsDeclarations, SettingsOverrides, StorageError, StorageResult,
-    StoredSetting, TopologyStore,
+    ChatProfileStore, DispatchStore, MediaStore, MessageStore, ObservationStore, PanelTokens,
+    ProvisioningStash, SettingsDeclaration, SettingsDeclarations, SettingsOverrides, StorageError,
+    StorageResult, StoredSetting, TopologyStore,
 };
 use async_trait::async_trait;
 use sqlx::migrate::Migrator;
@@ -13,9 +13,9 @@ use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
 use sqlx::{Row, SqlitePool};
 use std::str::FromStr;
 use wuphf_model::{
-    AddressLink, Alias, ChatAddress, ConnectorId, Conversation, ConversationId, DedupKey, Dispatch,
-    DispatchId, DispatchState, Endpoint, EndpointId, MediaBlob, MediaId, Message, MessageCopy,
-    MessageId, ObservedChat, ObservedDirection, ObservedMessage, RuleId,
+    AddressLink, Alias, ChatAddress, ChatProfile, ConnectorId, Conversation, ConversationId,
+    DedupKey, Dispatch, DispatchId, DispatchState, Endpoint, EndpointId, MediaBlob, MediaId,
+    Message, MessageCopy, MessageId, ObservedChat, ObservedDirection, ObservedMessage, RuleId,
 };
 
 /// The schema migrations, embedded at build time. Shared with the migration
@@ -1094,6 +1094,38 @@ async fn put_sqlite_copy(pool: &SqlitePool, copy: MessageCopy, sent: bool) -> St
     .execute(pool)
     .await?;
     Ok(())
+}
+
+#[async_trait]
+impl ChatProfileStore for SqliteStorage {
+    async fn chat_profile(
+        &self,
+        connector_id: &ConnectorId,
+        chat_id: &str,
+    ) -> StorageResult<Option<ChatProfile>> {
+        let row =
+            sqlx::query("SELECT payload FROM chat_profiles WHERE connector_id = ? AND chat_id = ?")
+                .bind(&connector_id.0)
+                .bind(chat_id)
+                .fetch_optional(&self.pool)
+                .await?;
+        row.map(|row| serde_json::from_str(row.get("payload")))
+            .transpose()
+            .map_err(Into::into)
+    }
+
+    async fn put_chat_profile(&self, profile: &ChatProfile) -> StorageResult<()> {
+        sqlx::query(
+            "INSERT INTO chat_profiles (connector_id, chat_id, payload) VALUES (?, ?, ?)
+             ON CONFLICT(connector_id, chat_id) DO UPDATE SET payload = excluded.payload",
+        )
+        .bind(&profile.connector_id.0)
+        .bind(&profile.chat_id)
+        .bind(serde_json::to_string(profile)?)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
 }
 
 async fn upsert_json<T: serde::Serialize>(
