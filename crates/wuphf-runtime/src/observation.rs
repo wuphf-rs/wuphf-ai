@@ -85,19 +85,14 @@ where
                         .await?,
                 )
             }
-            EventKind::Edit {
-                native_id: platform_message_id,
-                text,
-            } => {
+            EventKind::Edit { native_id, text } => {
                 self.storage
-                    .mark_observed_edited(connector_id, chat_id, platform_message_id, text.clone())
+                    .mark_observed_edited(connector_id, chat_id, native_id, text.clone())
                     .await?
             }
-            EventKind::Delete {
-                native_id: platform_message_id,
-            } => {
+            EventKind::Delete { native_id } => {
                 self.storage
-                    .mark_observed_deleted(connector_id, chat_id, platform_message_id)
+                    .mark_observed_deleted(connector_id, chat_id, native_id)
                     .await?
             }
             EventKind::Reaction { .. } | EventKind::Receipt { .. } => None,
@@ -111,7 +106,7 @@ where
     }
 
     /// Register an owner message awaiting acknowledgement. The observed row (its
-    /// `platform_message_id` still unknown) is held until
+    /// `native_id` still unknown) is held until
     /// [`settle_outbound`](Self::settle_outbound) fills it in from the
     /// connector's acknowledgement. The returned receiver resolves with the
     /// settled row; dropping it is fine — the row is logged either way.
@@ -138,12 +133,12 @@ where
     pub async fn settle_outbound(
         &self,
         dispatch_id: DispatchId,
-        platform_message_id: &str,
+        native_id: &str,
     ) -> Result<(), StorageError> {
         let Some(mut pending) = self.pending_outbound.lock().unwrap().remove(&dispatch_id) else {
             return Ok(());
         };
-        pending.observed.native_id = platform_message_id.to_owned();
+        pending.observed.native_id = native_id.to_owned();
         let stored = self.storage.log_observed(pending.observed, None).await?;
         if let Some(notify) = pending.notify.take() {
             let _ = notify.send(stored.clone());

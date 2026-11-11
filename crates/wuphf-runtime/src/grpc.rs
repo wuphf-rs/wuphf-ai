@@ -375,7 +375,7 @@ fn output_to_proto(output: ConnectorOutput) -> pb::ServerFrame {
                     disappearing,
                 } => {
                     let container = target.address.chat_id.clone();
-                    let reply_to_platform_message_id = reply_context
+                    let reply_to_native_id = reply_context
                         .as_ref()
                         .map(|context| context.native_id.clone());
                     pb::server_frame::Body::MessageCreate(Box::new(pb::MessageCreateDispatch {
@@ -394,34 +394,32 @@ fn output_to_proto(output: ConnectorOutput) -> pb::ServerFrame {
                             .into_iter()
                             .map(attachment_to_proto)
                             .collect(),
-                        reply_to_platform_message_id,
+                        reply_to_platform_message_id: reply_to_native_id,
                         timestamp_ms: message.timestamp_ms,
                         reply_context: reply_context.map(reply_context_to_proto),
                         sender_name: message.author_name,
                         disappearing: disappearing.map(timer_to_proto),
                     }))
                 }
-                Action::Edit {
-                    message,
-                    native_id: target_platform_message_id,
-                } => pb::server_frame::Body::MessageEdit(pb::MessageEditDispatch {
-                    dispatch_id,
-                    target_chat_id: target.address.chat_id,
-                    target_thread_id: target.address.thread_id,
-                    target_platform_message_id,
-                    text: message.text,
-                    sender_name: message.author_name,
-                    participant: message.participant,
-                }),
-                Action::Delete {
-                    native_id: target_platform_message_id,
-                    ..
-                } => pb::server_frame::Body::MessageDelete(pb::MessageDeleteDispatch {
-                    dispatch_id,
-                    target_chat_id: target.address.chat_id,
-                    target_thread_id: target.address.thread_id,
-                    target_platform_message_id,
-                }),
+                Action::Edit { message, native_id } => {
+                    pb::server_frame::Body::MessageEdit(pb::MessageEditDispatch {
+                        dispatch_id,
+                        target_chat_id: target.address.chat_id,
+                        target_thread_id: target.address.thread_id,
+                        target_platform_message_id: native_id,
+                        text: message.text,
+                        sender_name: message.author_name,
+                        participant: message.participant,
+                    })
+                }
+                Action::Delete { native_id, .. } => {
+                    pb::server_frame::Body::MessageDelete(pb::MessageDeleteDispatch {
+                        dispatch_id,
+                        target_chat_id: target.address.chat_id,
+                        target_thread_id: target.address.thread_id,
+                        target_platform_message_id: native_id,
+                    })
+                }
                 Action::RenameThread { title, .. } => {
                     pb::server_frame::Body::MessageRetitle(pb::MessageRetitleDispatch {
                         dispatch_id,
@@ -431,7 +429,7 @@ fn output_to_proto(output: ConnectorOutput) -> pb::ServerFrame {
                     })
                 }
                 Action::React {
-                    native_id: target_platform_message_id,
+                    native_id,
                     reactor,
                     reactor_name,
                     emoji,
@@ -440,30 +438,30 @@ fn output_to_proto(output: ConnectorOutput) -> pb::ServerFrame {
                     dispatch_id,
                     target_chat_id: target.address.chat_id,
                     target_thread_id: target.address.thread_id,
-                    target_platform_message_id,
+                    target_platform_message_id: native_id,
                     reactor,
                     reactor_name,
                     emoji: emoji.unwrap_or_default(),
                 }),
                 Action::Receipt {
-                    native_id: target_platform_message_id,
+                    native_id,
                     kind: ReceiptKind::Delivered,
                     ..
                 } => pb::server_frame::Body::DeliveryAck(pb::DeliveryAckDispatch {
                     dispatch_id,
                     target_chat_id: target.address.chat_id,
                     target_thread_id: target.address.thread_id,
-                    target_platform_message_id,
+                    target_platform_message_id: native_id,
                 }),
                 Action::Receipt {
-                    native_id: target_platform_message_id,
+                    native_id,
                     kind: ReceiptKind::Read,
                     ..
                 } => pb::server_frame::Body::SeenReceipt(pb::SeenReceiptDispatch {
                     dispatch_id,
                     target_chat_id: target.address.chat_id,
                     target_thread_id: target.address.thread_id,
-                    target_platform_message_id,
+                    target_platform_message_id: native_id,
                 }),
             }
         }

@@ -112,15 +112,11 @@ pub trait MessageStore: Send + Sync + 'static {
     async fn message(&self, message_id: MessageId) -> StorageResult<Option<Message>>;
     async fn put_received_copy(&self, copy: MessageCopy) -> StorageResult<()>;
     async fn record_sent_copy(&self, copy: MessageCopy) -> StorageResult<()>;
-    async fn is_sent_copy(
-        &self,
-        endpoint_id: EndpointId,
-        platform_message_id: &str,
-    ) -> StorageResult<bool>;
+    async fn is_sent_copy(&self, endpoint_id: EndpointId, native_id: &str) -> StorageResult<bool>;
     async fn message_id_for_copy(
         &self,
         endpoint_id: EndpointId,
-        platform_message_id: &str,
+        native_id: &str,
     ) -> StorageResult<Option<MessageId>>;
     async fn copy_at_endpoint(
         &self,
@@ -152,7 +148,7 @@ pub trait DispatchStore: Send + Sync + 'static {
     async fn acknowledge_dispatch(
         &self,
         dispatch_id: DispatchId,
-        platform_message_id: String,
+        native_id: String,
     ) -> StorageResult<Vec<Dispatch>>;
     /// Mark a dispatch as permanently failed so it leaves the pending queue and
     /// is never redelivered. Unlike acknowledgement, it records no sent copy.
@@ -206,7 +202,7 @@ pub trait ObservationStore: Send + Sync + 'static {
         &self,
         connector_id: &ConnectorId,
         chat_id: &str,
-        platform_message_id: &str,
+        native_id: &str,
     ) -> StorageResult<Option<ObservedMessage>>;
     /// Replace an observed message's text and flag it edited, returning the
     /// updated row, or `None` when the message was never observed.
@@ -214,7 +210,7 @@ pub trait ObservationStore: Send + Sync + 'static {
         &self,
         connector_id: &ConnectorId,
         chat_id: &str,
-        platform_message_id: &str,
+        native_id: &str,
         text: Option<String>,
     ) -> StorageResult<Option<ObservedMessage>>;
     /// Re-key every observation row of one chat onto another address on the

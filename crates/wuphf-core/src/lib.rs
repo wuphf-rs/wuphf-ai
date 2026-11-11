@@ -111,21 +111,16 @@ where
                 )
                 .await
             }
-            EventKind::Edit {
-                native_id: platform_message_id,
-                text,
-            } => {
-                self.ingest_edit(&routing, origin_endpoint, platform_message_id, text)
+            EventKind::Edit { native_id, text } => {
+                self.ingest_edit(&routing, origin_endpoint, native_id, text)
                     .await
             }
-            EventKind::Delete {
-                native_id: platform_message_id,
-            } => {
-                self.ingest_delete(&routing, origin_endpoint, platform_message_id)
+            EventKind::Delete { native_id } => {
+                self.ingest_delete(&routing, origin_endpoint, native_id)
                     .await
             }
             EventKind::Reaction {
-                native_id: platform_message_id,
+                native_id,
                 reactor,
                 reactor_name,
                 emoji,
@@ -137,7 +132,7 @@ where
                 self.ingest_reaction(
                     &routing,
                     origin_endpoint,
-                    platform_message_id,
+                    native_id,
                     reactor,
                     reactor_name,
                     emoji,
@@ -145,19 +140,13 @@ where
                 .await
             }
             EventKind::Receipt {
-                native_id: platform_message_id,
+                native_id,
                 observer: _,
                 from_me,
                 kind,
             } => {
-                self.ingest_receipt(
-                    &routing,
-                    origin_endpoint,
-                    platform_message_id,
-                    from_me,
-                    kind,
-                )
-                .await
+                self.ingest_receipt(&routing, origin_endpoint, native_id, from_me, kind)
+                    .await
             }
         }
     }

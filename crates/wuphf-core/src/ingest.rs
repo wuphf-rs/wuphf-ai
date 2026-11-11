@@ -35,9 +35,9 @@ where
         // never saw (sent before startup, or never mirrored) simply loses its
         // reply linkage rather than failing the whole message.
         let reply_to = match inbound.reply_to_native_id.as_deref() {
-            Some(platform_message_id) => {
+            Some(native_id) => {
                 self.storage
-                    .message_id_for_copy(origin_endpoint, platform_message_id)
+                    .message_id_for_copy(origin_endpoint, native_id)
                     .await?
             }
             None => None,
@@ -65,14 +65,14 @@ where
 
         // The native id outlives the inbound form: the message drops it on
         // promotion, but the received copy is keyed by it.
-        let platform_message_id = inbound.native_id.clone();
+        let native_id = inbound.native_id.clone();
         let message = Message::from_inbound(inbound, conversation_id, reply_to);
         self.storage.put_message(message.clone()).await?;
         self.storage
             .put_received_copy(MessageCopy {
                 message_id: message.id,
                 endpoint_id: origin_endpoint,
-                native_id: platform_message_id,
+                native_id,
             })
             .await?;
 
@@ -186,12 +186,12 @@ where
     async fn message_for_copy(
         &self,
         endpoint: EndpointId,
-        platform_message_id: &str,
+        native_id: &str,
         missing: fn(MessageId) -> CoreError,
     ) -> Result<Option<(MessageId, Message)>, CoreError> {
         let Some(message_id) = self
             .storage
-            .message_id_for_copy(endpoint, platform_message_id)
+            .message_id_for_copy(endpoint, native_id)
             .await?
         else {
             return Ok(None);
@@ -267,15 +267,11 @@ where
         &self,
         routing: &Arc<RoutingConfig>,
         origin_endpoint: EndpointId,
-        platform_message_id: String,
+        native_id: String,
         text: Option<String>,
     ) -> Result<IngestOutcome, CoreError> {
         let Some((message_id, mut message)) = self
-            .message_for_copy(
-                origin_endpoint,
-                &platform_message_id,
-                CoreError::EditTargetNotStored,
-            )
+            .message_for_copy(origin_endpoint, &native_id, CoreError::EditTargetNotStored)
             .await?
         else {
             return Ok(IngestOutcome::Ignored(IgnoreReason::Unmatched));
@@ -306,12 +302,12 @@ where
         &self,
         routing: &Arc<RoutingConfig>,
         origin_endpoint: EndpointId,
-        platform_message_id: String,
+        native_id: String,
     ) -> Result<IngestOutcome, CoreError> {
         let Some((message_id, mut message)) = self
             .message_for_copy(
                 origin_endpoint,
-                &platform_message_id,
+                &native_id,
                 CoreError::DeleteTargetNotStored,
             )
             .await?
@@ -346,7 +342,7 @@ where
         &self,
         routing: &Arc<RoutingConfig>,
         origin_endpoint: EndpointId,
-        platform_message_id: String,
+        native_id: String,
         reactor: String,
         reactor_name: Option<String>,
         emoji: Option<String>,
@@ -354,7 +350,7 @@ where
         let Some((message_id, message)) = self
             .message_for_copy(
                 origin_endpoint,
-                &platform_message_id,
+                &native_id,
                 CoreError::ReactionTargetNotStored,
             )
             .await?
@@ -389,7 +385,7 @@ where
         &self,
         routing: &Arc<RoutingConfig>,
         observer_endpoint: EndpointId,
-        platform_message_id: String,
+        native_id: String,
         from_me: bool,
         kind: wuphf_model::ReceiptKind,
     ) -> Result<IngestOutcome, CoreError> {
@@ -399,7 +395,7 @@ where
         let Some((message_id, message)) = self
             .message_for_copy(
                 observer_endpoint,
-                &platform_message_id,
+                &native_id,
                 CoreError::ReceiptTargetNotStored,
             )
             .await?

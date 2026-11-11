@@ -155,7 +155,7 @@ where
                 acknowledgement = self.acknowledgement_rx.recv() => {
                     if let Some(acknowledgement) = acknowledgement {
                         debug!(dispatch_id = %acknowledgement.dispatch_id, "dispatch acknowledged");
-                        let (dispatch_id, platform_message_id) = (
+                        let (dispatch_id, native_id) = (
                             acknowledgement.dispatch_id,
                             acknowledgement.native_id.clone(),
                         );
@@ -167,7 +167,7 @@ where
                         // observation row, never the delivery, so warn and go on.
                         if let Err(error) = self
                             .observer
-                            .settle_outbound(dispatch_id, &platform_message_id)
+                            .settle_outbound(dispatch_id, &native_id)
                             .await
                         {
                             warn!(dispatch_id = %dispatch_id, %error, "failed to record outgoing observation");

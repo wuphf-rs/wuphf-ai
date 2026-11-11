@@ -314,16 +314,12 @@ impl MessageStore for SqliteStorage {
         put_sqlite_copy(&self.pool, copy, true).await
     }
 
-    async fn is_sent_copy(
-        &self,
-        endpoint_id: EndpointId,
-        platform_message_id: &str,
-    ) -> StorageResult<bool> {
+    async fn is_sent_copy(&self, endpoint_id: EndpointId, native_id: &str) -> StorageResult<bool> {
         let row = sqlx::query(
             "SELECT sent FROM message_copies WHERE endpoint_id = ? AND platform_message_id = ?",
         )
         .bind(endpoint_id.to_string())
-        .bind(platform_message_id)
+        .bind(native_id)
         .fetch_optional(&self.pool)
         .await?;
         Ok(row.is_some_and(|row| row.get::<i64, _>("sent") != 0))
@@ -332,13 +328,13 @@ impl MessageStore for SqliteStorage {
     async fn message_id_for_copy(
         &self,
         endpoint_id: EndpointId,
-        platform_message_id: &str,
+        native_id: &str,
     ) -> StorageResult<Option<MessageId>> {
         let row = sqlx::query(
             "SELECT payload FROM message_copies WHERE endpoint_id = ? AND platform_message_id = ?",
         )
         .bind(endpoint_id.to_string())
-        .bind(platform_message_id)
+        .bind(native_id)
         .fetch_optional(&self.pool)
         .await?;
         row.map(|row| serde_json::from_str::<MessageCopy>(row.get("payload")))
@@ -449,7 +445,7 @@ impl DispatchStore for SqliteStorage {
     async fn acknowledge_dispatch(
         &self,
         dispatch_id: DispatchId,
-        platform_message_id: String,
+        native_id: String,
     ) -> StorageResult<Vec<Dispatch>> {
         let mut transaction = self.pool.begin().await?;
         let row = sqlx::query("SELECT payload FROM dispatches WHERE id = ?")
@@ -459,7 +455,7 @@ impl DispatchStore for SqliteStorage {
             .ok_or(StorageError::DispatchNotFound(dispatch_id))?;
         let mut dispatch: Dispatch = serde_json::from_str(row.get("payload"))?;
         dispatch.state = DispatchState::Acknowledged {
-            native_id: platform_message_id.clone(),
+            native_id: native_id.clone(),
         };
         sqlx::query("UPDATE dispatches SET waiting_for = ?, state = ?, payload = ? WHERE id = ?")
             .bind(None::<String>)
@@ -468,7 +464,7 @@ impl DispatchStore for SqliteStorage {
             .bind(dispatch.id.to_string())
             .execute(&mut *transaction)
             .await?;
-        let Some(copy) = acknowledged_copy(&dispatch, &platform_message_id) else {
+        let Some(copy) = acknowledged_copy(&dispatch, &native_id) else {
             transaction.commit().await?;
             return Ok(Vec::new());
         };
@@ -508,7 +504,7 @@ impl DispatchStore for SqliteStorage {
         let parent: Message = serde_json::from_str(parent_row.get("payload"))?;
         for row in rows {
             let mut blocked: Dispatch = serde_json::from_str(row.get("payload"))?;
-            release_blocked(&mut blocked, parent.clone(), platform_message_id.clone());
+            release_blocked(&mut blocked, parent.clone(), native_id.clone());
             sqlx::query(
                 "UPDATE dispatches SET waiting_for = ?, state = ?, payload = ? WHERE id = ?",
             )
@@ -710,17 +706,11 @@ impl ObservationStore for SqliteStorage {
         &self,
         connector_id: &ConnectorId,
         chat_id: &str,
-        platform_message_id: &str,
+        native_id: &str,
     ) -> StorageResult<Option<ObservedMessage>> {
-        update_observed(
-            &self.pool,
-            connector_id,
-            chat_id,
-            platform_message_id,
-            |observed| {
-                observed.deleted = true;
-            },
-        )
+        update_observed(&self.pool, connector_id, chat_id, native_id, |observed| {
+            observed.deleted = true;
+        })
         .await
     }
 
@@ -728,19 +718,13 @@ impl ObservationStore for SqliteStorage {
         &self,
         connector_id: &ConnectorId,
         chat_id: &str,
-        platform_message_id: &str,
+        native_id: &str,
         text: Option<String>,
     ) -> StorageResult<Option<ObservedMessage>> {
-        update_observed(
-            &self.pool,
-            connector_id,
-            chat_id,
-            platform_message_id,
-            |observed| {
-                observed.text = text;
-                observed.edited = true;
-            },
-        )
+        update_observed(&self.pool, connector_id, chat_id, native_id, |observed| {
+            observed.text = text;
+            observed.edited = true;
+        })
         .await
     }
 
@@ -1034,7 +1018,7 @@ async fn update_observed(
     pool: &SqlitePool,
     connector_id: &ConnectorId,
     chat_id: &str,
-    platform_message_id: &str,
+    native_id: &str,
     mutate: impl FnOnce(&mut ObservedMessage),
 ) -> StorageResult<Option<ObservedMessage>> {
     let mut transaction = pool.begin().await?;
@@ -1044,7 +1028,7 @@ async fn update_observed(
     )
     .bind(connector_id.to_string())
     .bind(chat_id)
-    .bind(platform_message_id)
+    .bind(native_id)
     .fetch_optional(&mut *transaction)
     .await?;
     let Some(row) = row else {
@@ -1060,7 +1044,7 @@ async fn update_observed(
     .bind(serde_json::to_string(&observed)?)
     .bind(connector_id.to_string())
     .bind(chat_id)
-    .bind(platform_message_id)
+    .bind(native_id)
     .execute(&mut *transaction)
     .await?;
     transaction.commit().await?;

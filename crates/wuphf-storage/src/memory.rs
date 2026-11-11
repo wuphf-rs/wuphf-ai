@@ -266,30 +266,26 @@ impl MessageStore for InMemoryStorage {
         Ok(())
     }
 
-    async fn is_sent_copy(
-        &self,
-        endpoint_id: EndpointId,
-        platform_message_id: &str,
-    ) -> StorageResult<bool> {
+    async fn is_sent_copy(&self, endpoint_id: EndpointId, native_id: &str) -> StorageResult<bool> {
         Ok(self
             .state
             .read()
             .await
             .sent_copies
-            .contains(&(endpoint_id, platform_message_id.to_owned())))
+            .contains(&(endpoint_id, native_id.to_owned())))
     }
 
     async fn message_id_for_copy(
         &self,
         endpoint_id: EndpointId,
-        platform_message_id: &str,
+        native_id: &str,
     ) -> StorageResult<Option<MessageId>> {
         Ok(self
             .state
             .read()
             .await
             .copy_ids
-            .get(&(endpoint_id, platform_message_id.to_owned()))
+            .get(&(endpoint_id, native_id.to_owned()))
             .copied())
     }
 
@@ -398,7 +394,7 @@ impl DispatchStore for InMemoryStorage {
     async fn acknowledge_dispatch(
         &self,
         dispatch_id: DispatchId,
-        platform_message_id: String,
+        native_id: String,
     ) -> StorageResult<Vec<Dispatch>> {
         let mut state = self.state.write().await;
         let dispatch = state
@@ -406,9 +402,9 @@ impl DispatchStore for InMemoryStorage {
             .get_mut(&dispatch_id)
             .ok_or(StorageError::DispatchNotFound(dispatch_id))?;
         dispatch.state = DispatchState::Acknowledged {
-            native_id: platform_message_id.clone(),
+            native_id: native_id.clone(),
         };
-        let Some(copy) = acknowledged_copy(dispatch, &platform_message_id) else {
+        let Some(copy) = acknowledged_copy(dispatch, &native_id) else {
             return Ok(Vec::new());
         };
         let (message_id, endpoint_id) = (copy.message_id, copy.endpoint_id);
@@ -440,7 +436,7 @@ impl DispatchStore for InMemoryStorage {
                 .dispatches
                 .get_mut(&id)
                 .expect("blocked dispatch present");
-            release_blocked(candidate, parent.clone(), platform_message_id.clone());
+            release_blocked(candidate, parent.clone(), native_id.clone());
             released.push(candidate.clone());
         }
         Ok(released)
@@ -566,13 +562,13 @@ impl ObservationStore for InMemoryStorage {
         &self,
         connector_id: &ConnectorId,
         chat_id: &str,
-        platform_message_id: &str,
+        native_id: &str,
     ) -> StorageResult<Option<ObservedMessage>> {
         let mut state = self.state.write().await;
         let observed = state.observed_messages.get_mut(&(
             connector_id.clone(),
             chat_id.to_owned(),
-            platform_message_id.to_owned(),
+            native_id.to_owned(),
         ));
         Ok(observed.map(|observed| {
             observed.deleted = true;
@@ -584,14 +580,14 @@ impl ObservationStore for InMemoryStorage {
         &self,
         connector_id: &ConnectorId,
         chat_id: &str,
-        platform_message_id: &str,
+        native_id: &str,
         text: Option<String>,
     ) -> StorageResult<Option<ObservedMessage>> {
         let mut state = self.state.write().await;
         let observed = state.observed_messages.get_mut(&(
             connector_id.clone(),
             chat_id.to_owned(),
-            platform_message_id.to_owned(),
+            native_id.to_owned(),
         ));
         Ok(observed.map(|observed| {
             observed.text = text;

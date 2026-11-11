@@ -18,13 +18,13 @@ where
         &self,
         message_id: MessageId,
         target_endpoint: EndpointId,
-        platform_message_id: impl Into<String>,
+        native_id: impl Into<String>,
     ) -> Result<(), CoreError> {
         self.storage
             .record_sent_copy(MessageCopy {
                 message_id,
                 endpoint_id: target_endpoint,
-                native_id: platform_message_id.into(),
+                native_id: native_id.into(),
             })
             .await?;
         Ok(())

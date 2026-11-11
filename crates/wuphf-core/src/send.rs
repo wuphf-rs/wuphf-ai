@@ -173,14 +173,14 @@ where
     async fn resolve_reply(
         &self,
         endpoint_id: EndpointId,
-        reply_to_platform_message_id: Option<&str>,
+        reply_to_native_id: Option<&str>,
     ) -> Result<(Option<MessageId>, Option<ReplyContext>), CoreError> {
-        let Some(platform_message_id) = reply_to_platform_message_id else {
+        let Some(native_id) = reply_to_native_id else {
             return Ok((None, None));
         };
         let Some(parent_id) = self
             .storage
-            .message_id_for_copy(endpoint_id, platform_message_id)
+            .message_id_for_copy(endpoint_id, native_id)
             .await?
         else {
             return Ok((None, None));
@@ -188,12 +188,8 @@ where
         let Some(parent) = self.storage.message(parent_id).await? else {
             return Ok((None, None));
         };
-        let authored_by_bridge = self
-            .storage
-            .is_sent_copy(endpoint_id, platform_message_id)
-            .await?;
-        let context =
-            ReplyContext::quoting(parent, platform_message_id.to_owned(), authored_by_bridge);
+        let authored_by_bridge = self.storage.is_sent_copy(endpoint_id, native_id).await?;
+        let context = ReplyContext::quoting(parent, native_id.to_owned(), authored_by_bridge);
         Ok((Some(parent_id), Some(context)))
     }
 

@@ -662,7 +662,7 @@ async fn observation_log_roundtrips<S: Storage>(storage: S) {
 fn observed(
     connector_id: &ConnectorId,
     chat_id: &str,
-    platform_message_id: &str,
+    native_id: &str,
     timestamp_ms: i64,
     text: Option<&str>,
 ) -> ObservedMessage {
@@ -671,7 +671,7 @@ fn observed(
         platform: Platform::WhatsApp,
         chat_id: chat_id.into(),
         thread_id: None,
-        native_id: platform_message_id.into(),
+        native_id: native_id.into(),
         author_id: "sender".into(),
         author_name: None,
         participant: None,

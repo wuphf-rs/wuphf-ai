@@ -305,6 +305,22 @@ Rust) by the owner's decision.
     `connector_settings.rs` prints the config's platform string, not the enum.
   - Four new model tests (every name, `other:`, unknown, round-trip).
   - Workspace: 300 tests passing (2 ignored), clippy clean.
+- **027's deferred follow-up done 2026-11-10** (`advisor/027-native-id-names`,
+  on top of 022): the Rust parameters and local variables named
+  `platform_message_id` (and `reply_to_platform_message_id`) are now
+  `native_id` (and `reply_to_native_id`) in `wuphf-storage` (the trait, both
+  backends, the test helper), `wuphf-core` and `wuphf-runtime`.
+  - **Kept on purpose:** SQL column names and SQL text; protobuf fields
+    (`event.platform_message_id`, `target_platform_message_id`, …) and the
+    error texts that name them; the `platform_message_id` log key in
+    `wuphf-connector`; the legacy JSON in `migration_tests.rs`. The
+    `wuphf-connector` crate and the TUI were not changed: they use only
+    protobuf types, and the TUI does not depend on `wuphf-model`.
+  - At the gRPC conversion (`output_to_proto`), the bindings take the model
+    name and the protobuf field keeps the wire name
+    (`target_platform_message_id: native_id`).
+  - No string literal changed. Workspace: 300 tests passing (2 ignored),
+    clippy clean.
 
 ### Remote functions 032–033 (added 2026-10-22 at `2c92f5a`)
 
