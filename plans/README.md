@@ -39,7 +39,7 @@ code).
 | 019 | Single-source dispatch settlement across storage backends | P1 | M | — (004 helps) | DONE |
 | 020 | Deduplicate per-operation fan-out in router + core | P2 | M | — | DONE |
 | 021 | Split Storage god-trait into role traits | P3 | M | 019 (soft) | DONE (re-planned in place, see notes) |
-| 022 | Move Platform name mapping into wuphf-model | P3 | S | — | TODO |
+| 022 | Move Platform name mapping into wuphf-model | P3 | S | — | DONE (see notes) |
 | 023 | Consolidate similar model types behind shared constructors | P3 | S-M | — (020 soft) | DONE |
 | 024 | SPIKE: real-time WhatsApp↔Telegram call forwarding | P3 | M (impl XL) | — | TODO |
 | 025 | Rust WhatsApp connector on whatsapp-rust | P2 | L | — | DONE |
@@ -289,6 +289,22 @@ Rust) by the owner's decision.
   expected.
 - **022 is independent** but touches `crates/wuphf-cli/src/main.rs` like 026
   and 028; whichever lands second rebases trivially.
+- **022 done 2026-11-10** (`advisor/022-platform-fromstr`). Drift: 035 had
+  moved the private `platform()` function from `wuphf-cli/src/main.rs` to
+  `wuphf-settings/src/config.rs` (returning `Result<Platform, String>`), so
+  that file and its one caller in `wuphf-settings/src/schema.rs` replaced the
+  CLI as the in-scope files. The CLI was not touched.
+  - `Platform` now has `FromStr` (error `UnknownPlatform`, a `thiserror`
+    struct) and `Display` in `wuphf-model/src/routing.rs`. The accepted names
+    are byte-identical; the `other:` rule uses `strip_prefix`, which is the
+    same as the old `name[6..]` after `starts_with`.
+  - The caller maps the error with `to_string()`, so the message stays
+    `unsupported platform {name}` and `derive_rejects_an_unknown_platform`
+    passes unchanged.
+  - No existing output changed: nothing formatted `Platform` before.
+    `connector_settings.rs` prints the config's platform string, not the enum.
+  - Four new model tests (every name, `other:`, unknown, round-trip).
+  - Workspace: 300 tests passing (2 ignored), clippy clean.
 
 ### Remote functions 032–033 (added 2026-10-22 at `2c92f5a`)
 

@@ -6,7 +6,7 @@ use std::collections::BTreeMap;
 use std::fmt;
 use std::net::SocketAddr;
 use wuphf_functions::FunctionsConfig;
-use wuphf_model::{ChatAddress, ChatFilter, ChatRef, ConnectorId, Platform, RuleKind};
+use wuphf_model::{ChatAddress, ChatFilter, ChatRef, ConnectorId, RuleKind};
 
 /// The core configuration.
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -223,19 +223,5 @@ impl fmt::Debug for Secret {
 impl Serialize for Secret {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         serializer.serialize_str("<redacted>")
-    }
-}
-
-pub(crate) fn platform(name: &str) -> Result<Platform, String> {
-    match name {
-        "whatsapp" => Ok(Platform::WhatsApp),
-        "telegram" => Ok(Platform::Telegram),
-        "discord" => Ok(Platform::Discord),
-        "signal" => Ok(Platform::Signal),
-        "slack" => Ok(Platform::Slack),
-        "matrix" => Ok(Platform::Matrix),
-        "instagram" => Ok(Platform::Instagram),
-        _ if name.starts_with("other:") => Ok(Platform::Other(name[6..].to_owned())),
-        _ => Err(format!("unsupported platform {name}")),
     }
 }

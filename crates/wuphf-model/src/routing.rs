@@ -21,6 +21,49 @@ pub enum Platform {
     Other(String),
 }
 
+/// The lowercase name a config file uses for the platform: `whatsapp`,
+/// `telegram`, …, or `other:{name}`. [`FromStr`] parses it back.
+impl fmt::Display for Platform {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let name = match self {
+            Platform::WhatsApp => "whatsapp",
+            Platform::Telegram => "telegram",
+            Platform::Discord => "discord",
+            Platform::Signal => "signal",
+            Platform::Slack => "slack",
+            Platform::Matrix => "matrix",
+            Platform::Instagram => "instagram",
+            Platform::Other(name) => return write!(f, "other:{name}"),
+        };
+        f.write_str(name)
+    }
+}
+
+impl FromStr for Platform {
+    type Err = UnknownPlatform;
+
+    fn from_str(name: &str) -> Result<Self, Self::Err> {
+        match name {
+            "whatsapp" => Ok(Platform::WhatsApp),
+            "telegram" => Ok(Platform::Telegram),
+            "discord" => Ok(Platform::Discord),
+            "signal" => Ok(Platform::Signal),
+            "slack" => Ok(Platform::Slack),
+            "matrix" => Ok(Platform::Matrix),
+            "instagram" => Ok(Platform::Instagram),
+            _ => match name.strip_prefix("other:") {
+                Some(other) => Ok(Platform::Other(other.to_owned())),
+                None => Err(UnknownPlatform(name.to_owned())),
+            },
+        }
+    }
+}
+
+/// A platform name that is neither a known platform nor `other:{name}`.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[error("unsupported platform {0}")]
+pub struct UnknownPlatform(pub String);
+
 /// A concrete delivery destination on one connector: a chat, optionally a
 /// thread within it. Endpoints are members of a [`Conversation`] and are
 /// derived from rules at runtime, never hand-configured. `chat_id`/`thread_id`
@@ -443,6 +486,51 @@ mod tests {
         ChatRef {
             connector_id: ConnectorId(connector.into()),
             address: ChatAddress::new(chat, thread.map(Into::into)),
+        }
+    }
+
+    fn named_platforms() -> [(&'static str, Platform); 7] {
+        [
+            ("whatsapp", Platform::WhatsApp),
+            ("telegram", Platform::Telegram),
+            ("discord", Platform::Discord),
+            ("signal", Platform::Signal),
+            ("slack", Platform::Slack),
+            ("matrix", Platform::Matrix),
+            ("instagram", Platform::Instagram),
+        ]
+    }
+
+    #[test]
+    fn every_named_platform_parses() {
+        for (name, platform) in named_platforms() {
+            assert_eq!(name.parse::<Platform>(), Ok(platform), "{name}");
+        }
+    }
+
+    #[test]
+    fn other_prefix_parses_to_other() {
+        assert_eq!(
+            "other:mattermost".parse::<Platform>(),
+            Ok(Platform::Other("mattermost".into()))
+        );
+    }
+
+    #[test]
+    fn unknown_platform_is_rejected() {
+        let error = "unknown".parse::<Platform>().unwrap_err();
+        assert_eq!(error, UnknownPlatform("unknown".into()));
+        assert_eq!(error.to_string(), "unsupported platform unknown");
+    }
+
+    #[test]
+    fn platforms_round_trip_through_display() {
+        let platforms = named_platforms()
+            .into_iter()
+            .map(|(_, platform)| platform)
+            .chain([Platform::Other("mattermost".into())]);
+        for platform in platforms {
+            assert_eq!(platform.to_string().parse::<Platform>(), Ok(platform));
         }
     }
 

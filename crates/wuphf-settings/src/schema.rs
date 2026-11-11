@@ -1,7 +1,7 @@
 //! The schema: how botconf validates the configuration and what it derives
 //! from it.
 
-use crate::config::{Configuration, platform};
+use crate::config::Configuration;
 use crate::domains;
 use botconf::{Choices, Field, FixedChoice, Form, Kind, RuntimeSetting};
 use std::collections::{HashMap, HashSet};
@@ -9,7 +9,7 @@ use std::sync::Arc;
 use wuphf_core::RoutingConfig;
 use wuphf_functions::Functions;
 use wuphf_model::{
-    Connector, ConnectorCapabilities, ConnectorId, Rule, RuleId, is_valid_connector_id,
+    Connector, ConnectorCapabilities, ConnectorId, Platform, Rule, RuleId, is_valid_connector_id,
 };
 
 /// What the core runs from, computed from a validated configuration.
@@ -82,7 +82,10 @@ impl botconf::Schema for WuphfSchema {
             }
             connectors.push(Connector {
                 id: ConnectorId(connector.id.clone()),
-                platform: platform(&connector.platform)?,
+                platform: connector
+                    .platform
+                    .parse::<Platform>()
+                    .map_err(|error| error.to_string())?,
                 capabilities: ConnectorCapabilities {
                     supports_threads: connector.supports_threads,
                     supports_topic_create: connector.supports_topic_create,
