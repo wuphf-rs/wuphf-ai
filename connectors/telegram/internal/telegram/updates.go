@@ -51,7 +51,22 @@ func (n Normalizer) Dispatcher() tg.UpdateDispatcher {
 		return n.handle(ctx, entities, update.Message)
 	})
 	dispatcher.OnNewChannelMessage(func(ctx context.Context, entities tg.Entities, update *tg.UpdateNewChannelMessage) error {
+		// A topic closed or reopened is a service message about the topic,
+		// never a message to mirror (handle drops service messages).
+		if err := n.sendChatUpdates(ctx, topicCloseUpdates(update.Message)); err != nil {
+			return err
+		}
 		return n.handle(ctx, entities, update.Message)
+	})
+	// Topic pin and mute state (mirror topics only; see chatstate.go).
+	dispatcher.OnPinnedForumTopic(func(ctx context.Context, _ tg.Entities, update *tg.UpdatePinnedForumTopic) error {
+		return n.sendChatUpdates(ctx, pinnedTopicUpdates(update))
+	})
+	dispatcher.OnPinnedForumTopics(func(ctx context.Context, _ tg.Entities, update *tg.UpdatePinnedForumTopics) error {
+		return n.sendChatUpdates(ctx, pinnedTopicsUpdates(update))
+	})
+	dispatcher.OnNotifySettings(func(ctx context.Context, _ tg.Entities, update *tg.UpdateNotifySettings) error {
+		return n.sendChatUpdates(ctx, notifyUpdates(update, n.peers.IsBot(), time.Now()))
 	})
 	dispatcher.OnEditMessage(func(ctx context.Context, entities tg.Entities, update *tg.UpdateEditMessage) error {
 		return n.handleEdit(ctx, entities, update.Message)
@@ -227,6 +242,11 @@ func topicRootID(message *tg.Message) (int, bool) {
 	if !ok {
 		return 0, false
 	}
+	return topicOf(reply)
+}
+
+// topicOf is the forum topic a reply header threads into, when any.
+func topicOf(reply tg.MessageReplyHeaderClass) (int, bool) {
 	header, ok := reply.(*tg.MessageReplyHeader)
 	if !ok || !header.ForumTopic {
 		return 0, false

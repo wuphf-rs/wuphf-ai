@@ -29,7 +29,7 @@ func (r *recordingAPI) Invoke(_ context.Context, input bin.Encoder, output bin.D
 	r.mu.Unlock()
 	var response bin.Encoder
 	switch input.(type) {
-	case *tg.UploadSaveFilePartRequest, *tg.UploadSaveBigFilePartRequest:
+	case *tg.UploadSaveFilePartRequest, *tg.UploadSaveBigFilePartRequest, *tg.AccountUpdateNotifySettingsRequest:
 		response = &tg.BoolTrue{}
 	default:
 		response = &tg.Updates{Updates: []tg.UpdateClass{&tg.UpdateNewMessage{
