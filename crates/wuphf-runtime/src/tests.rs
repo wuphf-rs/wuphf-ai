@@ -1365,7 +1365,9 @@ async fn a_reported_timer_reaches_the_whatsapp_send_over_grpc() {
                         seconds: 604_800,
                         setting_timestamp: Some(1_700_000_000),
                     }),
+                    ..Default::default()
                 }],
+                snapshot: false,
             })),
         })
         .await

@@ -436,7 +436,9 @@ async fn the_registration_carries_the_disappearing_capability() {
                         seconds: 86_400,
                         setting_timestamp: None,
                     }),
+                    ..Default::default()
                 }],
+                snapshot: false,
             })),
         })
         .await

@@ -399,6 +399,7 @@ fn output_to_proto(output: ConnectorOutput) -> pb::ServerFrame {
                         reply_context: reply_context.map(reply_context_to_proto),
                         sender_name: message.author_name,
                         disappearing: disappearing.map(timer_to_proto),
+                        system_note: false,
                     }))
                 }
                 Action::Edit { message, native_id } => {
@@ -699,12 +700,15 @@ mod tests {
                         seconds: 604_800,
                         setting_timestamp: Some(1_700_000_000),
                     }),
+                    ..Default::default()
                 },
                 pb::ChatUpdate {
                     chat_id: "2@s.whatsapp.net".into(),
                     disappearing: None,
+                    ..Default::default()
                 },
             ],
+            snapshot: false,
         });
         assert_eq!(
             work(frame),
@@ -730,7 +734,9 @@ mod tests {
             updates: vec![pb::ChatUpdate {
                 chat_id: String::new(),
                 disappearing: None,
+                ..Default::default()
             }],
+            snapshot: false,
         });
         assert!(
             input_from_proto(

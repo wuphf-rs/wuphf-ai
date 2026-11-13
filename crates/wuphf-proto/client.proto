@@ -31,10 +31,52 @@ message MessageCreateEvent {
 
 // One chat's properties as the platform reported them. An absent field was not
 // reported and leaves what the core knows unchanged. Later plans add fields
-// (title, pins, mutes) here.
+// (pins, mutes) here.
 message ChatUpdate {
   string chat_id = 1;
   optional DisappearingTimer disappearing = 2;
+  // The chat's display title, exactly as the connector sends it in
+  // MessageCreateEvent.chat_title (tags included). A change renames the
+  // mirror thread; it never becomes a note.
+  optional string title = 3;
+  // The group description / chat about text. Empty means cleared.
+  optional string description = 4;
+  optional ChatAvatar avatar = 5;
+  // The member count, when the connector read it (group info, a snapshot).
+  optional uint32 participant_count = 6;
+  // Membership events, in order. Never part of a snapshot.
+  repeated ParticipantChange participant_changes = 7;
+}
+
+// The chat's picture. `id` is the platform's picture id; empty means the
+// picture was removed. `media_id` is the uploaded picture in the core's media
+// store, absent when removed or when the connector could not fetch it.
+message ChatAvatar {
+  string id = 1;
+  optional string media_id = 2;
+}
+
+message ParticipantChange {
+  enum Kind {
+    KIND_UNSPECIFIED = 0;
+    KIND_JOINED = 1;
+    KIND_LEFT = 2;
+    KIND_PROMOTED = 3;
+    KIND_DEMOTED = 4;
+  }
+  Kind kind = 1;
+  // Canonical participant id, as the connector reports senders.
+  string participant = 2;
+  // Display name as the connector resolves senders (contact name first).
+  optional string name = 3;
+  // Who made the change (the admin who added, removed, promoted or demoted
+  // the member), when the platform says: canonical id in the same address
+  // form as `participant`, and display name resolved like `name`. Absent for
+  // a self-join through a link or a self-leave the platform reports without
+  // an actor. The core uses the plain wording when it is absent or equals
+  // `participant`.
+  optional string actor = 4;
+  optional string actor_name = 5;
 }
 
 // Chat properties changed or were learned (a timer setting message, a group
@@ -43,6 +85,9 @@ message ChatUpdate {
 // connector reports them in MessageCreateEvent.
 message ChatUpdateEvent {
   repeated ChatUpdate updates = 1;
+  // The updates describe current state (a history sync, a first sighting),
+  // not live changes: the core stores them without notes.
+  bool snapshot = 2;
 }
 
 // The platform reported that an existing message's content changed. The

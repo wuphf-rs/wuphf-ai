@@ -51,6 +51,10 @@ message MessageCreateDispatch {
   // connectors that declare supports_disappearing_timers. The connector puts
   // it on every part of the send; edits, deletes and reactions carry none.
   optional DisappearingTimer disappearing = 13;
+  // A note the core composed about the chat (an info card, a change). Render
+  // it as plain text with any attachments; no sender label, no reply. The core
+  // records no copy, so nothing can reply to it or bridge it back.
+  bool system_note = 14;
 }
 
 // Instruction to revise an already-delivered copy. `target_platform_message_id`

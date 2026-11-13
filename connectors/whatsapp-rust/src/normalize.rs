@@ -104,6 +104,7 @@ fn normalize(
             Some(wa::message::protocol_message::Type::EPHEMERAL_SETTING) => Some(frame(
                 pb::client_frame::Body::ChatUpdate(pb::ChatUpdateEvent {
                     updates: vec![ephemeral_setting(chat, info, protocol)],
+                    snapshot: false,
                 }),
             )),
             // A delete arrives as a REVOKE protocol message naming the revoked
@@ -353,6 +354,7 @@ mod tests {
                         seconds,
                         setting_timestamp: Some(1_700_000_000),
                     }),
+                    ..Default::default()
                 }]
             );
         }

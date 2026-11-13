@@ -60,6 +60,7 @@ pub fn ephemeral_setting(
             seconds: protocol.ephemeral_expiration.unwrap_or(0),
             setting_timestamp: Some(setting_timestamp),
         }),
+        ..Default::default()
     }
 }
 
@@ -85,6 +86,7 @@ fn group_action_update(
             seconds: *expiration,
             setting_timestamp: Some(at.timestamp()),
         }),
+        ..Default::default()
     })
 }
 
@@ -121,6 +123,7 @@ pub fn history_updates(sync: &wa::HistorySync) -> Vec<pb::ChatUpdate> {
             updates.push(pb::ChatUpdate {
                 chat_id,
                 disappearing: Some(timer),
+                ..Default::default()
             });
         }
     }
@@ -140,6 +143,7 @@ pub fn chat_update_frames(updates: Vec<pb::ChatUpdate>, batch: usize) -> Vec<pb:
         .map(|chunk| {
             frame(pb::client_frame::Body::ChatUpdate(pb::ChatUpdateEvent {
                 updates: chunk.to_vec(),
+                snapshot: false,
             }))
         })
         .collect()
@@ -249,7 +253,9 @@ impl TimerFallback {
                     updates: vec![pb::ChatUpdate {
                         chat_id: chat_id.to_owned(),
                         disappearing: Some(timer),
+                        ..Default::default()
                     }],
+                    snapshot: false,
                 },
             )));
             return Some(timer);
@@ -396,6 +402,7 @@ mod tests {
                 Some(pb::ChatUpdate {
                     chat_id: "123@g.us".into(),
                     disappearing: Some(timer(seconds, Some(1_700_000_000))),
+                    ..Default::default()
                 })
             );
         }
@@ -431,18 +438,22 @@ mod tests {
                 pb::ChatUpdate {
                     chat_id: "1@g.us".into(),
                     disappearing: Some(timer(86_400, None)),
+                    ..Default::default()
                 },
                 pb::ChatUpdate {
                     chat_id: "88887777@lid".into(),
                     disappearing: Some(timer(604_800, Some(1_700_000_000))),
+                    ..Default::default()
                 },
                 pb::ChatUpdate {
                     chat_id: "15550001111@s.whatsapp.net".into(),
                     disappearing: Some(timer(604_800, Some(1_700_000_000))),
+                    ..Default::default()
                 },
                 pb::ChatUpdate {
                     chat_id: "2@s.whatsapp.net".into(),
                     disappearing: Some(timer(0, None)),
+                    ..Default::default()
                 },
             ]
         );
