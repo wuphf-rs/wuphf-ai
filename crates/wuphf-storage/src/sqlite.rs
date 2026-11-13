@@ -1128,10 +1128,12 @@ impl ChatProfileStore for SqliteStorage {
     }
 }
 
+/// `table` and `key_column` are `'static` so that only names written in this
+/// file can reach the SQL text; the values travel as bound parameters.
 async fn upsert_json<T: serde::Serialize>(
     pool: &SqlitePool,
-    table: &str,
-    key_column: &str,
+    table: &'static str,
+    key_column: &'static str,
     key: String,
     value: &T,
 ) -> StorageResult<()> {
@@ -1139,7 +1141,7 @@ async fn upsert_json<T: serde::Serialize>(
         "INSERT INTO {table} ({key_column}, payload) VALUES (?, ?)
          ON CONFLICT({key_column}) DO UPDATE SET payload = excluded.payload"
     );
-    sqlx::query(&sql)
+    sqlx::query(sqlx::AssertSqlSafe(sql))
         .bind(key)
         .bind(serde_json::to_string(value)?)
         .execute(pool)
@@ -1147,14 +1149,18 @@ async fn upsert_json<T: serde::Serialize>(
     Ok(())
 }
 
+/// As [`upsert_json`]: only `'static` names reach the SQL text.
 async fn get_json<T: serde::de::DeserializeOwned>(
     pool: &SqlitePool,
-    table: &str,
-    key_column: &str,
+    table: &'static str,
+    key_column: &'static str,
     key: String,
 ) -> StorageResult<Option<T>> {
     let sql = format!("SELECT payload FROM {table} WHERE {key_column} = ?");
-    let row = sqlx::query(&sql).bind(key).fetch_optional(pool).await?;
+    let row = sqlx::query(sqlx::AssertSqlSafe(sql))
+        .bind(key)
+        .fetch_optional(pool)
+        .await?;
     row.map(|row| serde_json::from_str(row.get("payload")))
         .transpose()
         .map_err(Into::into)

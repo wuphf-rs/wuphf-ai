@@ -52,11 +52,13 @@ async fn assert_stored<T>(pool: &SqlitePool, table: &str, key: &str, id: &str, e
 where
     T: Serialize + DeserializeOwned + PartialEq + Debug,
 {
-    let row = sqlx::query(&format!("SELECT payload FROM {table} WHERE {key} = ?"))
-        .bind(id)
-        .fetch_one(pool)
-        .await
-        .unwrap();
+    let row = sqlx::query(sqlx::AssertSqlSafe(format!(
+        "SELECT payload FROM {table} WHERE {key} = ?"
+    )))
+    .bind(id)
+    .fetch_one(pool)
+    .await
+    .unwrap();
     let stored: String = row.get("payload");
     assert_eq!(
         stored,
@@ -166,7 +168,10 @@ async fn migration_0014_merges_replica_sets_into_conversations() {
         "#,
         message = message_id(),
     );
-    sqlx::raw_sql(&seed).execute(&pool).await.unwrap();
+    sqlx::raw_sql(sqlx::AssertSqlSafe(seed))
+        .execute(&pool)
+        .await
+        .unwrap();
 
     MIGRATOR.run(&pool).await.unwrap();
 
@@ -536,7 +541,7 @@ async fn real_database_migrates_and_decodes() {
 /// Decode every `payload` in `table`, failing on the first row that does not
 /// fit the model.
 async fn decode_all<T: DeserializeOwned>(pool: &SqlitePool, table: &str) -> Vec<T> {
-    let rows = sqlx::query(&format!("SELECT payload FROM {table}"))
+    let rows = sqlx::query(sqlx::AssertSqlSafe(format!("SELECT payload FROM {table}")))
         .fetch_all(pool)
         .await
         .unwrap();
