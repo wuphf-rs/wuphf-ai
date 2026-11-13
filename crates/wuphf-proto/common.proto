@@ -87,3 +87,9 @@ message MediaMetadata {
   optional uint64 size_bytes = 4;
   bool animated = 5;
 }
+
+// A chat's mute: 0 = not muted, -1 = muted forever, otherwise the end in Unix
+// seconds. A mute whose end has passed is reported as 0.
+message MuteState {
+  int64 muted_until = 1;
+}

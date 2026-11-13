@@ -339,8 +339,7 @@ func (x *MessageCreateEvent) GetDisappearing() *DisappearingTimer {
 }
 
 // One chat's properties as the platform reported them. An absent field was not
-// reported and leaves what the core knows unchanged. Later plans add fields
-// (pins, mutes) here.
+// reported and leaves what the core knows unchanged.
 type ChatUpdate struct {
 	state        protoimpl.MessageState `protogen:"open.v1"`
 	ChatId       string                 `protobuf:"bytes,1,opt,name=chat_id,json=chatId,proto3" json:"chat_id,omitempty"`
@@ -356,8 +355,16 @@ type ChatUpdate struct {
 	ParticipantCount *uint32 `protobuf:"varint,6,opt,name=participant_count,json=participantCount,proto3,oneof" json:"participant_count,omitempty"`
 	// Membership events, in order. Never part of a snapshot.
 	ParticipantChanges []*ParticipantChange `protobuf:"bytes,7,rep,name=participant_changes,json=participantChanges,proto3" json:"participant_changes,omitempty"`
-	unknownFields      protoimpl.UnknownFields
-	sizeCache          protoimpl.SizeCache
+	// Set when the update is about a thread (a Telegram forum topic) rather
+	// than the whole chat. The core resolves (chat_id, thread_id) to the
+	// conversation's mirror endpoint.
+	ThreadId *string    `protobuf:"bytes,8,opt,name=thread_id,json=threadId,proto3,oneof" json:"thread_id,omitempty"`
+	Pinned   *bool      `protobuf:"varint,9,opt,name=pinned,proto3,oneof" json:"pinned,omitempty"`
+	Mute     *MuteState `protobuf:"bytes,10,opt,name=mute,proto3,oneof" json:"mute,omitempty"`
+	// WhatsApp: archived. Telegram topic: closed.
+	Archived      *bool `protobuf:"varint,11,opt,name=archived,proto3,oneof" json:"archived,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *ChatUpdate) Reset() {
@@ -437,6 +444,34 @@ func (x *ChatUpdate) GetParticipantChanges() []*ParticipantChange {
 		return x.ParticipantChanges
 	}
 	return nil
+}
+
+func (x *ChatUpdate) GetThreadId() string {
+	if x != nil && x.ThreadId != nil {
+		return *x.ThreadId
+	}
+	return ""
+}
+
+func (x *ChatUpdate) GetPinned() bool {
+	if x != nil && x.Pinned != nil {
+		return *x.Pinned
+	}
+	return false
+}
+
+func (x *ChatUpdate) GetMute() *MuteState {
+	if x != nil {
+		return x.Mute
+	}
+	return nil
+}
+
+func (x *ChatUpdate) GetArchived() bool {
+	if x != nil && x.Archived != nil {
+		return *x.Archived
+	}
+	return false
 }
 
 // The chat's picture. `id` is the platform's picture id; empty means the
@@ -1464,7 +1499,7 @@ const file_client_proto_rawDesc = "" +
 	"\x05_textB\x1f\n" +
 	"\x1d_reply_to_platform_message_idB\x0e\n" +
 	"\f_sender_nameB\x0f\n" +
-	"\r_disappearing\"\xca\x03\n" +
+	"\r_disappearing\"\x91\x05\n" +
 	"\n" +
 	"ChatUpdate\x12\x17\n" +
 	"\achat_id\x18\x01 \x01(\tR\x06chatId\x12N\n" +
@@ -1473,12 +1508,22 @@ const file_client_proto_rawDesc = "" +
 	"\vdescription\x18\x04 \x01(\tH\x02R\vdescription\x88\x01\x01\x12;\n" +
 	"\x06avatar\x18\x05 \x01(\v2\x1e.wuphf.connector.v1.ChatAvatarH\x03R\x06avatar\x88\x01\x01\x120\n" +
 	"\x11participant_count\x18\x06 \x01(\rH\x04R\x10participantCount\x88\x01\x01\x12V\n" +
-	"\x13participant_changes\x18\a \x03(\v2%.wuphf.connector.v1.ParticipantChangeR\x12participantChangesB\x0f\n" +
+	"\x13participant_changes\x18\a \x03(\v2%.wuphf.connector.v1.ParticipantChangeR\x12participantChanges\x12 \n" +
+	"\tthread_id\x18\b \x01(\tH\x05R\bthreadId\x88\x01\x01\x12\x1b\n" +
+	"\x06pinned\x18\t \x01(\bH\x06R\x06pinned\x88\x01\x01\x126\n" +
+	"\x04mute\x18\n" +
+	" \x01(\v2\x1d.wuphf.connector.v1.MuteStateH\aR\x04mute\x88\x01\x01\x12\x1f\n" +
+	"\barchived\x18\v \x01(\bH\bR\barchived\x88\x01\x01B\x0f\n" +
 	"\r_disappearingB\b\n" +
 	"\x06_titleB\x0e\n" +
 	"\f_descriptionB\t\n" +
 	"\a_avatarB\x14\n" +
-	"\x12_participant_count\"I\n" +
+	"\x12_participant_countB\f\n" +
+	"\n" +
+	"_thread_idB\t\n" +
+	"\a_pinnedB\a\n" +
+	"\x05_muteB\v\n" +
+	"\t_archived\"I\n" +
 	"\n" +
 	"ChatAvatar\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x1e\n" +
@@ -1621,7 +1666,8 @@ var file_client_proto_goTypes = []any{
 	(*ClientFrame)(nil),         // 16: wuphf.connector.v1.ClientFrame
 	(*Attachment)(nil),          // 17: wuphf.connector.v1.Attachment
 	(*DisappearingTimer)(nil),   // 18: wuphf.connector.v1.DisappearingTimer
-	(*Registration)(nil),        // 19: wuphf.connector.v1.Registration
+	(*MuteState)(nil),           // 19: wuphf.connector.v1.MuteState
+	(*Registration)(nil),        // 20: wuphf.connector.v1.Registration
 }
 var file_client_proto_depIdxs = []int32{
 	17, // 0: wuphf.connector.v1.MessageCreateEvent.attachments:type_name -> wuphf.connector.v1.Attachment
@@ -1629,26 +1675,27 @@ var file_client_proto_depIdxs = []int32{
 	18, // 2: wuphf.connector.v1.ChatUpdate.disappearing:type_name -> wuphf.connector.v1.DisappearingTimer
 	5,  // 3: wuphf.connector.v1.ChatUpdate.avatar:type_name -> wuphf.connector.v1.ChatAvatar
 	6,  // 4: wuphf.connector.v1.ChatUpdate.participant_changes:type_name -> wuphf.connector.v1.ParticipantChange
-	2,  // 5: wuphf.connector.v1.ParticipantChange.kind:type_name -> wuphf.connector.v1.ParticipantChange.Kind
-	4,  // 6: wuphf.connector.v1.ChatUpdateEvent.updates:type_name -> wuphf.connector.v1.ChatUpdate
-	0,  // 7: wuphf.connector.v1.ReceiptEvent.kind:type_name -> wuphf.connector.v1.ReceiptKind
-	1,  // 8: wuphf.connector.v1.OwnerNotice.kind:type_name -> wuphf.connector.v1.NoticeKind
-	19, // 9: wuphf.connector.v1.ClientFrame.registration:type_name -> wuphf.connector.v1.Registration
-	3,  // 10: wuphf.connector.v1.ClientFrame.message_create:type_name -> wuphf.connector.v1.MessageCreateEvent
-	11, // 11: wuphf.connector.v1.ClientFrame.acknowledgement:type_name -> wuphf.connector.v1.Acknowledgement
-	10, // 12: wuphf.connector.v1.ClientFrame.identity_migrated:type_name -> wuphf.connector.v1.IdentityMigrated
-	12, // 13: wuphf.connector.v1.ClientFrame.dispatch_failed:type_name -> wuphf.connector.v1.DispatchFailed
-	8,  // 14: wuphf.connector.v1.ClientFrame.message_edit:type_name -> wuphf.connector.v1.MessageEditEvent
-	9,  // 15: wuphf.connector.v1.ClientFrame.message_delete:type_name -> wuphf.connector.v1.MessageDeleteEvent
-	13, // 16: wuphf.connector.v1.ClientFrame.reaction:type_name -> wuphf.connector.v1.ReactionEvent
-	14, // 17: wuphf.connector.v1.ClientFrame.receipt:type_name -> wuphf.connector.v1.ReceiptEvent
-	15, // 18: wuphf.connector.v1.ClientFrame.owner_notice:type_name -> wuphf.connector.v1.OwnerNotice
-	7,  // 19: wuphf.connector.v1.ClientFrame.chat_update:type_name -> wuphf.connector.v1.ChatUpdateEvent
-	20, // [20:20] is the sub-list for method output_type
-	20, // [20:20] is the sub-list for method input_type
-	20, // [20:20] is the sub-list for extension type_name
-	20, // [20:20] is the sub-list for extension extendee
-	0,  // [0:20] is the sub-list for field type_name
+	19, // 5: wuphf.connector.v1.ChatUpdate.mute:type_name -> wuphf.connector.v1.MuteState
+	2,  // 6: wuphf.connector.v1.ParticipantChange.kind:type_name -> wuphf.connector.v1.ParticipantChange.Kind
+	4,  // 7: wuphf.connector.v1.ChatUpdateEvent.updates:type_name -> wuphf.connector.v1.ChatUpdate
+	0,  // 8: wuphf.connector.v1.ReceiptEvent.kind:type_name -> wuphf.connector.v1.ReceiptKind
+	1,  // 9: wuphf.connector.v1.OwnerNotice.kind:type_name -> wuphf.connector.v1.NoticeKind
+	20, // 10: wuphf.connector.v1.ClientFrame.registration:type_name -> wuphf.connector.v1.Registration
+	3,  // 11: wuphf.connector.v1.ClientFrame.message_create:type_name -> wuphf.connector.v1.MessageCreateEvent
+	11, // 12: wuphf.connector.v1.ClientFrame.acknowledgement:type_name -> wuphf.connector.v1.Acknowledgement
+	10, // 13: wuphf.connector.v1.ClientFrame.identity_migrated:type_name -> wuphf.connector.v1.IdentityMigrated
+	12, // 14: wuphf.connector.v1.ClientFrame.dispatch_failed:type_name -> wuphf.connector.v1.DispatchFailed
+	8,  // 15: wuphf.connector.v1.ClientFrame.message_edit:type_name -> wuphf.connector.v1.MessageEditEvent
+	9,  // 16: wuphf.connector.v1.ClientFrame.message_delete:type_name -> wuphf.connector.v1.MessageDeleteEvent
+	13, // 17: wuphf.connector.v1.ClientFrame.reaction:type_name -> wuphf.connector.v1.ReactionEvent
+	14, // 18: wuphf.connector.v1.ClientFrame.receipt:type_name -> wuphf.connector.v1.ReceiptEvent
+	15, // 19: wuphf.connector.v1.ClientFrame.owner_notice:type_name -> wuphf.connector.v1.OwnerNotice
+	7,  // 20: wuphf.connector.v1.ClientFrame.chat_update:type_name -> wuphf.connector.v1.ChatUpdateEvent
+	21, // [21:21] is the sub-list for method output_type
+	21, // [21:21] is the sub-list for method input_type
+	21, // [21:21] is the sub-list for extension type_name
+	21, // [21:21] is the sub-list for extension extendee
+	0,  // [0:21] is the sub-list for field type_name
 }
 
 func init() { file_client_proto_init() }

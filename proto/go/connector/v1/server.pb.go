@@ -865,6 +865,7 @@ type ServerFrame struct {
 	//	*ServerFrame_Reaction
 	//	*ServerFrame_DeliveryAck
 	//	*ServerFrame_SeenReceipt
+	//	*ServerFrame_ChatState
 	Body          isServerFrame_Body `protobuf_oneof:"body"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -979,6 +980,15 @@ func (x *ServerFrame) GetSeenReceipt() *SeenReceiptDispatch {
 	return nil
 }
 
+func (x *ServerFrame) GetChatState() *ChatStateDispatch {
+	if x != nil {
+		if x, ok := x.Body.(*ServerFrame_ChatState); ok {
+			return x.ChatState
+		}
+	}
+	return nil
+}
+
 type isServerFrame_Body interface {
 	isServerFrame_Body()
 }
@@ -1015,6 +1025,10 @@ type ServerFrame_SeenReceipt struct {
 	SeenReceipt *SeenReceiptDispatch `protobuf:"bytes,8,opt,name=seen_receipt,json=seenReceipt,proto3,oneof"`
 }
 
+type ServerFrame_ChatState struct {
+	ChatState *ChatStateDispatch `protobuf:"bytes,9,opt,name=chat_state,json=chatState,proto3,oneof"`
+}
+
 func (*ServerFrame_MessageCreate) isServerFrame_Body() {}
 
 func (*ServerFrame_Rejected) isServerFrame_Body() {}
@@ -1030,6 +1044,95 @@ func (*ServerFrame_Reaction) isServerFrame_Body() {}
 func (*ServerFrame_DeliveryAck) isServerFrame_Body() {}
 
 func (*ServerFrame_SeenReceipt) isServerFrame_Body() {}
+
+func (*ServerFrame_ChatState) isServerFrame_Body() {}
+
+// Bring a chat (or a thread) to this pin / mute / archive state. Absent fields
+// are left alone. Acknowledged with the target chat id; a connector that
+// cannot apply a field acknowledges without applying it.
+type ChatStateDispatch struct {
+	state          protoimpl.MessageState `protogen:"open.v1"`
+	DispatchId     string                 `protobuf:"bytes,1,opt,name=dispatch_id,json=dispatchId,proto3" json:"dispatch_id,omitempty"`
+	TargetChatId   string                 `protobuf:"bytes,2,opt,name=target_chat_id,json=targetChatId,proto3" json:"target_chat_id,omitempty"`
+	TargetThreadId *string                `protobuf:"bytes,3,opt,name=target_thread_id,json=targetThreadId,proto3,oneof" json:"target_thread_id,omitempty"`
+	Pinned         *bool                  `protobuf:"varint,4,opt,name=pinned,proto3,oneof" json:"pinned,omitempty"`
+	Mute           *MuteState             `protobuf:"bytes,5,opt,name=mute,proto3,oneof" json:"mute,omitempty"`
+	Archived       *bool                  `protobuf:"varint,6,opt,name=archived,proto3,oneof" json:"archived,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
+}
+
+func (x *ChatStateDispatch) Reset() {
+	*x = ChatStateDispatch{}
+	mi := &file_server_proto_msgTypes[11]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ChatStateDispatch) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ChatStateDispatch) ProtoMessage() {}
+
+func (x *ChatStateDispatch) ProtoReflect() protoreflect.Message {
+	mi := &file_server_proto_msgTypes[11]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ChatStateDispatch.ProtoReflect.Descriptor instead.
+func (*ChatStateDispatch) Descriptor() ([]byte, []int) {
+	return file_server_proto_rawDescGZIP(), []int{11}
+}
+
+func (x *ChatStateDispatch) GetDispatchId() string {
+	if x != nil {
+		return x.DispatchId
+	}
+	return ""
+}
+
+func (x *ChatStateDispatch) GetTargetChatId() string {
+	if x != nil {
+		return x.TargetChatId
+	}
+	return ""
+}
+
+func (x *ChatStateDispatch) GetTargetThreadId() string {
+	if x != nil && x.TargetThreadId != nil {
+		return *x.TargetThreadId
+	}
+	return ""
+}
+
+func (x *ChatStateDispatch) GetPinned() bool {
+	if x != nil && x.Pinned != nil {
+		return *x.Pinned
+	}
+	return false
+}
+
+func (x *ChatStateDispatch) GetMute() *MuteState {
+	if x != nil {
+		return x.Mute
+	}
+	return nil
+}
+
+func (x *ChatStateDispatch) GetArchived() bool {
+	if x != nil && x.Archived != nil {
+		return *x.Archived
+	}
+	return false
+}
 
 var File_server_proto protoreflect.FileDescriptor
 
@@ -1129,7 +1232,7 @@ const file_server_proto_rawDesc = "" +
 	"\x1atarget_platform_message_id\x18\x04 \x01(\tR\x17targetPlatformMessageIdB\x13\n" +
 	"\x11_target_thread_id\"\"\n" +
 	"\bRejected\x12\x16\n" +
-	"\x06reason\x18\x01 \x01(\tR\x06reason\"\xfe\x04\n" +
+	"\x06reason\x18\x01 \x01(\tR\x06reason\"\xc6\x05\n" +
 	"\vServerFrame\x12R\n" +
 	"\x0emessage_create\x18\x01 \x01(\v2).wuphf.connector.v1.MessageCreateDispatchH\x00R\rmessageCreate\x12:\n" +
 	"\brejected\x18\x02 \x01(\v2\x1c.wuphf.connector.v1.RejectedH\x00R\brejected\x12L\n" +
@@ -1138,8 +1241,22 @@ const file_server_proto_rawDesc = "" +
 	"\x0fmessage_retitle\x18\x05 \x01(\v2*.wuphf.connector.v1.MessageRetitleDispatchH\x00R\x0emessageRetitle\x12B\n" +
 	"\breaction\x18\x06 \x01(\v2$.wuphf.connector.v1.ReactionDispatchH\x00R\breaction\x12L\n" +
 	"\fdelivery_ack\x18\a \x01(\v2'.wuphf.connector.v1.DeliveryAckDispatchH\x00R\vdeliveryAck\x12L\n" +
-	"\fseen_receipt\x18\b \x01(\v2'.wuphf.connector.v1.SeenReceiptDispatchH\x00R\vseenReceiptB\x06\n" +
-	"\x04bodyB:Z8github.com/akshettrj/wuphf/proto/go/connector/v1;wuphfpbb\x06proto3"
+	"\fseen_receipt\x18\b \x01(\v2'.wuphf.connector.v1.SeenReceiptDispatchH\x00R\vseenReceipt\x12F\n" +
+	"\n" +
+	"chat_state\x18\t \x01(\v2%.wuphf.connector.v1.ChatStateDispatchH\x00R\tchatStateB\x06\n" +
+	"\x04body\"\xb5\x02\n" +
+	"\x11ChatStateDispatch\x12\x1f\n" +
+	"\vdispatch_id\x18\x01 \x01(\tR\n" +
+	"dispatchId\x12$\n" +
+	"\x0etarget_chat_id\x18\x02 \x01(\tR\ftargetChatId\x12-\n" +
+	"\x10target_thread_id\x18\x03 \x01(\tH\x00R\x0etargetThreadId\x88\x01\x01\x12\x1b\n" +
+	"\x06pinned\x18\x04 \x01(\bH\x01R\x06pinned\x88\x01\x01\x126\n" +
+	"\x04mute\x18\x05 \x01(\v2\x1d.wuphf.connector.v1.MuteStateH\x02R\x04mute\x88\x01\x01\x12\x1f\n" +
+	"\barchived\x18\x06 \x01(\bH\x03R\barchived\x88\x01\x01B\x13\n" +
+	"\x11_target_thread_idB\t\n" +
+	"\a_pinnedB\a\n" +
+	"\x05_muteB\v\n" +
+	"\t_archivedB:Z8github.com/akshettrj/wuphf/proto/go/connector/v1;wuphfpbb\x06proto3"
 
 var (
 	file_server_proto_rawDescOnce sync.Once
@@ -1153,7 +1270,7 @@ func file_server_proto_rawDescGZIP() []byte {
 	return file_server_proto_rawDescData
 }
 
-var file_server_proto_msgTypes = make([]protoimpl.MessageInfo, 11)
+var file_server_proto_msgTypes = make([]protoimpl.MessageInfo, 12)
 var file_server_proto_goTypes = []any{
 	(*ReplyContext)(nil),           // 0: wuphf.connector.v1.ReplyContext
 	(*ProvisionThread)(nil),        // 1: wuphf.connector.v1.ProvisionThread
@@ -1166,15 +1283,17 @@ var file_server_proto_goTypes = []any{
 	(*SeenReceiptDispatch)(nil),    // 8: wuphf.connector.v1.SeenReceiptDispatch
 	(*Rejected)(nil),               // 9: wuphf.connector.v1.Rejected
 	(*ServerFrame)(nil),            // 10: wuphf.connector.v1.ServerFrame
-	(*Attachment)(nil),             // 11: wuphf.connector.v1.Attachment
-	(*DisappearingTimer)(nil),      // 12: wuphf.connector.v1.DisappearingTimer
+	(*ChatStateDispatch)(nil),      // 11: wuphf.connector.v1.ChatStateDispatch
+	(*Attachment)(nil),             // 12: wuphf.connector.v1.Attachment
+	(*DisappearingTimer)(nil),      // 13: wuphf.connector.v1.DisappearingTimer
+	(*MuteState)(nil),              // 14: wuphf.connector.v1.MuteState
 }
 var file_server_proto_depIdxs = []int32{
-	11, // 0: wuphf.connector.v1.ReplyContext.attachments:type_name -> wuphf.connector.v1.Attachment
+	12, // 0: wuphf.connector.v1.ReplyContext.attachments:type_name -> wuphf.connector.v1.Attachment
 	1,  // 1: wuphf.connector.v1.MessageCreateDispatch.provision_thread:type_name -> wuphf.connector.v1.ProvisionThread
-	11, // 2: wuphf.connector.v1.MessageCreateDispatch.attachments:type_name -> wuphf.connector.v1.Attachment
+	12, // 2: wuphf.connector.v1.MessageCreateDispatch.attachments:type_name -> wuphf.connector.v1.Attachment
 	0,  // 3: wuphf.connector.v1.MessageCreateDispatch.reply_context:type_name -> wuphf.connector.v1.ReplyContext
-	12, // 4: wuphf.connector.v1.MessageCreateDispatch.disappearing:type_name -> wuphf.connector.v1.DisappearingTimer
+	13, // 4: wuphf.connector.v1.MessageCreateDispatch.disappearing:type_name -> wuphf.connector.v1.DisappearingTimer
 	2,  // 5: wuphf.connector.v1.ServerFrame.message_create:type_name -> wuphf.connector.v1.MessageCreateDispatch
 	9,  // 6: wuphf.connector.v1.ServerFrame.rejected:type_name -> wuphf.connector.v1.Rejected
 	3,  // 7: wuphf.connector.v1.ServerFrame.message_edit:type_name -> wuphf.connector.v1.MessageEditDispatch
@@ -1183,11 +1302,13 @@ var file_server_proto_depIdxs = []int32{
 	6,  // 10: wuphf.connector.v1.ServerFrame.reaction:type_name -> wuphf.connector.v1.ReactionDispatch
 	7,  // 11: wuphf.connector.v1.ServerFrame.delivery_ack:type_name -> wuphf.connector.v1.DeliveryAckDispatch
 	8,  // 12: wuphf.connector.v1.ServerFrame.seen_receipt:type_name -> wuphf.connector.v1.SeenReceiptDispatch
-	13, // [13:13] is the sub-list for method output_type
-	13, // [13:13] is the sub-list for method input_type
-	13, // [13:13] is the sub-list for extension type_name
-	13, // [13:13] is the sub-list for extension extendee
-	0,  // [0:13] is the sub-list for field type_name
+	11, // 13: wuphf.connector.v1.ServerFrame.chat_state:type_name -> wuphf.connector.v1.ChatStateDispatch
+	14, // 14: wuphf.connector.v1.ChatStateDispatch.mute:type_name -> wuphf.connector.v1.MuteState
+	15, // [15:15] is the sub-list for method output_type
+	15, // [15:15] is the sub-list for method input_type
+	15, // [15:15] is the sub-list for extension type_name
+	15, // [15:15] is the sub-list for extension extendee
+	0,  // [0:15] is the sub-list for field type_name
 }
 
 func init() { file_server_proto_init() }
@@ -1212,14 +1333,16 @@ func file_server_proto_init() {
 		(*ServerFrame_Reaction)(nil),
 		(*ServerFrame_DeliveryAck)(nil),
 		(*ServerFrame_SeenReceipt)(nil),
+		(*ServerFrame_ChatState)(nil),
 	}
+	file_server_proto_msgTypes[11].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_server_proto_rawDesc), len(file_server_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   11,
+			NumMessages:   12,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

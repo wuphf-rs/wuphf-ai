@@ -328,6 +328,11 @@ func (c Client) runSession(
 				if err := c.deliver(ctx, stream, dispatch.DispatchId, op); err != nil {
 					return err
 				}
+			case *wuphfpb.ServerFrame_ChatState:
+				dispatch := body.ChatState
+				if err := c.deliver(ctx, stream, dispatch.DispatchId, ackOnly(dispatch.TargetChatId)); err != nil {
+					return err
+				}
 			case *wuphfpb.ServerFrame_Rejected:
 				return fmt.Errorf("core rejected connector operation: %s", body.Rejected.Reason)
 			default:

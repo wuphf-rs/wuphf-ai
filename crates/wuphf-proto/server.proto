@@ -140,5 +140,18 @@ message ServerFrame {
     ReactionDispatch reaction = 6;
     DeliveryAckDispatch delivery_ack = 7;
     SeenReceiptDispatch seen_receipt = 8;
+    ChatStateDispatch chat_state = 9;
   }
+}
+
+// Bring a chat (or a thread) to this pin / mute / archive state. Absent fields
+// are left alone. Acknowledged with the target chat id; a connector that
+// cannot apply a field acknowledges without applying it.
+message ChatStateDispatch {
+  string dispatch_id = 1;
+  string target_chat_id = 2;
+  optional string target_thread_id = 3;
+  optional bool pinned = 4;
+  optional MuteState mute = 5;
+  optional bool archived = 6;
 }

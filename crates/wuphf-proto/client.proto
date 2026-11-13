@@ -30,8 +30,7 @@ message MessageCreateEvent {
 }
 
 // One chat's properties as the platform reported them. An absent field was not
-// reported and leaves what the core knows unchanged. Later plans add fields
-// (pins, mutes) here.
+// reported and leaves what the core knows unchanged.
 message ChatUpdate {
   string chat_id = 1;
   optional DisappearingTimer disappearing = 2;
@@ -46,6 +45,14 @@ message ChatUpdate {
   optional uint32 participant_count = 6;
   // Membership events, in order. Never part of a snapshot.
   repeated ParticipantChange participant_changes = 7;
+  // Set when the update is about a thread (a Telegram forum topic) rather
+  // than the whole chat. The core resolves (chat_id, thread_id) to the
+  // conversation's mirror endpoint.
+  optional string thread_id = 8;
+  optional bool pinned = 9;
+  optional MuteState mute = 10;
+  // WhatsApp: archived. Telegram topic: closed.
+  optional bool archived = 11;
 }
 
 // The chat's picture. `id` is the platform's picture id; empty means the

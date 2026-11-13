@@ -262,6 +262,15 @@ impl Client {
                 })
                 .await
             }
+            Some(pb::server_frame::Body::ChatState(dispatch)) => {
+                let dispatch_id = dispatch.dispatch_id.clone();
+                let chat_id = dispatch.target_chat_id.clone();
+                self.deliver(outbound, &dispatch_id, move || {
+                    let chat_id = chat_id.clone();
+                    async move { Ok((chat_id, None)) }
+                })
+                .await
+            }
             Some(pb::server_frame::Body::Rejected(rejected)) => {
                 Err(SessionError::Rejected(rejected.reason))
             }
