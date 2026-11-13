@@ -3,6 +3,7 @@ package whatsappconnector
 import (
 	"context"
 	"strings"
+	"time"
 
 	wuphfpb "github.com/akshettrj/wuphf/proto/go/connector/v1"
 	waE2E "go.mau.fi/whatsmeow/proto/waE2E"
@@ -821,6 +822,11 @@ func (n Normalizer) HandleHistorySync(ctx context.Context, evt *events.HistorySy
 		if title := n.historyTitle(ctx, jid, conversation.GetName()); title != "" {
 			update.Title = &title
 		}
+		pinned := conversation.GetPinned() > 0
+		archived := conversation.GetArchived()
+		update.Pinned = &pinned
+		update.Archived = &archived
+		update.Mute = &wuphfpb.MuteState{MutedUntil: muteFromHistory(conversation.GetMuteEndTime(), time.Now())}
 		updates = append(updates, update)
 	}
 	return n.sendChatUpdates(ctx, updates, true)

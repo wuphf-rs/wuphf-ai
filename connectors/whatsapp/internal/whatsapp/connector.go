@@ -109,6 +109,12 @@ func (c Connector) Run(ctx context.Context) error {
 			err = normalizer.HandleNameChange(ctx, evt.JID, false)
 		case *events.BusinessName:
 			err = normalizer.HandleNameChange(ctx, evt.JID, false)
+		case *events.Pin:
+			err = normalizer.HandlePin(ctx, evt)
+		case *events.Mute:
+			err = normalizer.HandleMute(ctx, evt)
+		case *events.Archive:
+			err = normalizer.HandleArchive(ctx, evt)
 		default:
 			// Session-health events do not fail the connector: whatsmeow stops
 			// delivering messages but the core session stays up, which is what

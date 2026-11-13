@@ -22,6 +22,7 @@ type SendClient interface {
 	Upload(context.Context, []byte, whatsmeow.MediaType) (whatsmeow.UploadResponse, error)
 	BuildEdit(types.JID, types.MessageID, *waE2E.Message) *waE2E.Message
 	BuildRevoke(chat, sender types.JID, id types.MessageID) *waE2E.Message
+	appStateSender
 }
 
 // StickerConverter converts stored media to another format (in production,

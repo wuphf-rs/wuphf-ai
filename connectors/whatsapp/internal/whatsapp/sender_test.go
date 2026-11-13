@@ -12,6 +12,7 @@ import (
 	"github.com/akshettrj/wuphf/connectors/whatsapp/internal/config"
 	wuphfpb "github.com/akshettrj/wuphf/proto/go/connector/v1"
 	"go.mau.fi/whatsmeow"
+	"go.mau.fi/whatsmeow/appstate"
 	waE2E "go.mau.fi/whatsmeow/proto/waE2E"
 	"go.mau.fi/whatsmeow/types"
 	"google.golang.org/protobuf/proto"
@@ -24,6 +25,7 @@ type stubSendClient struct {
 	media      whatsmeow.MediaType
 	editedKey  types.MessageID
 	revokedKey types.MessageID
+	patches    []appstate.PatchInfo
 }
 
 func (s *stubSendClient) SendMessage(_ context.Context, to types.JID, message *waE2E.Message, _ ...whatsmeow.SendRequestExtra) (whatsmeow.SendResponse, error) {
@@ -40,6 +42,11 @@ func (s *stubSendClient) BuildEdit(_ types.JID, id types.MessageID, newContent *
 func (s *stubSendClient) BuildRevoke(_ types.JID, _ types.JID, id types.MessageID) *waE2E.Message {
 	s.revokedKey = id
 	return &waE2E.Message{}
+}
+
+func (s *stubSendClient) SendAppState(_ context.Context, patch appstate.PatchInfo) error {
+	s.patches = append(s.patches, patch)
+	return nil
 }
 
 func (s *stubSendClient) Upload(_ context.Context, bytes []byte, media whatsmeow.MediaType) (whatsmeow.UploadResponse, error) {
