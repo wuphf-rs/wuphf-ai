@@ -3069,15 +3069,16 @@ async fn from_topic(
     .unwrap()
 }
 
-/// Each chat-state dispatch: its endpoint and the fields it carries.
-fn set_states(
-    dispatches: &[Dispatch],
-) -> Vec<(
+/// A chat-state dispatch's endpoint, pinned, mute and archived.
+type SetState = (
     EndpointId,
     Option<bool>,
     Option<wuphf_model::MuteState>,
     Option<bool>,
-)> {
+);
+
+/// Each chat-state dispatch: its endpoint and the fields it carries.
+fn set_states(dispatches: &[Dispatch]) -> Vec<SetState> {
     dispatches
         .iter()
         .filter_map(|dispatch| match &dispatch.action {
