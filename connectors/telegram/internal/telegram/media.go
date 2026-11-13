@@ -91,7 +91,8 @@ func inboundMedia(
 		if name := documentFileName(document); name != "" {
 			metadata.FileName = &name
 		}
-		return metadata, document.AsInputDocumentFileLocation(), true
+		// An empty thumbnail size downloads the full file.
+		return metadata, document.AsInputDocumentFileLocation(""), true
 	default:
 		return nil, nil, false
 	}
