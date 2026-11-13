@@ -11,7 +11,7 @@ use uuid::Uuid;
 use wuphf_model::{
     Action, Attachment, AttachmentKind, ChatAddress, ChatUpdate, Connector, ConnectorCapabilities,
     ConnectorId, ConnectorInput, ConnectorOutput, DisappearingTimer, DispatchAck, DispatchFailed,
-    Event, EventKind, InboundWork, MediaId, NewMessage, NoticeKind, ParticipantChange,
+    Event, EventKind, InboundWork, MediaId, MuteState, NewMessage, NoticeKind, ParticipantChange,
     ParticipantChangeKind, Platform, ReceiptKind, ReplyContext, ReportedAvatar, SourceAddress,
 };
 use wuphf_proto::connector as pb;
@@ -440,6 +440,20 @@ fn output_to_proto(output: ConnectorOutput) -> pb::ServerFrame {
                         target_platform_message_id: native_id,
                     })
                 }
+                Action::SetChatState {
+                    pinned,
+                    mute,
+                    archived,
+                } => pb::server_frame::Body::ChatState(pb::ChatStateDispatch {
+                    dispatch_id,
+                    target_chat_id: target.address.chat_id,
+                    target_thread_id: target.address.thread_id,
+                    pinned,
+                    mute: mute.map(|mute| pb::MuteState {
+                        muted_until: mute.muted_until,
+                    }),
+                    archived,
+                }),
                 Action::RenameThread { title, .. } => {
                     pb::server_frame::Body::MessageRetitle(pb::MessageRetitleDispatch {
                         dispatch_id,
@@ -532,6 +546,12 @@ fn chat_update_from_proto(update: pb::ChatUpdate) -> Result<ChatUpdate, WireErro
             .into_iter()
             .map(participant_change_from_proto)
             .collect::<Result<_, _>>()?,
+        thread_id: update.thread_id.filter(|thread| !thread.is_empty()),
+        pinned: update.pinned,
+        mute: update.mute.map(|mute| MuteState {
+            muted_until: mute.muted_until,
+        }),
+        archived: update.archived,
     })
 }
 

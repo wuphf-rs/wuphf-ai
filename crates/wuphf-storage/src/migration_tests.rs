@@ -430,6 +430,40 @@ async fn chat_profiles_from_045_decode() {
     assert_stored(&pool, "chat_profiles", "chat_id", "1@g.us", &expected).await;
 }
 
+/// A profile 046 stored (title, description, avatar, count) decodes with
+/// 047's pin, mute and archive unknown, and is written back byte for byte.
+#[tokio::test]
+async fn chat_profiles_from_046_decode() {
+    let pool = database_before(20).await;
+    let media = MediaId(Uuid::from_u128(77));
+    let stored = format!(
+        r#"{{"connector_id":"whatsapp-main","chat_id":"1@g.us","title":"[G] Family","description":"Weekend plans","avatar":{{"id":"pic-1","media_id":"{media}","hash":"ab"}},"participant_count":12}}"#
+    );
+    sqlx::query("INSERT INTO chat_profiles (connector_id, chat_id, payload) VALUES (?, ?, ?)")
+        .bind("whatsapp-main")
+        .bind("1@g.us")
+        .bind(&stored)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    let expected = ChatProfile {
+        title: Some("[G] Family".into()),
+        description: Some("Weekend plans".into()),
+        avatar: Some(wuphf_model::ChatAvatar {
+            id: "pic-1".into(),
+            media_id: Some(media),
+            hash: Some("ab".into()),
+        }),
+        participant_count: Some(12),
+        ..ChatProfile::new(ConnectorId("whatsapp-main".into()), "1@g.us")
+    };
+    assert_eq!(expected.pinned, None);
+    assert_eq!(expected.mute, None);
+    assert_eq!(expected.archived, None);
+    assert_stored(&pool, "chat_profiles", "chat_id", "1@g.us", &expected).await;
+}
+
 /// Seed one `dispatches` row per sample, in the JSON shape given.
 async fn insert_dispatches(pool: &SqlitePool, payloads: &[&str]) {
     for (dispatch, payload) in sample_dispatches().iter().zip(payloads) {

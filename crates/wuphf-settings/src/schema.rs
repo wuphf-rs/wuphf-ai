@@ -6,10 +6,11 @@ use crate::domains;
 use botconf::{Choices, Field, FixedChoice, Form, Kind, RuntimeSetting};
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
-use wuphf_core::RoutingConfig;
+use wuphf_core::{ChatStateSettings, RoutingConfig};
 use wuphf_functions::Functions;
 use wuphf_model::{
-    Connector, ConnectorCapabilities, ConnectorId, Platform, Rule, RuleId, is_valid_connector_id,
+    ChatStatePolicy, ChatStatePolicyOverride, Connector, ConnectorCapabilities, ConnectorId,
+    Platform, Rule, RuleId, is_valid_connector_id,
 };
 
 /// What the core runs from, computed from a validated configuration.
@@ -101,7 +102,8 @@ impl botconf::Schema for WuphfSchema {
             .map(|target| target.0.clone())
             .collect();
         let routing = RoutingConfig::new(rules(config)?, connectors.clone())
-            .with_notice_targets(notice_targets);
+            .with_notice_targets(notice_targets)
+            .with_chat_state(chat_state(config)?);
         routing.validate().map_err(|error| error.to_string())?;
         let routing = Arc::new(routing);
         let functions = config
@@ -141,8 +143,88 @@ impl botconf::Schema for WuphfSchema {
             )
             .titled("Notice targets")
             .kind(Kind::reference(domains::CHAT, true)),
+            RuntimeSetting::new(
+                "chat_state.pin",
+                "Which way pinning crosses between a chat and its mirror topic",
+            )
+            .titled("Pin")
+            .kind(DIRECTION),
+            RuntimeSetting::new(
+                "chat_state.mute",
+                "Which way muting crosses between a chat and its mirror topic",
+            )
+            .titled("Mute")
+            .kind(DIRECTION),
+            RuntimeSetting::new(
+                "chat_state.archive",
+                "Which way archiving (closing the topic) crosses between a chat and its mirror topic",
+            )
+            .titled("Archive")
+            .kind(DIRECTION),
+            RuntimeSetting::per_entry(
+                "chat_state.chats",
+                "Per-conversation overrides of chat_state; the chat is the source chat or its mirror topic",
+                CHAT_STATE_OVERRIDE,
+            )
+            .titled("Chat state overrides"),
         ]
     }
+}
+
+/// The directions a chat state can cross in, named from the source chat
+/// (which need not be WhatsApp).
+const DIRECTIONS: &[FixedChoice] = &[
+    FixedChoice::new("off", "Off"),
+    FixedChoice::new("to_mirror", "Source → mirror"),
+    FixedChoice::new("to_source", "Mirror → source"),
+    FixedChoice::new("both", "Both ways"),
+];
+const DIRECTION: Kind = Kind::one_of(Choices::fixed(DIRECTIONS), false, false);
+const OPTIONAL_DIRECTION: Kind = Kind::one_of(Choices::fixed(DIRECTIONS), false, true);
+/// An override names its chat (required, so a new one is built in a panel
+/// draft) and the states it changes; an absent state takes the global value.
+const CHAT_STATE_OVERRIDE: &Kind = &Kind::form(CHAT_STATE_FORM);
+const CHAT_STATE_FORM: &Form = &Form::new(CHAT_STATE_FIELDS, "{}");
+const CHAT_STATE_FIELDS: &[Field] = &[
+    Field::new(
+        "chat",
+        "Chat (source chat or mirror topic)",
+        Kind::reference(domains::CHAT, false),
+    )
+    .required(),
+    Field::new("pin", "Pin", OPTIONAL_DIRECTION),
+    Field::new("mute", "Mute", OPTIONAL_DIRECTION),
+    Field::new("archive", "Archive", OPTIONAL_DIRECTION),
+];
+
+/// The `chat_state` settings the router reads: the global directions, and
+/// each override keyed by its chat. Override names follow the map-entry rule.
+fn chat_state(config: &Configuration) -> Result<ChatStateSettings, String> {
+    let state = &config.chat_state;
+    let mut overrides = Vec::new();
+    for (name, entry) in &state.chats {
+        if !botconf::keys::is_entry_name(name) {
+            return Err(format!(
+                "chat_state override {name:?} must be non-empty and must not contain '.'"
+            ));
+        }
+        overrides.push((
+            entry.chat.0.clone(),
+            ChatStatePolicyOverride {
+                pin: entry.pin,
+                mute: entry.mute,
+                archive: entry.archive,
+            },
+        ));
+    }
+    Ok(ChatStateSettings {
+        global: ChatStatePolicy {
+            pin: state.pin,
+            mute: state.mute,
+            archive: state.archive,
+        },
+        overrides,
+    })
 }
 
 // A rule entry, edited field by field. Nested descriptors are not promoted

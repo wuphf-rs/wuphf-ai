@@ -1375,3 +1375,144 @@ fn switching_a_rules_kind_goes_through_a_draft() {
         Ok(())
     });
 }
+
+// ---- Plan 047: chat_state ----
+
+/// A conversation sourced at a WhatsApp group with a Telegram topic.
+fn family_conversation() -> (wuphf_model::Conversation, Vec<wuphf_model::ChatRef>) {
+    let chat = |text: &str| text.parse::<wuphf_model::ChatRef>().unwrap();
+    (
+        wuphf_model::Conversation {
+            id: wuphf_model::ConversationId::new(),
+            rule_id: None,
+            source: chat("whatsapp-main:1@g.us"),
+            endpoints: Vec::new(),
+            title: None,
+            introduced: false,
+        },
+        vec![chat("telegram-main:-100123#57")],
+    )
+}
+
+fn family_policy(store: &SettingsStore) -> wuphf_model::ChatStatePolicy {
+    let (conversation, endpoints) = family_conversation();
+    store
+        .current()
+        .derived
+        .routing
+        .chat_state_policy(&conversation, &endpoints)
+}
+
+#[test]
+fn chat_state_defaults_to_both() {
+    Jail::expect_with(|_| {
+        let store = store(every_token_set(), Path::new(EXAMPLE)).unwrap();
+        assert_eq!(
+            family_policy(&store),
+            wuphf_model::ChatStatePolicy::default()
+        );
+        for key in ["chat_state.pin", "chat_state.mute", "chat_state.archive"] {
+            assert_eq!(
+                store.current().value(key),
+                Some(serde_json::json!("both")),
+                "{key}"
+            );
+        }
+        Ok(())
+    });
+}
+
+#[test]
+fn chat_state_is_live() {
+    Jail::expect_with(|_| {
+        runtime().block_on(async {
+            let (store, _) = live_store(&temp_database()).await;
+            let live = LiveRouting::new(Arc::clone(&store));
+            let (conversation, endpoints) = family_conversation();
+
+            store
+                .set("chat_state.mute", serde_json::json!("off"), None)
+                .await
+                .unwrap();
+
+            let policy = live.routing().chat_state_policy(&conversation, &endpoints);
+            assert_eq!(policy.mute, wuphf_model::ChatStateDirection::Off);
+            assert_eq!(policy.pin, wuphf_model::ChatStateDirection::Both);
+        });
+        Ok(())
+    });
+}
+
+#[test]
+fn an_override_naming_an_unknown_connector_is_refused() {
+    Jail::expect_with(|_| {
+        runtime().block_on(async {
+            let (store, sqlite) = live_store(&temp_database()).await;
+            let error = store
+                .set(
+                    "chat_state.chats.fax",
+                    serde_json::json!({ "chat": "discord-main:1", "pin": "off" }),
+                    None,
+                )
+                .await
+                .unwrap_err();
+            assert!(
+                matches!(error, SettingsError::InvalidValue { .. }),
+                "{error}"
+            );
+            assert!(error.to_string().contains("discord-main"), "{error}");
+            assert!(sqlite.settings_overrides().await.unwrap().is_empty());
+        });
+        Ok(())
+    });
+}
+
+#[test]
+fn a_chat_state_override_is_created_through_a_draft() {
+    Jail::expect_with(|_| {
+        let panel = rules_panel(store(every_token_set(), Path::new(EXAMPLE)).unwrap());
+        runtime().block_on(async {
+            let position = panel
+                .store()
+                .catalog()
+                .live()
+                .find(|(_, entry)| entry.key == "chat_state.chats")
+                .expect("chat_state.chats is a runtime setting")
+                .0;
+            let question = Question::new(Target::setting(position), AskKind::Entry);
+            let draft = panel
+                .answer(&question, Input::Text("family".into()), &viewer())
+                .await
+                .unwrap()
+                .screen
+                .expect("a draft");
+            assert!(
+                screen_text(&draft).contains("Chat (source chat or mirror topic): ⚠️ needed"),
+                "{}",
+                screen_text(&draft)
+            );
+            assert!(
+                !screen_labels(&draft)
+                    .iter()
+                    .any(|label| label.contains("Save")),
+                "Save before the chat is set: {:?}",
+                screen_labels(&draft)
+            );
+
+            let draft = fill_in(
+                &panel,
+                &draft,
+                "Chat (source chat or mirror topic)",
+                "whatsapp-main:1@g.us",
+            )
+            .await;
+            let saved = press(&panel, &button(&draft, "💾 Save")).await;
+            assert!(saved.change.is_some());
+            assert_eq!(
+                panel.store().current().value("chat_state.chats.family"),
+                Some(serde_json::json!({ "chat": "whatsapp-main:1@g.us" }))
+            );
+        });
+        Ok(())
+    });
+}

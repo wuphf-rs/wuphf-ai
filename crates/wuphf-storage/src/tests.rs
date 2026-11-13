@@ -1352,6 +1352,11 @@ async fn chat_profiles_round_trip_every_field<S: ChatProfileStore>(storage: S) {
             hash: Some("ab".repeat(32)),
         }),
         participant_count: Some(12),
+        pinned: Some(true),
+        mute: Some(wuphf_model::MuteState {
+            muted_until: wuphf_model::MuteState::FOREVER,
+        }),
+        archived: Some(false),
         ..chat_profile("whatsapp", "1@g.us", Some(604_800))
     };
     storage.put_chat_profile(&full).await.unwrap();

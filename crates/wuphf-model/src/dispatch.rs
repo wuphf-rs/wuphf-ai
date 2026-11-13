@@ -45,7 +45,7 @@ impl Dispatch {
             Action::Delete { message_id, .. }
             | Action::React { message_id, .. }
             | Action::Receipt { message_id, .. } => Some(*message_id),
-            Action::RenameThread { .. } | Action::Note { .. } => None,
+            Action::RenameThread { .. } | Action::Note { .. } | Action::SetChatState { .. } => None,
         }
     }
 
@@ -139,6 +139,17 @@ pub enum Action {
         text: String,
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         attachments: Vec<Attachment>,
+    },
+    /// Bring the target chat (or thread) to this pin / mute / archive state;
+    /// absent fields are left alone. It acts on no message and records no
+    /// copy.
+    SetChatState {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        pinned: Option<bool>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        mute: Option<MuteState>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        archived: Option<bool>,
     },
 }
 
@@ -326,6 +337,14 @@ mod tests {
                 },
                 false,
             ),
+            (
+                Action::SetChatState {
+                    pinned: Some(true),
+                    mute: None,
+                    archived: None,
+                },
+                false,
+            ),
         ]
     }
 
@@ -357,9 +376,12 @@ mod tests {
     }
 
     #[test]
-    fn only_thread_renames_and_notes_have_no_message() {
+    fn only_conversation_actions_have_no_message() {
         for (action, _) in actions() {
-            let renames = matches!(action, Action::RenameThread { .. } | Action::Note { .. });
+            let renames = matches!(
+                action,
+                Action::RenameThread { .. } | Action::Note { .. } | Action::SetChatState { .. }
+            );
             let dispatch = Dispatch::new(target(), ConversationId::new(), action, None);
             assert_eq!(
                 dispatch.message_id().is_none(),

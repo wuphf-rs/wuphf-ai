@@ -49,7 +49,8 @@ fn bind_native_parent(dispatch: &mut Dispatch, parent: Message, native_id: Strin
         // A rename is never blocked on a parent message, so it is never
         // released with one.
         Action::RenameThread { .. } => {}
-        // A note is never blocked: it quotes nothing and acts on no copy.
-        Action::Note { .. } => {}
+        // A note or a chat-state change is never blocked: it quotes nothing
+        // and acts on no copy.
+        Action::Note { .. } | Action::SetChatState { .. } => {}
     }
 }

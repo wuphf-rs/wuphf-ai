@@ -154,3 +154,25 @@ token_env = "WUPHF_PROVIDER_MEDIACONV_TOKEN"
 functions = ["media.convert"]
 # [functions.overrides."media.convert"]
 # default_deadline_ms = 20000
+
+# Pin, mute and archive sync both ways between a source chat (WhatsApp) and
+# its mirror topic (Telegram: a pinned topic, the topic's notifications, a
+# closed topic). Each state is `off`, `to_mirror` (source → mirror),
+# `to_source` (mirror → source) or `both`; the default is `both`. Muting a
+# topic needs a Telegram user session (a bot's notify settings mean nothing).
+#
+# Runtime settings: `chat_state.pin`, `chat_state.mute`, `chat_state.archive`
+# and the overrides below can also be changed while the core runs.
+#
+# [chat_state]
+# pin = "both"
+# mute = "both"
+# archive = "to_mirror"
+#
+# An override for one conversation, named by its source chat or its mirror
+# topic. Its name is free (it cannot contain '.', which chat ids do); an
+# absent state takes the global value.
+#
+# [chat_state.chats.family]
+# chat = "whatsapp-main:120363000000000000@g.us"
+# mute = "off"

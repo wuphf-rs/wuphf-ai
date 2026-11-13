@@ -6,7 +6,7 @@ use std::collections::BTreeMap;
 use std::fmt;
 use std::net::SocketAddr;
 use wuphf_functions::FunctionsConfig;
-use wuphf_model::{ChatAddress, ChatFilter, ChatRef, ConnectorId, RuleKind};
+use wuphf_model::{ChatAddress, ChatFilter, ChatRef, ChatStateDirection, ConnectorId, RuleKind};
 
 /// The core configuration.
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -33,6 +33,10 @@ pub struct Configuration {
     /// the owner reachable when one platform is down.
     #[serde(default)]
     pub notify: Vec<ChatTarget>,
+    /// Which way pin, mute and archive cross between a source chat and its
+    /// mirror topic.
+    #[serde(default)]
+    pub chat_state: ChatStateConfig,
     /// Remote functions: which provider processes may serve which function
     /// names, and the deadlines and limits calls run under.
     #[serde(default)]
@@ -51,6 +55,35 @@ fn default_max_media_bytes() -> usize {
 
 fn default_orphan_media_retention_seconds() -> u64 {
     24 * 60 * 60
+}
+
+/// `[chat_state]`: each state's direction (`off`, `to_mirror`, `to_source`,
+/// `both`; named from the source chat), and per-conversation overrides.
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
+pub struct ChatStateConfig {
+    #[serde(default)]
+    pub pin: ChatStateDirection,
+    #[serde(default)]
+    pub mute: ChatStateDirection,
+    #[serde(default)]
+    pub archive: ChatStateDirection,
+    /// Overrides by name (`[chat_state.chats.<name>]`). A chat id cannot be
+    /// the key: map entry names cannot contain `.`, and WhatsApp ids do.
+    #[serde(default)]
+    pub chats: BTreeMap<String, ChatStateOverride>,
+}
+
+/// One conversation's override, named by `chat`: its source chat or its
+/// mirror topic. An absent state takes the global value.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct ChatStateOverride {
+    pub chat: ChatTarget,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pin: Option<ChatStateDirection>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mute: Option<ChatStateDirection>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub archive: Option<ChatStateDirection>,
 }
 
 /// A chat in the config file and the settings store, written

@@ -54,6 +54,14 @@ pub struct ChatProfile {
     /// The member count. The core never stores the member list.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub participant_count: Option<u32>,
+    /// The conversation's pin, mute and archive state, kept in the source
+    /// chat's profile (a mirror topic has no profile of its own).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pinned: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mute: Option<MuteState>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub archived: Option<bool>,
 }
 
 impl ChatProfile {
@@ -67,6 +75,73 @@ impl ChatProfile {
             description: None,
             avatar: None,
             participant_count: None,
+            pinned: None,
+            mute: None,
+            archived: None,
+        }
+    }
+}
+
+/// A chat's mute: 0 not muted, [`MuteState::FOREVER`] muted forever,
+/// otherwise the end in Unix seconds. A mute whose end has passed is 0.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MuteState {
+    pub muted_until: i64,
+}
+
+impl MuteState {
+    pub const FOREVER: i64 = -1;
+}
+
+/// Which way a chat state (pin, mute or archive) crosses the bridge, named
+/// from the conversation's source: `to_mirror` carries the source's state to
+/// its mirror thread, `to_source` the mirror's back to the source.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ChatStateDirection {
+    Off,
+    ToMirror,
+    ToSource,
+    #[default]
+    Both,
+}
+
+impl ChatStateDirection {
+    /// Whether a change reported by the source side (`from_source`) or by the
+    /// mirror side may cross to the other side.
+    pub fn allows(self, from_source: bool) -> bool {
+        match self {
+            ChatStateDirection::Off => false,
+            ChatStateDirection::ToMirror => from_source,
+            ChatStateDirection::ToSource => !from_source,
+            ChatStateDirection::Both => true,
+        }
+    }
+}
+
+/// The direction of each chat state for one conversation.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ChatStatePolicy {
+    pub pin: ChatStateDirection,
+    pub mute: ChatStateDirection,
+    pub archive: ChatStateDirection,
+}
+
+/// A per-conversation override: each field present replaces the global one.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ChatStatePolicyOverride {
+    pub pin: Option<ChatStateDirection>,
+    pub mute: Option<ChatStateDirection>,
+    pub archive: Option<ChatStateDirection>,
+}
+
+impl ChatStatePolicy {
+    /// This policy with `override_`'s fields put over it.
+    pub fn with(self, override_: &ChatStatePolicyOverride) -> Self {
+        Self {
+            pin: override_.pin.unwrap_or(self.pin),
+            mute: override_.mute.unwrap_or(self.mute),
+            archive: override_.archive.unwrap_or(self.archive),
         }
     }
 }
@@ -138,6 +213,17 @@ pub struct ChatUpdate {
     /// Membership events, in order. Never part of a snapshot.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub participant_changes: Vec<ParticipantChange>,
+    /// Set when the report is about a thread (a Telegram forum topic) rather
+    /// than the whole chat.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub thread_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pinned: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mute: Option<MuteState>,
+    /// WhatsApp: archived. Telegram topic: closed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub archived: Option<bool>,
 }
 
 impl ChatUpdate {
@@ -185,6 +271,34 @@ mod tests {
             serde_json::to_string(&change).unwrap(),
             r#"{"kind":"joined","participant":"1@s.whatsapp.net","name":"Bob"}"#
         );
+    }
+
+    #[test]
+    fn directions_allow_their_side() {
+        use ChatStateDirection::*;
+        for (direction, from_source, from_mirror) in [
+            (Off, false, false),
+            (ToMirror, true, false),
+            (ToSource, false, true),
+            (Both, true, true),
+        ] {
+            assert_eq!(direction.allows(true), from_source, "{direction:?}");
+            assert_eq!(direction.allows(false), from_mirror, "{direction:?}");
+        }
+        assert_eq!(ChatStateDirection::default(), Both);
+        assert_eq!(serde_json::to_string(&ToMirror).unwrap(), r#""to_mirror""#);
+    }
+
+    #[test]
+    fn an_override_replaces_only_its_fields() {
+        let global = ChatStatePolicy::default();
+        let policy = global.with(&ChatStatePolicyOverride {
+            mute: Some(ChatStateDirection::Off),
+            ..ChatStatePolicyOverride::default()
+        });
+        assert_eq!(policy.mute, ChatStateDirection::Off);
+        assert_eq!(policy.pin, ChatStateDirection::Both);
+        assert_eq!(policy.archive, ChatStateDirection::Both);
     }
 
     #[test]

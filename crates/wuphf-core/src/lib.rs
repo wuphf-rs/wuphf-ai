@@ -17,7 +17,9 @@ mod resolve;
 mod router;
 mod send;
 
-pub use config::{MatchedRule, RoutingConfig, RoutingConfigError, RoutingSource};
+pub use config::{
+    ChatStateSettings, MatchedRule, RoutingConfig, RoutingConfigError, RoutingSource,
+};
 use router::Router;
 pub use router::RouterError;
 
