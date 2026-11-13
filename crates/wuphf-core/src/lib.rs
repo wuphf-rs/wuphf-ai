@@ -8,6 +8,7 @@ use wuphf_model::{
 use wuphf_storage::{Storage, StorageError};
 
 mod acknowledge;
+mod chat_state;
 mod config;
 mod ingest;
 mod notes;

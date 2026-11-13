@@ -1,4 +1,5 @@
 use super::*;
+use crate::ChatStateSettings;
 use wuphf_model::{
     Action, Attachment, AttachmentKind, ChatAddress, ChatFilter, ChatRef, ChatUpdate, Connector,
     ConnectorCapabilities, DisappearingTimer, Dispatch, DispatchAck, MediaBlob, MediaId,
@@ -2930,5 +2931,378 @@ async fn one_change_reported_under_two_forms_posts_one_note() {
             .count(),
         1,
         "no duplicate waits in storage either"
+    );
+}
+
+// ---- Plan 047: two-way pin, mute and archive ----
+
+const OTHER_GROUP: &str = "222@g.us";
+
+/// A many-to-one rule mirroring only `group` into the Telegram forum.
+fn group_rule(id: &str, group: &str) -> Rule {
+    Rule {
+        id: RuleId(id.into()),
+        flow: RuleKind::ManyToOne {
+            source_connector: ConnectorId(WHATSAPP.into()),
+            source_chats_filter: ChatFilter::Only {
+                chats: vec![ChatAddress::new(group, None)],
+            },
+            destination_connector: ConnectorId(TELEGRAM.into()),
+            destination_chat: ChatAddress::new(MIRROR_CHAT, None),
+        },
+    }
+}
+
+fn state_core(settings: ChatStateSettings) -> Core<InMemoryStorage> {
+    let config = RoutingConfig::new(
+        vec![group_rule("family", GROUP), group_rule("work", OTHER_GROUP)],
+        connectors(),
+    )
+    .with_chat_state(settings);
+    Core::new(Arc::new(InMemoryStorage::default()), Arc::new(config))
+}
+
+/// Settle `group`'s first message into topic `thread`; returns the
+/// conversation's WhatsApp and Telegram endpoints.
+async fn provision_group(
+    core: &Core<InMemoryStorage>,
+    group: &str,
+    thread: &str,
+) -> (EndpointId, EndpointId) {
+    let card = core
+        .ingest(event(WHATSAPP, group, &format!("{group}-1"), None))
+        .await
+        .unwrap()
+        .dispatches()[0]
+        .clone();
+    let released = core
+        .acknowledge_dispatch(DispatchAck {
+            dispatch_id: card.id,
+            native_id: format!("{group}-card"),
+            thread_id: Some(thread.into()),
+        })
+        .await
+        .unwrap();
+    let message = released
+        .iter()
+        .find(|dispatch| matches!(dispatch.action, Action::Send { .. }))
+        .unwrap()
+        .clone();
+    core.acknowledge_dispatch(DispatchAck {
+        dispatch_id: message.id,
+        native_id: format!("{group}-tg-1"),
+        thread_id: None,
+    })
+    .await
+    .unwrap();
+    let conversation = core
+        .storage()
+        .conversation(card.conversation_id)
+        .await
+        .unwrap()
+        .unwrap();
+    let whatsapp = conversation
+        .endpoints
+        .iter()
+        .copied()
+        .find(|endpoint| *endpoint != card.to.endpoint_id)
+        .unwrap();
+    (whatsapp, card.to.endpoint_id)
+}
+
+fn pin(pinned: bool) -> ChatUpdate {
+    ChatUpdate {
+        pinned: Some(pinned),
+        ..ChatUpdate::default()
+    }
+}
+
+fn mute(muted_until: i64) -> ChatUpdate {
+    ChatUpdate {
+        mute: Some(wuphf_model::MuteState { muted_until }),
+        ..ChatUpdate::default()
+    }
+}
+
+fn archive(archived: bool) -> ChatUpdate {
+    ChatUpdate {
+        archived: Some(archived),
+        ..ChatUpdate::default()
+    }
+}
+
+/// `state` reported by WhatsApp about `group`.
+async fn from_whatsapp(
+    core: &Core<InMemoryStorage>,
+    group: &str,
+    state: ChatUpdate,
+    snapshot: bool,
+) -> Vec<Dispatch> {
+    core.update_chats(
+        &ConnectorId(WHATSAPP.into()),
+        vec![ChatUpdate {
+            chat_id: group.into(),
+            ..state
+        }],
+        snapshot,
+    )
+    .await
+    .unwrap()
+}
+
+/// `state` reported by Telegram about topic `thread`.
+async fn from_topic(
+    core: &Core<InMemoryStorage>,
+    thread: &str,
+    state: ChatUpdate,
+) -> Vec<Dispatch> {
+    core.update_chats(
+        &ConnectorId(TELEGRAM.into()),
+        vec![ChatUpdate {
+            chat_id: MIRROR_CHAT.into(),
+            thread_id: Some(thread.into()),
+            ..state
+        }],
+        false,
+    )
+    .await
+    .unwrap()
+}
+
+/// Each chat-state dispatch: its endpoint and the fields it carries.
+fn set_states(
+    dispatches: &[Dispatch],
+) -> Vec<(
+    EndpointId,
+    Option<bool>,
+    Option<wuphf_model::MuteState>,
+    Option<bool>,
+)> {
+    dispatches
+        .iter()
+        .filter_map(|dispatch| match &dispatch.action {
+            Action::SetChatState {
+                pinned,
+                mute,
+                archived,
+            } => Some((dispatch.to.endpoint_id, *pinned, *mute, *archived)),
+            _ => None,
+        })
+        .collect()
+}
+
+async fn stored_state(core: &Core<InMemoryStorage>, group: &str) -> wuphf_model::ChatProfile {
+    core.storage()
+        .chat_profile(&ConnectorId(WHATSAPP.into()), group)
+        .await
+        .unwrap()
+        .unwrap_or_else(|| wuphf_model::ChatProfile::new(ConnectorId(WHATSAPP.into()), group))
+}
+
+fn policy(
+    pin: wuphf_model::ChatStateDirection,
+    mute: wuphf_model::ChatStateDirection,
+    archive: wuphf_model::ChatStateDirection,
+) -> ChatStateSettings {
+    ChatStateSettings {
+        global: wuphf_model::ChatStatePolicy { pin, mute, archive },
+        overrides: Vec::new(),
+    }
+}
+
+#[tokio::test]
+async fn a_whatsapp_pin_pins_the_topic() {
+    let core = state_core(ChatStateSettings::default());
+    let (_, telegram) = provision_group(&core, GROUP, "777").await;
+
+    let dispatches = from_whatsapp(&core, GROUP, pin(true), false).await;
+
+    assert_eq!(
+        set_states(&dispatches),
+        [(telegram, Some(true), None, None)]
+    );
+    assert_eq!(
+        dispatches[0].to.address,
+        ChatAddress::new(MIRROR_CHAT, Some("777".into()))
+    );
+}
+
+#[tokio::test]
+async fn the_topic_pin_echo_is_a_no_op() {
+    let core = state_core(ChatStateSettings::default());
+    provision_group(&core, GROUP, "777").await;
+    from_whatsapp(&core, GROUP, pin(true), false).await;
+    let before = stored_state(&core, GROUP).await;
+
+    let dispatches = from_topic(&core, "777", pin(true)).await;
+
+    assert!(dispatches.is_empty(), "{dispatches:?}");
+    assert_eq!(stored_state(&core, GROUP).await, before);
+}
+
+#[tokio::test]
+async fn a_topic_close_archives_the_whatsapp_chat() {
+    let core = state_core(ChatStateSettings::default());
+    let (whatsapp, _) = provision_group(&core, GROUP, "777").await;
+
+    let dispatches = from_topic(&core, "777", archive(true)).await;
+    assert_eq!(
+        set_states(&dispatches),
+        [(whatsapp, None, None, Some(true))]
+    );
+    assert_eq!(dispatches[0].to.address, ChatAddress::new(GROUP, None));
+
+    let echo = from_whatsapp(&core, GROUP, archive(true), false).await;
+    assert!(echo.is_empty(), "{echo:?}");
+}
+
+#[tokio::test]
+async fn mute_values_cross_exactly() {
+    let core = state_core(ChatStateSettings::default());
+    let (whatsapp, telegram) = provision_group(&core, GROUP, "777").await;
+    let until = |muted_until| Some(wuphf_model::MuteState { muted_until });
+
+    let dispatches = from_whatsapp(&core, GROUP, mute(1_900_000_000), false).await;
+    assert_eq!(
+        set_states(&dispatches),
+        [(telegram, None, until(1_900_000_000), None)]
+    );
+    assert!(
+        from_topic(&core, "777", mute(1_900_000_000))
+            .await
+            .is_empty()
+    );
+
+    let forever = wuphf_model::MuteState::FOREVER;
+    let dispatches = from_topic(&core, "777", mute(forever)).await;
+    assert_eq!(
+        set_states(&dispatches),
+        [(whatsapp, None, until(forever), None)]
+    );
+    assert!(
+        from_whatsapp(&core, GROUP, mute(forever), false)
+            .await
+            .is_empty()
+    );
+}
+
+#[tokio::test]
+async fn directions_gate_each_field() {
+    use wuphf_model::ChatStateDirection::{Off, ToMirror, ToSource};
+    let core = state_core(policy(ToSource, Off, ToMirror));
+    let (whatsapp, _) = provision_group(&core, GROUP, "777").await;
+
+    // pin = to_source: a WhatsApp pin is stored but not dispatched, so the
+    // topic reporting the same pin is no change; an unpin there crosses.
+    assert!(
+        from_whatsapp(&core, GROUP, pin(true), false)
+            .await
+            .is_empty()
+    );
+    assert_eq!(stored_state(&core, GROUP).await.pinned, Some(true));
+    assert!(from_topic(&core, "777", pin(true)).await.is_empty());
+    let dispatches = from_topic(&core, "777", pin(false)).await;
+    assert_eq!(
+        set_states(&dispatches),
+        [(whatsapp, Some(false), None, None)]
+    );
+    assert_eq!(stored_state(&core, GROUP).await.pinned, Some(false));
+
+    // mute = off: neither side's mute moves; the source's is still recorded.
+    assert!(
+        from_whatsapp(&core, GROUP, mute(-1), false)
+            .await
+            .is_empty()
+    );
+    assert!(from_topic(&core, "777", mute(0)).await.is_empty());
+    assert_eq!(
+        stored_state(&core, GROUP).await.mute,
+        Some(wuphf_model::MuteState { muted_until: -1 })
+    );
+
+    // archive = to_mirror: a topic close is dropped, the stored value stays.
+    assert!(from_topic(&core, "777", archive(true)).await.is_empty());
+    assert_eq!(stored_state(&core, GROUP).await.archived, None);
+}
+
+#[tokio::test]
+async fn an_override_beats_the_global_setting() {
+    let family = "whatsapp-main:111@g.us".parse().unwrap();
+    let core = state_core(ChatStateSettings {
+        global: wuphf_model::ChatStatePolicy::default(),
+        overrides: vec![(
+            family,
+            wuphf_model::ChatStatePolicyOverride {
+                pin: Some(wuphf_model::ChatStateDirection::Off),
+                ..Default::default()
+            },
+        )],
+    });
+    provision_group(&core, GROUP, "777").await;
+    let (_, work_topic) = provision_group(&core, OTHER_GROUP, "778").await;
+
+    assert!(
+        from_whatsapp(&core, GROUP, pin(true), false)
+            .await
+            .is_empty()
+    );
+    let dispatches = from_whatsapp(&core, OTHER_GROUP, pin(true), false).await;
+    assert_eq!(
+        set_states(&dispatches),
+        [(work_topic, Some(true), None, None)]
+    );
+}
+
+#[tokio::test]
+async fn a_snapshot_sets_the_baseline_silently() {
+    let core = state_core(ChatStateSettings::default());
+    let (_, telegram) = provision_group(&core, GROUP, "777").await;
+
+    assert!(
+        from_whatsapp(&core, GROUP, pin(true), true)
+            .await
+            .is_empty()
+    );
+    assert_eq!(stored_state(&core, GROUP).await.pinned, Some(true));
+
+    let dispatches = from_whatsapp(&core, GROUP, pin(false), false).await;
+    assert_eq!(
+        set_states(&dispatches),
+        [(telegram, Some(false), None, None)]
+    );
+}
+
+#[tokio::test]
+async fn no_topic_no_dispatch() {
+    let core = state_core(ChatStateSettings::default());
+    // The card is out; the topic does not exist yet.
+    core.ingest(event(WHATSAPP, GROUP, "wa-1", None))
+        .await
+        .unwrap();
+
+    assert!(
+        from_whatsapp(&core, GROUP, pin(true), false)
+            .await
+            .is_empty()
+    );
+    assert_eq!(stored_state(&core, GROUP).await.pinned, Some(true));
+}
+
+#[tokio::test]
+async fn the_archive_unpin_crosses_too() {
+    let core = state_core(ChatStateSettings::default());
+    let (_, telegram) = provision_group(&core, GROUP, "777").await;
+    from_whatsapp(&core, GROUP, pin(true), false).await;
+
+    // WhatsApp archives, which also unpins.
+    let mut dispatches = from_whatsapp(&core, GROUP, archive(true), false).await;
+    dispatches.extend(from_whatsapp(&core, GROUP, pin(false), false).await);
+
+    assert_eq!(
+        set_states(&dispatches),
+        [
+            (telegram, None, None, Some(true)),
+            (telegram, Some(false), None, None),
+        ]
     );
 }

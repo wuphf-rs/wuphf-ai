@@ -331,7 +331,7 @@ where
 
     /// Whether the endpoint is the mirror side of its conversation's rule: a
     /// many-to-one destination, where each conversation gets its own thread.
-    fn is_mirror(&self, conversation: &Conversation, endpoint: &Endpoint) -> bool {
+    pub(crate) fn is_mirror(&self, conversation: &Conversation, endpoint: &Endpoint) -> bool {
         conversation
             .rule_id
             .as_ref()

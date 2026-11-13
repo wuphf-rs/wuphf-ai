@@ -211,6 +211,13 @@ where
         snapshot: bool,
         posted: &mut HashSet<(ConversationId, String)>,
     ) -> Result<Vec<Dispatch>, CoreError> {
+        // A thread (a mirror topic) has no profile of its own: a report about
+        // one only carries its chat state, kept in the source chat's profile.
+        if update.thread_id.is_some() {
+            return self
+                .sync_chat_state(routing, connector_id, update, snapshot, &[])
+                .await;
+        }
         let (changes, avatar) = self.merge_report(connector_id, update).await?;
         let mut dispatches = Vec::new();
         let conversations = self
@@ -235,6 +242,10 @@ where
                     .await?,
             );
         }
+        dispatches.extend(
+            self.sync_chat_state(routing, connector_id, update, snapshot, &conversations)
+                .await?,
+        );
         Ok(dispatches)
     }
 
@@ -292,7 +303,7 @@ where
     }
 
     /// Whether `endpoint` is the conversation's source chat.
-    async fn is_source_endpoint(
+    pub(crate) async fn is_source_endpoint(
         &self,
         conversation: &Conversation,
         endpoint: EndpointId,
