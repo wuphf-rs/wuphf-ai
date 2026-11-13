@@ -64,7 +64,7 @@ code).
 | 044 | Reload re-reads the config file; new rules go through panel drafts | P2 | S–M | 039, 040, 042, botconf 010, 011 | DONE (botconf v0.9.0; see notes) |
 | 045 | Disappearing-message timers as core chat profiles; whatsapp-rust chat titles | P1 | L | — | DONE (migration 0019; owner sets `supports_disappearing_timers` on both sides; see notes) |
 | 046 | Chat profiles: titles, descriptions, avatars, participants; notes and info cards in mirror threads | P2 | L | 045 | DONE (no migration; see notes) |
-| 047 | Two-way pin / mute / archive between WhatsApp chats and Telegram mirror topics | P3 | L | 046 | TODO |
+| 047 | Two-way pin / mute / archive between WhatsApp chats and Telegram mirror topics | P3 | L | 046 | DONE (no migration; see notes) |
 | 048 | Port the Instagram connector from messagix to instameow (upstream dropped IG lightspeed) | P0 | M–L | — | DONE |
 
 Status values: TODO | IN PROGRESS | DONE | BLOCKED (with one-line reason) |
@@ -1201,6 +1201,35 @@ Dependencies and ordering:
   - **Counts:** `cargo test --workspace` 300 → 332 (2 ignored); clippy and
     fmt clean; Go `proto/go`, `shared`, `whatsapp`, `telegram` green,
     `instagram` builds.
+- **047 done 2026-11-13** (on `v2`, `28e760b`..this commit). Drift: none
+  after 046. No migration: the three states live in the profile JSON, and
+  046-shaped profiles decode byte for byte (`chat_profiles_from_046_decode`).
+  - **Settings:** botconf accepts the dotted per-entry key
+    `chat_state.chats`, so the fallback `chat_state_chats` was not needed.
+    An override naming an unconfigured connector is refused by
+    `RoutingConfig::validate` (`UnknownChatStateConnector`).
+  - **Core:** the state is stored under the conversation's own source chat
+    id, never under the address form a report used, so both sides compare
+    with one value. A report with a `thread_id` never creates a profile for
+    the Telegram chat. A chat that is the source of no conversation still
+    records its state on its own profile.
+  - **Mute encoding:** a WhatsApp mute with no end is forever (-1) in both
+    WhatsApp connectors (the plan names only a negative end); applying 0 or
+    an end already over unmutes.
+  - **Telegram:** bot mode is read from `PeerCache` (bot addressing); a bot
+    skips a mute silently (the sender has no logger). "Not modified" errors
+    (`TOPIC_NOT_MODIFIED`, `PINNED_TOPIC_NOT_MODIFIED`) count as done.
+  - **whatsapp-rust** (subagent, reviewed): `archive_chat` does not unpin
+    (unlike whatsmeow's `BuildArchive`); `AppStateError::InvalidRequest` is
+    permanent, so a mute end that passes between the check and the call is
+    dead-lettered; a `mute_end_time` too large for an `i64` is forever.
+  - **Mutations** (each failed tests): comparing with the mirror's own state
+    instead of the source profile; not storing a source report its direction
+    blocks.
+  - **Counts:** `cargo test --workspace` 332 → 352 (2 ignored); whatsapp-rust
+    36 → 44; clippy and fmt clean; Go `proto/go`, `shared`, `whatsapp`,
+    `telegram` green, `instagram` builds. Not live-tested: the owner should
+    watch for two sides changing a state back and forth (a STOP condition).
 
 ## Findings considered and rejected
 
