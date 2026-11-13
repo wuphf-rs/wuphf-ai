@@ -21,8 +21,8 @@ use std::collections::HashSet;
 use std::sync::Arc;
 use wuphf_model::{
     Attachment, ChatAddress, ChatAvatar, ChatProfile, ChatUpdate, ConnectorId, Conversation,
-    DisappearingTimer, Dispatch, EndpointId, ParticipantChange, ParticipantChangeKind,
-    SourceAddress, Target,
+    ConversationId, DisappearingTimer, Dispatch, EndpointId, ParticipantChange,
+    ParticipantChangeKind, SourceAddress, Target,
 };
 use wuphf_storage::{ChatProfileStore, Storage, StorageError, TopologyStore};
 
@@ -189,9 +189,14 @@ where
     ) -> Result<Vec<Dispatch>, CoreError> {
         let routing = self.routing.routing();
         let mut dispatches = Vec::new();
+        // A connector can report one chat under several address forms in one
+        // batch (a WhatsApp DM as its LID and its phone number). Each form has
+        // its own profile, so each can see the same change: post a note once
+        // per conversation and batch.
+        let mut posted = HashSet::new();
         for update in &updates {
             dispatches.extend(
-                self.update_chat(&routing, connector_id, update, snapshot)
+                self.update_chat(&routing, connector_id, update, snapshot, &mut posted)
                     .await?,
             );
         }
@@ -204,6 +209,7 @@ where
         connector_id: &ConnectorId,
         update: &ChatUpdate,
         snapshot: bool,
+        posted: &mut HashSet<(ConversationId, String)>,
     ) -> Result<Vec<Dispatch>, CoreError> {
         let (changes, avatar) = self.merge_report(connector_id, update).await?;
         let mut dispatches = Vec::new();
@@ -224,7 +230,10 @@ where
         }
         if !snapshot {
             let notes = change_notes(&changes, avatar);
-            dispatches.extend(self.route_notes(routing, &conversations, &notes).await?);
+            dispatches.extend(
+                self.route_notes(routing, &conversations, &notes, posted)
+                    .await?,
+            );
         }
         Ok(dispatches)
     }
@@ -299,16 +308,21 @@ where
     }
 
     /// Route each note to every other endpoint of each conversation and save
-    /// the dispatches; returns the ones ready to send.
+    /// the dispatches; returns the ones ready to send. A note already in
+    /// `posted` for a conversation is skipped there.
     async fn route_notes(
         &self,
         routing: &Arc<RoutingConfig>,
         conversations: &[(Conversation, EndpointId)],
         notes: &[Note],
+        posted: &mut HashSet<(ConversationId, String)>,
     ) -> Result<Vec<Dispatch>, CoreError> {
         let mut routed = Vec::new();
         for note in notes {
             for (conversation, endpoint) in conversations {
+                if !posted.insert((conversation.id, note.text.clone())) {
+                    continue;
+                }
                 routed.extend(
                     self.with_routing(routing)
                         .route_note(conversation, *endpoint, note)
@@ -381,7 +395,8 @@ where
         let conversations = self
             .conversations_of_chat(&source.connector_id, &source.address.chat_id)
             .await?;
-        self.route_notes(routing, &conversations, &notes).await
+        self.route_notes(routing, &conversations, &notes, &mut HashSet::new())
+            .await
     }
 
     /// The profile of a conversation's source chat, under any of its address

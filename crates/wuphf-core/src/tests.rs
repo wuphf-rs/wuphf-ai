@@ -2877,3 +2877,58 @@ async fn owner_message_provisioning_also_gets_a_card() {
     assert!(matches!(card.action, Action::Note { .. }));
     assert!(card.to.create_thread.is_some());
 }
+
+#[tokio::test]
+async fn one_change_reported_under_two_forms_posts_one_note() {
+    let core = profile_core(false);
+    provision_mirror(&core).await;
+    // The platform reports a second address form for the group.
+    core.migrate_identity(
+        ConnectorId(WHATSAPP.into()),
+        ChatAddress::new(GROUP, None),
+        ChatAddress::new("222@g.us", None),
+    )
+    .await
+    .unwrap();
+    let describe = |chat: &str, text: &str| ChatUpdate {
+        description: Some(text.into()),
+        ..ChatUpdate::new(chat)
+    };
+    core.update_chats(
+        &ConnectorId(WHATSAPP.into()),
+        vec![
+            describe(GROUP, "Weekend plans"),
+            describe("222@g.us", "Weekend plans"),
+        ],
+        false,
+    )
+    .await
+    .unwrap();
+
+    let dispatches = core
+        .update_chats(
+            &ConnectorId(WHATSAPP.into()),
+            vec![
+                describe(GROUP, "New plans"),
+                describe("222@g.us", "New plans"),
+            ],
+            false,
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(
+        note_texts(&dispatches),
+        ["📝 Description changed:\nNew plans"]
+    );
+    assert_eq!(
+        core.pending_dispatches()
+            .await
+            .unwrap()
+            .iter()
+            .filter(|dispatch| matches!(dispatch.action, Action::Note { .. }))
+            .count(),
+        1,
+        "no duplicate waits in storage either"
+    );
+}
