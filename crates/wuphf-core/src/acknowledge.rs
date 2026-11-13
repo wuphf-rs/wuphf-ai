@@ -118,6 +118,12 @@ where
     /// held message, returning the resulting dispatches. Replay re-attempts
     /// provisioning if the thread still does not exist (a failed provision), so
     /// the conversation is not stranded.
+    ///
+    /// Only one replayed message may provision: once one has started a new
+    /// provision, the rest go back into the stash in order and wait for it,
+    /// exactly as messages arriving during a provision do. Without this, a
+    /// failed provision with several messages held would create one thread
+    /// per message.
     pub(crate) async fn replay_stash(
         &self,
         routing: &Arc<RoutingConfig>,
@@ -129,12 +135,32 @@ where
             .await?;
         let mut dispatches = Vec::new();
         for (message, origin_endpoint, provision_title) in stash {
+            if self.is_provisioning(conversation_id) {
+                self.storage
+                    .stash_provisioning_message(
+                        conversation_id,
+                        message.id,
+                        origin_endpoint,
+                        &provision_title,
+                    )
+                    .await?;
+                continue;
+            }
             let (routed, _) = self
                 .route_and_record(routing, &message, origin_endpoint, &provision_title)
                 .await?;
             dispatches.extend(routed);
         }
         Ok(dispatches)
+    }
+
+    /// Whether a provision for the conversation's mirror thread is in flight.
+    pub(crate) fn is_provisioning(&self, conversation_id: ConversationId) -> bool {
+        self.provisioning
+            .lock()
+            .unwrap()
+            .get(&conversation_id)
+            .is_some_and(|state| !state.pending.is_empty())
     }
 
     /// Durably stash a message deferred behind in-flight provisioning, closing

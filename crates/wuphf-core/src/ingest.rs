@@ -2,12 +2,21 @@
 //! logical message and the dispatches that fan it out, including mirror-thread
 //! provisioning and source-rename retitling.
 
-use crate::{Core, CoreError, RoutingConfig};
+use crate::{Core, CoreError, RoutingConfig, notes};
 use std::sync::Arc;
 use wuphf_model::{
-    ConversationId, DedupKey, Dispatch, Endpoint, EndpointId, IgnoreReason, IngestOutcome, Message,
-    MessageCopy, MessageId, SourceAddress,
+    Action, Conversation, ConversationId, DedupKey, Dispatch, Endpoint, EndpointId, IgnoreReason,
+    IngestOutcome, Message, MessageCopy, MessageId, SourceAddress,
 };
+
+/// What [`Core::introduce`] decided for a routed message.
+enum Introduction {
+    /// The info card dispatches replace the routed ones; the message is
+    /// stashed until the thread exists.
+    Card(Vec<Dispatch>),
+    /// No card is due: the routed dispatches go out as they are.
+    NotNeeded(Vec<Dispatch>),
+}
 use wuphf_storage::Storage;
 
 impl<S> Core<S>
@@ -156,7 +165,7 @@ where
         let Some(new_title) = new_title.map(str::trim).filter(|title| !title.is_empty()) else {
             return Ok(Vec::new());
         };
-        let Some(mut conversation) = self.storage.conversation(conversation_id).await? else {
+        let Some(conversation) = self.storage.conversation(conversation_id).await? else {
             return Ok(Vec::new());
         };
         if conversation.source.connector_id != origin.connector_id
@@ -164,7 +173,22 @@ where
         {
             return Ok(Vec::new());
         }
-        if conversation.title.as_deref() == Some(new_title) {
+        self.retitle_conversation(routing, conversation, new_title)
+            .await
+    }
+
+    /// Record a new source title on the conversation and rename its
+    /// provisioned mirror threads. The caller has checked that the title comes
+    /// from the conversation's source chat. A blank or unchanged title is a
+    /// no-op.
+    pub(crate) async fn retitle_conversation(
+        &self,
+        routing: &Arc<RoutingConfig>,
+        mut conversation: Conversation,
+        new_title: &str,
+    ) -> Result<Vec<Dispatch>, CoreError> {
+        let new_title = new_title.trim();
+        if new_title.is_empty() || conversation.title.as_deref() == Some(new_title) {
             return Ok(Vec::new());
         }
         self.storage
@@ -207,7 +231,7 @@ where
     /// Persist routed dispatches and return the ones ready to send, with a count
     /// of the blocked ones. Blocked dispatches are saved and surface later, when
     /// the message they wait for is acknowledged.
-    async fn save_dispatches(
+    pub(crate) async fn save_dispatches(
         &self,
         dispatches: Vec<Dispatch>,
     ) -> Result<(Vec<Dispatch>, usize), CoreError> {
@@ -229,6 +253,9 @@ where
     /// conversation are stashed (rather than provisioning again) until the
     /// thread exists. Returns the immediately-sendable dispatches and a
     /// count of the blocked ones.
+    ///
+    /// The first provisioning of a conversation's mirror thread is done by an
+    /// info card instead of the message: see [`Self::introduce`].
     pub(crate) async fn route_and_record(
         &self,
         routing: &Arc<RoutingConfig>,
@@ -240,6 +267,13 @@ where
             .with_routing(routing)
             .route(message, origin_endpoint, provision_title)
             .await?;
+        let routed = match self
+            .introduce(message, origin_endpoint, provision_title, routed)
+            .await?
+        {
+            Introduction::Card(cards) => cards,
+            Introduction::NotNeeded(routed) => routed,
+        };
         let (dispatches, blocked) = self.save_dispatches(routed).await?;
         // Only ready dispatches register: a blocked one provisions nothing until
         // it is released.
@@ -257,6 +291,80 @@ where
                 .extend(provisioning_ids);
         }
         Ok((dispatches, blocked))
+    }
+
+    /// When routing would provision a mirror thread for a conversation that
+    /// has never had an info card, post the card as the provisioning dispatch
+    /// instead and hold the message in the durable provisioning stash, which
+    /// replays it once the card's acknowledgement establishes the thread.
+    ///
+    /// The conversation is marked introduced before anything else, so a crash
+    /// cannot post two cards, and a card that fails is never retried: the
+    /// stash replays, and the message provisions the thread itself.
+    async fn introduce(
+        &self,
+        message: &Message,
+        origin_endpoint: EndpointId,
+        provision_title: &str,
+        routed: Vec<Dispatch>,
+    ) -> Result<Introduction, CoreError> {
+        if !routed
+            .iter()
+            .any(|dispatch| dispatch.to.create_thread.is_some())
+        {
+            return Ok(Introduction::NotNeeded(routed));
+        }
+        let Some(conversation) = self.storage.conversation(message.conversation_id).await? else {
+            return Ok(Introduction::NotNeeded(routed));
+        };
+        if conversation.introduced {
+            return Ok(Introduction::NotNeeded(routed));
+        }
+        self.storage
+            .mark_conversation_introduced(conversation.id)
+            .await?;
+
+        let profile = self.source_profile(&conversation).await?;
+        let avatar = match profile
+            .as_ref()
+            .and_then(|profile| profile.avatar.as_ref()?.media_id)
+        {
+            Some(media_id) => self
+                .storage
+                .media(media_id)
+                .await?
+                .map(|blob| blob.attachment),
+            None => None,
+        };
+        let title = conversation.title.as_deref().unwrap_or(provision_title);
+        let card = notes::info_card(title, profile.as_ref(), avatar);
+
+        // Discard the routed dispatches (none was saved): the stashed message
+        // is routed again once the thread exists.
+        let cards = routed
+            .into_iter()
+            .filter(|dispatch| dispatch.to.create_thread.is_some())
+            .map(|dispatch| {
+                Dispatch::new(
+                    dispatch.to,
+                    conversation.id,
+                    Action::Note {
+                        text: card.text.clone(),
+                        attachments: card.attachments.clone(),
+                    },
+                    None,
+                )
+            })
+            .collect();
+        self.storage
+            .stash_provisioning_message(
+                conversation.id,
+                message.id,
+                origin_endpoint,
+                provision_title,
+            )
+            .await?;
+        Ok(Introduction::Card(cards))
     }
 
     /// Apply an inbound edit: revise the canonical message text and fan the

@@ -4,6 +4,7 @@
 //! not yet exist.
 
 use crate::config::RoutingConfig;
+use crate::notes::Note;
 use crate::profile::target_disappearing;
 use std::sync::Arc;
 use thiserror::Error;
@@ -265,6 +266,44 @@ where
                 conversation.id,
                 Action::RenameThread {
                     title: title.to_owned(),
+                },
+                None,
+            ));
+        }
+        Ok(dispatches)
+    }
+
+    /// Post a system note to every endpoint of the conversation except `from`
+    /// (the chat it is about). A mirror endpoint without a thread is skipped:
+    /// its info card will show the current state when the thread is created.
+    pub async fn route_note(
+        &self,
+        conversation: &Conversation,
+        from: EndpointId,
+        note: &Note,
+    ) -> Result<Vec<Dispatch>, RouterError> {
+        let mut dispatches = Vec::new();
+        for endpoint_id in conversation
+            .endpoints
+            .iter()
+            .copied()
+            .filter(|endpoint_id| *endpoint_id != from)
+        {
+            let endpoint = self.storage.endpoint(endpoint_id).await?;
+            if endpoint.thread_id.is_none() && self.is_mirror(conversation, &endpoint) {
+                continue;
+            }
+            dispatches.push(Dispatch::new(
+                Target {
+                    endpoint_id,
+                    connector_id: endpoint.connector_id.clone(),
+                    address: endpoint.address(),
+                    create_thread: None,
+                },
+                conversation.id,
+                Action::Note {
+                    text: note.text.clone(),
+                    attachments: note.attachments.clone(),
                 },
                 None,
             ));

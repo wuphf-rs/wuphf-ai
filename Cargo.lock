@@ -3528,6 +3528,7 @@ dependencies = [
 name = "wuphf-core"
 version = "0.1.0"
 dependencies = [
+ "sha2",
  "thiserror",
  "tokio",
  "wuphf-model",

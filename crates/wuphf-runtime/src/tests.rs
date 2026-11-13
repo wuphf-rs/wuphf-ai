@@ -403,8 +403,9 @@ async fn hub_stamps_the_session_connector_on_all_work() {
 async fn restart_with_orphaned_stash_replays_immediately() {
     let storage = Arc::new(InMemoryStorage::default());
 
-    // Pre-crash state, built deterministically with a core: A provisions the
-    // mirror thread and B is deferred into the durable stash.
+    // Pre-crash state, built deterministically with a core: the info card
+    // provisions the mirror thread with A held in the durable stash behind it,
+    // and B is deferred into the stash too.
     {
         let core = mirror_core(Arc::clone(&storage));
         let first = core.ingest(wa_group_event("wa-1")).await.unwrap();
@@ -416,15 +417,16 @@ async fn restart_with_orphaned_stash_replays_immediately() {
 
         // Simulate a crash after the provision settled but before its stash was
         // replayed: mark it failed in storage directly (not via the core, which
-        // would replay right away), leaving B orphaned in the durable stash.
+        // would replay right away), leaving A and B orphaned in the stash.
         storage
             .fail_dispatch(provision_id, "crashed mid-provision".into())
             .await
             .unwrap();
     }
 
-    // Restart: the runtime's startup recovery drains the orphaned stash, so B's
-    // dispatch appears without any acknowledgement, re-attempting provisioning.
+    // Restart: the runtime's startup recovery drains the orphaned stash, so A's
+    // dispatch appears without any acknowledgement, re-attempting provisioning
+    // (B waits behind it).
     let (runtime, mut channels, _observer) = Runtime::channelled(mirror_core(storage), 8);
     let task = tokio::spawn(runtime.run());
     let replayed = channels.dispatches.recv().await.unwrap();

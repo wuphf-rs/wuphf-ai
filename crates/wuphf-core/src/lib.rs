@@ -10,6 +10,7 @@ use wuphf_storage::{Storage, StorageError};
 mod acknowledge;
 mod config;
 mod ingest;
+mod notes;
 mod notify;
 mod profile;
 mod resolve;
@@ -83,11 +84,15 @@ where
     pub async fn ingest(&self, event: Event) -> Result<IngestOutcome, CoreError> {
         let routing = self.routing.routing();
         let source = event.source;
-        // Before routing, so a chat no rule matches still learns its timer.
-        if let EventKind::NewMessage(inbound) = &event.payload {
-            self.observe_message_timer(&routing, &source, inbound.disappearing)
-                .await?;
-        }
+        // Before routing, so a chat no rule matches still learns its timer and
+        // the message's own dispatches carry the new one.
+        let timer_changes = match &event.payload {
+            EventKind::NewMessage(inbound) => Some(
+                self.observe_message_timer(&routing, &source, inbound.disappearing)
+                    .await?,
+            ),
+            _ => None,
+        };
         let Some(origin_endpoint) = self.resolve_origin(&routing, &source).await? else {
             return Ok(IngestOutcome::Ignored(IgnoreReason::Unmatched));
         };
@@ -101,15 +106,27 @@ where
 
         match event.payload {
             EventKind::NewMessage(inbound) => {
-                self.ingest_create(
-                    &routing,
-                    source,
-                    origin_endpoint,
-                    origin,
-                    conversation_id,
-                    inbound,
-                )
-                .await
+                let mut outcome = self
+                    .ingest_create(
+                        &routing,
+                        source.clone(),
+                        origin_endpoint,
+                        origin,
+                        conversation_id,
+                        inbound,
+                    )
+                    .await?;
+                // A timer change the message revealed is noted ahead of the
+                // message. Only a routed message posts it: otherwise the
+                // mirror has no thread yet, and its info card will show the
+                // timer.
+                if let (Some(changes), IngestOutcome::Routed { dispatches, .. }) =
+                    (&timer_changes, &mut outcome)
+                {
+                    let notes = self.message_timer_notes(&routing, &source, changes).await?;
+                    dispatches.splice(0..0, notes);
+                }
+                Ok(outcome)
             }
             EventKind::Edit { native_id, text } => {
                 self.ingest_edit(&routing, origin_endpoint, native_id, text)

@@ -6,7 +6,7 @@ use wuphf_model::{
     RuleKind, SourceAddress,
 };
 use wuphf_storage::{
-    ChatProfileStore, InMemoryStorage, MediaStore, ObservationStore, TopologyStore,
+    ChatProfileStore, InMemoryStorage, MediaStore, MessageStore, ObservationStore, TopologyStore,
 };
 
 const WHATSAPP: &str = "whatsapp-main";
@@ -278,7 +278,8 @@ async fn first_title_retitles_a_thread_provisioned_without_one() {
 async fn concurrent_messages_provision_one_thread_and_replay_the_rest() {
     let core = core(vec![mirror_rule()]);
 
-    // The first source message provisions the mirror topic.
+    // The first source message provisions the mirror topic, through the
+    // conversation's info card.
     let first = core
         .ingest(event(WHATSAPP, "111@g.us", "wa-1", None))
         .await
@@ -288,6 +289,7 @@ async fn concurrent_messages_provision_one_thread_and_replay_the_rest() {
     };
     assert_eq!(dispatches.len(), 1);
     assert!(dispatches[0].to.create_thread.is_some());
+    assert!(matches!(dispatches[0].action, Action::Note { .. }));
 
     // A second message arriving before the provision is acknowledged must be
     // deferred rather than provisioning a second topic for the same chat.
@@ -326,8 +328,8 @@ async fn restart_replays_stash_when_provisioning_settled_while_down() {
     let storage = Arc::new(InMemoryStorage::default());
     let core = core_over(Arc::clone(&storage), vec![mirror_rule()]);
 
-    // A provisions the mirror thread; B arrives mid-provision and is deferred
-    // into the durable stash.
+    // A provisions the mirror thread (through the info card, A itself waiting
+    // in the stash); B arrives mid-provision and is deferred into the stash.
     let first = core
         .ingest(event(WHATSAPP, "111@g.us", "wa-1", None))
         .await
@@ -398,19 +400,22 @@ async fn failed_provisioning_releases_stashed_messages() {
         panic!("second message is deferred while provisioning");
     };
 
-    // Failing the provisioning dispatch must release the stash rather than strand
-    // the conversation: the stashed message replays and re-attempts provisioning
-    // (a fresh create still carrying a create_thread, since no thread exists).
+    // Failing the provisioning dispatch (the info card) must release the
+    // stash rather than strand the conversation: the first stashed message
+    // replays and re-attempts provisioning (a fresh create still carrying a
+    // create_thread, since no thread exists). The second waits behind it
+    // rather than provisioning a second thread.
     let released = core
         .fail_dispatch(provisioning_id, "cannot create topic".into())
         .await
         .unwrap();
-    let replay = released
+    let sends: Vec<_> = released
         .iter()
-        .find(|dispatch| matches!(dispatch.action, Action::Send { .. }))
-        .expect("the stashed message replays when provisioning fails");
+        .filter(|dispatch| matches!(dispatch.action, Action::Send { .. }))
+        .collect();
+    assert_eq!(sends.len(), 1, "one replay provisions, the other waits");
     assert!(
-        replay.to.create_thread.is_some(),
+        sends[0].to.create_thread.is_some(),
         "replay re-attempts provisioning",
     );
 
@@ -2008,6 +2013,7 @@ async fn report(core: &Core<InMemoryStorage>, chat_id: &str, timer: Disappearing
             disappearing: Some(timer),
             ..ChatUpdate::default()
         }],
+        false,
     )
     .await
     .unwrap();
@@ -2077,7 +2083,7 @@ async fn a_message_with_a_timer_records_the_chat_profile() {
 }
 
 #[tokio::test]
-async fn chat_updates_apply_in_order_and_count_changes() {
+async fn chat_updates_apply_in_order() {
     let core = timer_core(vec![], true);
     report(
         &core,
@@ -2091,7 +2097,7 @@ async fn chat_updates_apply_in_order_and_count_changes() {
         disappearing: Some(timer),
         ..ChatUpdate::default()
     };
-    let changed = core
+    let dispatches = core
         .update_chats(
             &ConnectorId(WHATSAPP.into()),
             vec![
@@ -2104,10 +2110,12 @@ async fn chat_updates_apply_in_order_and_count_changes() {
                     ..ChatUpdate::default()
                 },
             ],
+            false,
         )
         .await
         .unwrap();
-    assert_eq!(changed, 2);
+    // No chat is routed, so nothing is dispatched.
+    assert!(dispatches.is_empty());
     assert_eq!(
         stored_timer(&core, WHATSAPP, "2@s.whatsapp.net").await,
         Some(DisappearingTimer::new(604_800))
@@ -2330,4 +2338,542 @@ async fn a_reported_timer_replaces_the_fill() {
         stored_timer(&core, WHATSAPP, "12345@s.whatsapp.net").await,
         Some(DisappearingTimer::new(604_800))
     );
+}
+
+// ---- Plan 046: chat profiles, notes and info cards ----
+
+const GROUP: &str = "111@g.us";
+const MIRROR_CHAT: &str = "-1001234567";
+
+/// A WhatsApp group mirrored into a Telegram topic, with the group's timer
+/// stamping on or off.
+fn profile_core(capable: bool) -> Core<InMemoryStorage> {
+    timer_core(vec![mirror_rule()], capable)
+}
+
+/// Route the group's first message and settle the provisioning: the info
+/// card creates topic 777, the stashed message follows into it. Returns the
+/// Telegram endpoint.
+async fn provision_mirror(core: &Core<InMemoryStorage>) -> EndpointId {
+    let card = core
+        .ingest(event(WHATSAPP, GROUP, "wa-1", None))
+        .await
+        .unwrap()
+        .dispatches()[0]
+        .clone();
+    assert!(matches!(card.action, Action::Note { .. }));
+    let released = core
+        .acknowledge_dispatch(DispatchAck {
+            dispatch_id: card.id,
+            native_id: "tg-card".into(),
+            thread_id: Some("777".into()),
+        })
+        .await
+        .unwrap();
+    let message = released
+        .iter()
+        .find(|dispatch| matches!(dispatch.action, Action::Send { .. }))
+        .expect("the stashed message follows the card")
+        .clone();
+    core.acknowledge_dispatch(DispatchAck {
+        dispatch_id: message.id,
+        native_id: "tg-1".into(),
+        thread_id: None,
+    })
+    .await
+    .unwrap();
+    card.to.endpoint_id
+}
+
+async fn update_group(
+    core: &Core<InMemoryStorage>,
+    update: ChatUpdate,
+    snapshot: bool,
+) -> Vec<Dispatch> {
+    core.update_chats(&ConnectorId(WHATSAPP.into()), vec![update], snapshot)
+        .await
+        .unwrap()
+}
+
+fn note_texts(dispatches: &[Dispatch]) -> Vec<String> {
+    dispatches
+        .iter()
+        .filter_map(|dispatch| match &dispatch.action {
+            Action::Note { text, .. } => Some(text.clone()),
+            _ => None,
+        })
+        .collect()
+}
+
+async fn group_profile(core: &Core<InMemoryStorage>) -> wuphf_model::ChatProfile {
+    core.storage()
+        .chat_profile(&ConnectorId(WHATSAPP.into()), GROUP)
+        .await
+        .unwrap()
+        .expect("the group has a profile")
+}
+
+/// Upload a picture the way a connector does, returning its attachment.
+async fn upload_photo(core: &Core<InMemoryStorage>, bytes: &[u8]) -> Attachment {
+    let attachment = Attachment {
+        media_id: MediaId::new(),
+        kind: AttachmentKind::Image,
+        file_name: Some("avatar.jpg".into()),
+        mime_type: Some("image/jpeg".into()),
+        size_bytes: Some(bytes.len() as u64),
+        animated: false,
+    };
+    core.storage()
+        .put_media(
+            MediaBlob {
+                attachment: attachment.clone(),
+                bytes: bytes.to_vec(),
+            },
+            0,
+        )
+        .await
+        .unwrap();
+    attachment
+}
+
+fn avatar(id: &str, photo: Option<&Attachment>) -> ChatUpdate {
+    ChatUpdate {
+        avatar: Some(wuphf_model::ReportedAvatar {
+            id: id.into(),
+            media_id: photo.map(|photo| photo.media_id),
+        }),
+        ..ChatUpdate::new(GROUP)
+    }
+}
+
+fn membership(
+    kind: wuphf_model::ParticipantChangeKind,
+    participant: &str,
+) -> wuphf_model::ParticipantChange {
+    wuphf_model::ParticipantChange {
+        kind,
+        participant: participant.into(),
+        name: Some(participant.to_uppercase()),
+        actor: None,
+        actor_name: None,
+    }
+}
+
+#[tokio::test]
+async fn first_seen_values_are_a_silent_baseline() {
+    let core = profile_core(false);
+    provision_mirror(&core).await;
+    let photo = upload_photo(&core, b"photo-a").await;
+
+    let dispatches = update_group(
+        &core,
+        ChatUpdate {
+            description: Some("Weekend plans".into()),
+            participant_count: Some(10),
+            disappearing: Some(DisappearingTimer::new(604_800)),
+            ..avatar("pic-1", Some(&photo))
+        },
+        false,
+    )
+    .await;
+
+    assert!(dispatches.is_empty(), "{dispatches:?}");
+    let profile = group_profile(&core).await;
+    assert_eq!(profile.description.as_deref(), Some("Weekend plans"));
+    assert_eq!(profile.participant_count, Some(10));
+    assert_eq!(profile.disappearing, Some(DisappearingTimer::new(604_800)));
+    let stored = profile.avatar.expect("the avatar is stored");
+    assert_eq!(stored.id, "pic-1");
+    assert_eq!(stored.media_id, Some(photo.media_id));
+    assert!(stored.hash.is_some());
+}
+
+#[tokio::test]
+async fn a_description_change_posts_a_note_in_the_mirror_thread() {
+    let core = profile_core(false);
+    let telegram = provision_mirror(&core).await;
+    let describe = |text: &str| ChatUpdate {
+        description: Some(text.into()),
+        ..ChatUpdate::new(GROUP)
+    };
+    update_group(&core, describe("Weekend plans"), false).await;
+
+    let dispatches = update_group(&core, describe("New plans"), false).await;
+
+    assert_eq!(dispatches.len(), 1, "only the mirror gets the note");
+    let note = &dispatches[0];
+    assert_eq!(note.to.endpoint_id, telegram);
+    assert_eq!(
+        note.to.address,
+        ChatAddress::new(MIRROR_CHAT, Some("777".into()))
+    );
+    assert!(note.to.create_thread.is_none());
+    assert_eq!(
+        note_texts(&dispatches),
+        ["📝 Description changed:\nNew plans"]
+    );
+}
+
+#[tokio::test]
+async fn a_snapshot_never_posts_notes() {
+    let core = profile_core(false);
+    provision_mirror(&core).await;
+    let describe = |text: &str| ChatUpdate {
+        description: Some(text.into()),
+        ..ChatUpdate::new(GROUP)
+    };
+    update_group(&core, describe("Weekend plans"), false).await;
+
+    let dispatches = update_group(&core, describe("Drifted while down"), true).await;
+
+    assert!(dispatches.is_empty(), "{dispatches:?}");
+    assert_eq!(
+        group_profile(&core).await.description.as_deref(),
+        Some("Drifted while down")
+    );
+}
+
+#[tokio::test]
+async fn the_same_photo_is_never_posted_twice() {
+    let core = profile_core(false);
+    provision_mirror(&core).await;
+    let a = upload_photo(&core, b"photo-a").await;
+    update_group(&core, avatar("pic-1", Some(&a)), false).await;
+
+    // A new platform id, the same bytes: nothing changed.
+    let same_bytes = upload_photo(&core, b"photo-a").await;
+    let dispatches = update_group(&core, avatar("pic-2", Some(&same_bytes)), false).await;
+    assert!(dispatches.is_empty(), "{dispatches:?}");
+    let stored = group_profile(&core).await.avatar.unwrap();
+    assert_eq!(stored.id, "pic-1");
+    assert_eq!(stored.media_id, Some(a.media_id));
+
+    // New bytes: one note, with the new photo attached.
+    let b = upload_photo(&core, b"photo-b").await;
+    let dispatches = update_group(&core, avatar("pic-3", Some(&b)), false).await;
+    assert_eq!(note_texts(&dispatches), ["🖼️ Photo changed"]);
+    let Action::Note { attachments, .. } = &dispatches[0].action else {
+        unreachable!();
+    };
+    assert_eq!(attachments, &vec![b.clone()]);
+
+    let dispatches = update_group(&core, avatar("", None), false).await;
+    assert_eq!(note_texts(&dispatches), ["🖼️ Photo removed"]);
+}
+
+#[tokio::test]
+async fn membership_changes_post_notes_and_adjust_the_count() {
+    use wuphf_model::ParticipantChangeKind::{Joined, Left, Promoted};
+    let core = profile_core(false);
+    provision_mirror(&core).await;
+    update_group(
+        &core,
+        ChatUpdate {
+            participant_count: Some(10),
+            ..ChatUpdate::new(GROUP)
+        },
+        false,
+    )
+    .await;
+
+    let dispatches = update_group(
+        &core,
+        ChatUpdate {
+            participant_changes: vec![
+                membership(Joined, "b"),
+                membership(Joined, "c"),
+                membership(Left, "d"),
+            ],
+            ..ChatUpdate::new(GROUP)
+        },
+        false,
+    )
+    .await;
+    assert_eq!(
+        note_texts(&dispatches),
+        ["➕ B joined", "➕ C joined", "➖ D left"]
+    );
+    assert_eq!(group_profile(&core).await.participant_count, Some(11));
+
+    let dispatches = update_group(
+        &core,
+        ChatUpdate {
+            participant_changes: vec![membership(Promoted, "b")],
+            ..ChatUpdate::new(GROUP)
+        },
+        false,
+    )
+    .await;
+    assert_eq!(note_texts(&dispatches), ["⭐ B is now an admin"]);
+    assert_eq!(group_profile(&core).await.participant_count, Some(11));
+}
+
+#[tokio::test]
+async fn a_title_change_renames_without_a_note() {
+    let core = profile_core(false);
+    provision_mirror(&core).await;
+    let title = |title: &str| ChatUpdate {
+        title: Some(title.into()),
+        ..ChatUpdate::new(GROUP)
+    };
+    let renames = |dispatches: &[Dispatch]| -> Vec<String> {
+        dispatches
+            .iter()
+            .filter_map(|dispatch| match &dispatch.action {
+                Action::RenameThread { title } => Some(title.clone()),
+                _ => None,
+            })
+            .collect()
+    };
+
+    let dispatches = update_group(&core, title("[G] New Name"), false).await;
+    assert_eq!(renames(&dispatches), ["[G] New Name"]);
+    assert!(note_texts(&dispatches).is_empty());
+
+    let dispatches = update_group(&core, title("[G] Newer"), true).await;
+    assert_eq!(
+        renames(&dispatches),
+        ["[G] Newer"],
+        "a snapshot renames too"
+    );
+    assert!(note_texts(&dispatches).is_empty());
+}
+
+#[tokio::test]
+async fn a_timer_change_posts_a_note() {
+    let core = profile_core(true);
+    provision_mirror(&core).await;
+    // The first message, without a timer, settled the unknown timer as off.
+    assert_eq!(
+        stored_timer(&core, WHATSAPP, GROUP).await,
+        Some(DisappearingTimer::new(0))
+    );
+
+    let dispatches = update_group(
+        &core,
+        ChatUpdate {
+            disappearing: Some(DisappearingTimer::new(604_800)),
+            ..ChatUpdate::new(GROUP)
+        },
+        false,
+    )
+    .await;
+    assert_eq!(
+        note_texts(&dispatches),
+        ["⏳ Disappearing messages: 7 days"]
+    );
+
+    // A message carrying a different timer notes it ahead of the message.
+    let outcome = core
+        .ingest(with_timer(
+            event(WHATSAPP, GROUP, "wa-2", None),
+            DisappearingTimer::new(86_400),
+        ))
+        .await
+        .unwrap();
+    let dispatches = outcome.dispatches();
+    assert_eq!(
+        note_texts(dispatches),
+        ["⏳ Disappearing messages: 24 hours"]
+    );
+    assert!(matches!(dispatches[0].action, Action::Note { .. }));
+    assert!(matches!(dispatches[1].action, Action::Send { .. }));
+
+    // The unknown fill (a first-seen value) posts nothing.
+    core.storage()
+        .put_chat_profile(&wuphf_model::ChatProfile::new(
+            ConnectorId(WHATSAPP.into()),
+            GROUP,
+        ))
+        .await
+        .unwrap();
+    let outcome = core
+        .ingest(event(WHATSAPP, GROUP, "wa-3", None))
+        .await
+        .unwrap();
+    assert!(note_texts(outcome.dispatches()).is_empty());
+    assert_eq!(
+        stored_timer(&core, WHATSAPP, GROUP).await,
+        Some(DisappearingTimer::new(0))
+    );
+}
+
+#[tokio::test]
+async fn notes_skip_unprovisioned_mirrors() {
+    let core = profile_core(false);
+    // The card is out, the topic does not exist yet.
+    core.ingest(event(WHATSAPP, GROUP, "wa-1", None))
+        .await
+        .unwrap();
+    let describe = |text: &str| ChatUpdate {
+        description: Some(text.into()),
+        ..ChatUpdate::new(GROUP)
+    };
+    update_group(&core, describe("Weekend plans"), false).await;
+
+    let dispatches = update_group(&core, describe("New plans"), false).await;
+
+    assert!(dispatches.is_empty(), "{dispatches:?}");
+}
+
+#[tokio::test]
+async fn a_new_mirror_topic_starts_with_an_info_card() {
+    let core = profile_core(false);
+    let photo = upload_photo(&core, b"photo-a").await;
+    update_group(
+        &core,
+        ChatUpdate {
+            title: Some("[G] Family".into()),
+            description: Some("Weekend plans".into()),
+            participant_count: Some(12),
+            disappearing: Some(DisappearingTimer::new(604_800)),
+            ..avatar("pic-1", Some(&photo))
+        },
+        true,
+    )
+    .await;
+
+    let outcome = core
+        .ingest(event(WHATSAPP, GROUP, "wa-1", None))
+        .await
+        .unwrap();
+    let [card] = outcome.dispatches() else {
+        panic!("the card is the only dispatch: {outcome:?}");
+    };
+    assert!(card.to.create_thread.is_some());
+    let Action::Note { text, attachments } = &card.action else {
+        panic!("the card is a note: {card:?}");
+    };
+    assert_eq!(
+        text,
+        "ℹ️ Title\n📝 Weekend plans\n⏳ Disappearing messages: 7 days\n👥 12 participants"
+    );
+    assert_eq!(attachments, &vec![photo]);
+
+    let released = core
+        .acknowledge_dispatch(DispatchAck {
+            dispatch_id: card.id,
+            native_id: "tg-card".into(),
+            thread_id: Some("777".into()),
+        })
+        .await
+        .unwrap();
+    let message = released
+        .iter()
+        .find(|dispatch| matches!(dispatch.action, Action::Send { .. }))
+        .expect("the message follows the card");
+    assert!(message.to.create_thread.is_none());
+    assert_eq!(message.to.address.thread_id.as_deref(), Some("777"));
+}
+
+#[tokio::test]
+async fn one_card_per_conversation() {
+    let core = profile_core(false);
+    let card = core
+        .ingest(event(WHATSAPP, GROUP, "wa-1", None))
+        .await
+        .unwrap()
+        .dispatches()[0]
+        .clone();
+    assert!(matches!(card.action, Action::Note { .. }));
+
+    // The card fails: the stashed message provisions the topic itself.
+    let released = core
+        .fail_dispatch(card.id, "cannot create topic".into())
+        .await
+        .unwrap();
+    let [message] = released.as_slice() else {
+        panic!("only the message is released: {released:?}");
+    };
+    assert!(matches!(message.action, Action::Send { .. }));
+    assert!(message.to.create_thread.is_some());
+    core.acknowledge_dispatch(DispatchAck {
+        dispatch_id: message.id,
+        native_id: "tg-1".into(),
+        thread_id: Some("777".into()),
+    })
+    .await
+    .unwrap();
+
+    // The thread is lost and provisioned again: still no second card.
+    let mut endpoint = core
+        .storage()
+        .endpoint(message.to.endpoint_id)
+        .await
+        .unwrap();
+    endpoint.thread_id = None;
+    core.storage().put_endpoint(endpoint).await.unwrap();
+    let outcome = core
+        .ingest(event(WHATSAPP, GROUP, "wa-2", None))
+        .await
+        .unwrap();
+    let [again] = outcome.dispatches() else {
+        panic!("one dispatch: {outcome:?}");
+    };
+    assert!(matches!(again.action, Action::Send { .. }));
+    assert!(again.to.create_thread.is_some());
+}
+
+#[tokio::test]
+async fn a_note_records_no_copy() {
+    let core = profile_core(false);
+    let telegram = provision_mirror(&core).await;
+    let describe = |text: &str| ChatUpdate {
+        description: Some(text.into()),
+        ..ChatUpdate::new(GROUP)
+    };
+    update_group(&core, describe("Weekend plans"), false).await;
+    let note = update_group(&core, describe("New plans"), false).await[0].clone();
+
+    let released = core
+        .acknowledge_dispatch(DispatchAck {
+            dispatch_id: note.id,
+            native_id: "tg-note".into(),
+            thread_id: None,
+        })
+        .await
+        .unwrap();
+    assert!(released.is_empty(), "no delivery ack: {released:?}");
+    assert_eq!(
+        core.storage()
+            .message_id_for_copy(telegram, "tg-note")
+            .await
+            .unwrap(),
+        None
+    );
+
+    // A Telegram reply quoting the note bridges with no reply link.
+    let outcome = core
+        .ingest(event_in(
+            TELEGRAM,
+            MIRROR_CHAT,
+            Some("777"),
+            "tg-reply",
+            Some("tg-note"),
+        ))
+        .await
+        .unwrap();
+    let [reply] = outcome.dispatches() else {
+        panic!("one dispatch: {outcome:?}");
+    };
+    let Action::Send { message, reply, .. } = &reply.action else {
+        panic!("a send: {reply:?}");
+    };
+    assert!(reply.is_none());
+    assert!(message.reply_to.is_none());
+}
+
+#[tokio::test]
+async fn owner_message_provisioning_also_gets_a_card() {
+    let core = profile_core(false);
+    let outcome = core
+        .send_owner_message(owner_message(GROUP, "from the tui", None))
+        .await
+        .unwrap();
+    assert!(matches!(outcome.direct.action, Action::Send { .. }));
+    let [card] = outcome.mirrored.as_slice() else {
+        panic!("the card is the only mirrored dispatch: {outcome:?}");
+    };
+    assert!(matches!(card.action, Action::Note { .. }));
+    assert!(card.to.create_thread.is_some());
 }

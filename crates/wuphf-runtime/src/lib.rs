@@ -284,17 +284,18 @@ where
         InboundWork::ChatUpdate {
             connector_id,
             updates,
-            ..
+            snapshot,
         } => {
             let reported = updates.len();
-            let changed = core.update_chats(&connector_id, updates).await?;
+            let dispatches = core.update_chats(&connector_id, updates, snapshot).await?;
             debug!(
                 connector = %connector_id.0,
                 updates = reported,
-                changed,
+                snapshot,
+                dispatches = dispatches.len(),
                 "chat profiles updated",
             );
-            Ok(Vec::new())
+            Ok(dispatches)
         }
     }
 }
