@@ -67,9 +67,19 @@ connection dies silently; the SDKs keep retrying with backoff until then.
     `name`, and, when the platform says who made the change, its `actor` (in
     the same address form as `participant`) and `actor_name`. They are events:
     never part of a snapshot.
+  - `thread_id`: set when the update is about a thread (a Telegram forum
+    topic) rather than the whole chat. The core resolves the chat and thread to
+    the conversation's mirror endpoint. Such an update carries chat state only.
+  - `pinned`, `mute`, `archived`: the chat's (or topic's) state. `mute` is
+    `MuteState { muted_until }`: 0 not muted, -1 muted forever, otherwise the
+    end in Unix **seconds**; a mute whose end has passed is reported as 0. A
+    Telegram topic reports a closed topic as `archived`. Encode each value
+    exactly and reversibly: the core recognizes an echo of its own dispatch
+    only because the value it gets back equals the value it sent.
   - `snapshot` (on the event): the updates describe current state (a history
-    sync, the first time this connector process sees a chat), not live
-    changes. The core stores them without posting notes.
+    sync, the first time this connector process sees a chat, a full app-state
+    sync), not live changes. The core stores them without posting notes or
+    dispatching chat state.
 - `MessageEditEvent` / `MessageDeleteEvent` — the original message's native id
   plus the change; the core resolves it to the logical message and fans it out.
 - `Acknowledgement` — echoes the `dispatch_id`, supplies the resulting native
@@ -118,6 +128,13 @@ connection dies silently; the SDKs keep retrying with backoff until then.
   `title`, sent when a source conversation is renamed so the mirror thread's
   title tracks it. Carries no message; the connector renames the thread and
   acknowledges with the thread id.
+- `ChatStateDispatch` — bring the target chat (or thread) to this `pinned` /
+  `mute` / `archived` state; absent fields are left alone. Acknowledge with the
+  target chat id. A field the connector cannot apply (a mute on a Telegram bot
+  session, a plain Telegram chat without a thread) is acknowledged without
+  acting; a connector that does not implement the dispatch at all acknowledges
+  it unchanged (both SDKs do this by default). Applying it sends no frame: the
+  platform's own echo comes back through the normal event path.
 - `Rejected` — the connector's last input violated session ownership.
 
 Dispatches remain pending until acknowledged with the same `dispatch_id`; a

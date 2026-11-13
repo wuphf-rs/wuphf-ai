@@ -274,7 +274,35 @@ chat's mirror threads (`Action::Note`, sent as a `MessageCreateDispatch` with
   `orphan_media_retention_seconds`; pruning keeps the media a profile still
   names.
 
-Profiles are the extension point for pin, mute and archive state (plan 047).
+### Chat state
+
+Pin, mute and archive sync both ways between a source chat and its mirror
+topics (`wuphf-core/src/chat_state.rs`).
+
+- **One state per conversation**, kept in the source chat's profile under the
+  conversation's own source chat id. A mirror topic has no profile of its own.
+- **An echo is an equal value.** A report equal to the stored state is a
+  no-op, which is what ends the echo of every dispatch the core sent. There is
+  no suppression window, so both sides must encode each value exactly (mute
+  ends: WhatsApp milliseconds ÷ 1000; WhatsApp "forever" and Telegram's
+  `2147483647` are -1).
+- **Directions** are named from the source: `chat_state.pin`, `.mute` and
+  `.archive` are each `off`, `to_mirror`, `to_source` or `both` (default),
+  with per-conversation overrides in `chat_state.chats.<name> = { chat, … }`
+  naming the source chat or the mirror topic. A source-side report is always
+  stored (the profile mirrors the source) and goes to each mirror topic that
+  exists when its direction allows `to_mirror`; a mirror-side report is stored
+  and goes to the source only when its direction allows `to_source`,
+  otherwise it is dropped.
+- **Snapshots** (history syncs, full app-state syncs) set the baseline and
+  dispatch nothing. Existing topics are not aligned at startup: the first
+  real change on either side syncs.
+- **Telegram mapping:** pin ↔ pinned forum topic; mute ↔ the topic's notify
+  settings (user sessions only: a bot's notify settings mean nothing, so a bot
+  neither reports nor applies mutes); archive ↔ closed topic (the owner, an
+  admin, can still post in it). Plain Telegram chats are out of scope.
+- **Archiving on WhatsApp also unpins**; that unpin is reported like any
+  change, so the topic is unpinned too.
 
 ## Owner Notices
 

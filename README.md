@@ -42,6 +42,10 @@ For a human-friendly tour, open [`docs/index.html`](docs/index.html).
   leaving, promoted or demoted) appear as notes in the topic; a rename renames
   the topic. Both WhatsApp connectors report them, show saved contact names
   for senders and @mentions, and name a DM the owner starts after the contact.
+- Pin, mute and archive sync both ways between a WhatsApp chat and its
+  Telegram mirror topic (pinned topic, topic notifications, closed topic),
+  each configurable as `off`, `to_mirror`, `to_source` or `both` under
+  `[chat_state]`, with per-conversation overrides.
 - Go connectors: Telegram (`gotd/td`, forum topics, albums), WhatsApp
   (`whatsmeow`, QR pairing), and Instagram (`mautrix-meta` instameow).
 
@@ -86,8 +90,9 @@ export WUPHF_CONNECTOR_WHATSAPP_MAIN_TOKEN=<token>
 export WUPHF_CONNECTOR_INSTAGRAM_MAIN_TOKEN=<token>
 ```
 
-`rules` and `notify` can also change while the core runs, through its
-settings service; list each connector's `owner_ids` in the core's config to
+`rules`, `notify` and `chat_state` (`chat_state.pin`, `.mute`, `.archive`
+and the `chat_state.chats` overrides) can also change while the core runs,
+through its settings service; list each connector's `owner_ids` in the core's config to
 choose who may change them from that platform (see `docs/architecture.md`,
 "Settings service").
 
