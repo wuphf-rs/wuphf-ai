@@ -63,7 +63,7 @@ code).
 | 043 | Label user-session stickers through the helper bot | P3 | M | 041 | DONE (see notes) |
 | 044 | Reload re-reads the config file; new rules go through panel drafts | P2 | S–M | 039, 040, 042, botconf 010, 011 | DONE (botconf v0.9.0; see notes) |
 | 045 | Disappearing-message timers as core chat profiles; whatsapp-rust chat titles | P1 | L | — | DONE (migration 0019; owner sets `supports_disappearing_timers` on both sides; see notes) |
-| 046 | Chat profiles: titles, descriptions, avatars, participants; notes and info cards in mirror threads | P2 | L | 045 | TODO |
+| 046 | Chat profiles: titles, descriptions, avatars, participants; notes and info cards in mirror threads | P2 | L | 045 | DONE (no migration; see notes) |
 | 047 | Two-way pin / mute / archive between WhatsApp chats and Telegram mirror topics | P3 | L | 046 | TODO |
 | 048 | Port the Instagram connector from messagix to instameow (upstream dropped IG lightspeed) | P0 | M–L | — | DONE |
 
@@ -1155,6 +1155,52 @@ Dependencies and ordering:
     entry) and in that connector's own config, in the same restart; one side
     alone makes the core refuse the connector ("registration does not match
     configuration").
+- **046 done 2026-11-13** (on `v2`, `e1dd7bc`..this commit). Drift: only the
+  022 and `native_id` refactor commits (renames, no behavior). No migration;
+  045-shaped profiles and conversations without `introduced` keep their exact
+  JSON.
+  - **Environment:** no `nix` on the owner's Mac and Go is 1.27.4:
+    `connectors/whatsapp` builds only with `-tags=http2legacy` (grpc v1.81.1
+    vs x/net v0.54 under go1.27); protoc-gen-go v1.36.11 and
+    protoc-gen-go-grpc v1.6.2 were installed by hand; only `client.pb.go`
+    and `server.pb.go` were regenerated (protoc 36.2 would rewrite every
+    header).
+  - **Core deviations:** `timer_text` names one day "24 hours" (as WhatsApp
+    does) and larger whole days as days. `mark_conversation_introduced`
+    uses the read-modify-write of `set_conversation_title`, not `json_set`.
+    A message's timer note is routed only when the message is routed (in
+    every other outcome the mirror has no thread yet).
+  - **Found and fixed:** the info card stashes the first message too, so a
+    failed card with a second message held made two topics:
+    `replay_stash` now lets only one replayed message provision and
+    re-stashes the rest (the old code had the same fault with two held
+    messages). whatsapp-rust reports a DM under both its forms, so one
+    change could post two notes: `update_chats` posts a note text once per
+    conversation and batch.
+  - **Existing tests:** provisioning tests now see the card as the
+    provisioning dispatch (assertions and comments updated); 045's
+    `chat_updates_apply_in_order_and_count_changes` checked the old `usize`
+    return and became `chat_updates_apply_in_order`; the Go 045 test's
+    "a rename reports nothing" became "an empty notification reports
+    nothing".
+  - **SDK:** `wuphf_connector::MediaClient` connects lazily and returns
+    `MediaConnectError`. Telegram note tests drive `SendMessage` through a
+    recording fake of the Telegram API (`note_test.go`).
+  - **whatsapp-rust** (run by a subagent, reviewed): lock gained only the
+    root's two edges; 36 tests; sender names use contacts for every
+    non-owner sender (as Go); `snapshot = from_full_sync` for contact syncs;
+    a failed picture lookup reports no avatar; `get_profile_picture` maps a
+    hidden picture (401/404) to "no picture".
+  - **Go WhatsApp:** `ErrProfilePictureNotSet` reports an empty avatar id;
+    the first-sighting count prefers `GroupInfo.ParticipantCount`.
+  - **Mutations** (each failed a test): avatar ids instead of hashes; notes
+    from snapshots; `introduced` not set at card creation; replaying every
+    held message; no per-batch note dedup; SQLite prune without the profile
+    clause; titles before push names (whatsapp-rust); first-sighting
+    snapshot after the message (Go).
+  - **Counts:** `cargo test --workspace` 300 → 332 (2 ignored); clippy and
+    fmt clean; Go `proto/go`, `shared`, `whatsapp`, `telegram` green,
+    `instagram` builds.
 
 ## Findings considered and rejected
 
