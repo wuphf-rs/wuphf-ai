@@ -132,6 +132,17 @@ type SeenReceiptMarker interface {
 	MarkSeen(context.Context, *wuphfpb.SeenReceiptDispatch) (messageID string, err error)
 }
 
+// ChatStateApplier is implemented by senders that apply pin, mute and archive
+// to a chat or thread. Without it, a ChatState dispatch is acknowledged
+// unchanged (with its target chat id). Applying a state emits nothing: the
+// platform's own echo comes back through the event handlers.
+type ChatStateApplier interface {
+	// ApplyChatState brings the target chat (or thread) to the dispatch's
+	// state, leaving absent fields alone, and returns the target chat id. A
+	// field the platform cannot apply is acknowledged without acting.
+	ApplyChatState(context.Context, *wuphfpb.ChatStateDispatch) (chatID string, err error)
+}
+
 // sendOp performs one outbound delivery attempt, returning the resulting
 // platform message id and, when a thread was provisioned, its id.
 type sendOp func(context.Context) (messageID string, threadID string, err error)
@@ -330,7 +341,14 @@ func (c Client) runSession(
 				}
 			case *wuphfpb.ServerFrame_ChatState:
 				dispatch := body.ChatState
-				if err := c.deliver(ctx, stream, dispatch.DispatchId, ackOnly(dispatch.TargetChatId)); err != nil {
+				op := ackOnly(dispatch.TargetChatId)
+				if applier, ok := sender.(ChatStateApplier); ok {
+					op = func(ctx context.Context) (string, string, error) {
+						chatID, err := applier.ApplyChatState(ctx, dispatch)
+						return chatID, "", err
+					}
+				}
+				if err := c.deliver(ctx, stream, dispatch.DispatchId, op); err != nil {
 					return err
 				}
 			case *wuphfpb.ServerFrame_Rejected:

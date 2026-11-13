@@ -924,6 +924,75 @@ mod tests {
     }
 
     #[test]
+    fn chat_state_reports_cross_the_wire() {
+        let frame = pb::client_frame::Body::ChatUpdate(pb::ChatUpdateEvent {
+            updates: vec![
+                pb::ChatUpdate {
+                    chat_id: "telegram:channel:1".into(),
+                    thread_id: Some("57".into()),
+                    pinned: Some(true),
+                    mute: Some(pb::MuteState { muted_until: -1 }),
+                    archived: Some(false),
+                    ..Default::default()
+                },
+                // An empty thread id is no thread.
+                pb::ChatUpdate {
+                    chat_id: "1@g.us".into(),
+                    thread_id: Some(String::new()),
+                    pinned: Some(false),
+                    ..Default::default()
+                },
+            ],
+            snapshot: false,
+        });
+        let InboundWork::ChatUpdate { updates, .. } = work(frame) else {
+            panic!("a chat update");
+        };
+        assert_eq!(
+            updates[0],
+            ChatUpdate {
+                thread_id: Some("57".into()),
+                pinned: Some(true),
+                mute: Some(MuteState { muted_until: -1 }),
+                archived: Some(false),
+                ..ChatUpdate::new("telegram:channel:1")
+            }
+        );
+        assert_eq!(updates[1].thread_id, None);
+    }
+
+    #[test]
+    fn a_chat_state_change_is_a_chat_state_frame() {
+        let mut topic = dispatch(
+            Action::SetChatState {
+                pinned: None,
+                mute: Some(MuteState {
+                    muted_until: 1_900_000_000,
+                }),
+                archived: Some(true),
+            },
+            None,
+        );
+        topic.to.address = ChatAddress::new("tg-chat", Some("57".into()));
+        let pb::server_frame::Body::ChatState(state) = body(topic.clone()) else {
+            panic!("a chat-state change is a ChatState frame");
+        };
+        assert_eq!(
+            state,
+            pb::ChatStateDispatch {
+                dispatch_id: topic.id.to_string(),
+                target_chat_id: "tg-chat".into(),
+                target_thread_id: Some("57".into()),
+                pinned: None,
+                mute: Some(pb::MuteState {
+                    muted_until: 1_900_000_000
+                }),
+                archived: Some(true),
+            }
+        );
+    }
+
+    #[test]
     fn chat_update_frames_become_inbound_work() {
         let frame = pb::client_frame::Body::ChatUpdate(pb::ChatUpdateEvent {
             updates: vec![

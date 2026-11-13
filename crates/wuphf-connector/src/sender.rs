@@ -107,4 +107,16 @@ pub trait Sender: Send + Sync + 'static {
     ) -> impl Future<Output = Result<String, Failure>> + Send {
         async move { Ok(dispatch.target_platform_message_id) }
     }
+
+    /// Bring a chat (or thread) to the dispatch's pin / mute / archive state,
+    /// leaving absent fields alone, and return the target chat id. A field the
+    /// platform cannot apply is acknowledged without acting, which is also
+    /// what this default does for every field. Emits nothing: the platform's
+    /// own echo comes back through the connector's event handlers.
+    fn apply_chat_state(
+        &self,
+        dispatch: pb::ChatStateDispatch,
+    ) -> impl Future<Output = Result<String, Failure>> + Send {
+        async move { Ok(dispatch.target_chat_id) }
+    }
 }

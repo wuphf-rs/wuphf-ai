@@ -264,10 +264,10 @@ impl Client {
             }
             Some(pb::server_frame::Body::ChatState(dispatch)) => {
                 let dispatch_id = dispatch.dispatch_id.clone();
-                let chat_id = dispatch.target_chat_id.clone();
                 self.deliver(outbound, &dispatch_id, move || {
-                    let chat_id = chat_id.clone();
-                    async move { Ok((chat_id, None)) }
+                    let sender = Arc::clone(sender);
+                    let dispatch = dispatch.clone();
+                    async move { Ok((sender.apply_chat_state(dispatch).await?, None)) }
                 })
                 .await
             }

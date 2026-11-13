@@ -467,3 +467,56 @@ async fn the_registration_carries_the_disappearing_capability() {
     drop(inputs_tx);
     harness.abort();
 }
+
+/// A sender that does not implement `apply_chat_state` acknowledges a
+/// chat-state dispatch unchanged, with its target chat id, so the core stops
+/// redelivering it.
+#[tokio::test]
+async fn a_chat_state_dispatch_is_acknowledged_with_the_chat_id_by_default() {
+    let harness = Harness::start().await;
+    let dispatch = wuphf_model::Dispatch::new(
+        wuphf_model::Target {
+            endpoint_id: wuphf_model::EndpointId::new(),
+            connector_id: ConnectorId(TG.into()),
+            address: ChatAddress::new("tg-chat", Some("topic".into())),
+            create_thread: None,
+        },
+        wuphf_model::ConversationId::new(),
+        wuphf_model::Action::SetChatState {
+            pinned: Some(true),
+            mute: None,
+            archived: None,
+        },
+        None,
+    );
+    // Pending before the connector connects: the core delivers it on connect.
+    harness.storage.enqueue_dispatch(&dispatch).await.unwrap();
+
+    let (inputs_tx, inputs_rx) = mpsc::channel(8);
+    let cancel = CancellationToken::new();
+    let session = tokio::spawn({
+        let cancel = cancel.clone();
+        let client = sdk_client(&harness.address);
+        let sender = HarnessSender::succeeding(Arc::new(StdMutex::new(Vec::new())));
+        async move { client.run(sender, inputs_rx, cancel).await }
+    });
+
+    let settled = wait_for_dispatch_state(&harness.storage, &dispatch.id, |dispatch| {
+        matches!(
+            dispatch.state,
+            wuphf_model::DispatchState::Acknowledged { .. }
+        )
+    })
+    .await;
+    assert_eq!(
+        settled.state,
+        wuphf_model::DispatchState::Acknowledged {
+            native_id: "tg-chat".into()
+        }
+    );
+
+    cancel.cancel();
+    session.await.unwrap().unwrap();
+    drop(inputs_tx);
+    harness.abort();
+}
