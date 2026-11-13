@@ -20,6 +20,12 @@ Implemented slice:
   a group's unknown timer is looked up, and a DM's raises one owner notice.
   Needs `supports_disappearing_timers = true` here and in the core's
   `[[connectors]]` entry
+- chat profiles: group renames, descriptions and membership changes (with
+  who made them), picture changes (the picture is uploaded to the core),
+  contact and push-name changes and history-sync titles are reported to the
+  core, which posts them as notes in the mirror topic; the first message of a
+  chat in each run reports the chat's current state first, for the topic's
+  info card. @mentions show the contact's name instead of the number
 
 Deferred connector work:
 

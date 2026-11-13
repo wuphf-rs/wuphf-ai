@@ -36,6 +36,12 @@ For a human-friendly tour, open [`docs/index.html`](docs/index.html).
   from Telegram disappears like the rest of the chat instead of showing "will
   not disappear". Enable it with `supports_disappearing_timers = true` in the
   core's `[[connectors]]` entry and in the connector's own config, together.
+- Chat profiles and notes: the core keeps each chat's title, description,
+  picture and member count. A new mirror topic starts with an info card, and
+  later changes (description, picture, disappearing timer, members joining,
+  leaving, promoted or demoted) appear as notes in the topic; a rename renames
+  the topic. Both WhatsApp connectors report them, show saved contact names
+  for senders and @mentions, and name a DM the owner starts after the contact.
 - Go connectors: Telegram (`gotd/td`, forum topics, albums), WhatsApp
   (`whatsmeow`, QR pairing), and Instagram (`mautrix-meta` instameow).
 

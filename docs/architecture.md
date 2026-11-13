@@ -211,8 +211,10 @@ dedup, reply mapping, loop prevention, or address mapping.
 The core keeps what it knows about each platform chat apart from routing in a
 chat profile (`chat_profiles` table, the `ChatProfileStore` role): a JSON
 payload keyed by the connector and the chat's native id, never by endpoint,
-so a later field needs no schema change. Today a profile holds the chat's
-disappearing-messages timer.
+so a later field needs no schema change. A profile holds the chat's display
+title, description, avatar (the platform's picture id, the uploaded media and
+the core's SHA-256 of its bytes), member count and disappearing-messages
+timer. It never holds the member list.
 
 - **Reported by connectors.** A `MessageCreateEvent` carries the timer the
   message had (only when greater than 0); a `ChatUpdateEvent` reports chats in
@@ -230,8 +232,49 @@ disappearing-messages timer.
   linked to it (newest setting timestamp first). A dispatch that waits keeps
   the value it was routed with.
 
-Profiles are the extension point for chat titles, descriptions, avatars and
-participants (plan 046) and for pin, mute and archive state (plan 047).
+### Notes and info cards
+
+The core turns what it learns about a chat into **system notes** in the
+chat's mirror threads (`Action::Note`, sent as a `MessageCreateDispatch` with
+`system_note`). The wording lives in one place, `wuphf-core/src/notes.rs`.
+
+- **Baseline, then changes.** The first time a value is seen it is stored
+  silently as the baseline. Only a later change of a known value is a change.
+  A snapshot report (`ChatUpdateEvent.snapshot`: a history sync, a first
+  sighting) is stored without notes even when it differs, so re-pairing does
+  not post a note for every chat that drifted while the bridge was down.
+- **What becomes a note.** A changed description, picture ("🖼️ Photo changed"
+  with the photo attached, or "Photo removed"), disappearing timer (also when
+  a message reveals it), and each membership event ("➕ Alice added Bob",
+  "➖ Bob left", "⭐ Bob is now an admin", …, the plain wording when no actor is
+  known or the member acted on themself). A title change is never a note: it
+  renames the mirror thread through the retitle path, snapshots included.
+  The member count only changes the stored count.
+- **Where notes go.** To every other endpoint of each conversation the chat
+  belongs to (under any of its address forms), skipping a mirror endpoint
+  whose thread does not exist yet: its info card will show the current state.
+- **Notes are not messages.** Acknowledging a note records no copy and sends
+  no delivery receipt, so a reply to a note links to nothing, and a note is
+  never bridged back. Every current connector drops its own sends before they
+  could come back as inbound messages.
+- **The info card provisions the topic.** When routing would provision a
+  mirror thread for a conversation that has never had one, the core marks the
+  conversation `introduced`, sends one info card (title, description, timer,
+  member count, with the picture attached) as the provisioning dispatch, and
+  holds the message in the durable provisioning stash. The card's
+  acknowledgement establishes the thread and the stash replays into it. A
+  card that fails is not retried: the stash replays and the message
+  provisions the thread itself. Marking the conversation before the card is
+  sent makes a second card impossible, even after a crash or a lost thread.
+  A replay lets only one held message provision; the rest wait behind it.
+- **Pictures.** The connector uploads the picture to the media store and
+  reports its id; the core hashes the bytes and stores nothing new when the
+  hash is unchanged, so the same picture is never posted twice. Repeated
+  uploads of an unchanged picture are orphans and are pruned after
+  `orphan_media_retention_seconds`; pruning keeps the media a profile still
+  names.
+
+Profiles are the extension point for pin, mute and archive state (plan 047).
 
 ## Owner Notices
 
@@ -274,8 +317,10 @@ The runtime exposes a bounded media broker. A source connector uploads bytes
 once; normalized attachments and dispatches refer only to a core-owned
 `MediaId`. The destination connector downloads by id while executing its
 dispatch, so platform-private file handles never become cross-platform message
-identity. Uploads not linked into a logical message are pruned after
-`orphan_media_retention_seconds`; linked media is retained.
+identity. Uploads not linked into a logical message or named by a chat
+profile's avatar are pruned after `orphan_media_retention_seconds`; linked
+media is retained. The Go connectors upload through
+`coreclient.MediaClient`, the Rust ones through `wuphf_connector::MediaClient`.
 
 ## Remote Functions
 

@@ -46,12 +46,30 @@ connection dies silently; the SDKs keep retrying with backoff until then.
   `supports_disappearing_timers`, the core records it as off. The core records
   the timer before routing, so chats no rule matches count too.
 - `ChatUpdateEvent` — a batch of `ChatUpdate`s, each a chat's properties as
-  the platform reported them (today its `disappearing` timer, from a timer
-  setting message, a group notification or a history sync). `chat_id`s are
+  the platform reported them (a timer setting message, a group notification, a
+  picture or contact change, a history sync, a first sighting). `chat_id`s are
   canonical, exactly as the connector reports them in `MessageCreateEvent`; an
-  absent field leaves what the core knows unchanged. With a setting timestamp
-  on both the stored and the reported timer the newer wins; otherwise the later
-  report wins.
+  absent field leaves what the core knows unchanged.
+  - `disappearing`: with a setting timestamp on both the stored and the
+    reported timer the newer wins; otherwise the later report wins.
+  - `title` is the chat's **display title**, exactly the string the connector
+    sends as `MessageCreateEvent.chat_title` (tags included, e.g. `[G] …`). A
+    change renames the mirror thread; it is never a note.
+  - `description`: an empty string means the description was cleared.
+  - `avatar { id, media_id }`: `id` is the platform's picture id, empty when the
+    picture was removed. `media_id` names the picture the connector uploaded to
+    the core's media store first; leave the whole `avatar` out when the picture
+    could not be fetched. The core compares pictures by a hash of their bytes,
+    so re-uploading the same picture changes nothing.
+  - `participant_count`: the member count, when the connector read it.
+  - `participant_changes`: membership events in order — `kind` (joined, left,
+    promoted, demoted), the member's canonical `participant` id and display
+    `name`, and, when the platform says who made the change, its `actor` (in
+    the same address form as `participant`) and `actor_name`. They are events:
+    never part of a snapshot.
+  - `snapshot` (on the event): the updates describe current state (a history
+    sync, the first time this connector process sees a chat), not live
+    changes. The core stores them without posting notes.
 - `MessageEditEvent` / `MessageDeleteEvent` — the original message's native id
   plus the change; the core resolves it to the logical message and fans it out.
 - `Acknowledgement` — echoes the `dispatch_id`, supplies the resulting native
@@ -87,6 +105,11 @@ connection dies silently; the SDKs keep retrying with backoff until then.
   never learned, `seconds` 0 when known to be off, and set only for connectors
   that declare `supports_disappearing_timers`. The connector puts it on every
   part of a content send; edits, deletes and reactions carry none.
+  `system_note` marks a note the core composed about the chat (an info card, a
+  profile change): render it as plain text with its attachments, with no sender
+  label and replying to nothing (a thread's root is fine). The core records no
+  copy for it, so nothing can reply to it or bridge it back; a connector that
+  cannot send its attachments sends the text and acknowledges.
 - `MessageEditDispatch` / `MessageDeleteDispatch` — the target copy's native id
   plus an `edit_mode` / `delete_mode` resolved server-side from the target
   connector's delivery options, so the connector renders the operation without
