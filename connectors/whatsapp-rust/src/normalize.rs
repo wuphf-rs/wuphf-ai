@@ -12,10 +12,14 @@ use whatsapp_rust::client::Client;
 use whatsapp_rust::types::message::MessageInfo;
 use whatsapp_rust::wacore::proto_helpers::MessageExt;
 use whatsapp_rust::waproto::whatsapp as wa;
+use whatsapp_rust::{Jid, Server};
 use wuphf_proto::connector as pb;
 
-use crate::chats::chat_forms;
-use crate::disappearing::{ephemeral_setting, message_timer};
+use crate::avatars::Avatars;
+use crate::chats::{Sightings, chat_forms, sighting_updates};
+use crate::disappearing::{
+    CHAT_UPDATE_BATCH, chat_update_frames, ephemeral_setting, message_timer,
+};
 use crate::names::ChatTitles;
 
 /// Maps inbound WhatsApp messages onto core event frames and queues them for
@@ -24,27 +28,165 @@ use crate::names::ChatTitles;
 pub struct Normalizer {
     inputs: mpsc::Sender<pb::ClientFrame>,
     titles: Arc<ChatTitles>,
+    avatars: Arc<Avatars>,
+    sightings: Arc<Sightings>,
+}
+
+/// The names a message needs, resolved from the contacts table before it is
+/// normalized.
+#[derive(Debug, Default)]
+struct Names {
+    /// The sender's display name (not for the owner's own messages).
+    sender: Option<String>,
+    /// `(user part, display name)` for each mentioned person with a known name.
+    mentions: Vec<(String, String)>,
 }
 
 impl Normalizer {
-    pub fn new(inputs: mpsc::Sender<pb::ClientFrame>, titles: Arc<ChatTitles>) -> Self {
-        Self { inputs, titles }
+    pub fn new(
+        inputs: mpsc::Sender<pb::ClientFrame>,
+        titles: Arc<ChatTitles>,
+        avatars: Arc<Avatars>,
+    ) -> Self {
+        Self {
+            inputs,
+            titles,
+            avatars,
+            sightings: Arc::new(Sightings::default()),
+        }
     }
 
     pub async fn handle(&self, ctx: MessageContext) {
-        let title = self.titles.title(&ctx.client, &ctx.info).await;
-        let Some(mut frame) = normalize(&ctx.info, &ctx.message, title) else {
+        let (client, info) = (&*ctx.client, &ctx.info);
+        // Before the title is resolved, so the newest push name names the chat.
+        // The owner's own messages carry the owner's push name: never stored.
+        if !info.source.is_from_me && is_person(&info.source.sender) {
+            self.titles
+                .contacts()
+                .upsert_push_name(canonical(&info.source.sender), &info.push_name)
+                .await;
+        }
+        let title = self.titles.title(client, info).await;
+        let names = Names {
+            sender: self.sender_display_name(client, info).await,
+            mentions: self.mentions(client, &ctx.message).await,
+        };
+        let Some(mut frame) = normalize(info, &ctx.message, title.clone(), &names) else {
             return;
         };
         // A DM's timer is reported under both its LID and phone forms: the core
         // has no link between them for this connector.
         if let Some(pb::client_frame::Body::ChatUpdate(event)) = &mut frame.body {
-            with_other_forms(&ctx.client, &ctx.info, event).await;
+            with_other_forms(client, info, event).await;
         }
+        self.report_first_sighting(client, info, title).await;
         if self.inputs.send(frame).await.is_err() {
             warn!("core session input closed; dropping inbound WhatsApp event");
         }
     }
+
+    /// The first time this process sees a chat, one snapshot of what is known
+    /// about it (title, a group's description and member count, the picture),
+    /// before the message: it gives a new mirror thread's info card its
+    /// content. Sent from here, an event handler, never from the sender.
+    async fn report_first_sighting(
+        &self,
+        client: &Client,
+        info: &MessageInfo,
+        title: Option<String>,
+    ) {
+        let chat = info.source.chat.to_non_ad();
+        if !matches!(chat.server, Server::Pn | Server::Lid | Server::Group)
+            || !self.sightings.first(&canonical(&chat))
+        {
+            return;
+        }
+        let (forms, facts) = if chat.server == Server::Group {
+            let facts = self.titles.groups().facts(client, &chat).await;
+            (vec![canonical(&chat)], facts)
+        } else {
+            (chat_forms(client, &chat).await, None)
+        };
+        let avatar = self.avatars.fetch(client, &chat).await;
+        let updates = sighting_updates(forms, title, facts.as_ref(), avatar);
+        for frame in chat_update_frames(updates, CHAT_UPDATE_BATCH, true) {
+            if self.inputs.send(frame).await.is_err() {
+                warn!("core session input closed; dropping a WhatsApp chat snapshot");
+                return;
+            }
+        }
+    }
+
+    /// The sender's name from the contacts table, like the Go connector's
+    /// `PersonName`. `None` for the owner's own messages ("Me").
+    async fn sender_display_name(&self, client: &Client, info: &MessageInfo) -> Option<String> {
+        if info.source.is_from_me || !is_person(&info.source.sender) {
+            return None;
+        }
+        let person = self
+            .titles
+            .person(client, &info.source.sender, info.source.sender_alt.as_ref())
+            .await;
+        Some(person.name())
+    }
+
+    /// The display names of the people a message mentions, where known.
+    async fn mentions(&self, client: &Client, message: &wa::Message) -> Vec<(String, String)> {
+        let Some(context) = context_info(message) else {
+            return Vec::new();
+        };
+        let mut mentions = Vec::new();
+        for id in &context.mentioned_jid {
+            let Ok(jid) = id.parse::<Jid>() else {
+                continue;
+            };
+            let person = self.titles.person(client, &jid, None).await;
+            if person.names.is_named() {
+                mentions.push((jid.user.to_string(), person.name()));
+            }
+        }
+        mentions
+    }
+}
+
+/// A phone or LID JID: someone a name can be stored for.
+fn is_person(jid: &Jid) -> bool {
+    matches!(jid.server, Server::Pn | Server::Lid)
+}
+
+/// Replace each `@<user>` mention in `text` with `@<name>`. A mention only
+/// matches a whole user part: `@1555` does not touch `@15550`.
+pub fn render_mentions(text: &str, mentions: &[(String, String)]) -> String {
+    if mentions.is_empty() {
+        return text.to_owned();
+    }
+    let mut rendered = String::with_capacity(text.len());
+    let mut rest = text;
+    while let Some(at) = rest.find('@') {
+        rendered.push_str(&rest[..at]);
+        let after = &rest[at + 1..];
+        let matched = mentions.iter().find(|(user, _)| {
+            !user.is_empty()
+                && after.starts_with(user.as_str())
+                && !after[user.len()..]
+                    .chars()
+                    .next()
+                    .is_some_and(char::is_alphanumeric)
+        });
+        match matched {
+            Some((user, name)) => {
+                rendered.push('@');
+                rendered.push_str(name);
+                rest = &after[user.len()..];
+            }
+            None => {
+                rendered.push('@');
+                rest = after;
+            }
+        }
+    }
+    rendered.push_str(rest);
+    rendered
 }
 
 /// Add the chat's other address forms to a chat update about it.
@@ -70,10 +212,12 @@ pub fn canonical(jid: &whatsapp_rust::Jid) -> String {
 
 /// One inbound message as a core frame, or `None` when it is not bridged.
 /// `chat_title` is the chat's title as the namer resolved it.
+/// `names` holds the sender's and the mentioned people's names.
 fn normalize(
     info: &MessageInfo,
     message: &wa::Message,
     chat_title: Option<String>,
+    names: &Names,
 ) -> Option<pb::ClientFrame> {
     let chat = canonical(&info.source.chat);
 
@@ -138,7 +282,7 @@ fn normalize(
             thread_id: None,
             platform_message_id: target,
             sender: canonical(&info.source.sender),
-            sender_name: sender_name(info),
+            sender_name: sender_name(info, names.sender.as_deref()),
             emoji: reaction.text.clone().unwrap_or_default(),
             from_me: info.source.is_from_me,
         })));
@@ -169,25 +313,30 @@ fn normalize(
             // it, a direct chat's two sides are indistinguishable on a mirror.
             participant: Some(sender.clone()),
             sender,
-            text: Some(text.to_owned()),
+            text: Some(render_mentions(text, &names.mentions)),
             attachments: vec![],
             reply_to_platform_message_id: reply_target(message),
             timestamp_ms: info.timestamp.timestamp_millis(),
-            sender_name: sender_name(info),
+            sender_name: sender_name(info, names.sender.as_deref()),
             disappearing: message_timer(info, message),
         },
     )))
 }
 
-/// The per-message sender label. The account owner's own messages are labelled
-/// "Me" so a direct chat's two sides stay distinguishable on the mirror; any
-/// sender whose device is not the primary phone is tagged as writing from a
-/// linked device.
-fn sender_name(info: &MessageInfo) -> Option<String> {
+/// The per-message sender label: the name the contacts table resolved
+/// (`resolved`), else the raw push name. The account owner's own messages are
+/// labelled "Me" so a direct chat's two sides stay distinguishable on the
+/// mirror; any sender whose device is not the primary phone is tagged as
+/// writing from a linked device.
+fn sender_name(info: &MessageInfo, resolved: Option<&str>) -> Option<String> {
     let name = if info.source.is_from_me {
         "Me".to_owned()
     } else {
-        info.push_name.trim().to_owned()
+        resolved
+            .map(str::trim)
+            .filter(|name| !name.is_empty())
+            .unwrap_or_else(|| info.push_name.trim())
+            .to_owned()
     };
     if name.is_empty() {
         return None;
@@ -299,7 +448,12 @@ mod tests {
 
     #[test]
     fn a_create_carries_the_message_timer() {
-        let event = create(normalize(&info(Some(86_400)), &timed_text(), None));
+        let event = create(normalize(
+            &info(Some(86_400)),
+            &timed_text(),
+            None,
+            &Names::default(),
+        ));
         assert_eq!(
             event.disappearing,
             Some(pb::DisappearingTimer {
@@ -308,7 +462,12 @@ mod tests {
             })
         );
         for none in [Some(0), None] {
-            let event = create(normalize(&info(none), &timed_text(), None));
+            let event = create(normalize(
+                &info(none),
+                &timed_text(),
+                None,
+                &Names::default(),
+            ));
             assert_eq!(event.disappearing, None);
         }
     }
@@ -320,9 +479,10 @@ mod tests {
             &info(None),
             &message,
             Some("[P] Alice (1555)".into()),
+            &Names::default(),
         ));
         assert_eq!(titled.chat_title.as_deref(), Some("[P] Alice (1555)"));
-        let untitled = create(normalize(&info(None), &message, None));
+        let untitled = create(normalize(&info(None), &message, None, &Names::default()));
         assert_eq!(untitled.chat_title, None);
     }
 
@@ -345,6 +505,7 @@ mod tests {
                 &info(None),
                 &ephemeral_setting_message(seconds, Some(1_700_000_000)),
                 None,
+                &Names::default(),
             ));
             assert_eq!(
                 event.updates,
@@ -363,6 +524,7 @@ mod tests {
             &info(None),
             &ephemeral_setting_message(86_400, None),
             None,
+            &Names::default(),
         ));
         assert_eq!(
             event.updates[0].disappearing,
@@ -371,5 +533,54 @@ mod tests {
                 setting_timestamp: Some(1_700_000_500),
             })
         );
+    }
+
+    #[test]
+    fn mentions_render_as_names() {
+        let mentions = vec![
+            ("1555".to_owned(), "Alice Smith".to_owned()),
+            ("8888".to_owned(), "Bob (1666)".to_owned()),
+        ];
+        assert_eq!(
+            render_mentions("hi @1555 and @8888, see @1999", &mentions),
+            "hi @Alice Smith and @Bob (1666), see @1999"
+        );
+        // Only a whole user part matches.
+        assert_eq!(
+            render_mentions("@15550 @1555", &mentions),
+            "@15550 @Alice Smith"
+        );
+        assert_eq!(render_mentions("mail me@ x @", &mentions), "mail me@ x @");
+        assert_eq!(render_mentions("@1555", &[]), "@1555");
+        assert_eq!(
+            render_mentions("ünï @1555!", &mentions),
+            "ünï @Alice Smith!"
+        );
+    }
+
+    #[test]
+    fn a_create_carries_the_resolved_names() {
+        let mut info = info(None);
+        info.source.chat = "123@g.us".parse().unwrap();
+        let message = wa::Message::text_with_context(
+            "ping @1777",
+            wa::ContextInfo {
+                mentioned_jid: vec!["1777@s.whatsapp.net".into()],
+                ..Default::default()
+            },
+        );
+        let names = Names {
+            sender: Some("Alice Smith".into()),
+            mentions: vec![("1777".into(), "Bob (1777)".into())],
+        };
+        let event = create(normalize(&info, &message, None, &names));
+        assert_eq!(event.sender_name.as_deref(), Some("Alice Smith"));
+        assert_eq!(event.text.as_deref(), Some("ping @Bob (1777)"));
+        // Without a resolved name, the push name; the owner is "Me".
+        let event = create(normalize(&info, &message, None, &Names::default()));
+        assert_eq!(event.sender_name.as_deref(), Some("Alice"));
+        info.source.is_from_me = true;
+        let event = create(normalize(&info, &message, None, &names));
+        assert_eq!(event.sender_name.as_deref(), Some("Me"));
     }
 }

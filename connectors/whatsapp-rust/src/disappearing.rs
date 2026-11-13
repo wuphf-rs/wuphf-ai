@@ -13,7 +13,6 @@ use tokio::sync::mpsc;
 use tracing::warn;
 use whatsapp_rust::chrono::{DateTime, Utc};
 use whatsapp_rust::client::Client;
-use whatsapp_rust::types::events::GroupUpdate;
 use whatsapp_rust::types::message::MessageInfo;
 use whatsapp_rust::wacore::proto_helpers::MessageExt;
 use whatsapp_rust::wacore::stanza::groups::GroupNotificationAction;
@@ -65,14 +64,9 @@ pub fn ephemeral_setting(
 }
 
 /// The update a group notification makes, when it changes the timer
-/// (`not_ephemeral` arrives as an expiration of 0).
-pub fn group_update(update: &GroupUpdate) -> Option<pb::ChatUpdate> {
-    group_action_update(&update.group_jid, update.timestamp, &update.action)
-}
-
-/// [`group_update`] over the notification's parts (`GroupUpdate` cannot be
-/// built outside its crate).
-fn group_action_update(
+/// (`not_ephemeral` arrives as an expiration of 0). Over the notification's
+/// parts, so it is tested without building a `GroupUpdate`.
+pub fn group_action_update(
     group: &Jid,
     at: DateTime<Utc>,
     action: &GroupNotificationAction,
@@ -93,9 +87,13 @@ fn group_action_update(
 /// Every conversation's timer in a history sync, under its canonical id and,
 /// for a DM, under its other (phone or LID) form when the sync names it. A
 /// sync snapshot omits the expiration when the timer is off, so an absent one
-/// reports 0. Chats other than DMs and groups (status, broadcasts,
-/// newsletters) are skipped.
-pub fn history_updates(sync: &wa::HistorySync) -> Vec<pb::ChatUpdate> {
+/// reports 0. `name_of` titles each conversation (given the conversation and its
+/// chat JID); its title goes on every form. Chats other than DMs and groups
+/// (status, broadcasts, newsletters) are skipped.
+pub fn history_updates(
+    sync: &wa::HistorySync,
+    mut name_of: impl FnMut(&wa::Conversation, &Jid) -> Option<String>,
+) -> Vec<pb::ChatUpdate> {
     let mut updates = Vec::new();
     let mut seen = HashSet::new();
     for conversation in &sync.conversations {
@@ -108,6 +106,7 @@ pub fn history_updates(sync: &wa::HistorySync) -> Vec<pb::ChatUpdate> {
                 .ephemeral_setting_timestamp
                 .filter(|timestamp| *timestamp > 0),
         };
+        let title = name_of(conversation, &chat);
         let primary = canonical(&chat);
         let alternates = [&conversation.pn_jid, &conversation.lid_jid]
             .into_iter()
@@ -123,6 +122,7 @@ pub fn history_updates(sync: &wa::HistorySync) -> Vec<pb::ChatUpdate> {
             updates.push(pb::ChatUpdate {
                 chat_id,
                 disappearing: Some(timer),
+                title: title.clone(),
                 ..Default::default()
             });
         }
@@ -136,14 +136,20 @@ fn chat_jid(id: &str) -> Option<Jid> {
     matches!(jid.server, Server::Pn | Server::Lid | Server::Group).then_some(jid)
 }
 
-/// Chat updates as frames of at most `batch` updates each.
-pub fn chat_update_frames(updates: Vec<pb::ChatUpdate>, batch: usize) -> Vec<pb::ClientFrame> {
+/// Chat updates as frames of at most `batch` updates each. `snapshot` says
+/// they describe current state (a history sync, a first sighting) rather than
+/// live changes.
+pub fn chat_update_frames(
+    updates: Vec<pb::ChatUpdate>,
+    batch: usize,
+    snapshot: bool,
+) -> Vec<pb::ClientFrame> {
     updates
         .chunks(batch)
         .map(|chunk| {
             frame(pb::client_frame::Body::ChatUpdate(pb::ChatUpdateEvent {
                 updates: chunk.to_vec(),
-                snapshot: false,
+                snapshot,
             }))
         })
         .collect()
@@ -433,7 +439,7 @@ mod tests {
             ..Default::default()
         };
         assert_eq!(
-            history_updates(&sync),
+            history_updates(&sync, |_, _| None),
             vec![
                 pb::ChatUpdate {
                     chat_id: "1@g.us".into(),
@@ -467,13 +473,14 @@ mod tests {
                 .collect(),
             ..Default::default()
         };
-        let sizes = chat_update_frames(history_updates(&sync), CHAT_UPDATE_BATCH)
-            .into_iter()
-            .map(|frame| match frame.body {
-                Some(pb::client_frame::Body::ChatUpdate(event)) => event.updates.len(),
-                other => panic!("expected a chat update frame, got {other:?}"),
-            })
-            .collect::<Vec<_>>();
+        let sizes =
+            chat_update_frames(history_updates(&sync, |_, _| None), CHAT_UPDATE_BATCH, true)
+                .into_iter()
+                .map(|frame| match frame.body {
+                    Some(pb::client_frame::Body::ChatUpdate(event)) => event.updates.len(),
+                    other => panic!("expected a chat update frame, got {other:?}"),
+                })
+                .collect::<Vec<_>>();
         assert_eq!(sizes, [500, 500, 201]);
     }
 

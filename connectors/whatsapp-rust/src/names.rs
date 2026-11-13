@@ -1,10 +1,11 @@
-//! Chat titles for mirror threads, formatted like the Go connector's
+//! Chat titles and person names, formatted like the Go connector's
 //! `ChatNamer` (`connectors/whatsapp/internal/whatsapp/names.go`): a `[G]` or
 //! `[P]` tag, then the group subject or the person's name.
 //!
-//! Saved address-book names are not available through this client, so a
-//! saved contact shows its push name and number where the Go connector shows
-//! the saved name.
+//! People are named from the connector's own contacts table (saved full
+//! names from contact syncs, push names from messages and history syncs).
+//! whatsapp-rust has no business-name source, so the order is the Go one
+//! without its business step: saved full name, then push name, then number.
 
 use std::sync::Arc;
 
@@ -12,22 +13,48 @@ use whatsapp_rust::client::Client;
 use whatsapp_rust::types::message::MessageInfo;
 use whatsapp_rust::{Jid, Server};
 
+use crate::chats::{forms_of, lid_pn};
+use crate::contacts::{ContactNames, Contacts};
 use crate::groups::GroupDirectory;
 
-/// Resolves the title the core names a chat's mirror thread with. Only group
-/// subjects are cached (in the shared [`GroupDirectory`]); a person's push
-/// name rides on every message they send.
+/// A person as the connector can name them: the phone number (or the id when
+/// no number is known) and the names on record.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Person {
+    pub number: String,
+    pub names: ContactNames,
+}
+
+impl Person {
+    /// The person's display name ("Alice Smith", "Ali (1555)", "1555").
+    pub fn name(&self) -> String {
+        format_person_name(&self.number, &self.names)
+    }
+}
+
+/// Resolves the titles the core names mirror threads with, and the names of
+/// people. Group subjects are cached in the shared [`GroupDirectory`]; names
+/// come from the [`Contacts`] table.
 pub struct ChatTitles {
     groups: Arc<GroupDirectory>,
+    contacts: Arc<Contacts>,
 }
 
 impl ChatTitles {
-    pub fn new(groups: Arc<GroupDirectory>) -> Self {
-        Self { groups }
+    pub fn new(groups: Arc<GroupDirectory>, contacts: Arc<Contacts>) -> Self {
+        Self { groups, contacts }
     }
 
-    /// The chat's title, or `None` when this message cannot name the chat
-    /// (the core then keeps the title it has).
+    pub fn contacts(&self) -> &Contacts {
+        &self.contacts
+    }
+
+    pub fn groups(&self) -> &GroupDirectory {
+        &self.groups
+    }
+
+    /// The chat's title, or `None` when nothing names the chat yet (the core
+    /// then keeps the title it has).
     pub async fn title(&self, client: &Client, info: &MessageInfo) -> Option<String> {
         let chat = info.source.chat.to_non_ad();
         match chat.server {
@@ -35,41 +62,67 @@ impl ChatTitles {
                 let facts = self.groups.facts(client, &chat).await?;
                 tagged("G", &facts.subject)
             }
-            Server::Pn | Server::Lid => {
-                // Only the other party's message names a DM, so the owner's
-                // own needs no number lookup.
-                let is_from_me = info.source.is_from_me;
-                let number = if is_from_me {
-                    String::new()
-                } else {
-                    phone_number(client, &chat).await
-                };
-                dm_title(is_from_me, &number, &info.push_name)
-            }
+            Server::Pn | Server::Lid => self.dm_title(client, &chat, info.source.is_from_me).await,
             _ => None,
+        }
+    }
+
+    /// A DM's title from the contacts table. `is_from_me` says the owner's
+    /// side is the one speaking, so a bare number is no title.
+    pub async fn dm_title(&self, client: &Client, chat: &Jid, is_from_me: bool) -> Option<String> {
+        let person = self.person(client, chat, None).await;
+        dm_title(is_from_me, &person.number, &person.names)
+    }
+
+    /// Look a person up under their JID, its other (phone or LID) form when
+    /// the client knows the mapping, and `phone` when the caller has the
+    /// phone form at hand (a group notification's participant).
+    pub async fn person(&self, client: &Client, jid: &Jid, phone: Option<&Jid>) -> Person {
+        let jid = jid.to_non_ad();
+        let mapping = lid_pn(client, &jid).await;
+        let mapping = mapping
+            .as_ref()
+            .map(|(lid, pn)| (lid.as_str(), pn.as_str()));
+        let mut forms = forms_of(&jid, mapping);
+        let phone = phone.map(Jid::to_non_ad);
+        if let Some(phone) = &phone {
+            let form = phone.to_string();
+            if !forms.contains(&form) {
+                forms.push(form);
+            }
+        }
+        Person {
+            number: number_of(&jid, mapping, phone.as_ref()),
+            names: self.contacts.get(forms).await,
         }
     }
 }
 
-/// The phone number of a DM's chat: a LID chat is mapped to its phone number
-/// when the mapping is known, otherwise the JID's user part is used.
-async fn phone_number(client: &Client, chat: &Jid) -> String {
-    if chat.is_lid()
-        && let Ok(Some(entry)) = client.get_lid_pn_entry(chat).await
-    {
-        return entry.phone_number.to_string();
+/// A person's phone number: a phone JID's user part, the mapped number of a
+/// LID, the phone form the caller had, or else the JID's user part.
+pub fn number_of(jid: &Jid, mapping: Option<(&str, &str)>, phone: Option<&Jid>) -> String {
+    if jid.server == Server::Pn {
+        return jid.user.to_string();
     }
-    chat.user.to_string()
+    if let Some((_, pn)) = mapping {
+        return pn.to_owned();
+    }
+    if let Some(phone) = phone {
+        return phone.user.to_string();
+    }
+    jid.user.to_string()
 }
 
-/// A DM's title. The owner's own message names nothing: the push name on it is
-/// the owner's, not the chat's, and any fallback (a cache, the number) would
-/// rename the thread after a restart. The core keeps the title it stored.
-pub fn dm_title(is_from_me: bool, number: &str, push: &str) -> Option<String> {
-    if is_from_me {
+/// A DM's title: the contact's name for either side when a saved or push
+/// name is known (so a DM the owner starts is named too); the number when
+/// the other party wrote and nothing else is known; otherwise `None`. A
+/// title appears only from real data, so a restart never renames a thread
+/// to something worse.
+pub fn dm_title(is_from_me: bool, number: &str, names: &ContactNames) -> Option<String> {
+    if is_from_me && !names.is_named() {
         return None;
     }
-    tagged("P", &format_person_name(number, push))
+    tagged("P", &format_person_name(number, names))
 }
 
 /// Prefix a chat title with its kind (`[G]` group, `[P]` private) so a mirror
@@ -79,14 +132,22 @@ pub fn tagged(kind: &str, title: &str) -> Option<String> {
     (!title.is_empty()).then(|| format!("[{kind}] {title}"))
 }
 
-/// A person by push name with the number in brackets, or the number alone
-/// when no push name is known. No `+`, as in the Go connector.
-pub fn format_person_name(number: &str, push: &str) -> String {
-    let push = push.trim();
-    if push.is_empty() {
-        number.to_owned()
-    } else {
-        format!("{push} ({number})")
+/// A person by descending specificity, like the Go `formatPersonName`
+/// without its business step: a saved full name alone; else the push name
+/// with the number in brackets; else the number. No `+`, as in Go.
+pub fn format_person_name(number: &str, names: &ContactNames) -> String {
+    let named = |name: &Option<String>| {
+        name.as_deref()
+            .map(str::trim)
+            .filter(|name| !name.is_empty())
+            .map(str::to_owned)
+    };
+    if let Some(full) = named(&names.full_name) {
+        return full;
+    }
+    match named(&names.push_name) {
+        Some(push) => format!("{push} ({number})"),
+        None => number.to_owned(),
     }
 }
 
@@ -94,11 +155,33 @@ pub fn format_person_name(number: &str, push: &str) -> String {
 mod tests {
     use super::*;
 
+    fn names(full: Option<&str>, push: Option<&str>) -> ContactNames {
+        ContactNames {
+            full_name: full.map(str::to_owned),
+            first_name: None,
+            push_name: push.map(str::to_owned),
+        }
+    }
+
     #[test]
-    fn a_person_is_named_by_push_name_and_number() {
-        assert_eq!(format_person_name("1555", "Alice"), "Alice (1555)");
-        assert_eq!(format_person_name("1555", "  "), "1555");
-        assert_eq!(format_person_name("1555", ""), "1555");
+    fn a_person_is_named_by_full_name_then_push_name_then_number() {
+        assert_eq!(
+            format_person_name("1555", &names(Some("Alice Smith"), Some("Ali"))),
+            "Alice Smith"
+        );
+        assert_eq!(
+            format_person_name("1555", &names(None, Some("Ali"))),
+            "Ali (1555)"
+        );
+        assert_eq!(format_person_name("1555", &names(None, Some("  "))), "1555");
+        assert_eq!(format_person_name("1555", &names(Some(" "), None)), "1555");
+        assert_eq!(format_person_name("1555", &ContactNames::default()), "1555");
+        // A first name alone names nobody.
+        let first_only = ContactNames {
+            first_name: Some("Alice".into()),
+            ..Default::default()
+        };
+        assert_eq!(format_person_name("1555", &first_only), "1555");
     }
 
     #[test]
@@ -112,14 +195,39 @@ mod tests {
     }
 
     #[test]
-    fn only_the_other_party_names_a_dm() {
+    fn a_dm_is_named_from_the_contact_on_either_side() {
         assert_eq!(
-            dm_title(false, "1555", "Alice").as_deref(),
-            Some("[P] Alice (1555)")
+            dm_title(false, "1555", &names(Some("Alice Smith"), None)).as_deref(),
+            Some("[P] Alice Smith")
         );
-        assert_eq!(dm_title(false, "1555", "").as_deref(), Some("[P] 1555"));
-        // Never "Me", never the owner's push name, never the number.
-        assert_eq!(dm_title(true, "1555", "Owner"), None);
-        assert_eq!(dm_title(true, "1555", ""), None);
+        assert_eq!(
+            dm_title(false, "1555", &names(None, Some("Ali"))).as_deref(),
+            Some("[P] Ali (1555)")
+        );
+        assert_eq!(
+            dm_title(false, "1555", &ContactNames::default()).as_deref(),
+            Some("[P] 1555")
+        );
+        // A DM the owner starts is named after the known contact.
+        assert_eq!(
+            dm_title(true, "1555", &names(Some("Alice Smith"), None)).as_deref(),
+            Some("[P] Alice Smith")
+        );
+        assert_eq!(
+            dm_title(true, "1555", &names(None, Some("Ali"))).as_deref(),
+            Some("[P] Ali (1555)")
+        );
+        // Nothing known: never the bare number from the owner's side.
+        assert_eq!(dm_title(true, "1555", &ContactNames::default()), None);
+    }
+
+    #[test]
+    fn the_number_prefers_the_phone_form() {
+        let pn: Jid = "1555@s.whatsapp.net".parse().unwrap();
+        let lid: Jid = "8888@lid".parse().unwrap();
+        assert_eq!(number_of(&pn, None, None), "1555");
+        assert_eq!(number_of(&lid, Some(("8888", "1555")), None), "1555");
+        assert_eq!(number_of(&lid, None, Some(&pn)), "1555");
+        assert_eq!(number_of(&lid, None, None), "8888");
     }
 }

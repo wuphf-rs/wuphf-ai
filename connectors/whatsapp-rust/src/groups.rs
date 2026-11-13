@@ -1,7 +1,8 @@
 //! A small cache of group facts the connector needs: the subject that names a
-//! mirror thread and the group's disappearing-messages timer. Shared by the
-//! chat namer and the sender, so a group is looked up once per TTL however
-//! many messages it carries.
+//! mirror thread, the description and member count a first sighting reports,
+//! and the group's disappearing-messages timer. Shared by the chat namer, the
+//! first-sighting report and the sender, so a group is looked up once per TTL
+//! however many messages it carries.
 
 use std::collections::HashMap;
 use std::sync::Mutex;
@@ -21,6 +22,10 @@ const GROUP_TTL: Duration = Duration::from_secs(5 * 60);
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct GroupFacts {
     pub subject: String,
+    /// The group description; empty when the group has none.
+    pub description: String,
+    /// How many members the group has.
+    pub participant_count: u32,
     /// The group's disappearing-messages timer; 0 when off.
     pub disappearing_seconds: u32,
 }
@@ -52,8 +57,14 @@ impl GroupDirectory {
                 return None;
             }
         };
+        let participant_count = match metadata.participants.len() {
+            0 => metadata.size.unwrap_or(0),
+            listed => u32::try_from(listed).unwrap_or(u32::MAX),
+        };
         let facts = GroupFacts {
             subject: metadata.subject,
+            description: metadata.description.unwrap_or_default(),
+            participant_count,
             disappearing_seconds: metadata.ephemeral_expiration,
         };
         self.entries
@@ -89,6 +100,8 @@ mod tests {
         let jid: Jid = "123@g.us".parse().unwrap();
         let facts = GroupFacts {
             subject: "Family".into(),
+            description: "Our family".into(),
+            participant_count: 4,
             disappearing_seconds: 604_800,
         };
         directory

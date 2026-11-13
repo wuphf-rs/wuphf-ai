@@ -3,8 +3,10 @@
 //! core events and executes dispatch commands; all routing decisions live in
 //! the core.
 
+mod avatars;
 mod chats;
 mod config;
+mod contacts;
 mod disappearing;
 mod groups;
 mod names;
@@ -23,8 +25,10 @@ use tracing_subscriber::EnvFilter;
 use whatsapp_rust::pair_code::PairCodeOptions;
 use whatsapp_rust::prelude::*;
 
+use crate::avatars::Avatars;
 use crate::chats::ChatEvents;
 use crate::config::Config;
+use crate::contacts::Contacts;
 use crate::disappearing::TimerFallback;
 use crate::groups::GroupDirectory;
 use crate::names::ChatTitles;
@@ -49,17 +53,40 @@ async fn main() -> anyhow::Result<()> {
     let config = Config::load(&cli.config)?;
     init_logging(&config.log_level);
 
+    // The token comes from the environment only, so it stays out of the config
+    // file and the process list.
+    let core_token = std::env::var(&config.core_token_env)
+        .ok()
+        .filter(|token| !token.is_empty())
+        .with_context(|| {
+            format!(
+                "environment variable {} (core_token_env) is unset or empty",
+                config.core_token_env
+            )
+        })?;
+
     let store = SqliteStore::new(&config.session_database)
         .await
         .context("open WhatsApp session store")?;
-    let (inputs_tx, inputs_rx) = mpsc::channel(EVENT_CAPACITY);
-    // One group directory serves the namer (subjects) and the sender (timers).
-    let groups = Arc::new(GroupDirectory::new());
-    let normalizer = Normalizer::new(
-        inputs_tx.clone(),
-        Arc::new(ChatTitles::new(Arc::clone(&groups))),
+    // The connector's contact names live in the session store's file, through
+    // its shared pool.
+    let contacts = Arc::new(
+        Contacts::open(store.shared())
+            .await
+            .context("prepare the WhatsApp contacts table")?,
     );
-    let chat_events = ChatEvents::new(inputs_tx.clone(), Arc::clone(&groups));
+    // Chat pictures are uploaded to the core's media store.
+    let avatars = Arc::new(Avatars::new(
+        wuphf_connector::MediaClient::connect(&config.core_address, &core_token)
+            .context("prepare the core media client")?,
+    ));
+    let (inputs_tx, inputs_rx) = mpsc::channel(EVENT_CAPACITY);
+    // One group directory serves the namer (subjects), the first-sighting
+    // report (description, members) and the sender (timers).
+    let groups = Arc::new(GroupDirectory::new());
+    let titles = Arc::new(ChatTitles::new(Arc::clone(&groups), contacts));
+    let normalizer = Normalizer::new(inputs_tx.clone(), Arc::clone(&titles), Arc::clone(&avatars));
+    let chat_events = ChatEvents::new(inputs_tx.clone(), titles, avatars);
 
     let mut builder = Bot::builder()
         .with_backend(store)
@@ -99,14 +126,21 @@ async fn main() -> anyhow::Result<()> {
             let normalizer = normalizer.clone();
             async move { normalizer.handle(ctx).await }
         })
-        // Chat timers come from group notifications and history syncs too.
-        // DisappearingModeChanged is deliberately not handled: a contact's
-        // account-wide default applies only to chats started after it changes.
+        // Chat profiles (titles, descriptions, members, pictures, timers) come
+        // from group notifications, picture changes, contact syncs and history
+        // syncs. DisappearingModeChanged is deliberately not handled: a
+        // contact's account-wide default applies only to chats started after it
+        // changes.
         .on_event_for(
-            &[EventKind::GroupUpdate, EventKind::HistorySync],
-            move |event, _client| {
+            &[
+                EventKind::GroupUpdate,
+                EventKind::PictureUpdate,
+                EventKind::ContactUpdate,
+                EventKind::HistorySync,
+            ],
+            move |event, client| {
                 let chat_events = chat_events.clone();
-                async move { chat_events.handle(event).await }
+                async move { chat_events.handle(event, client).await }
             },
         );
     if let Some(phone_number) = config.phone_number.clone() {
@@ -115,17 +149,6 @@ async fn main() -> anyhow::Result<()> {
     let bot = builder.build().await.context("build WhatsApp bot")?;
     let mut handle = bot.spawn();
 
-    // The token comes from the environment only, so it stays out of the config
-    // file and the process list.
-    let core_token = std::env::var(&config.core_token_env)
-        .ok()
-        .filter(|token| !token.is_empty())
-        .with_context(|| {
-            format!(
-                "environment variable {} (core_token_env) is unset or empty",
-                config.core_token_env
-            )
-        })?;
     let core_client = wuphf_connector::Client::new(wuphf_connector::Options {
         core_address: config.core_address.clone(),
         connector_id: config.connector_id.clone(),

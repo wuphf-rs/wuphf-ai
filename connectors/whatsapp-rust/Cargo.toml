@@ -15,6 +15,9 @@ version = "0.1.0"
 [dependencies]
 anyhow = "1"
 clap = { version = "4", features = ["derive"] }
+# The contacts table runs on the session store's diesel pool; pinned to the
+# version that store links (see src/contacts.rs).
+diesel = { version = "=2.3.11", default-features = false, features = ["sqlite"] }
 qrcode = { version = "0.14", default-features = false }
 serde = { version = "1", features = ["derive"] }
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "signal", "sync", "time"] }
@@ -23,5 +26,6 @@ toml = "0.8"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 whatsapp-rust = { git = "https://github.com/oxidezap/whatsapp-rust", rev = "5ca80c5c" }
+whatsapp-rust-sqlite-storage = { git = "https://github.com/oxidezap/whatsapp-rust", rev = "5ca80c5c" }
 wuphf-connector = { path = "../../crates/wuphf-connector" }
 wuphf-proto = { path = "../../crates/wuphf-proto" }

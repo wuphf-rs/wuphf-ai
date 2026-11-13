@@ -3060,6 +3060,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "clap",
+ "diesel",
  "qrcode",
  "serde",
  "tokio",
@@ -3068,6 +3069,7 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "whatsapp-rust",
+ "whatsapp-rust-sqlite-storage",
  "wuphf-connector",
  "wuphf-proto",
 ]

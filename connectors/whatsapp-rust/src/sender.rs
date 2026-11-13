@@ -35,22 +35,31 @@ fn parse_chat(chat_id: &str) -> Result<Jid, Failure> {
     })
 }
 
+/// Attachments are dead-lettered rather than partially delivered: acking a
+/// text-only copy would silently lose the media. A system note is the
+/// exception: it is informational, so its text alone is sent and
+/// acknowledged (an avatar note's photo is dropped).
+fn check_attachments(dispatch: &pb::MessageCreateDispatch) -> Result<(), Failure> {
+    if dispatch.attachments.is_empty() || dispatch.system_note {
+        return Ok(());
+    }
+    Err(Failure::permanent(
+        "attachments are not yet supported by wuphf-connector-whatsapp",
+    ))
+}
+
 fn transient(error: SendError) -> Failure {
     Failure::Transient(anyhow::Error::new(error))
 }
 
 impl Sender for WhatsAppSender {
     async fn send_message(&self, dispatch: pb::MessageCreateDispatch) -> Result<Delivery, Failure> {
-        // Attachments are dead-lettered rather than partially delivered: acking
-        // a text-only copy would silently lose the media.
-        if !dispatch.attachments.is_empty() {
-            return Err(Failure::permanent(
-                "attachments are not yet supported by wuphf-connector-whatsapp",
-            ));
-        }
+        check_attachments(&dispatch)?;
         let chat = parse_chat(&dispatch.target_chat_id)?;
         let text = dispatch.text.unwrap_or_default();
         let mut message = match dispatch.reply_context {
+            // A system note is plain text: no sender label, no reply.
+            _ if dispatch.system_note => wa::Message::text(text),
             Some(reply) => wa::Message::text_with_context(text, self.quote_context(&chat, &reply)?),
             None => {
                 if dispatch.reply_to_platform_message_id.is_some() {
@@ -141,5 +150,34 @@ impl WhatsAppSender {
             chat,
             &quoted,
         ))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn dispatch(system_note: bool, attachments: usize) -> pb::MessageCreateDispatch {
+        pb::MessageCreateDispatch {
+            target_chat_id: "1555@s.whatsapp.net".into(),
+            text: Some("🖼️ Photo changed".into()),
+            attachments: (0..attachments)
+                .map(|n| pb::Attachment {
+                    media_id: format!("m{n}"),
+                    ..Default::default()
+                })
+                .collect(),
+            system_note,
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn a_note_with_a_photo_sends_its_text_and_is_not_dead_lettered() {
+        assert!(check_attachments(&dispatch(true, 1)).is_ok());
+        assert!(check_attachments(&dispatch(true, 0)).is_ok());
+        assert!(check_attachments(&dispatch(false, 0)).is_ok());
+        let error = check_attachments(&dispatch(false, 1)).unwrap_err();
+        assert!(error.is_permanent());
     }
 }
