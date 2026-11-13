@@ -4,6 +4,7 @@
 //! the core.
 
 mod avatars;
+mod chat_state;
 mod chats;
 mod config;
 mod contacts;
@@ -126,16 +127,19 @@ async fn main() -> anyhow::Result<()> {
             let normalizer = normalizer.clone();
             async move { normalizer.handle(ctx).await }
         })
-        // Chat profiles (titles, descriptions, members, pictures, timers) come
-        // from group notifications, picture changes, contact syncs and history
-        // syncs. DisappearingModeChanged is deliberately not handled: a
-        // contact's account-wide default applies only to chats started after it
-        // changes.
+        // Chat profiles (titles, descriptions, members, pictures, timers, pin /
+        // mute / archive) come from group notifications, picture changes,
+        // app-state syncs and history syncs. DisappearingModeChanged is
+        // deliberately not handled: a contact's account-wide default applies
+        // only to chats started after it changes.
         .on_event_for(
             &[
                 EventKind::GroupUpdate,
                 EventKind::PictureUpdate,
                 EventKind::ContactUpdate,
+                EventKind::PinUpdate,
+                EventKind::MuteUpdate,
+                EventKind::ArchiveUpdate,
                 EventKind::HistorySync,
             ],
             move |event, client| {

@@ -87,12 +87,13 @@ pub fn group_action_update(
 /// Every conversation's timer in a history sync, under its canonical id and,
 /// for a DM, under its other (phone or LID) form when the sync names it. A
 /// sync snapshot omits the expiration when the timer is off, so an absent one
-/// reports 0. `name_of` titles each conversation (given the conversation and its
-/// chat JID); its title goes on every form. Chats other than DMs and groups
-/// (status, broadcasts, newsletters) are skipped.
+/// reports 0. `profile_of` gives the rest of each conversation's update (its
+/// title, its pin / mute / archive state), given the conversation and its chat
+/// JID; it goes on every form. Chats other than DMs and groups (status,
+/// broadcasts, newsletters) are skipped.
 pub fn history_updates(
     sync: &wa::HistorySync,
-    mut name_of: impl FnMut(&wa::Conversation, &Jid) -> Option<String>,
+    mut profile_of: impl FnMut(&wa::Conversation, &Jid) -> pb::ChatUpdate,
 ) -> Vec<pb::ChatUpdate> {
     let mut updates = Vec::new();
     let mut seen = HashSet::new();
@@ -106,7 +107,7 @@ pub fn history_updates(
                 .ephemeral_setting_timestamp
                 .filter(|timestamp| *timestamp > 0),
         };
-        let title = name_of(conversation, &chat);
+        let profile = profile_of(conversation, &chat);
         let primary = canonical(&chat);
         let alternates = [&conversation.pn_jid, &conversation.lid_jid]
             .into_iter()
@@ -122,8 +123,7 @@ pub fn history_updates(
             updates.push(pb::ChatUpdate {
                 chat_id,
                 disappearing: Some(timer),
-                title: title.clone(),
-                ..Default::default()
+                ..profile.clone()
             });
         }
     }
@@ -439,7 +439,7 @@ mod tests {
             ..Default::default()
         };
         assert_eq!(
-            history_updates(&sync, |_, _| None),
+            history_updates(&sync, |_, _| pb::ChatUpdate::default()),
             vec![
                 pb::ChatUpdate {
                     chat_id: "1@g.us".into(),
@@ -473,14 +473,17 @@ mod tests {
                 .collect(),
             ..Default::default()
         };
-        let sizes =
-            chat_update_frames(history_updates(&sync, |_, _| None), CHAT_UPDATE_BATCH, true)
-                .into_iter()
-                .map(|frame| match frame.body {
-                    Some(pb::client_frame::Body::ChatUpdate(event)) => event.updates.len(),
-                    other => panic!("expected a chat update frame, got {other:?}"),
-                })
-                .collect::<Vec<_>>();
+        let sizes = chat_update_frames(
+            history_updates(&sync, |_, _| pb::ChatUpdate::default()),
+            CHAT_UPDATE_BATCH,
+            true,
+        )
+        .into_iter()
+        .map(|frame| match frame.body {
+            Some(pb::client_frame::Body::ChatUpdate(event)) => event.updates.len(),
+            other => panic!("expected a chat update frame, got {other:?}"),
+        })
+        .collect::<Vec<_>>();
         assert_eq!(sizes, [500, 500, 201]);
     }
 

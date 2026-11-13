@@ -25,6 +25,7 @@ use wuphf_proto::connector as pb;
 use wuphf_proto::connector::participant_change::Kind;
 
 use crate::avatars::{self, Avatars};
+use crate::chat_state::{history_state, now_ms, state_report};
 use crate::contacts;
 use crate::disappearing::{
     CHAT_UPDATE_BATCH, chat_update_frames, group_action_update, history_updates,
@@ -70,6 +71,21 @@ impl ChatEvents {
             ),
             // History sync frames describe current state: snapshots.
             Event::HistorySync(_) => (self.history_sync(Arc::clone(&event)).await, true),
+            Event::PinUpdate(_) | Event::MuteUpdate(_) | Event::ArchiveUpdate(_) => {
+                let Some(report) = state_report(&event, now_ms()) else {
+                    return;
+                };
+                // A DM goes out under both its forms, as its timer does.
+                let updates = chat_forms(&client, &report.jid)
+                    .await
+                    .into_iter()
+                    .map(|chat_id| pb::ChatUpdate {
+                        chat_id,
+                        ..report.update.clone()
+                    })
+                    .collect();
+                (updates, report.snapshot)
+            }
             _ => return,
         };
         self.send(updates, snapshot).await;
@@ -347,8 +363,10 @@ fn group_report(
 }
 
 /// A history sync, in order: store its push names, then map every
-/// conversation's timer and title (groups by their synced name, DMs from the
-/// contacts table, which now holds the sync's push names).
+/// conversation's timer, pin / mute / archive state and title (groups by
+/// their synced name, DMs from the contacts table, which now holds the sync's
+/// push names). `at` is now, in Unix seconds (a mute that ended reads as
+/// none).
 pub fn history_report(
     conn: &mut SqliteConnection,
     sync: &wa::HistorySync,
@@ -363,11 +381,16 @@ pub fn history_report(
         })
         .collect::<Vec<_>>();
     contacts::store_push_names(conn, &push_names, at)?;
+    let now_ms = at.saturating_mul(1000);
     Ok(history_updates(sync, |conversation, chat| {
-        history_title(conn, conversation, chat).unwrap_or_else(|error| {
+        let title = history_title(conn, conversation, chat).unwrap_or_else(|error| {
             warn!(%error, chat = %chat, "could not read a WhatsApp contact name");
             None
-        })
+        });
+        pb::ChatUpdate {
+            title,
+            ..history_state(conversation, now_ms)
+        }
     }))
 }
 
@@ -853,6 +876,38 @@ mod tests {
             &frame.body,
             Some(pb::client_frame::Body::ChatUpdate(event)) if event.snapshot
         )));
+    }
+
+    #[test]
+    fn a_history_sync_reports_chat_state_under_every_form() {
+        let mut conn = memory();
+        let sync = wa::HistorySync {
+            conversations: vec![wa::Conversation {
+                id: "8888@lid".into(),
+                pn_jid: Some("1666@s.whatsapp.net".into()),
+                pinned: Some(1),
+                archived: Some(true),
+                // Seconds; still in the future at `at`.
+                mute_end_time: Some(1_900_000_000),
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+        let updates = history_report(&mut conn, &sync, 1_700_000_000).unwrap();
+        assert_eq!(updates.len(), 2);
+        for update in updates {
+            assert_eq!(update.pinned, Some(true));
+            assert_eq!(update.archived, Some(true));
+            assert_eq!(
+                update.mute,
+                Some(pb::MuteState {
+                    muted_until: 1_900_000_000
+                })
+            );
+        }
+        // The same end has passed by 2031: no mute.
+        let updates = history_report(&mut conn, &sync, 1_950_000_000).unwrap();
+        assert_eq!(updates[0].mute, Some(pb::MuteState { muted_until: 0 }));
     }
 
     #[test]

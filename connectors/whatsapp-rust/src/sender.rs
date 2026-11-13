@@ -8,10 +8,11 @@ use whatsapp_rust::client::Client;
 use whatsapp_rust::send::RevokeType;
 use whatsapp_rust::wacore::proto_helpers::{MessageBuilderExt, build_quote_context_with_info};
 use whatsapp_rust::waproto::whatsapp as wa;
-use whatsapp_rust::{Jid, SendError};
+use whatsapp_rust::{AppStateError, Jid, SendError};
 use wuphf_connector::{Delivery, Failure, Sender};
 use wuphf_proto::connector as pb;
 
+use crate::chat_state::{MuteCall, mute_call, now_ms};
 use crate::disappearing::{TimerFallback, stamp};
 
 pub struct WhatsAppSender {
@@ -50,6 +51,15 @@ fn check_attachments(dispatch: &pb::MessageCreateDispatch) -> Result<(), Failure
 
 fn transient(error: SendError) -> Failure {
     Failure::Transient(anyhow::Error::new(error))
+}
+
+/// An invalid chat-action request (a malformed chat, a past mute end) can
+/// never succeed on retry; anything else (encoding, keys, the send) may.
+fn app_state_failure(error: AppStateError) -> Failure {
+    match error {
+        AppStateError::InvalidRequest(_) => Failure::permanent(error.to_string()),
+        other => Failure::Transient(anyhow::Error::new(other)),
+    }
 }
 
 impl Sender for WhatsAppSender {
@@ -110,6 +120,41 @@ impl Sender for WhatsAppSender {
             )
             .await
             .map_err(transient)
+    }
+
+    /// Bring the chat to the dispatched pin / mute / archive state, one chat
+    /// action per field present. Emits nothing: WhatsApp's own app-state echo
+    /// comes back through the event handlers, and the core finds it equal to
+    /// what it stored. WhatsApp has no threads, so `target_thread_id` is
+    /// never set here.
+    async fn apply_chat_state(&self, dispatch: pb::ChatStateDispatch) -> Result<String, Failure> {
+        let chat = parse_chat(&dispatch.target_chat_id)?;
+        let actions = self.client.chat_actions();
+        if let Some(pinned) = dispatch.pinned {
+            let result = if pinned {
+                actions.pin_chat(&chat).await
+            } else {
+                actions.unpin_chat(&chat).await
+            };
+            result.map_err(app_state_failure)?;
+        }
+        if let Some(mute) = dispatch.mute {
+            let result = match mute_call(mute.muted_until, now_ms()) {
+                MuteCall::Forever => actions.mute_chat(&chat).await,
+                MuteCall::Until(end_ms) => actions.mute_chat_until(&chat, end_ms).await,
+                MuteCall::Unmute => actions.unmute_chat(&chat).await,
+            };
+            result.map_err(app_state_failure)?;
+        }
+        if let Some(archived) = dispatch.archived {
+            let result = if archived {
+                actions.archive_chat(&chat, None).await
+            } else {
+                actions.unarchive_chat(&chat, None).await
+            };
+            result.map_err(app_state_failure)?;
+        }
+        Ok(dispatch.target_chat_id)
     }
 
     /// RevokeType::Sender revokes our own (bridge-authored) copy; the target
@@ -179,5 +224,14 @@ mod tests {
         assert!(check_attachments(&dispatch(false, 0)).is_ok());
         let error = check_attachments(&dispatch(false, 1)).unwrap_err();
         assert!(error.is_permanent());
+    }
+
+    #[test]
+    fn an_invalid_chat_action_is_permanent() {
+        assert!(app_state_failure(AppStateError::InvalidRequest("past".into())).is_permanent());
+        assert!(
+            !app_state_failure(AppStateError::Internal(anyhow::anyhow!("send failed")))
+                .is_permanent()
+        );
     }
 }
