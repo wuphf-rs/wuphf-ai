@@ -37,8 +37,8 @@ pub(crate) fn timer_text(seconds: u32) -> String {
     };
     match seconds {
         0 => "off".to_owned(),
-        _ if seconds % DAY == 0 && seconds > DAY => plural(seconds / DAY, "day"),
-        _ if seconds % HOUR == 0 => plural(seconds / HOUR, "hour"),
+        _ if seconds.is_multiple_of(DAY) && seconds > DAY => plural(seconds / DAY, "day"),
+        _ if seconds.is_multiple_of(HOUR) => plural(seconds / HOUR, "hour"),
         _ => plural(seconds, "second"),
     }
 }

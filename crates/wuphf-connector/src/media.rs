@@ -3,6 +3,7 @@
 //! bytes of an attachment (or a chat's picture) here first, then names the
 //! returned media id in the frame that carries it.
 
+use thiserror::Error;
 use tonic::metadata::{Ascii, MetadataValue};
 use tonic::transport::{Channel, Endpoint};
 use wuphf_proto::connector as pb;
@@ -12,6 +13,18 @@ use crate::client::{SessionError, core_uri};
 
 /// The largest chunk one upload frame carries, as in the Go client.
 const UPLOAD_CHUNK_BYTES: usize = 64 * 1024;
+
+/// Why a [`MediaClient`] could not be built: only its inputs can be wrong,
+/// since it connects on first use.
+#[derive(Debug, Error)]
+pub enum MediaConnectError {
+    #[error("invalid core address: {0}")]
+    Address(#[from] tonic::codegen::http::uri::InvalidUri),
+    #[error("invalid core endpoint: {0}")]
+    Endpoint(#[from] tonic::transport::Error),
+    #[error("the core token is not a valid header value")]
+    Token(#[from] tonic::metadata::errors::InvalidMetadataValue),
+}
 
 /// A client of the core's media service, authenticated with the connector's
 /// core token. Cheap to clone.
@@ -25,7 +38,7 @@ impl MediaClient {
     /// A client for the core at `core_address` (a scheme is added when
     /// missing). The connection is made on first use, as the Go client does,
     /// so a connector can build it before the core is up.
-    pub fn connect(core_address: &str, token: &str) -> Result<Self, SessionError> {
+    pub fn connect(core_address: &str, token: &str) -> Result<Self, MediaConnectError> {
         let channel = Endpoint::new(core_uri(core_address)?)?.connect_lazy();
         Ok(Self {
             client: MediaTransportClient::new(channel),

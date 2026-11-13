@@ -8,5 +8,5 @@ mod media;
 mod sender;
 
 pub use client::{Client, Options, PermanentFailureClassifier, SessionError};
-pub use media::MediaClient;
+pub use media::{MediaClient, MediaConnectError};
 pub use sender::{Delivery, Failure, Sender};
