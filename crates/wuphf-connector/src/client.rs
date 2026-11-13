@@ -353,7 +353,7 @@ impl Client {
     }
 }
 
-fn core_uri(address: &str) -> Result<Uri, tonic::codegen::http::uri::InvalidUri> {
+pub(crate) fn core_uri(address: &str) -> Result<Uri, tonic::codegen::http::uri::InvalidUri> {
     if address.contains("://") {
         address.parse()
     } else {

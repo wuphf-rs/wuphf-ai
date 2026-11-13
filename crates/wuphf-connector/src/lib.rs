@@ -4,7 +4,9 @@
 //! crate maintains the gRPC session against the core.
 
 mod client;
+mod media;
 mod sender;
 
 pub use client::{Client, Options, PermanentFailureClassifier, SessionError};
+pub use media::MediaClient;
 pub use sender::{Delivery, Failure, Sender};

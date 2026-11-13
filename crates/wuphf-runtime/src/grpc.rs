@@ -11,8 +11,8 @@ use uuid::Uuid;
 use wuphf_model::{
     Action, Attachment, AttachmentKind, ChatAddress, ChatUpdate, Connector, ConnectorCapabilities,
     ConnectorId, ConnectorInput, ConnectorOutput, DisappearingTimer, DispatchAck, DispatchFailed,
-    Event, EventKind, InboundWork, MediaId, NewMessage, NoticeKind, Platform, ReceiptKind,
-    ReplyContext, SourceAddress,
+    Event, EventKind, InboundWork, MediaId, NewMessage, NoticeKind, ParticipantChange,
+    ParticipantChangeKind, Platform, ReceiptKind, ReplyContext, ReportedAvatar, SourceAddress,
 };
 use wuphf_proto::connector as pb;
 use wuphf_proto::connector::connector_transport_server::ConnectorTransport;
@@ -304,13 +304,7 @@ fn input_from_proto(
                 updates: event
                     .updates
                     .into_iter()
-                    .map(|update| {
-                        Ok(ChatUpdate {
-                            chat_id: required_string(update.chat_id, "chat_id")?,
-                            disappearing: update.disappearing.map(timer_from_proto),
-                            ..ChatUpdate::default()
-                        })
-                    })
+                    .map(chat_update_from_proto)
                     .collect::<Result<_, WireError>>()?,
             })))
         }
@@ -514,6 +508,55 @@ fn reply_context_to_proto(context: ReplyContext) -> pb::ReplyContext {
     }
 }
 
+fn chat_update_from_proto(update: pb::ChatUpdate) -> Result<ChatUpdate, WireError> {
+    Ok(ChatUpdate {
+        chat_id: required_string(update.chat_id, "chat_id")?,
+        disappearing: update.disappearing.map(timer_from_proto),
+        title: update.title,
+        description: update.description,
+        avatar: update
+            .avatar
+            .map(|avatar| {
+                Ok::<_, WireError>(ReportedAvatar {
+                    id: avatar.id,
+                    media_id: avatar
+                        .media_id
+                        .map(|id| parse_uuid(&id, "avatar media_id").map(MediaId))
+                        .transpose()?,
+                })
+            })
+            .transpose()?,
+        participant_count: update.participant_count,
+        participant_changes: update
+            .participant_changes
+            .into_iter()
+            .map(participant_change_from_proto)
+            .collect::<Result<_, _>>()?,
+    })
+}
+
+fn participant_change_from_proto(
+    change: pb::ParticipantChange,
+) -> Result<ParticipantChange, WireError> {
+    use pb::participant_change::Kind;
+    let kind = match Kind::try_from(change.kind)
+        .map_err(|_| WireError("invalid participant change kind".into()))?
+    {
+        Kind::Joined => ParticipantChangeKind::Joined,
+        Kind::Left => ParticipantChangeKind::Left,
+        Kind::Promoted => ParticipantChangeKind::Promoted,
+        Kind::Demoted => ParticipantChangeKind::Demoted,
+        Kind::Unspecified => return Err(WireError("participant change kind required".into())),
+    };
+    Ok(ParticipantChange {
+        kind,
+        participant: required_string(change.participant, "participant")?,
+        name: change.name,
+        actor: change.actor,
+        actor_name: change.actor_name,
+    })
+}
+
 fn timer_from_proto(timer: pb::DisappearingTimer) -> DisappearingTimer {
     DisappearingTimer {
         seconds: timer.seconds,
@@ -713,6 +756,151 @@ mod tests {
             panic!("a send is a MessageCreate frame");
         };
         *create
+    }
+
+    #[test]
+    fn every_chat_update_field_crosses_the_wire() {
+        let media = MediaId::new();
+        let frame = pb::client_frame::Body::ChatUpdate(pb::ChatUpdateEvent {
+            updates: vec![pb::ChatUpdate {
+                chat_id: "1@g.us".into(),
+                title: Some("[G] Family".into()),
+                description: Some(String::new()),
+                avatar: Some(pb::ChatAvatar {
+                    id: "pic-1".into(),
+                    media_id: Some(media.to_string()),
+                }),
+                participant_count: Some(12),
+                participant_changes: vec![
+                    pb::ParticipantChange {
+                        kind: pb::participant_change::Kind::Joined as i32,
+                        participant: "2@s.whatsapp.net".into(),
+                        name: Some("Bob".into()),
+                        actor: Some("3@s.whatsapp.net".into()),
+                        actor_name: Some("Alice".into()),
+                    },
+                    pb::ParticipantChange {
+                        kind: pb::participant_change::Kind::Demoted as i32,
+                        participant: "4@s.whatsapp.net".into(),
+                        name: None,
+                        actor: None,
+                        actor_name: None,
+                    },
+                ],
+                ..Default::default()
+            }],
+            snapshot: true,
+        });
+        assert_eq!(
+            work(frame),
+            InboundWork::ChatUpdate {
+                connector_id: whatsapp(),
+                snapshot: true,
+                updates: vec![ChatUpdate {
+                    title: Some("[G] Family".into()),
+                    description: Some(String::new()),
+                    avatar: Some(ReportedAvatar {
+                        id: "pic-1".into(),
+                        media_id: Some(media),
+                    }),
+                    participant_count: Some(12),
+                    participant_changes: vec![
+                        ParticipantChange {
+                            kind: ParticipantChangeKind::Joined,
+                            participant: "2@s.whatsapp.net".into(),
+                            name: Some("Bob".into()),
+                            actor: Some("3@s.whatsapp.net".into()),
+                            actor_name: Some("Alice".into()),
+                        },
+                        ParticipantChange {
+                            kind: ParticipantChangeKind::Demoted,
+                            participant: "4@s.whatsapp.net".into(),
+                            name: None,
+                            actor: None,
+                            actor_name: None,
+                        },
+                    ],
+                    ..ChatUpdate::new("1@g.us")
+                }],
+            }
+        );
+    }
+
+    #[test]
+    fn malformed_profile_reports_are_wire_errors() {
+        let rejected = |update: pb::ChatUpdate| {
+            input_from_proto(
+                pb::ClientFrame {
+                    body: Some(pb::client_frame::Body::ChatUpdate(pb::ChatUpdateEvent {
+                        updates: vec![update],
+                        snapshot: false,
+                    })),
+                },
+                &whatsapp(),
+            )
+            .is_err()
+        };
+        let change = |kind: pb::participant_change::Kind, participant: &str| pb::ChatUpdate {
+            chat_id: "1@g.us".into(),
+            participant_changes: vec![pb::ParticipantChange {
+                kind: kind as i32,
+                participant: participant.into(),
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+        assert!(rejected(change(
+            pb::participant_change::Kind::Unspecified,
+            "2@s.whatsapp.net"
+        )));
+        assert!(rejected(change(pb::participant_change::Kind::Left, "")));
+        assert!(rejected(pb::ChatUpdate {
+            chat_id: "1@g.us".into(),
+            avatar: Some(pb::ChatAvatar {
+                id: "pic-1".into(),
+                media_id: Some("not-a-uuid".into()),
+            }),
+            ..Default::default()
+        }));
+    }
+
+    #[test]
+    fn a_note_is_a_plain_unlabelled_create() {
+        let photo = Attachment {
+            media_id: MediaId::new(),
+            kind: AttachmentKind::Image,
+            file_name: Some("avatar.jpg".into()),
+            mime_type: Some("image/jpeg".into()),
+            size_bytes: Some(3),
+            animated: false,
+        };
+        let note = Action::Note {
+            text: "🖼️ Photo changed".into(),
+            attachments: vec![photo],
+        };
+        let pb::server_frame::Body::MessageCreate(create) =
+            body(dispatch(note, Some("[G] Family".into())))
+        else {
+            panic!("a note is a MessageCreate frame");
+        };
+        assert!(create.system_note);
+        assert_eq!(create.text.as_deref(), Some("🖼️ Photo changed"));
+        assert_eq!(create.attachments.len(), 1);
+        assert_eq!(create.sender, "");
+        assert_eq!(create.participant, None);
+        assert_eq!(create.sender_name, None);
+        assert_eq!(create.reply_to_platform_message_id, None);
+        assert_eq!(create.reply_context, None);
+        assert_eq!(create.disappearing, None);
+        assert_eq!(
+            create.provision_thread,
+            Some(pb::ProvisionThread {
+                container: "tg-chat".into(),
+                title: "[G] Family".into(),
+            })
+        );
+        // An ordinary send is never a note.
+        assert!(!send_with(None).system_note);
     }
 
     #[test]
