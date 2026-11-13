@@ -99,9 +99,19 @@ func (s Sender) SendMessage(ctx context.Context, dispatch *wuphfpb.MessageCreate
 		}
 	}
 
+	// A system note (an info card, a change to the chat) is the bridge
+	// speaking: it carries no sender header and replies to nothing, so it
+	// never uses the sticker label either. Clearing these once here keeps
+	// every send path below (text, media, album, text as a file) the same.
+	senderName, participant := dispatch.GetSenderName(), dispatch.GetParticipant()
+	nativeReplyID := replyTargetMessageID(dispatch)
+	if dispatch.GetSystemNote() {
+		senderName, participant, nativeReplyID = "", "", ""
+	}
+
 	builder := s.sender.To(peer).CloneBuilder()
 	target := sendTarget{peer: peer}
-	if nativeReplyID := replyTargetMessageID(dispatch); nativeReplyID != "" {
+	if nativeReplyID != "" {
 		replyID, err := strconv.Atoi(nativeReplyID)
 		if err != nil {
 			return "", "", coreclient.Permanent(fmt.Errorf("invalid Telegram reply message ID %q: %w", nativeReplyID, err))
@@ -114,15 +124,15 @@ func (s Sender) SendMessage(ctx context.Context, dispatch *wuphfpb.MessageCreate
 	}
 
 	rendering := s.rendering()
-	body := attributedText(dispatch.GetSenderName(), dispatch.GetParticipant(), dispatch.GetText())
+	body := attributedText(senderName, participant, dispatch.GetText())
 	var updates tg.UpdatesClass
 	switch {
 	case len(dispatch.Attachments) > 1:
 		updates, err = s.sendAlbum(ctx, builder, dispatch.Attachments, body, rendering.AttachmentsAsFiles)
 	case len(dispatch.Attachments) > 0:
-		updates, err = s.sendAttachment(ctx, builder, target, dispatch.Attachments[0], body, senderLabel(dispatch.GetSenderName(), dispatch.GetParticipant()), rendering.AttachmentsAsFiles)
+		updates, err = s.sendAttachment(ctx, builder, target, dispatch.Attachments[0], body, senderLabel(senderName, participant), rendering.AttachmentsAsFiles)
 	case textExceedsLimit(dispatch.GetText(), rendering.MaxMessageLength):
-		updates, err = s.sendTextAsFile(ctx, builder, dispatch.GetSenderName(), dispatch.GetParticipant(), dispatch.GetText())
+		updates, err = s.sendTextAsFile(ctx, builder, senderName, participant, dispatch.GetText())
 	default:
 		updates, err = builder.StyledText(ctx, body...)
 	}
