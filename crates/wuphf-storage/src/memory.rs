@@ -233,6 +233,20 @@ impl TopologyStore for InMemoryStorage {
             .title = Some(title.to_owned());
         Ok(())
     }
+
+    async fn mark_conversation_introduced(
+        &self,
+        conversation_id: ConversationId,
+    ) -> StorageResult<()> {
+        self.state
+            .write()
+            .await
+            .conversations
+            .get_mut(&conversation_id)
+            .ok_or(StorageError::ConversationNotFound(conversation_id))?
+            .introduced = true;
+        Ok(())
+    }
 }
 
 #[async_trait]
@@ -349,6 +363,13 @@ impl MediaStore for InMemoryStorage {
             .values()
             .flat_map(|message| message.attachments.iter())
             .map(|attachment| attachment.media_id)
+            // A chat's stored avatar is kept for its info cards.
+            .chain(
+                state
+                    .chat_profiles
+                    .values()
+                    .filter_map(|profile| profile.avatar.as_ref()?.media_id),
+            )
             .collect::<HashSet<_>>();
         let before = state.media.len();
         state

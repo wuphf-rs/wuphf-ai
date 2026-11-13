@@ -101,6 +101,12 @@ pub trait TopologyStore: Send + Sync + 'static {
         conversation_id: ConversationId,
         title: &str,
     ) -> StorageResult<()>;
+    /// Record that the conversation's info card was created, leaving the rest
+    /// of the conversation untouched.
+    async fn mark_conversation_introduced(
+        &self,
+        conversation_id: ConversationId,
+    ) -> StorageResult<()>;
 }
 
 /// Logical messages and their per-endpoint copies, plus inbound dedup and the

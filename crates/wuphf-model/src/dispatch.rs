@@ -37,7 +37,7 @@ impl Dispatch {
     }
 
     /// The logical message the dispatch acts on, or `None` for an action on a
-    /// conversation rather than a message (a thread rename). The id keys the
+    /// conversation rather than a message (a thread rename, a note). The id keys the
     /// delivered copy a later edit/delete revises.
     pub fn message_id(&self) -> Option<MessageId> {
         match &self.action {
@@ -45,7 +45,7 @@ impl Dispatch {
             Action::Delete { message_id, .. }
             | Action::React { message_id, .. }
             | Action::Receipt { message_id, .. } => Some(*message_id),
-            Action::RenameThread { .. } => None,
+            Action::RenameThread { .. } | Action::Note { .. } => None,
         }
     }
 
@@ -132,6 +132,14 @@ pub enum Action {
     /// conversation property, not a per-message operation; the thread is
     /// addressed by the dispatch's [`Target`].
     RenameThread { title: String },
+    /// A system note the core composed about the chat: an info card, or a
+    /// change to the chat's profile. It is no logical message: acknowledging
+    /// it records no copy, so nothing can reply to it or bridge it back.
+    Note {
+        text: String,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        attachments: Vec<Attachment>,
+    },
 }
 
 /// Lifecycle of a [`Dispatch`].
@@ -311,6 +319,13 @@ mod tests {
                 },
                 false,
             ),
+            (
+                Action::Note {
+                    text: "note".into(),
+                    attachments: Vec::new(),
+                },
+                false,
+            ),
         ]
     }
 
@@ -342,9 +357,9 @@ mod tests {
     }
 
     #[test]
-    fn only_a_thread_rename_has_no_message() {
+    fn only_thread_renames_and_notes_have_no_message() {
         for (action, _) in actions() {
-            let renames = matches!(action, Action::RenameThread { .. });
+            let renames = matches!(action, Action::RenameThread { .. } | Action::Note { .. });
             let dispatch = Dispatch::new(target(), ConversationId::new(), action, None);
             assert_eq!(
                 dispatch.message_id().is_none(),

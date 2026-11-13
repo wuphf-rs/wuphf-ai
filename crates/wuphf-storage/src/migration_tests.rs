@@ -181,6 +181,7 @@ async fn migration_0014_merges_replica_sets_into_conversations() {
             source: source("wa-1"),
             endpoints: vec![wa, tg],
             title: Some("Priya".into()),
+            introduced: false,
         },
         Conversation {
             id: rule_less,
@@ -188,6 +189,7 @@ async fn migration_0014_merges_replica_sets_into_conversations() {
             source: source("wa-2"),
             endpoints: vec![standalone],
             title: None,
+            introduced: false,
         },
     ];
     for conversation in &expected {
@@ -400,6 +402,32 @@ async fn migration_0019_adds_chat_profiles() {
             ..ChatProfile::new(ConnectorId("whatsapp-main".into()), "1@s.whatsapp.net")
         }]
     );
+}
+
+/// A profile 045 stored (a timer only) decodes with 046's fields unknown, and
+/// today's model writes it back byte for byte: no new key appears while empty.
+/// The same holds for conversations without `introduced` (see the 0014 test,
+/// whose stored rows compare byte for byte with `introduced: false`).
+#[tokio::test]
+async fn chat_profiles_from_045_decode() {
+    let pool = database_before(20).await;
+    let stored =
+        r#"{"connector_id":"whatsapp-main","chat_id":"1@g.us","disappearing":{"seconds":604800}}"#;
+    sqlx::query("INSERT INTO chat_profiles (connector_id, chat_id, payload) VALUES (?, ?, ?)")
+        .bind("whatsapp-main")
+        .bind("1@g.us")
+        .bind(stored)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    let expected = ChatProfile {
+        disappearing: Some(DisappearingTimer::new(604_800)),
+        ..ChatProfile::new(ConnectorId("whatsapp-main".into()), "1@g.us")
+    };
+    assert_eq!(expected.title, None);
+    assert_eq!(expected.avatar, None);
+    assert_stored(&pool, "chat_profiles", "chat_id", "1@g.us", &expected).await;
 }
 
 /// Seed one `dispatches` row per sample, in the JSON shape given.

@@ -274,6 +274,7 @@ async fn thread_names_come_from_their_conversation() {
             },
             endpoints: vec![endpoint],
             title: Some("Family".into()),
+            introduced: false,
         })
         .await
         .unwrap();

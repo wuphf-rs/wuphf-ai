@@ -476,6 +476,9 @@ pub struct Conversation {
     /// the mirror threads. `None` until a title is first observed.
     #[serde(default)]
     pub title: Option<String>,
+    /// The info card was created for this conversation; never post another.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub introduced: bool,
 }
 
 #[cfg(test)]
@@ -532,6 +535,26 @@ mod tests {
         for platform in platforms {
             assert_eq!(platform.to_string().parse::<Platform>(), Ok(platform));
         }
+    }
+
+    #[test]
+    fn a_conversation_not_introduced_stores_no_introduced_key() {
+        let conversation = Conversation {
+            id: ConversationId::new(),
+            rule_id: None,
+            source: chat_ref("whatsapp", "1@g.us", None),
+            endpoints: Vec::new(),
+            title: None,
+            introduced: false,
+        };
+        let json = serde_json::to_value(&conversation).unwrap();
+        assert!(json.get("introduced").is_none(), "{json}");
+        let introduced = Conversation {
+            introduced: true,
+            ..conversation
+        };
+        let json = serde_json::to_value(&introduced).unwrap();
+        assert_eq!(json["introduced"], true);
     }
 
     #[test]

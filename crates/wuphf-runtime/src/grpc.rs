@@ -300,6 +300,7 @@ fn input_from_proto(
         Some(pb::client_frame::Body::ChatUpdate(event)) => {
             Ok(ConnectorInput::Work(Box::new(InboundWork::ChatUpdate {
                 connector_id: connector_id.clone(),
+                snapshot: event.snapshot,
                 updates: event
                     .updates
                     .into_iter()
@@ -307,6 +308,7 @@ fn input_from_proto(
                         Ok(ChatUpdate {
                             chat_id: required_string(update.chat_id, "chat_id")?,
                             disappearing: update.disappearing.map(timer_from_proto),
+                            ..ChatUpdate::default()
                         })
                     })
                     .collect::<Result<_, WireError>>()?,
@@ -400,6 +402,29 @@ fn output_to_proto(output: ConnectorOutput) -> pb::ServerFrame {
                         sender_name: message.author_name,
                         disappearing: disappearing.map(timer_to_proto),
                         system_note: false,
+                    }))
+                }
+                // A note is a plain create with no author, reply or timer; the
+                // connector renders it without a sender label.
+                Action::Note { text, attachments } => {
+                    let container = target.address.chat_id.clone();
+                    pb::server_frame::Body::MessageCreate(Box::new(pb::MessageCreateDispatch {
+                        dispatch_id,
+                        target_chat_id: target.address.chat_id,
+                        target_thread_id: target.address.thread_id,
+                        provision_thread: target
+                            .create_thread
+                            .map(|title| pb::ProvisionThread { container, title }),
+                        sender: String::new(),
+                        participant: None,
+                        text: Some(text),
+                        attachments: attachments.into_iter().map(attachment_to_proto).collect(),
+                        reply_to_platform_message_id: None,
+                        timestamp_ms: 0,
+                        reply_context: None,
+                        sender_name: None,
+                        disappearing: None,
+                        system_note: true,
                     }))
                 }
                 Action::Edit { message, native_id } => {
@@ -714,6 +739,7 @@ mod tests {
             work(frame),
             InboundWork::ChatUpdate {
                 connector_id: whatsapp(),
+                snapshot: false,
                 updates: vec![
                     ChatUpdate {
                         chat_id: "1@g.us".into(),
@@ -721,10 +747,12 @@ mod tests {
                             seconds: 604_800,
                             setting_timestamp: Some(1_700_000_000),
                         }),
+                        ..ChatUpdate::default()
                     },
                     ChatUpdate {
                         chat_id: "2@s.whatsapp.net".into(),
                         disappearing: None,
+                        ..ChatUpdate::default()
                     },
                 ],
             }

@@ -2006,6 +2006,7 @@ async fn report(core: &Core<InMemoryStorage>, chat_id: &str, timer: Disappearing
         vec![ChatUpdate {
             chat_id: chat_id.into(),
             disappearing: Some(timer),
+            ..ChatUpdate::default()
         }],
     )
     .await
@@ -2088,6 +2089,7 @@ async fn chat_updates_apply_in_order_and_count_changes() {
     let update = |chat_id: &str, timer| ChatUpdate {
         chat_id: chat_id.into(),
         disappearing: Some(timer),
+        ..ChatUpdate::default()
     };
     let changed = core
         .update_chats(
@@ -2099,6 +2101,7 @@ async fn chat_updates_apply_in_order_and_count_changes() {
                 ChatUpdate {
                     chat_id: "4@g.us".into(),
                     disappearing: None,
+                    ..ChatUpdate::default()
                 },
             ],
         )

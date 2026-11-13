@@ -162,6 +162,7 @@ where
                 },
                 endpoints: vec![endpoint.id],
                 title: None,
+                introduced: false,
             })
             .await?;
         Ok(endpoint.id)

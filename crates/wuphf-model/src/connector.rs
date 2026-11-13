@@ -100,10 +100,13 @@ pub enum InboundWork {
         detail: String,
     },
     /// The platform reported chat properties (a timer setting, a group
-    /// notification, a history sync); batched.
+    /// notification, a history sync); batched. `snapshot` updates describe
+    /// current state (a history sync, a first sighting), not live changes: the
+    /// core stores them without notes.
     ChatUpdate {
         connector_id: ConnectorId,
         updates: Vec<ChatUpdate>,
+        snapshot: bool,
     },
 }
 

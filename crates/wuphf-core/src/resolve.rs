@@ -184,6 +184,7 @@ where
             },
             endpoints: Vec::new(),
             title: None,
+            introduced: false,
         };
         self.storage.put_conversation(conversation.clone()).await?;
         Ok(conversation)

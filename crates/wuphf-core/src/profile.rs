@@ -112,6 +112,7 @@ where
                 &ChatUpdate {
                     chat_id: chat_id.clone(),
                     disappearing: Some(timer),
+                    ..ChatUpdate::default()
                 },
             )
             .await?;

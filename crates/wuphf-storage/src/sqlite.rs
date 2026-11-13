@@ -261,6 +261,18 @@ impl TopologyStore for SqliteStorage {
         transaction.commit().await?;
         Ok(())
     }
+
+    async fn mark_conversation_introduced(
+        &self,
+        conversation_id: ConversationId,
+    ) -> StorageResult<()> {
+        let mut transaction = self.pool.begin().await?;
+        let mut conversation = conversation_in(&mut transaction, conversation_id).await?;
+        conversation.introduced = true;
+        update_conversation_payload(&mut transaction, &conversation).await?;
+        transaction.commit().await?;
+        Ok(())
+    }
 }
 
 #[async_trait]
@@ -413,6 +425,10 @@ impl MediaStore for SqliteStorage {
                AND stored_at_ms < ?
                AND NOT EXISTS (
                  SELECT 1 FROM message_media WHERE message_media.media_id = media_blobs.id
+               )
+               AND NOT EXISTS (
+                 SELECT 1 FROM chat_profiles
+                 WHERE chat_profiles.payload ->> '$.avatar.media_id' = media_blobs.id
                )",
         )
         .bind(cutoff_ms)

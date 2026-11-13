@@ -517,6 +517,7 @@ fn conversation(endpoints: Vec<EndpointId>) -> Conversation {
         },
         endpoints,
         title: None,
+        introduced: false,
     }
 }
 
@@ -1326,4 +1327,143 @@ async fn sqlite_chat_profiles_survive_reopen() {
             .unwrap(),
         Some(stored)
     );
+}
+
+#[tokio::test]
+async fn memory_chat_profiles_round_trip_every_field() {
+    chat_profiles_round_trip_every_field(InMemoryStorage::default()).await;
+}
+
+#[tokio::test]
+async fn sqlite_chat_profiles_round_trip_every_field() {
+    chat_profiles_round_trip_every_field(temp_sqlite().await).await;
+}
+
+/// Every profile field survives a round trip, and a later put with fewer
+/// fields replaces the row rather than merging into it.
+async fn chat_profiles_round_trip_every_field<S: ChatProfileStore>(storage: S) {
+    let whatsapp = ConnectorId("whatsapp".into());
+    let full = ChatProfile {
+        title: Some("[G] Family".into()),
+        description: Some("Weekend plans".into()),
+        avatar: Some(wuphf_model::ChatAvatar {
+            id: "pic-1".into(),
+            media_id: Some(MediaId::new()),
+            hash: Some("ab".repeat(32)),
+        }),
+        participant_count: Some(12),
+        ..chat_profile("whatsapp", "1@g.us", Some(604_800))
+    };
+    storage.put_chat_profile(&full).await.unwrap();
+    assert_eq!(
+        storage.chat_profile(&whatsapp, "1@g.us").await.unwrap(),
+        Some(full)
+    );
+
+    let fewer = ChatProfile {
+        title: Some("[G] Family".into()),
+        ..ChatProfile::new(whatsapp.clone(), "1@g.us")
+    };
+    storage.put_chat_profile(&fewer).await.unwrap();
+    assert_eq!(
+        storage.chat_profile(&whatsapp, "1@g.us").await.unwrap(),
+        Some(fewer)
+    );
+}
+
+#[tokio::test]
+async fn memory_marking_a_conversation_introduced_keeps_the_rest() {
+    marking_a_conversation_introduced_keeps_the_rest(InMemoryStorage::default()).await;
+}
+
+#[tokio::test]
+async fn sqlite_marking_a_conversation_introduced_keeps_the_rest() {
+    marking_a_conversation_introduced_keeps_the_rest(temp_sqlite().await).await;
+}
+
+/// The flag is a narrow write: the title and an endpoint added since the
+/// caller read the conversation both survive it.
+async fn marking_a_conversation_introduced_keeps_the_rest<S: Storage>(storage: S) {
+    let endpoint_a = EndpointId::new();
+    let endpoint_b = EndpointId::new();
+    let conversation = conversation(vec![endpoint_a]);
+    storage
+        .put_conversation(conversation.clone())
+        .await
+        .unwrap();
+    storage
+        .set_conversation_title(conversation.id, "Priya")
+        .await
+        .unwrap();
+    storage
+        .add_conversation_endpoint(conversation.id, endpoint_b)
+        .await
+        .unwrap();
+
+    storage
+        .mark_conversation_introduced(conversation.id)
+        .await
+        .unwrap();
+
+    let stored = storage
+        .conversation(conversation.id)
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(stored.introduced);
+    assert_eq!(stored.title.as_deref(), Some("Priya"));
+    assert_eq!(stored.endpoints, vec![endpoint_a, endpoint_b]);
+
+    let missing = ConversationId::new();
+    assert!(matches!(
+        storage.mark_conversation_introduced(missing).await,
+        Err(StorageError::ConversationNotFound(id)) if id == missing
+    ));
+}
+
+#[tokio::test]
+async fn memory_pruning_spares_media_a_profile_references() {
+    pruning_spares_media_a_profile_references(InMemoryStorage::default()).await;
+}
+
+#[tokio::test]
+async fn sqlite_pruning_spares_media_a_profile_references() {
+    pruning_spares_media_a_profile_references(temp_sqlite().await).await;
+}
+
+/// A chat's stored avatar is no orphan: pruning keeps it while dropping an
+/// equally old blob nothing references.
+async fn pruning_spares_media_a_profile_references<S: Storage>(storage: S) {
+    let avatar = attachment();
+    let orphan = attachment();
+    for attachment in [&avatar, &orphan] {
+        storage
+            .put_media(
+                MediaBlob {
+                    attachment: attachment.clone(),
+                    bytes: b"old".to_vec(),
+                },
+                10,
+            )
+            .await
+            .unwrap();
+    }
+    storage
+        .put_chat_profile(&ChatProfile {
+            avatar: Some(wuphf_model::ChatAvatar {
+                id: "pic-1".into(),
+                media_id: Some(avatar.media_id),
+                hash: None,
+            }),
+            ..ChatProfile::new(ConnectorId("whatsapp".into()), "1@g.us")
+        })
+        .await
+        .unwrap();
+
+    assert_eq!(
+        storage.prune_unreferenced_media_before(20).await.unwrap(),
+        1
+    );
+    assert!(storage.media(avatar.media_id).await.unwrap().is_some());
+    assert!(storage.media(orphan.media_id).await.unwrap().is_none());
 }

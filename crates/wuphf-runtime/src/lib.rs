@@ -284,6 +284,7 @@ where
         InboundWork::ChatUpdate {
             connector_id,
             updates,
+            ..
         } => {
             let reported = updates.len();
             let changed = core.update_chats(&connector_id, updates).await?;
