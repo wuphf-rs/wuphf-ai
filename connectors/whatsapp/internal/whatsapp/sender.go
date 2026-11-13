@@ -101,9 +101,14 @@ func (s Sender) SendMessage(ctx context.Context, dispatch *wuphfpb.MessageCreate
 	if err != nil {
 		return "", "", err
 	}
-	contextInfo, err := s.quotedContext(ctx, dispatch, mode)
-	if err != nil {
-		return "", "", err
+	// A system note (an info card, a change to the chat) is the bridge
+	// speaking: it quotes nothing.
+	var contextInfo *waE2E.ContextInfo
+	if !dispatch.GetSystemNote() {
+		contextInfo, err = s.quotedContext(ctx, dispatch, mode)
+		if err != nil {
+			return "", "", err
+		}
 	}
 	// Every part of a content send carries the chat's timer, so it disappears
 	// like the rest of the chat instead of showing "will not disappear".

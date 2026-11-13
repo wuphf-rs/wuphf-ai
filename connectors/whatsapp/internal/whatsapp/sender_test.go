@@ -14,6 +14,7 @@ import (
 	"go.mau.fi/whatsmeow"
 	waE2E "go.mau.fi/whatsmeow/proto/waE2E"
 	"go.mau.fi/whatsmeow/types"
+	"google.golang.org/protobuf/proto"
 )
 
 type stubSendClient struct {
@@ -774,4 +775,27 @@ func TestEditAndDeleteCarryNoTimer(t *testing.T) {
 		t.Fatalf("an edit or delete emitted %v", frame)
 	default:
 	}
+}
+
+func TestSendRendersASystemNote(t *testing.T) {
+	t.Parallel()
+	client := &stubSendClient{}
+	sender := NewSender(client, &stubBroker{}, stubConverter{}, staticAddressing{}, liveRendering(config.RenderingOptions{}))
+	text := "📝 Description changed:\nNew plans"
+	if _, _, err := sender.SendMessage(context.Background(), &wuphfpb.MessageCreateDispatch{
+		TargetChatId:             "123@s.whatsapp.net",
+		Text:                     &text,
+		SystemNote:               true,
+		ReplyToPlatformMessageId: proto.String("quoted"),
+		Disappearing:             dayTimer(),
+	}); err != nil {
+		t.Fatalf("SendMessage() error = %v", err)
+	}
+	if client.sent.GetExtendedTextMessage().GetText() != text {
+		t.Fatalf("sent %v, want the note text", client.sent)
+	}
+	if context := contentContext(client.sent); context.GetStanzaID() != "" || context.GetQuotedMessage() != nil {
+		t.Fatalf("a note quotes nothing, got %v", context)
+	}
+	assertStamped(t, "note", client.sent)
 }

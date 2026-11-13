@@ -857,13 +857,13 @@ func TestHandleGroupInfoReportsEphemeral(t *testing.T) {
 		}
 	}
 
-	name := "Renamed"
-	if err := normalizer.HandleGroupInfo(context.Background(), &events.GroupInfo{JID: group, Timestamp: at, Name: &types.GroupName{Name: name}}); err != nil {
+	// A notification that changed nothing reported reports nothing.
+	if err := normalizer.HandleGroupInfo(context.Background(), &events.GroupInfo{JID: group, Timestamp: at}); err != nil {
 		t.Fatalf("HandleGroupInfo() error = %v", err)
 	}
 	select {
 	case frame := <-inputs:
-		t.Fatalf("a group change without a timer produced %v", frame)
+		t.Fatalf("an empty group notification produced %v", frame)
 	default:
 	}
 }
@@ -895,7 +895,11 @@ func TestHandleHistorySyncBatches(t *testing.T) {
 	var sizes []int
 	var updates []*wuphfpb.ChatUpdate
 	for len(updates) < 1201 {
-		batch := nextChatUpdate(t, inputs).GetUpdates()
+		event := nextChatUpdate(t, inputs)
+		if !event.GetSnapshot() {
+			t.Fatal("a history sync frame is not a snapshot")
+		}
+		batch := event.GetUpdates()
 		sizes = append(sizes, len(batch))
 		updates = append(updates, batch...)
 	}

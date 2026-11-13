@@ -28,10 +28,40 @@ type chatNamer struct {
 	client *whatsmeow.Client
 	mu     sync.RWMutex
 	titles map[string]cachedTitle
+	// groups keeps the metadata of the last group-info call per group, so a
+	// first-sighting report reuses the call the title just made.
+	groups map[string]*types.GroupInfo
 }
 
 func newChatNamer(client *whatsmeow.Client) *chatNamer {
-	return &chatNamer{client: client, titles: make(map[string]cachedTitle)}
+	return &chatNamer{
+		client: client,
+		titles: make(map[string]cachedTitle),
+		groups: make(map[string]*types.GroupInfo),
+	}
+}
+
+// Forget drops the cached title of a chat, so the next lookup resolves it
+// again (after a rename or a contact change).
+func (n *chatNamer) Forget(chat types.JID) {
+	n.mu.Lock()
+	delete(n.titles, chat.String())
+	n.mu.Unlock()
+}
+
+// GroupInfo is the group's metadata from the last group-info call, fetched
+// now when there was none.
+func (n *chatNamer) GroupInfo(ctx context.Context, group types.JID) *types.GroupInfo {
+	n.mu.RLock()
+	info, ok := n.groups[group.String()]
+	n.mu.RUnlock()
+	if ok {
+		return info
+	}
+	n.groupName(ctx, group)
+	n.mu.RLock()
+	defer n.mu.RUnlock()
+	return n.groups[group.String()]
 }
 
 func (n *chatNamer) ChatTitle(ctx context.Context, chat types.JID) string {
@@ -80,6 +110,9 @@ func (n *chatNamer) groupName(ctx context.Context, chat types.JID) string {
 	if err != nil || info == nil {
 		return ""
 	}
+	n.mu.Lock()
+	n.groups[chat.String()] = info
+	n.mu.Unlock()
 	return info.Name
 }
 

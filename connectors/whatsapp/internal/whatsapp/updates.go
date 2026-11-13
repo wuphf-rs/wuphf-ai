@@ -49,6 +49,38 @@ type Normalizer struct {
 	// the sender can address the chat the same way. Nil in tests that do not
 	// exercise it.
 	addresses addressRecorder
+	// profiles reports chat pictures and the first-sighting snapshot. Nil in
+	// tests that do not exercise it.
+	profiles *chatProfiler
+}
+
+// WithProfiles enables picture reports and the first-sighting snapshot.
+func (n Normalizer) WithProfiles(profiles *chatProfiler) Normalizer {
+	n.profiles = profiles
+	return n
+}
+
+// titleCache is the optional part of a ChatNamer that caches titles.
+type titleCache interface {
+	Forget(chat types.JID)
+}
+
+// forgetTitle drops a chat's cached title, so a rename is seen at once.
+func (n Normalizer) forgetTitle(chat types.JID) {
+	if cache, ok := n.namer.(titleCache); ok {
+		cache.Forget(chat)
+	}
+}
+
+// personName names a person as message headers do (contact name first),
+// falling back to the bare id without a namer.
+func (n Normalizer) personName(ctx context.Context, jid types.JID) string {
+	if n.namer != nil {
+		if name := n.namer.PersonName(ctx, jid, ""); name != "" {
+			return name
+		}
+	}
+	return jid.User
 }
 
 func NewNormalizer(
@@ -117,7 +149,7 @@ func (n Normalizer) Handle(ctx context.Context, message *events.Message) error {
 	// A timer change is a protocol message about the chat, not a message to
 	// bridge: it updates the chat's profile in the core.
 	if timer, ok := ephemeralSetting(message); ok {
-		return n.sendChatUpdates(ctx, []*wuphfpb.ChatUpdate{{ChatId: chat.String(), Disappearing: timer}})
+		return n.sendChatUpdates(ctx, []*wuphfpb.ChatUpdate{{ChatId: chat.String(), Disappearing: timer}}, false)
 	}
 	if reaction, ok := n.normalizeReaction(ctx, message, chat); ok {
 		return n.send(ctx, &wuphfpb.ClientFrame{
@@ -141,6 +173,16 @@ func (n Normalizer) Handle(ctx context.Context, message *events.Message) error {
 	event, ok, err := n.normalize(ctx, message)
 	if err != nil || !ok {
 		return err
+	}
+	// The first time this process sees the chat, its current state goes
+	// ahead of the message, so a mirror topic the message creates starts
+	// with a complete info card.
+	if n.profiles != nil {
+		if sighting := n.profiles.firstSighting(ctx, message.Info.Chat, event.GetChatId(), event.GetChatTitle()); sighting != nil {
+			if err := n.sendChatUpdates(ctx, []*wuphfpb.ChatUpdate{sighting}, true); err != nil {
+				return err
+			}
+		}
 	}
 	return n.send(ctx, &wuphfpb.ClientFrame{
 		Body: &wuphfpb.ClientFrame_MessageCreate{MessageCreate: event},
@@ -410,6 +452,7 @@ func (n Normalizer) normalize(ctx context.Context, message *events.Message) (*wu
 		return nil, false, nil
 	}
 	text := markViewOnce(message.Message, messageText(message.Message))
+	text = n.mentionNames(ctx, message.Message, text)
 	if text == "" && len(attachments) == 0 {
 		return nil, false, nil
 	}
@@ -448,6 +491,24 @@ func (n Normalizer) normalize(ctx context.Context, message *events.Message) (*wu
 		event.ReplyToPlatformMessageId = &reply
 	}
 	return event, true, nil
+}
+
+// mentionNames renders each @mention in the text as the mentioned person's
+// name, resolved like a sender (contact name first), instead of a number.
+func (n Normalizer) mentionNames(ctx context.Context, message *waE2E.Message, text string) string {
+	mentioned := messageContext(message).GetMentionedJID()
+	if len(mentioned) == 0 || text == "" {
+		return text
+	}
+	names := make(map[string]string, len(mentioned))
+	for _, raw := range mentioned {
+		jid, err := types.ParseJID(raw)
+		if err != nil {
+			continue
+		}
+		names[jid.User] = n.personName(ctx, jid)
+	}
+	return renderMentions(text, names)
 }
 
 // identityMigration derives a phone-to-LID (or reverse) chat address change for
@@ -604,13 +665,16 @@ func ephemeralSetting(message *events.Message) (*wuphfpb.DisappearingTimer, bool
 }
 
 // sendChatUpdates queues chat updates for the core in frames of at most
-// chatUpdateBatch updates.
-func (n Normalizer) sendChatUpdates(ctx context.Context, updates []*wuphfpb.ChatUpdate) error {
+// chatUpdateBatch updates. A snapshot describes current state (a history
+// sync, a first sighting, a full app-state sync), not a live change: the core
+// stores it without posting notes.
+func (n Normalizer) sendChatUpdates(ctx context.Context, updates []*wuphfpb.ChatUpdate, snapshot bool) error {
 	for start := 0; start < len(updates); start += chatUpdateBatch {
 		end := min(start+chatUpdateBatch, len(updates))
 		if err := n.send(ctx, &wuphfpb.ClientFrame{
 			Body: &wuphfpb.ClientFrame_ChatUpdate{ChatUpdate: &wuphfpb.ChatUpdateEvent{
-				Updates: updates[start:end],
+				Updates:  updates[start:end],
+				Snapshot: snapshot,
 			}},
 		}); err != nil {
 			return err
@@ -619,30 +683,121 @@ func (n Normalizer) sendChatUpdates(ctx context.Context, updates []*wuphfpb.Chat
 	return nil
 }
 
-// HandleGroupInfo reports a group's disappearing timer when a group
-// notification changes it. Other group changes report nothing.
+// HandleGroupInfo reports what a group notification changed: the name (as
+// the tagged display title), the description, the disappearing timer, and
+// each membership change with who made it. One update per notification; a
+// notification that changed none of these reports nothing.
 func (n Normalizer) HandleGroupInfo(ctx context.Context, evt *events.GroupInfo) error {
-	if evt.Ephemeral == nil {
+	update := &wuphfpb.ChatUpdate{ChatId: n.canonical(ctx, evt.JID).String()}
+	changed := false
+	if evt.Name != nil {
+		n.forgetTitle(evt.JID)
+		if title := tagged("G", evt.Name.Name); title != "" {
+			update.Title = &title
+			changed = true
+		}
+	}
+	if evt.Topic != nil {
+		description := evt.Topic.Topic
+		if evt.Topic.TopicDeleted {
+			description = ""
+		}
+		update.Description = &description
+		changed = true
+	}
+	if evt.Ephemeral != nil {
+		timer := &wuphfpb.DisappearingTimer{}
+		if evt.Ephemeral.IsEphemeral {
+			timer.Seconds = evt.Ephemeral.DisappearingTimer
+		}
+		if !evt.Timestamp.IsZero() {
+			at := evt.Timestamp.Unix()
+			timer.SettingTimestamp = &at
+		}
+		update.Disappearing = timer
+		changed = true
+	}
+	for _, group := range []struct {
+		kind    wuphfpb.ParticipantChange_Kind
+		members []types.JID
+	}{
+		{wuphfpb.ParticipantChange_KIND_JOINED, evt.Join},
+		{wuphfpb.ParticipantChange_KIND_LEFT, evt.Leave},
+		{wuphfpb.ParticipantChange_KIND_PROMOTED, evt.Promote},
+		{wuphfpb.ParticipantChange_KIND_DEMOTED, evt.Demote},
+	} {
+		for _, member := range group.members {
+			update.ParticipantChanges = append(update.ParticipantChanges, n.participantChange(ctx, group.kind, member, evt.Sender))
+			changed = true
+		}
+	}
+	if !changed {
 		return nil
 	}
-	timer := &wuphfpb.DisappearingTimer{}
-	if evt.Ephemeral.IsEphemeral {
-		timer.Seconds = evt.Ephemeral.DisappearingTimer
-	}
-	if !evt.Timestamp.IsZero() {
-		at := evt.Timestamp.Unix()
-		timer.SettingTimestamp = &at
-	}
-	return n.sendChatUpdates(ctx, []*wuphfpb.ChatUpdate{{
-		ChatId:       n.canonical(ctx, evt.JID).String(),
-		Disappearing: timer,
-	}})
+	return n.sendChatUpdates(ctx, []*wuphfpb.ChatUpdate{update}, false)
 }
 
-// HandleHistorySync reports every DM's and group's timer in a history sync. A
-// sync snapshot omits the expiration when the timer is off, so an absent one
-// reports 0. Chat ids are canonicalized exactly like a message's chat, so the
-// core keys the profile under the id it routes.
+// participantChange reports one membership event. The actor (absent for an
+// invite-link join) is canonicalized like the member, so the core's "acted
+// on themself" check compares like with like.
+func (n Normalizer) participantChange(ctx context.Context, kind wuphfpb.ParticipantChange_Kind, member types.JID, actor *types.JID) *wuphfpb.ParticipantChange {
+	name := n.personName(ctx, member)
+	change := &wuphfpb.ParticipantChange{
+		Kind:        kind,
+		Participant: n.canonical(ctx, member).String(),
+		Name:        &name,
+	}
+	if actor != nil && !actor.IsEmpty() {
+		id := n.canonical(ctx, *actor).String()
+		actorName := n.personName(ctx, *actor)
+		change.Actor = &id
+		change.ActorName = &actorName
+	}
+	return change
+}
+
+// HandlePicture reports a chat's new picture (uploaded to the core) or its
+// removal. A picture that could not be fetched reports nothing.
+func (n Normalizer) HandlePicture(ctx context.Context, evt *events.Picture) error {
+	if n.profiles == nil {
+		return nil
+	}
+	update := n.profiles.pictureUpdate(ctx, evt.JID, n.canonical(ctx, evt.JID).String(), evt.Remove)
+	if update == nil {
+		return nil
+	}
+	return n.sendChatUpdates(ctx, []*wuphfpb.ChatUpdate{update}, false)
+}
+
+// HandleNameChange reports a direct chat's title again after the person's
+// saved name, push name or business name changed, so the mirror topic is
+// renamed. A change from a full app-state sync is a snapshot.
+func (n Normalizer) HandleNameChange(ctx context.Context, person types.JID, snapshot bool) error {
+	switch person.Server {
+	case types.DefaultUserServer, types.HiddenUserServer:
+	default:
+		return nil
+	}
+	if n.namer == nil {
+		return nil
+	}
+	person = person.ToNonAD()
+	n.forgetTitle(person)
+	title := n.namer.ChatTitle(ctx, person)
+	if title == "" {
+		return nil
+	}
+	return n.sendChatUpdates(ctx, []*wuphfpb.ChatUpdate{{
+		ChatId: n.canonical(ctx, person).String(),
+		Title:  &title,
+	}}, snapshot)
+}
+
+// HandleHistorySync reports every DM's and group's timer and title in a
+// history sync, as a snapshot: current state, stored by the core without
+// notes. A sync snapshot omits the expiration when the timer is off, so an
+// absent one reports 0. Chat ids are canonicalized exactly like a message's
+// chat, so the core keys the profile under the id it routes.
 func (n Normalizer) HandleHistorySync(ctx context.Context, evt *events.HistorySync) error {
 	var updates []*wuphfpb.ChatUpdate
 	for _, conversation := range evt.Data.GetConversations() {
@@ -659,10 +814,28 @@ func (n Normalizer) HandleHistorySync(ctx context.Context, evt *events.HistorySy
 		if at := conversation.GetEphemeralSettingTimestamp(); at > 0 {
 			timer.SettingTimestamp = &at
 		}
-		updates = append(updates, &wuphfpb.ChatUpdate{
+		update := &wuphfpb.ChatUpdate{
 			ChatId:       n.canonical(ctx, jid).String(),
 			Disappearing: timer,
-		})
+		}
+		if title := n.historyTitle(ctx, jid, conversation.GetName()); title != "" {
+			update.Title = &title
+		}
+		updates = append(updates, update)
 	}
-	return n.sendChatUpdates(ctx, updates)
+	return n.sendChatUpdates(ctx, updates, true)
+}
+
+// historyTitle is a history-sync conversation's display title: a group's
+// synced name, tagged, without a group-info call per chat (a sync holds
+// hundreds); a direct chat's title from the local contact store, which
+// already holds the sync's push names.
+func (n Normalizer) historyTitle(ctx context.Context, jid types.JID, name string) string {
+	if jid.Server == types.GroupServer {
+		return tagged("G", name)
+	}
+	if n.namer == nil {
+		return ""
+	}
+	return n.namer.ChatTitle(ctx, jid)
 }

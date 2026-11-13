@@ -86,7 +86,9 @@ func (c Connector) Run(ctx context.Context) error {
 	inputs := make(chan *wuphfpb.ClientFrame, 128)
 	identity := newIdentityResolver(client)
 	addresses := newAddressBook(identity, whatsmeowAccount{client: client})
-	normalizer := NewNormalizer(inputs, NewMediaCodec(media, client), newChatNamer(client), identity, client, addresses)
+	namer := newChatNamer(client)
+	profiles := newChatProfiler(client, httpFetch, media, namer, c.logger)
+	normalizer := NewNormalizer(inputs, NewMediaCodec(media, client), namer, identity, client, addresses).WithProfiles(profiles)
 	eventErrors := make(chan error, 1)
 	client.AddEventHandler(func(raw any) {
 		var err error
@@ -99,6 +101,14 @@ func (c Connector) Run(ctx context.Context) error {
 			err = normalizer.HandleGroupInfo(ctx, evt)
 		case *events.HistorySync:
 			err = normalizer.HandleHistorySync(ctx, evt)
+		case *events.Picture:
+			err = normalizer.HandlePicture(ctx, evt)
+		case *events.Contact:
+			err = normalizer.HandleNameChange(ctx, evt.JID, evt.FromFullSync)
+		case *events.PushName:
+			err = normalizer.HandleNameChange(ctx, evt.JID, false)
+		case *events.BusinessName:
+			err = normalizer.HandleNameChange(ctx, evt.JID, false)
 		default:
 			// Session-health events do not fail the connector: whatsmeow stops
 			// delivering messages but the core session stays up, which is what
