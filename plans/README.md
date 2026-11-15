@@ -28,8 +28,8 @@ code).
 | 008 | Dispatch failure / dead-letter path tests | P1 | S | — | DONE |
 | 009 | Durable provisioning stash (crash-safe deferral) | P1 | M | 004, 008 | DONE |
 | 010 | Storage hardening trio (ORDER BY, poison locks, SQL allowlist) | P3 | S | 009 | TODO |
-| 011 | Instagram CDN download size cap | P2 | S | — | TODO |
-| 012 | Bound Instagram message→thread cache | P3 | S-M | — | TODO |
+| 011 | Instagram CDN download size cap | P2 | S | — | TODO — still applies after 048 (`MediaCodec.fetch` still uses an unbounded `io.ReadAll`, checked 2026-11-15) |
+| 012 | Bound Instagram message→thread cache | P3 | S-M | — | REJECTED — superseded by 048: instameow has no `messageThreads` map; the only per-message map (`reactionTargets`) is already capped by `reactionTargetLimit` (checked 2026-11-15) |
 | 013 | Instagram core client retry tests | P3 | S | — | DONE |
 | 014 | Shared Go connector core module (de-triplicate) | P2 | M | 013 | DONE |
 | 015 | SPIKE: reactions end-to-end design | P2 | M | — | DONE (design in `015-reactions-design.md`, written as-built) |
