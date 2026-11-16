@@ -1,0 +1,8 @@
+# All wuphf parts. Each service you enable is WantedBy this target, so
+# `systemctl start wuphf.target` / `stop wuphf.target` acts on all of them.
+[Unit]
+Description=wuphf messaging bridge
+Documentation=https://github.com/wuphf-rs/wuphf-ai/tree/v2/deploy/systemd
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,55 @@
+# The wuphf core: routing, identity, storage (SQLite) and the gRPC server the
+# connectors, providers and the TUI talk to.
+#
+# /etc/wuphf/core.toml
+#     the core config (see config/example.toml)
+# /etc/wuphf/core.env
+#     every [[connectors]].token_env and provider token_env
+#     the config names (the core refuses to start while one
+#     is unset), plus WUPHF_* overrides if you use any
+# /var/lib/wuphf/core
+#     working directory: a relative database_url such as
+#     "sqlite://wuphf.sqlite" lives here
+[Unit]
+Description=wuphf core server
+Documentation=https://github.com/wuphf-rs/wuphf-ai/tree/v2/deploy/systemd
+After=network-online.target
+Wants=network-online.target
+PartOf=wuphf.target
+
+[Service]
+Type=simple
+User=wuphf
+Group=wuphf
+EnvironmentFile=/etc/wuphf/core.env
+StateDirectory=wuphf/core
+StateDirectoryMode=0750
+WorkingDirectory=%S/wuphf/core
+ExecStart=/usr/local/bin/wuphf-server serve --config /etc/wuphf/core.toml
+Restart=on-failure
+RestartSec=5s
+# Every write is a SQLite transaction, so the default SIGTERM is safe.
+TimeoutStopSec=30s
+
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+RestrictSUIDSGID=yes
+RestrictRealtime=yes
+RestrictNamespaces=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+SystemCallArchitectures=native
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+UMask=0027
+
+[Install]
+WantedBy=wuphf.target

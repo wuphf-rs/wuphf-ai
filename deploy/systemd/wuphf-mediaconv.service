@@ -1,0 +1,57 @@
+# The mediaconv provider (media.convert@1: sticker conversion). Needs ffmpeg
+# and ImageMagick on PATH; it is a provider, not a connector, so its token
+# matches a [[functions.providers]] entry in the core config.
+#
+# /etc/wuphf/mediaconv.toml
+#     the config (see providers/mediaconv/config.example.toml)
+# /etc/wuphf/mediaconv.env
+#     this part's token (the variable its config names), with
+#     the same value as in /etc/wuphf/core.env
+# /var/lib/wuphf/mediaconv
+#     working directory
+[Unit]
+Description=wuphf mediaconv provider
+Documentation=https://github.com/wuphf-rs/wuphf-ai/tree/v2/deploy/systemd
+After=network-online.target wuphf-core.service
+Wants=network-online.target
+PartOf=wuphf.target
+
+[Service]
+Type=simple
+User=wuphf
+Group=wuphf
+EnvironmentFile=/etc/wuphf/mediaconv.env
+StateDirectory=wuphf/mediaconv
+StateDirectoryMode=0750
+WorkingDirectory=%S/wuphf/mediaconv
+ExecStart=/usr/local/bin/wuphf-mediaconv -config /etc/wuphf/mediaconv.toml
+# The provider reconnects to the core by itself; this restarts it when the
+# process exits with an error.
+Restart=on-failure
+RestartSec=5s
+# It finishes its calls and shuts down cleanly on SIGINT, not on SIGTERM.
+KillSignal=SIGINT
+TimeoutStopSec=30s
+
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+RestrictSUIDSGID=yes
+RestrictRealtime=yes
+RestrictNamespaces=yes
+LockPersonality=yes
+# No MemoryDenyWriteExecute: it runs ffmpeg and ImageMagick.
+SystemCallArchitectures=native
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+UMask=0027
+
+[Install]
+WantedBy=wuphf.target

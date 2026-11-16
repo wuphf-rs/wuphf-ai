@@ -1,0 +1,58 @@
+# The Telegram connector (gotd/td).
+#
+# /etc/wuphf/telegram.toml
+#     the config (see connectors/telegram/config.example.toml)
+# /etc/wuphf/telegram.env
+#     this part's token (the variable its config names), with
+#     the same value as in /etc/wuphf/core.env, plus
+#     WUPHF_TELEGRAM_APP_ID / _APP_HASH and either the bot token or
+#     WUPHF_TELEGRAM_PHONE (see env/telegram.env.example)
+# /var/lib/wuphf/telegram
+#     working directory: relative session paths in the
+#     config live here
+[Unit]
+Description=wuphf Telegram connector
+Documentation=https://github.com/wuphf-rs/wuphf-ai/tree/v2/deploy/systemd
+After=network-online.target wuphf-core.service
+Wants=network-online.target
+PartOf=wuphf.target
+
+[Service]
+Type=simple
+User=wuphf
+Group=wuphf
+EnvironmentFile=/etc/wuphf/telegram.env
+StateDirectory=wuphf/telegram
+StateDirectoryMode=0750
+WorkingDirectory=%S/wuphf/telegram
+ExecStart=/usr/local/bin/wuphf-telegram -config /etc/wuphf/telegram.toml
+# The connector reconnects to the core by itself; this restarts it when the
+# process exits with an error.
+Restart=on-failure
+RestartSec=5s
+# It shuts down cleanly (saving its session) on SIGINT, not on SIGTERM.
+KillSignal=SIGINT
+TimeoutStopSec=30s
+
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+RestrictSUIDSGID=yes
+RestrictRealtime=yes
+RestrictNamespaces=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+SystemCallArchitectures=native
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+UMask=0027
+
+[Install]
+WantedBy=wuphf.target

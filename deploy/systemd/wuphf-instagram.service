@@ -1,0 +1,57 @@
+# The Instagram connector (mautrix-meta instameow). Put the exported cookies
+# file (cookies_file) in /var/lib/wuphf/instagram before the first start.
+#
+# /etc/wuphf/instagram.toml
+#     the config (see connectors/instagram/config.example.toml)
+# /etc/wuphf/instagram.env
+#     this part's token (the variable its config names), with
+#     the same value as in /etc/wuphf/core.env
+# /var/lib/wuphf/instagram
+#     working directory: relative session paths in the
+#     config live here
+[Unit]
+Description=wuphf Instagram connector
+Documentation=https://github.com/wuphf-rs/wuphf-ai/tree/v2/deploy/systemd
+After=network-online.target wuphf-core.service
+Wants=network-online.target
+PartOf=wuphf.target
+
+[Service]
+Type=simple
+User=wuphf
+Group=wuphf
+EnvironmentFile=/etc/wuphf/instagram.env
+StateDirectory=wuphf/instagram
+StateDirectoryMode=0750
+WorkingDirectory=%S/wuphf/instagram
+ExecStart=/usr/local/bin/wuphf-instagram -config /etc/wuphf/instagram.toml
+# The connector reconnects to the core by itself; this restarts it when the
+# process exits with an error.
+Restart=on-failure
+RestartSec=5s
+# It shuts down cleanly (saving its session) on SIGINT, not on SIGTERM.
+KillSignal=SIGINT
+TimeoutStopSec=30s
+
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+RestrictSUIDSGID=yes
+RestrictRealtime=yes
+RestrictNamespaces=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+SystemCallArchitectures=native
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+UMask=0027
+
+[Install]
+WantedBy=wuphf.target
