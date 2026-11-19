@@ -67,6 +67,7 @@ code).
 | 047 | Two-way pin / mute / archive between WhatsApp chats and Telegram mirror topics | P3 | L | 046 | DONE (no migration; see notes) |
 | 048 | Port the Instagram connector from messagix to instameow (upstream dropped IG lightspeed) | P0 | M–L | — | DONE |
 | 049 | Move to a botconf release that lifts the gotd (v0.161.0) and tonic/prost (0.12/0.13) pins | P3 | M | a new botconf release | TODO — blocked on botconf |
+| 050 | wuphf-misc: a host for non-bridging features, first an Instagram reel/post downloader | P3 | L | 011 | TODO |
 
 Status values: TODO | IN PROGRESS | DONE | BLOCKED (with one-line reason) |
 REJECTED (with one-line rationale).
