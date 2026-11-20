@@ -18,3 +18,31 @@ log_level = "info"
 
 # Pause before resubscribing after the message stream ends, in milliseconds.
 # reconnect_delay_ms = 2000
+
+# Instagram downloader: when someone posts an Instagram post or reel link in
+# one of `chats`, reply to it with the post's video or photos (a carousel's
+# every item). Messages you send count too, from your phone or the TUI;
+# wuphf-misc's own replies never do. Edits do not. Links sent while
+# wuphf-misc is down are not answered.
+#
+# The fetch runs on the Instagram connector's logged-in account, through the
+# core's function broker: enable the Instagram connector's [functions]
+# section and the core's matching [[functions.providers]] entry. Every fetch
+# is an Instagram request on that account, so keep the limits low.
+[instagram]
+enabled = false
+# Chat references, as in the core's rules: "connector:chat", or
+# "connector:chat#thread" for one thread only.
+chats = ["whatsapp-main:120363000000000000@g.us"]
+# Add "@author: " and up to 200 characters of the post's text to the reply.
+caption = true
+# Reply "Could not download this post." when a fetch fails (else log only).
+reply_on_failure = false
+# The same post in the same chat is answered once in this many hours.
+dedup_hours = 24
+# At most this many fetches a minute, over every chat; more are skipped.
+max_per_minute = 10
+# At most this many fetches at a time.
+max_concurrent = 2
+# One fetch's time limit, in seconds.
+call_timeout_seconds = 60

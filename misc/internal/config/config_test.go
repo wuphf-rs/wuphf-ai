@@ -1,6 +1,9 @@
 package config
 
-import "testing"
+import (
+	"testing"
+	"time"
+)
 
 func TestExampleConfigLoads(t *testing.T) {
 	t.Parallel()
@@ -10,6 +13,21 @@ func TestExampleConfigLoads(t *testing.T) {
 	}
 	if cfg.ObserverTokenEnv != "WUPHF_OBSERVER_TOKEN" || cfg.ReconnectDelay() != DefaultReconnectDelay {
 		t.Fatalf("config = %+v", cfg)
+	}
+	instagram := cfg.Instagram.WithDefaults()
+	if instagram.Enabled || len(instagram.Chats) != 1 || !*instagram.Caption || instagram.MaxPerMinute != 10 || instagram.CallTimeout() != time.Minute {
+		t.Fatalf("instagram = %+v", instagram)
+	}
+}
+
+func TestInstagramDefaults(t *testing.T) {
+	t.Parallel()
+	got := Instagram{}.WithDefaults()
+	if !*got.Caption || got.Dedup() != 24*time.Hour || got.MaxPerMinute != 10 || got.MaxConcurrent != 2 || got.CallTimeout() != time.Minute {
+		t.Fatalf("defaults = %+v", got)
+	}
+	if err := (File{CoreAddress: "a", ObserverTokenEnv: "T", Instagram: Instagram{Enabled: true}}).Validate(); err == nil {
+		t.Fatal("Validate() accepted an enabled feature without chats")
 	}
 }
 
