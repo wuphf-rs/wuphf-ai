@@ -67,7 +67,7 @@ code).
 | 047 | Two-way pin / mute / archive between WhatsApp chats and Telegram mirror topics | P3 | L | 046 | DONE (no migration; see notes) |
 | 048 | Port the Instagram connector from messagix to instameow (upstream dropped IG lightspeed) | P0 | M–L | — | DONE |
 | 049 | Move to a botconf release that lifts the gotd (v0.161.0) and tonic/prost (0.12/0.13) pins | P3 | M | a new botconf release | TODO — blocked on botconf |
-| 050 | wuphf-misc: a host for non-bridging features, first an Instagram reel/post downloader | P3 | L | 011 | TODO |
+| 050 | wuphf-misc: a host for non-bridging features, first an Instagram reel/post downloader | P3 | L | 011 | DONE (see notes; not yet tried against a live Instagram session) |
 
 Status values: TODO | IN PROGRESS | DONE | BLOCKED (with one-line reason) |
 REJECTED (with one-line rationale).
@@ -1320,3 +1320,25 @@ From the 2026-10-22 remote-functions design:
   (except where architectural evidence surfaced them, e.g. the backend
   divergence in plan 019). TUI internals (`app.rs`/`ui.rs`) got a structural
   skim only.
+
+- **050 notes** (2026-11-20, commits `95a43d6`..`d165cb6`). Departures from
+  the plan:
+  - The `instagram.fetch_media@1` contract (names, args and result types) and
+    the link parser live in `connectors/shared/functions/instagram.go`, shared
+    by the connector and wuphf-misc, instead of a copied `links.go`. Only the
+    shortcode → media id decoding is in the connector (`links.go`).
+  - `proto/go` had no observer bindings (only Rust used the service);
+    `observer.pb.go` and `observer_grpc.pb.go` are new.
+  - The echo of an owner send kept the row's direction but overwrote the rest,
+    so `sent_by` was lost: both storage backends now keep it too (tested).
+  - The runner hands each message to features once (10-minute memory by
+    native id: a send's row streams again on its echo), and skips an incoming
+    message with the same text as a reply it sent in the same chat in the last
+    2 minutes (an echo the platform reports before the acknowledgement).
+  - A media-only owner send stores no text (`None`, not `""`).
+  - A provider session the core rejects is logged; the Instagram connector
+    goes on bridging.
+  - Open: `FetchMedia` with an id decoded from a shortcode is tested only
+    against fakes. Try one reel, one photo post and one carousel on the real
+    account before relying on it (plan STOP condition 2).
+
