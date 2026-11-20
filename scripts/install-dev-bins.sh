@@ -6,7 +6,7 @@
 # Remove scripts/dev-bin/.bin/ to go back to building on every start.
 #
 # Run inside the nix dev shell (cargo, go, and a C/C++ toolchain for the cgo
-# connectors and the mediaconv provider).
+# connectors and the mediaconv provider; wuphf-misc builds without one).
 set -euo pipefail
 
 readonly REPO="$(cd "$(dirname "$(readlink -f "$0")")/.." && pwd)"
@@ -27,7 +27,7 @@ step "whatsapp-rust connector (nightly features via RUSTC_BOOTSTRAP)"
 RUSTC_BOOTSTRAP=1 cargo build --release --manifest-path "$REPO/connectors/whatsapp-rust/Cargo.toml"
 install -m 0755 "$REPO/connectors/whatsapp-rust/target/release/wuphf-connector-whatsapp" "$BIN/wuphf-whatsapp-rust"
 
-for module in connectors/telegram connectors/whatsapp connectors/instagram providers/mediaconv; do
+for module in connectors/telegram connectors/whatsapp connectors/instagram providers/mediaconv misc; do
     name="wuphf-$(basename "$module")"
     step "$name"
     (cd "$REPO/$module" && go build -o "$BIN/$name" "./cmd/$name")

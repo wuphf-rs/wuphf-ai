@@ -48,6 +48,9 @@ For a human-friendly tour, open [`docs/index.html`](docs/index.html).
   `[chat_state]`, with per-conversation overrides.
 - Go connectors: Telegram (`gotd/td`, forum topics, albums), WhatsApp
   (`whatsmeow`, QR pairing), and Instagram (`mautrix-meta` instameow).
+- `wuphf-misc`: features that are not bridging, outside the core. The first
+  posts the video or photos of an Instagram post or reel linked in a chat you
+  choose (see `misc/README.md`).
 
 Reactions, delivery/read receipts, and mirror-thread retitling are executed
 end to end. Instagram sends text only; its outbound attachments are not
@@ -68,6 +71,7 @@ crates/
   wuphf-tui/       Observer TUI (read-only view of the observation log)
 connectors/        Go Telegram (gotd/td), WhatsApp (whatsmeow), Instagram connectors
 providers/mediaconv/ Sticker converter serving media.convert@1
+misc/              wuphf-misc: non-bridging features (Instagram downloader)
 proto/go/          Generated Go connector bindings
 migrations/        SQLite schema migrations
 config/            Example server topology and rules
@@ -117,8 +121,8 @@ The whole stack at once, in a zellij session with a tab per component:
 
 Tabs are shells, so a crashed connector leaves you somewhere to restart it
 from. Each starts its component by name — `wuphf-server`, `wuphf-telegram`,
-`wuphf-whatsapp`, `wuphf-instagram`, `wuphf-tui` — or by the short aliases
-`ws`, `wtg`, `wwa`, `wig`, `wtui`. Run `wuphf-help` in any tab for the list.
+`wuphf-whatsapp`, `wuphf-instagram`, `wuphf-misc`, `wuphf-tui` — or by the
+short aliases `ws`, `wtg`, `wwa`, `wig`, `wmi`, `wtui`. Run `wuphf-help` in any tab for the list.
 Re-running the script attaches to the existing session; `--kill` ends it.
 
 Or by hand:

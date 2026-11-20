@@ -184,6 +184,7 @@ dedup, reply mapping, loop prevention, or address mapping.
 | `wuphf-proto` | Canonical protobuf contract and Tonic bindings. |
 | `wuphf-cli` | Loads the configuration through `wuphf-settings`, wires storage/core/runtime, serves gRPC; `wuphf settings` views and changes the runtime settings from a terminal. |
 | `connectors/` | Go connectors: Telegram (`gotd/td`, forum topics), WhatsApp (`whatsmeow`, QR pairing), and Instagram (`mautrix/meta`, cookie auth). |
+| `misc/` | `wuphf-misc`: non-bridging features (the Instagram downloader), a client of the observer and function services. |
 
 ## Replicated Operations
 
@@ -378,6 +379,33 @@ back to a static sticker or a file.
 Only processes outside the core call functions: routing, dispatch and
 acknowledgement never wait on a provider, and the broker crate
 (`wuphf-functions`) depends on neither the core nor storage.
+
+The Instagram connector can also serve `instagram.fetch_media@1` (enable its
+`[functions]` section): it downloads a post's or reel's media by link on the
+connector's logged-in session and returns them as media ids.
+
+## Feature clients (wuphf-misc)
+
+Features that are not bridging (the first: "when someone posts an Instagram
+link in this chat, post the video there") belong neither in the core nor in a
+connector. `wuphf-misc` (`misc/`) hosts them as a separate process, built only
+on the core's client services, like the TUI: it follows `SubscribeMessages`,
+calls functions through `FunctionTransport`, and replies with `SendMessage`.
+A reply is an ordinary owner send, so it records its sent copy and fans out to
+the chat's mirrors like any message the owner types.
+
+An owner send can name the client that sent it (`SendMessageRequest.client`).
+The core keeps it on the outgoing observed row as `sent_by`, and the row keeps
+it when the platform reports the send back. The TUI sends as `wuphf-tui` and
+wuphf-misc as `wuphf-misc`. wuphf-misc reacts to incoming messages and to
+outgoing ones from other clients, but never to a row whose `sent_by` is its
+own: this is what keeps a reply whose caption holds a link from triggering
+another fetch. It also skips an incoming message in the same chat with the
+same text as a reply it sent in the last two minutes, which covers an echo the
+platform reports before the core has the acknowledgement.
+
+wuphf-misc authenticates with the observer token, which reads every captured
+chat and sends as the owner into any of them. Scoped tokens are planned.
 
 ## Key Invariants
 

@@ -47,6 +47,11 @@ layout {
         pane name="mediaconv" cwd="providers/mediaconv"
     }
 
+    // Non-bridging features (the Instagram downloader); a client of the core.
+    tab name="misc" {
+        pane name="misc" cwd="misc"
+    }
+
     tab name="tui" {
         pane name="tui"
     }

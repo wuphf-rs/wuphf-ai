@@ -13,6 +13,7 @@ alias wwa='wuphf-whatsapp'
 alias wwr='wuphf-whatsapp-rust'
 alias wig='wuphf-instagram'
 alias wmc='wuphf-mediaconv'
+alias wmi='wuphf-misc'
 alias wtui='wuphf-tui'
 
 # wuphf-help lists what this session provides. Kept as a function so it is
@@ -27,6 +28,7 @@ wuphf dev session
   wwr    wuphf-whatsapp-rust  WhatsApp connector (whatsapp-rust)
   wig    wuphf-instagram    Instagram connector
   wmc    wuphf-mediaconv    sticker converter (media.convert@1 provider)
+  wmi    wuphf-misc         non-bridging features (Instagram downloader)
   wtui   wuphf-tui          observer TUI
 
 Each command runs with no arguments for the usual dev config. Pass any
@@ -35,7 +37,7 @@ or `ws serve --config config.local.toml`.
 
 Override a config without arguments: WUPHF_SERVER_CONFIG,
 WUPHF_TELEGRAM_CONFIG, WUPHF_WHATSAPP_CONFIG, WUPHF_INSTAGRAM_CONFIG,
-WUPHF_MEDIACONV_CONFIG, WUPHF_WHATSAPP_RUST_CONFIG.
+WUPHF_MEDIACONV_CONFIG, WUPHF_WHATSAPP_RUST_CONFIG, WUPHF_MISC_CONFIG.
 
 scripts/install-dev-bins.sh builds release binaries the commands then run
 instead of building on every start; re-run it after changing code, or delete
@@ -52,6 +54,10 @@ refuses to start until all of them are set. Put them in the git-ignored
 
 wmc needs WUPHF_PROVIDER_MEDIACONV_TOKEN set, and the server config needs the
 matching [[functions.providers]] entry (see providers/mediaconv/README.md).
+
+wmi needs WUPHF_OBSERVER_TOKEN (the server's observer_token) and a config
+with a feature enabled; the Instagram downloader also needs the Instagram
+connector's [functions] section (see misc/README.md).
 
 Tabs: Alt+<number> to jump, Alt+h / Alt+l to cycle.
 Start the server before the connectors: they connect to it on startup.

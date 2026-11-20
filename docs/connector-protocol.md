@@ -234,6 +234,29 @@ The core refuses to start when a token variable is unset or empty, a value is
 zero, a default deadline exceeds its maximum, or a provider or pattern is
 malformed.
 
+## Observer service
+
+`crates/wuphf-proto/observer.proto`'s `ObserverTransport` is the client
+surface (the TUI, wuphf-misc): `ListChats`, `GetMessages` and
+`SubscribeMessages` read the observation log, and `SendMessage` sends as the
+owner. Every call needs `authorization: Bearer <observer_token>` when the core
+sets one.
+
+`SendMessage` takes the chat (`connector_id`, `chat_id`, optional
+`thread_id`), `text`, an optional `reply_to_platform_message_id`, and:
+
+- `media_ids`: attachments, as ids of media already in the core (uploaded
+  through `MediaTransport`, or returned by a function). The core sends each
+  with its stored metadata. `text` may be empty when `media_ids` is not;
+  neither, an id that is not a UUID, or an id of no stored media is
+  `INVALID_ARGUMENT`.
+- `client`: names the sender (`wuphf-tui`, `wuphf-misc`). The core stores it
+  on the outgoing `ObservedMessage` as `sent_by`, which the platform's echo of
+  the send keeps. Incoming rows and sends without a client have no `sent_by`.
+
+The reply carries the native id once the connector acknowledges the send
+within the core's wait window, else an empty id (the send still proceeds).
+
 ## Settings
 
 The core serves its runtime settings as `botconf.v1.Settings` (botconf's
@@ -306,4 +329,9 @@ configuration may not hold `[connector_settings]`.
   via a JSON session file, keyed by numeric thread ids. Declares no thread
   capabilities (never a mirror). Currently an MVP: inbound and outbound text
   only, with native reply ids carried through. Own-account messages are still
-  submitted so the core decides echo suppression.
+  submitted so the core decides echo suppression. With its `[functions]`
+  section it also serves `instagram.fetch_media@1`: args `{"url": ...}` (a
+  `/p/`, `/reel/` or `/reels/` link), result `{"items": [{"kind":
+  "video"|"image"}], "author", "caption", "skipped"}` with the media ids in
+  item order; a carousel gives one item per medium, and media over 64 MiB or
+  the core's upload limit are left out and counted in `skipped`.

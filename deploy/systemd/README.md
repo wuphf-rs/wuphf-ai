@@ -10,6 +10,7 @@ System units for every wuphf part, grouped under `wuphf.target`:
 | `wuphf-whatsapp-rust.service` | `wuphf-whatsapp-rust` | `whatsapp-rust.toml` | Opt-in second WhatsApp connector; pairs once. |
 | `wuphf-instagram.service` | `wuphf-instagram` | `instagram.toml` | Needs the exported cookies file. |
 | `wuphf-mediaconv.service` | `wuphf-mediaconv` | `mediaconv.toml` | Needs `ffmpeg` and ImageMagick on `PATH`. |
+| `wuphf-misc.service` | `wuphf-misc` | `misc.toml` | Holds the observer token (full access); see `misc/README.md`. |
 
 Enable only the parts your `core.toml` configures.
 
@@ -38,12 +39,13 @@ sudo install -m 0755 scripts/dev-bin/.bin/wuphf-* /usr/local/bin/
 sudo install -d -m 0750 -o root -g wuphf /etc/wuphf
 sudo install -m 0640 -o root -g wuphf config/example.toml /etc/wuphf/core.toml
 sudo install -m 0640 -o root -g wuphf connectors/telegram/config.example.toml /etc/wuphf/telegram.toml
-# ... the same for whatsapp, whatsapp-rust, instagram and providers/mediaconv
-for part in core telegram whatsapp instagram mediaconv; do
+# ... the same for whatsapp, whatsapp-rust, instagram, providers/mediaconv and misc
+for part in core telegram whatsapp instagram mediaconv misc; do
     sudo install -m 0600 -o root -g root deploy/systemd/env/$part.env.example /etc/wuphf/$part.env
 done
 # Fill the tokens: one random value per part, the same in core.env and in
-# that part's own file (`openssl rand -hex 32`).
+# that part's own file (`openssl rand -hex 32`). wuphf-misc's token is the
+# core's observer token (WUPHF_CORE_OBSERVER_TOKEN in core.env).
 
 # 4. Units.
 sudo install -m 0644 deploy/systemd/wuphf.target deploy/systemd/wuphf-*.service /etc/systemd/system/
@@ -100,6 +102,10 @@ not need it.
   (`ProtectSystem=strict`, `ProtectHome`, `PrivateTmp`, …).
   `wuphf-mediaconv` leaves out `MemoryDenyWriteExecute` because it runs
   ffmpeg and ImageMagick.
+- **wuphf-misc.** It needs no first run. The Instagram downloader fetches
+  through the Instagram connector: enable that connector's `[functions]`
+  section (and `WUPHF_PROVIDER_INSTAGRAM_TOKEN` in `instagram.env` and
+  `core.env`) and the core's matching `[[functions.providers]]` entry.
 - **Remote core.** When a connector runs on another host, drop
   `wuphf-core.service` from its `After=` and point its `core_address` at the
   core.

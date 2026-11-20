@@ -1,0 +1,57 @@
+# wuphf-misc (non-bridging features, e.g. the Instagram downloader). A client
+# of the core's observer and function services: it holds the observer token,
+# which reads every captured chat and sends as the owner into any of them.
+#
+# /etc/wuphf/misc.toml
+#     the config (see misc/config.example.toml)
+# /etc/wuphf/misc.env
+#     the observer token (the variable its config names), with the same value
+#     as the core's observer_token
+# /var/lib/wuphf/misc
+#     working directory
+[Unit]
+Description=wuphf-misc features
+Documentation=https://github.com/wuphf-rs/wuphf-ai/tree/v2/deploy/systemd
+After=network-online.target wuphf-core.service
+Wants=network-online.target
+PartOf=wuphf.target
+
+[Service]
+Type=simple
+User=wuphf
+Group=wuphf
+EnvironmentFile=/etc/wuphf/misc.env
+StateDirectory=wuphf/misc
+StateDirectoryMode=0750
+WorkingDirectory=%S/wuphf/misc
+ExecStart=/usr/local/bin/wuphf-misc -config /etc/wuphf/misc.toml
+# It resubscribes to the core by itself; this restarts it when the process
+# exits with an error (a rejected token, a bad config).
+Restart=on-failure
+RestartSec=5s
+# It waits for its features' work and exits cleanly on SIGINT.
+KillSignal=SIGINT
+TimeoutStopSec=90s
+
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+RestrictSUIDSGID=yes
+RestrictRealtime=yes
+RestrictNamespaces=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+SystemCallArchitectures=native
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+UMask=0027
+
+[Install]
+WantedBy=wuphf.target
