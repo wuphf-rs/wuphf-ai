@@ -1,0 +1,20 @@
+# wuphf-misc: features that are not bridging. It follows the core's live
+# messages through the observer service and replies through it. A change to
+# this file needs a restart.
+
+core_address = "127.0.0.1:50051"
+
+# Environment variable holding the core's observer token (the core's
+# `observer_token`). This token is full access: it reads every captured chat
+# and sends as you into any of them.
+observer_token_env = "WUPHF_OBSERVER_TOKEN"
+
+# Environment variable holding the core's `functions.invoke_token`, when the
+# core sets one. Leave unset otherwise.
+# invoke_token_env = "WUPHF_INVOKE_TOKEN"
+
+# Log verbosity: trace, debug, info, warn, error (WUPHF_LOG_LEVEL overrides).
+log_level = "info"
+
+# Pause before resubscribing after the message stream ends, in milliseconds.
+# reconnect_delay_ms = 2000
