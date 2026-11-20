@@ -227,13 +227,20 @@ pub enum IgnoreReason {
 /// own records and mirror renderings.
 pub const OWNER_AUTHOR: &str = "me";
 
-/// An owner-authored outbound text addressed by raw platform coordinates.
+/// An owner-authored outbound message addressed by raw platform coordinates.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct OwnerMessage {
     pub connector_id: ConnectorId,
     pub chat_id: String,
     pub thread_id: Option<String>,
+    /// May be empty when `media_ids` is not.
     pub text: String,
+    /// Attachments, as ids of media already stored in the core; the core sends
+    /// each with its stored metadata.
+    pub media_ids: Vec<MediaId>,
+    /// The client that sent it (e.g. `wuphf-tui`), kept on its outgoing
+    /// observed row as [`crate::ObservedMessage::sent_by`].
+    pub client: Option<String>,
     /// Native id of the message this send replies to, when known. Resolved
     /// best-effort: a reply to a message the bridge never stored sends as a
     /// plain message rather than failing.

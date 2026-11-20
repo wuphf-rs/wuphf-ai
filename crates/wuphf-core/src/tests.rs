@@ -1127,6 +1127,8 @@ fn owner_message(chat_id: &str, text: &str, reply_to: Option<&str>) -> OwnerMess
         chat_id: chat_id.into(),
         thread_id: None,
         text: text.into(),
+        media_ids: Vec::new(),
+        client: None,
         reply_to_native_id: reply_to.map(str::to_owned),
         timestamp_ms: 5,
     }
@@ -1198,6 +1200,64 @@ async fn owner_message_to_a_routed_chat_fans_out_to_the_other_side() {
             .unwrap(),
         IngestOutcome::Ignored(IgnoreReason::SentMessageEcho)
     );
+}
+
+#[tokio::test]
+async fn owner_message_media_ids_carry_the_stored_attachments_to_every_copy() {
+    let core = core(vec![direct_rule()]);
+    let mut stored = Vec::new();
+    for (kind, name) in [
+        (AttachmentKind::Video, "reel.mp4"),
+        (AttachmentKind::Image, "2.jpg"),
+    ] {
+        let attachment = Attachment {
+            media_id: MediaId::new(),
+            kind,
+            file_name: Some(name.into()),
+            mime_type: None,
+            size_bytes: Some(3),
+            animated: false,
+        };
+        core.storage
+            .put_media(
+                MediaBlob {
+                    attachment: attachment.clone(),
+                    bytes: b"abc".to_vec(),
+                },
+                1,
+            )
+            .await
+            .unwrap();
+        stored.push(attachment);
+    }
+    let mut outbound = owner_message("12345@s.whatsapp.net", "", None);
+    outbound.media_ids = stored
+        .iter()
+        .map(|attachment| attachment.media_id)
+        .collect();
+    outbound.client = Some("wuphf-misc".into());
+    let outcome = core.send_owner_message(outbound).await.unwrap();
+
+    let sent = |dispatch: &Dispatch| match &dispatch.action {
+        Action::Send { message, .. } => (message.text.clone(), message.attachments.clone()),
+        other => panic!("owner message dispatches a send, got {other:?}"),
+    };
+    // Media only: no empty text for a connector to render as a caption.
+    assert_eq!(sent(&outcome.direct), (None, stored.clone()));
+    assert_eq!(outcome.mirrored.len(), 1);
+    assert_eq!(sent(&outcome.mirrored[0]), (None, stored));
+}
+
+#[tokio::test]
+async fn owner_message_with_an_unknown_media_id_is_rejected() {
+    let core = core(vec![direct_rule()]);
+    let missing = MediaId::new();
+    let mut outbound = owner_message("12345@s.whatsapp.net", "caption", None);
+    outbound.media_ids = vec![missing];
+    assert!(matches!(
+        core.send_owner_message(outbound).await,
+        Err(CoreError::UnknownMedia(id)) if id == missing
+    ));
 }
 
 #[tokio::test]
@@ -1287,6 +1347,8 @@ async fn owner_message_to_an_unknown_connector_is_rejected() {
             chat_id: "somewhere".into(),
             thread_id: None,
             text: "hi".into(),
+            media_ids: Vec::new(),
+            client: None,
             reply_to_native_id: None,
             timestamp_ms: 5,
         })
@@ -1539,6 +1601,7 @@ async fn migration_heals_a_chat_split_across_the_observation_log() {
                     timestamp_ms: ts,
                     deleted: false,
                     edited: false,
+                    sent_by: None,
                 },
                 None,
             )
@@ -1962,6 +2025,8 @@ async fn each_operation_reads_routing_once() {
         chat_id: "111@g.us".into(),
         thread_id: None,
         text: "hi".into(),
+        media_ids: Vec::new(),
+        client: None,
         reply_to_native_id: None,
         timestamp_ms: 3,
     })

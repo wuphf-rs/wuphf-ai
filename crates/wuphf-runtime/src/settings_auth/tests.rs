@@ -193,6 +193,7 @@ fn observed(chat_id: &str, native_id: &str, timestamp_ms: i64) -> ObservedMessag
         timestamp_ms,
         deleted: false,
         edited: false,
+        sent_by: None,
     }
 }
 

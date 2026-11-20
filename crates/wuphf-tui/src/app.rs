@@ -420,6 +420,7 @@ mod tests {
             timestamp_ms: ts,
             deleted: false,
             edited: false,
+            sent_by: None,
         }
     }
 

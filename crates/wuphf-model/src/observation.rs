@@ -41,6 +41,11 @@ pub struct ObservedMessage {
     pub deleted: bool,
     #[serde(default)]
     pub edited: bool,
+    /// The client that sent an outgoing message (an owner send's `client`).
+    /// Absent on incoming messages; never serialized when absent, so older
+    /// rows keep their stored form.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sent_by: Option<String>,
 }
 
 /// Longest chat-list preview kept for a message, in characters. Bounds the chat
@@ -68,6 +73,7 @@ impl ObservedMessage {
             timestamp_ms: inbound.timestamp_ms,
             deleted: false,
             edited: false,
+            sent_by: None,
         }
     }
 

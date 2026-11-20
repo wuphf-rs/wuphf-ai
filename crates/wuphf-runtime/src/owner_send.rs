@@ -11,7 +11,7 @@ use thiserror::Error;
 use tokio::sync::{mpsc, oneshot};
 use wuphf_core::{Core, CoreError};
 use wuphf_model::{
-    Dispatch, OWNER_AUTHOR, ObservedDirection, ObservedMessage, OwnerMessage, Platform,
+    Action, Dispatch, OWNER_AUTHOR, ObservedDirection, ObservedMessage, OwnerMessage, Platform,
 };
 use wuphf_storage::Storage;
 
@@ -59,7 +59,7 @@ where
         }
     }
 
-    /// Send an owner-authored text to a platform chat. Enqueues the direct
+    /// Send an owner-authored message to a platform chat. Enqueues the direct
     /// dispatch and any mirror fan-out for delivery, and returns a receiver
     /// that resolves with the observed (outgoing) row once the connector
     /// acknowledges the send with its native message id. Dropping the receiver
@@ -68,8 +68,12 @@ where
         &self,
         outbound: OwnerMessage,
     ) -> Result<oneshot::Receiver<ObservedMessage>, OwnerSendError> {
-        let observed = self.observed_template(&outbound);
+        let mut observed = self.observed_template(&outbound);
         let outcome = self.core.send_owner_message(outbound).await?;
+        // The core resolved the media ids to their stored attachments.
+        if let Action::Send { message, .. } = &outcome.direct.action {
+            observed.attachments = message.attachments.clone();
+        }
         // Track before injecting the dispatch: the acknowledgement must not be
         // able to race past an untracked send.
         let settled = self.observer.track_outbound(outcome.direct.id, observed);
@@ -81,7 +85,8 @@ where
     }
 
     /// The observation-log row for an owner message, complete except for the native
-    /// message id its acknowledgement will supply.
+    /// message id its acknowledgement will supply and the attachments the core
+    /// resolves.
     fn observed_template(&self, outbound: &OwnerMessage) -> ObservedMessage {
         let platform = self
             .core
@@ -96,13 +101,14 @@ where
             author_id: OWNER_AUTHOR.to_owned(),
             author_name: None,
             participant: None,
-            text: Some(outbound.text.clone()),
+            text: (!outbound.text.is_empty()).then(|| outbound.text.clone()),
             attachments: Vec::new(),
             reply_to_native_id: outbound.reply_to_native_id.clone(),
             direction: ObservedDirection::Outgoing,
             timestamp_ms: outbound.timestamp_ms,
             deleted: false,
             edited: false,
+            sent_by: outbound.client.clone(),
         }
     }
 

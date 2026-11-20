@@ -543,12 +543,17 @@ impl ObservationStore for InMemoryStorage {
         );
         // A row already recorded as outgoing stays outgoing: the platform
         // reporting our own send back must not relabel it as incoming.
-        if state
+        if let Some(existing) = state
             .observed_messages
             .get(&message_key)
-            .is_some_and(|existing| existing.direction == ObservedDirection::Outgoing)
+            .filter(|existing| existing.direction == ObservedDirection::Outgoing)
         {
             observed.direction = ObservedDirection::Outgoing;
+            // So does the client that sent it: a client skips its own messages
+            // by it, echoes included.
+            if observed.sent_by.is_none() {
+                observed.sent_by = existing.sent_by.clone();
+            }
         }
         let chat_key = (observed.connector_id.clone(), observed.chat_id.clone());
         // Fold the message into the chat summary: keep the stored title unless

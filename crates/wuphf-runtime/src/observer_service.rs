@@ -11,8 +11,10 @@ use std::time::Duration;
 use tokio::sync::{broadcast, mpsc};
 use tokio_stream::{Stream, wrappers::ReceiverStream};
 use tonic::{Request, Response, Status};
+use uuid::Uuid;
+use wuphf_core::CoreError;
 use wuphf_model::{
-    ConnectorId, ObservedChat, ObservedDirection, ObservedMessage, OwnerMessage, Platform,
+    ConnectorId, MediaId, ObservedChat, ObservedDirection, ObservedMessage, OwnerMessage, Platform,
 };
 use wuphf_proto::connector as pb;
 use wuphf_proto::connector::observer_transport_server::ObserverTransport;
@@ -156,20 +158,37 @@ where
                 "connector_id and chat_id are required",
             ));
         }
-        if request.text.trim().is_empty() {
-            return Err(Status::invalid_argument("text must not be empty"));
+        if request.text.trim().is_empty() && request.media_ids.is_empty() {
+            return Err(Status::invalid_argument(
+                "a message needs text or media_ids",
+            ));
         }
+        let media_ids = request
+            .media_ids
+            .iter()
+            .map(|id| {
+                Uuid::parse_str(id)
+                    .map(MediaId)
+                    .map_err(|_| Status::invalid_argument(format!("media id {id:?} is not a UUID")))
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        let client = request.client.filter(|client| !client.is_empty());
         let settled = sender
             .send(OwnerMessage {
                 connector_id: ConnectorId(request.connector_id),
                 chat_id: request.chat_id,
                 thread_id: request.thread_id,
                 text: request.text,
+                media_ids,
+                client,
                 reply_to_native_id: request.reply_to_platform_message_id,
                 timestamp_ms: owner_send::now_ms(),
             })
             .await
             .map_err(|error| match error {
+                OwnerSendError::Core(error @ CoreError::UnknownMedia(_)) => {
+                    Status::invalid_argument(error.to_string())
+                }
                 OwnerSendError::Core(error) => Status::failed_precondition(error.to_string()),
                 OwnerSendError::RuntimeStopped => Status::unavailable(error.to_string()),
             })?;
@@ -235,6 +254,7 @@ fn observed_message_to_proto(observed: ObservedMessage) -> pb::ObservedMessage {
         timestamp_ms: observed.timestamp_ms,
         deleted: observed.deleted,
         edited: observed.edited,
+        sent_by: observed.sent_by,
     }
 }
 
@@ -401,6 +421,8 @@ mod tests {
                 thread_id: None,
                 text: "hi".into(),
                 reply_to_platform_message_id: None,
+                media_ids: Vec::new(),
+                client: None,
             }))
             .await
             .unwrap_err();

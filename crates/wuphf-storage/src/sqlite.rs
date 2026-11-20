@@ -649,6 +649,9 @@ impl ObservationStore for SqliteStorage {
             let stored: ObservedMessage = serde_json::from_str(row.get("payload"))?;
             if stored.direction == ObservedDirection::Outgoing {
                 observed.direction = ObservedDirection::Outgoing;
+                // So does the client that sent it: a client skips its own
+                // messages by it, echoes included.
+                observed.sent_by = observed.sent_by.or(stored.sent_by);
             }
         }
         sqlx::query(

@@ -409,6 +409,28 @@ async fn migration_0019_adds_chat_profiles() {
     );
 }
 
+/// An observed row stored before `sent_by` existed decodes with no client, and
+/// today's model writes it back byte for byte: the key appears only when set.
+#[test]
+fn observed_rows_without_sent_by_keep_their_json() {
+    let stored = serde_json::to_string(&sample_observed()).unwrap();
+    assert!(!stored.contains("sent_by"), "{stored}");
+    let decoded: ObservedMessage = serde_json::from_str(&stored).unwrap();
+    assert_eq!(decoded.sent_by, None);
+    assert_eq!(serde_json::to_string(&decoded).unwrap(), stored);
+
+    let tagged = ObservedMessage {
+        sent_by: Some("wuphf-tui".into()),
+        ..sample_observed()
+    };
+    let json = serde_json::to_string(&tagged).unwrap();
+    assert!(json.ends_with(r#","sent_by":"wuphf-tui"}"#), "{json}");
+    assert_eq!(
+        serde_json::from_str::<ObservedMessage>(&json).unwrap(),
+        tagged
+    );
+}
+
 /// A profile 045 stored (a timer only) decodes with 046's fields unknown, and
 /// today's model writes it back byte for byte: no new key appears while empty.
 /// The same holds for conversations without `introduced` (see the 0014 test,
@@ -734,6 +756,7 @@ fn sample_observed() -> ObservedMessage {
         timestamp_ms: 1000,
         deleted: true,
         edited: true,
+        sent_by: None,
     }
 }
 

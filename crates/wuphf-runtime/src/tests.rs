@@ -777,6 +777,8 @@ fn owner_message(chat_id: &str, text: &str) -> wuphf_model::OwnerMessage {
         chat_id: chat_id.into(),
         thread_id: None,
         text: text.into(),
+        media_ids: Vec::new(),
+        client: None,
         reply_to_native_id: None,
         timestamp_ms: 42,
     }
@@ -876,11 +878,158 @@ async fn observer_service_send_message_returns_the_acknowledged_native_id() {
             thread_id: None,
             text: "hello from the tui".into(),
             reply_to_platform_message_id: None,
+            media_ids: Vec::new(),
+            client: None,
         }))
         .await
         .unwrap()
         .into_inner();
     assert_eq!(response.platform_message_id, "wa-raw-9");
+
+    drop(inbound);
+    task.await.unwrap().unwrap();
+    acker.abort();
+}
+
+/// A client's media-only send: the core resolves the media ids, the outgoing
+/// row carries the attachments and the client as `sent_by`, and the
+/// platform's echo of the send keeps both.
+#[tokio::test]
+async fn observer_service_sends_media_ids_and_tags_the_client() {
+    use crate::observer_service::GrpcObserverService;
+    use tokio_stream::StreamExt;
+    use wuphf_model::{Attachment, AttachmentKind, MediaBlob, MediaId, ObservedDirection};
+    use wuphf_proto::connector::observer_transport_server::ObserverTransport;
+    use wuphf_storage::MediaStore;
+
+    let (runtime, channels, observer) = Runtime::channelled(core(), 8);
+    let service =
+        GrpcObserverService::new(Arc::clone(&observer)).with_sender(runtime.owner_sender());
+    let task = tokio::spawn(runtime.run());
+    let RuntimeChannels {
+        inbound,
+        acknowledgements,
+        failures: _failures,
+        mut dispatches,
+    } = channels;
+    let (sent_tx, mut sent_rx) = mpsc::channel(4);
+    let acker = tokio::spawn(async move {
+        while let Some(dispatch) = dispatches.recv().await {
+            if dispatch.to.connector_id == ConnectorId(WA.into()) {
+                sent_tx.send(dispatch.clone()).await.unwrap();
+                acknowledgements
+                    .send(DispatchAck {
+                        dispatch_id: dispatch.id,
+                        native_id: "wa-reel".into(),
+                        thread_id: None,
+                    })
+                    .await
+                    .unwrap();
+            }
+        }
+    });
+
+    let attachment = Attachment {
+        media_id: MediaId::new(),
+        kind: AttachmentKind::Video,
+        file_name: None,
+        mime_type: Some("video/mp4".into()),
+        size_bytes: Some(4),
+        animated: false,
+    };
+    observer
+        .storage()
+        .put_media(
+            MediaBlob {
+                attachment: attachment.clone(),
+                bytes: b"reel".to_vec(),
+            },
+            1,
+        )
+        .await
+        .unwrap();
+    let mut stream = service
+        .subscribe_messages(tonic::Request::new(pb::SubscribeMessagesRequest::default()))
+        .await
+        .unwrap()
+        .into_inner();
+
+    let request = |text: &str, media_ids: Vec<String>| {
+        tonic::Request::new(pb::SendMessageRequest {
+            connector_id: WA.into(),
+            chat_id: "wa-chat".into(),
+            thread_id: None,
+            text: text.into(),
+            reply_to_platform_message_id: None,
+            media_ids,
+            client: Some("wuphf-misc".into()),
+        })
+    };
+    // Neither text nor media, a malformed id, an id of no stored media.
+    for (text, ids) in [
+        ("  ", vec![]),
+        ("", vec!["not-a-uuid".to_owned()]),
+        ("caption", vec![MediaId::new().to_string()]),
+    ] {
+        let status = service.send_message(request(text, ids)).await.unwrap_err();
+        assert_eq!(status.code(), tonic::Code::InvalidArgument, "{status:?}");
+    }
+
+    let response = service
+        .send_message(request("", vec![attachment.media_id.to_string()]))
+        .await
+        .unwrap()
+        .into_inner();
+    assert_eq!(response.platform_message_id, "wa-reel");
+    let direct = sent_rx.recv().await.unwrap();
+    let Action::Send { message, .. } = &direct.action else {
+        panic!("an owner send dispatches a send, got {:?}", direct.action);
+    };
+    assert_eq!(message.attachments, [attachment.clone()]);
+
+    let row = stream.next().await.unwrap().unwrap();
+    assert_eq!(row.platform_message_id, "wa-reel");
+    assert_eq!(row.sent_by.as_deref(), Some("wuphf-misc"));
+    assert_eq!(row.text, None);
+    assert_eq!(row.attachments.len(), 1);
+
+    // WhatsApp reports the send back: the row stays outgoing and keeps its
+    // client, so the client still recognises its own message.
+    observer
+        .observe(
+            &Event {
+                source: wuphf_model::SourceAddress {
+                    connector_id: ConnectorId(WA.into()),
+                    address: ChatAddress::new("wa-chat", None),
+                    chat_title: None,
+                },
+                payload: EventKind::NewMessage(NewMessage {
+                    native_id: "wa-reel".into(),
+                    author_id: "me".into(),
+                    participant: None,
+                    author_name: None,
+                    text: None,
+                    attachments: vec![],
+                    reply_to_native_id: None,
+                    timestamp_ms: 50,
+                    disappearing: None,
+                }),
+            },
+            Platform::WhatsApp,
+        )
+        .await
+        .unwrap();
+    let echo = stream.next().await.unwrap().unwrap();
+    assert_eq!(echo.direction, i32::from(pb::ObservedDirection::Outgoing));
+    assert_eq!(echo.sent_by.as_deref(), Some("wuphf-misc"));
+    let stored = observer
+        .storage()
+        .observed_messages(&ConnectorId(WA.into()), "wa-chat", None, 10)
+        .await
+        .unwrap();
+    assert_eq!(stored.len(), 1);
+    assert_eq!(stored[0].direction, ObservedDirection::Outgoing);
+    assert_eq!(stored[0].sent_by.as_deref(), Some("wuphf-misc"));
 
     drop(inbound);
     task.await.unwrap().unwrap();

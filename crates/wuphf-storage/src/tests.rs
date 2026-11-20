@@ -683,6 +683,7 @@ fn observed(
         timestamp_ms,
         deleted: false,
         edited: false,
+        sent_by: None,
     }
 }
 
@@ -756,13 +757,16 @@ async fn outgoing_direction_survives_the_platform_echo<S: Storage>(storage: S) {
     let whatsapp = ConnectorId("whatsapp".into());
     let mut sent = observed(&whatsapp, "alice", "raw-1", 100, Some("mine"));
     sent.direction = ObservedDirection::Outgoing;
+    sent.sent_by = Some("wuphf-misc".into());
     let stored = storage.log_observed(sent, None).await.unwrap();
     assert_eq!(stored.direction, ObservedDirection::Outgoing);
 
     // The echo arrives as an ordinary incoming create for the same native id.
+    // It keeps the sending client too: a client skips its own messages by it.
     let echo = observed(&whatsapp, "alice", "raw-1", 100, Some("mine"));
     let stored = storage.log_observed(echo, None).await.unwrap();
     assert_eq!(stored.direction, ObservedDirection::Outgoing);
+    assert_eq!(stored.sent_by.as_deref(), Some("wuphf-misc"));
 
     let page = storage
         .observed_messages(&whatsapp, "alice", None, 10)
@@ -770,6 +774,13 @@ async fn outgoing_direction_survives_the_platform_echo<S: Storage>(storage: S) {
         .unwrap();
     assert_eq!(page.len(), 1);
     assert_eq!(page[0].direction, ObservedDirection::Outgoing);
+    assert_eq!(page[0].sent_by.as_deref(), Some("wuphf-misc"));
+
+    // An incoming row never takes a client.
+    let incoming = observed(&whatsapp, "alice", "raw-2", 101, Some("theirs"));
+    let stored = storage.log_observed(incoming, None).await.unwrap();
+    let stored = storage.log_observed(stored, None).await.unwrap();
+    assert_eq!(stored.sent_by, None);
 }
 
 #[tokio::test]

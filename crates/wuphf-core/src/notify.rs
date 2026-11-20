@@ -53,6 +53,8 @@ where
                         chat_id: target.address.chat_id,
                         thread_id: target.address.thread_id,
                         text: text.clone(),
+                        media_ids: Vec::new(),
+                        client: None,
                         reply_to_native_id: None,
                         timestamp_ms,
                     },

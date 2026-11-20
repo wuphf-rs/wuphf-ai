@@ -53,6 +53,10 @@ message ObservedMessage {
   int64 timestamp_ms = 13;
   bool deleted = 14;
   bool edited = 15;
+  // The client that sent an outgoing message through SendMessage (its
+  // `client` field). Absent on incoming messages and on owner sends that did
+  // not name a client. A client that reacts to messages skips its own.
+  optional string sent_by = 16;
 }
 
 message ListChatsRequest {}
@@ -87,8 +91,16 @@ message SendMessageRequest {
   string connector_id = 1;
   string chat_id = 2;
   optional string thread_id = 3;
+  // May be empty when media_ids is not.
   string text = 4;
   optional string reply_to_platform_message_id = 5;
+  // Attachments, as ids of media already stored in the core (uploaded through
+  // MediaTransport, or returned by a function). The core sends the stored
+  // media; an unknown id fails the call with INVALID_ARGUMENT.
+  repeated string media_ids = 6;
+  // Names the sending client (e.g. "wuphf-tui"). Stored on the outgoing
+  // message as ObservedMessage.sent_by.
+  optional string client = 7;
 }
 
 message SendMessageResponse {

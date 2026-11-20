@@ -286,6 +286,7 @@ mod tests {
             timestamp_ms: 42,
             deleted: false,
             edited: false,
+            sent_by: None,
         };
         let mut live = observer.subscribe();
         let settled = observer.track_outbound(dispatch_id, template.clone());

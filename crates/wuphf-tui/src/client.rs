@@ -9,6 +9,10 @@ use tonic::transport::Channel;
 use wuphf_proto::connector as pb;
 use wuphf_proto::connector::observer_transport_client::ObserverTransportClient;
 
+/// Names the TUI on its sends (`SendMessageRequest.client`), so the core marks
+/// them `sent_by = "wuphf-tui"`.
+const CLIENT_NAME: &str = "wuphf-tui";
+
 #[derive(Clone)]
 pub struct ObserverClient {
     inner: ObserverTransportClient<Channel>,
@@ -84,6 +88,8 @@ impl ObserverClient {
             thread_id,
             text,
             reply_to_platform_message_id,
+            media_ids: Vec::new(),
+            client: Some(CLIENT_NAME.to_owned()),
         })?;
         Ok(self
             .inner

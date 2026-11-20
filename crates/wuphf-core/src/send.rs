@@ -1,5 +1,6 @@
-//! Owner messages: deliver an owner-authored text (e.g. typed in the TUI)
-//! to a platform chat directly, without an inbound event triggering it.
+//! Owner messages: deliver an owner-authored text or media (typed in the TUI,
+//! or posted by a client such as wuphf-misc) to a platform chat directly,
+//! without an inbound event triggering it.
 //!
 //! An owner message reuses the ordinary dispatch pipeline end to end, which is what
 //! keeps it loop-safe: the direct dispatch is acknowledged like any other, the
@@ -16,9 +17,9 @@ use crate::profile::target_disappearing;
 use crate::{Core, CoreError, RoutingConfig};
 use std::sync::Arc;
 use wuphf_model::{
-    Action, Alias, ChatAddress, ChatRef, ConnectorId, Conversation, ConversationId, Dispatch,
-    Endpoint, EndpointId, Message, MessageId, OWNER_AUTHOR, OwnerMessage, OwnerSendOutcome,
-    ReplyContext, SourceAddress, Target,
+    Action, Alias, Attachment, ChatAddress, ChatRef, ConnectorId, Conversation, ConversationId,
+    Dispatch, Endpoint, EndpointId, MediaId, Message, MessageId, OWNER_AUTHOR, OwnerMessage,
+    OwnerSendOutcome, ReplyContext, SourceAddress, Target,
 };
 use wuphf_storage::Storage;
 
@@ -26,7 +27,8 @@ impl<S> Core<S>
 where
     S: Storage,
 {
-    /// Send an owner-authored text to a platform chat. Enqueues the direct
+    /// Send an owner-authored message to a platform chat. Its media ids must
+    /// name stored media ([`CoreError::UnknownMedia`] otherwise). Enqueues the direct
     /// dispatch (and any mirror fan-out) for delivery; the caller forwards the
     /// returned dispatches to the connectors.
     pub async fn send_owner_message(
@@ -59,6 +61,7 @@ where
         let (reply_to, reply_context) = self
             .resolve_reply(endpoint_id, outbound.reply_to_native_id.as_deref())
             .await?;
+        let attachments = self.stored_attachments(&outbound.media_ids).await?;
 
         let message = Message {
             id: MessageId::new(),
@@ -68,8 +71,8 @@ where
             // mirror labels it; the direct copy drops the label below.
             participant: Some(OWNER_AUTHOR.to_owned()),
             author_name: Some(OWNER_AUTHOR.to_owned()),
-            text: Some(outbound.text),
-            attachments: Vec::new(),
+            text: (!outbound.text.is_empty()).then_some(outbound.text),
+            attachments,
             reply_to,
             timestamp_ms: outbound.timestamp_ms,
             deleted: false,
@@ -166,6 +169,24 @@ where
             })
             .await?;
         Ok(endpoint.id)
+    }
+
+    /// The stored attachment of every media id, in order. The media must
+    /// already be in the core (uploaded, or a function's result).
+    async fn stored_attachments(
+        &self,
+        media_ids: &[MediaId],
+    ) -> Result<Vec<Attachment>, CoreError> {
+        let mut attachments = Vec::with_capacity(media_ids.len());
+        for &media_id in media_ids {
+            let media = self
+                .storage
+                .media(media_id)
+                .await?
+                .ok_or(CoreError::UnknownMedia(media_id))?;
+            attachments.push(media.attachment);
+        }
+        Ok(attachments)
     }
 
     /// Resolve the reply parent best-effort: when the quoted native id maps to a
