@@ -15,6 +15,11 @@ import (
 	"go.mau.fi/mautrix-meta/pkg/messagix/responses"
 )
 
+// maxDownloadBytes caps a CDN media download. The core rejects anything over
+// its configured max_media_bytes at upload anyway (32 MiB by default); this
+// bound only prevents buffering an unbounded response body before that check.
+const maxDownloadBytes = 64 * 1024 * 1024
+
 // MediaBroker stores inbound media bytes in the core and returns the
 // core-owned attachment handle dispatches refer to.
 type MediaBroker interface {
@@ -97,9 +102,12 @@ func (m MediaCodec) fetch(ctx context.Context, ref mediaRef) (*wuphfpb.Attachmen
 	if response.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("download Instagram media: unexpected status %s", response.Status)
 	}
-	bytes, err := io.ReadAll(response.Body)
+	bytes, err := io.ReadAll(io.LimitReader(response.Body, maxDownloadBytes+1))
 	if err != nil {
 		return nil, fmt.Errorf("read Instagram media body: %w", err)
+	}
+	if len(bytes) > maxDownloadBytes {
+		return nil, fmt.Errorf("download Instagram media: body exceeds %d bytes", maxDownloadBytes)
 	}
 	if ref.metadata.MimeType == nil {
 		ref.metadata.MimeType = optionalString(mimeBase(response.Header.Get("Content-Type")))
