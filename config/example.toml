@@ -154,6 +154,13 @@ token_env = "WUPHF_PROVIDER_MEDIACONV_TOKEN"
 functions = ["media.convert"]
 # [functions.overrides."media.convert"]
 # default_deadline_ms = 20000
+#
+# The Instagram connector can serve instagram.fetch_media@1 (wuphf-misc uses
+# it); enable its [functions] section with the same id and token variable.
+# [[functions.providers]]
+# id = "instagram-main"
+# token_env = "WUPHF_PROVIDER_INSTAGRAM_TOKEN"
+# functions = ["instagram.fetch_media"]
 
 # Pin, mute and archive sync both ways between a source chat (WhatsApp) and
 # its mirror topic (Telegram: a pinned topic, the topic's notifications, a

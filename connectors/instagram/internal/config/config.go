@@ -43,6 +43,34 @@ type File struct {
 	// bridged is dropped. Nil means enabled; set it to false to ignore the saved
 	// position and bridge only what arrives from now on.
 	BackfillOnStart *bool `toml:"backfill_on_start"`
+	// Functions, when set, makes the connector also serve
+	// instagram.fetch_media@1 through the core's function broker, on this
+	// connector's logged-in session. Nil serves no function.
+	Functions *Functions `toml:"functions"`
+}
+
+// Functions configures the provider session the connector opens next to its
+// connector session.
+type Functions struct {
+	// ProviderID is the core's [[functions.providers]].id for this connector.
+	ProviderID string `toml:"provider_id"`
+	// TokenEnv names the environment variable holding the provider token; it
+	// must match that provider entry's token_env.
+	TokenEnv string `toml:"token_env"`
+	// MaxConcurrency caps the fetches that run at once. 0 means
+	// DefaultFetchConcurrency.
+	MaxConcurrency uint32 `toml:"max_concurrency"`
+}
+
+// DefaultFetchConcurrency is the fetch concurrency when max_concurrency is unset.
+const DefaultFetchConcurrency = 2
+
+// Concurrency returns the configured fetch concurrency, or the default.
+func (f Functions) Concurrency() uint32 {
+	if f.MaxConcurrency == 0 {
+		return DefaultFetchConcurrency
+	}
+	return f.MaxConcurrency
 }
 
 // DefaultStateFile is the sync state path used when state_file is unset.
@@ -107,6 +135,9 @@ func (c File) Validate() error {
 	}
 	if c.SupportsTopicCreate && !c.SupportsThreads {
 		return errors.New("supports_topic_create requires supports_threads")
+	}
+	if c.Functions != nil && (c.Functions.ProviderID == "" || c.Functions.TokenEnv == "") {
+		return errors.New("[functions] needs provider_id and token_env")
 	}
 	return nil
 }

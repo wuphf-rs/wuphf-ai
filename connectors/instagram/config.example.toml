@@ -44,3 +44,12 @@ state_file = "instagram.state.json"
 # forces a fresh start and that gap is not replayed. Defaults to true when
 # unset; set to false to bridge only what arrives from now on.
 backfill_on_start = true
+
+# Serve instagram.fetch_media@1 (download a post's or reel's media by link, used
+# by wuphf-misc) through the core's function broker, on this connector's
+# logged-in session. Needs a matching [[functions.providers]] entry in the
+# core's config. Every fetch is an Instagram request on this account.
+# [functions]
+# provider_id = "instagram-main"
+# token_env = "WUPHF_PROVIDER_INSTAGRAM_TOKEN"
+# max_concurrency = 2

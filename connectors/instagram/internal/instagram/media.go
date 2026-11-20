@@ -131,7 +131,11 @@ func (m MediaCodec) fetchShareURL(ctx context.Context, share *shareMedia) (strin
 	if err != nil || response == nil || len(response.Items) == 0 || response.Items[0] == nil {
 		return "", 0
 	}
-	item := response.Items[0]
+	return bestRendition(response.Items[0])
+}
+
+// bestRendition picks an item's largest video, else its largest image.
+func bestRendition(item *responses.Items) (string, wuphfpb.Attachment_Kind) {
 	best, bestArea := "", 0
 	for _, version := range item.VideoVersions {
 		if area := version.Width * version.Height; version.URL != "" && area > bestArea {

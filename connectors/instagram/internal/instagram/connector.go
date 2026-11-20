@@ -10,6 +10,7 @@ import (
 
 	"github.com/akshettrj/wuphf/connectors/instagram/internal/config"
 	coreclient "github.com/akshettrj/wuphf/connectors/shared/coreclient"
+	"github.com/akshettrj/wuphf/connectors/shared/functions"
 	"github.com/akshettrj/wuphf/connectors/shared/logging"
 	"github.com/akshettrj/wuphf/connectors/shared/settings"
 	wuphfpb "github.com/akshettrj/wuphf/proto/go/connector/v1"
@@ -102,6 +103,12 @@ func (c Connector) Run(ctx context.Context) error {
 	ig.normalizer = NewNormalizer(inputs, codec, ig.threads, ownUserID, logger)
 	logger.Info().Msg("Instagram account loaded")
 
+	if c.cfg.Functions != nil {
+		if err := c.serveFunctions(ctx, codec, logger); err != nil {
+			return err
+		}
+	}
+
 	runResult := make(chan error, 1)
 	go func() {
 		runResult <- coreclient.New(coreclient.Options{
@@ -124,6 +131,31 @@ func (c Connector) Run(ctx context.Context) error {
 	case err := <-runResult:
 		return err
 	}
+}
+
+// serveFunctions serves instagram.fetch_media@1 on the logged-in session until
+// ctx ends. The provider session is separate from the connector session: a
+// provider the core rejects is logged, and bridging goes on without it.
+func (c Connector) serveFunctions(ctx context.Context, codec MediaCodec, logger zerolog.Logger) error {
+	cfg := *c.cfg.Functions
+	token, err := coreclient.TokenFromEnv(cfg.TokenEnv)
+	if err != nil {
+		return err
+	}
+	providerLogger := logger.With().Str("provider", cfg.ProviderID).Logger()
+	go func() {
+		err := functions.Serve(ctx, functions.ProviderOptions{
+			Address:    c.cfg.CoreAddress,
+			ProviderID: cfg.ProviderID,
+			Token:      token,
+			Functions:  []functions.Function{FetchMediaFunction(codec, cfg.Concurrency(), providerLogger)},
+		}, providerLogger)
+		if err != nil && !errors.Is(err, context.Canceled) {
+			providerLogger.Err(err).Msg("instagram.fetch_media@1 is not served")
+		}
+	}()
+	providerLogger.Info().Msg("serving instagram.fetch_media@1")
+	return nil
 }
 
 // loadCookies reads the Instagram session cookies, preferring the persisted

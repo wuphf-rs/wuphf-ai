@@ -70,3 +70,34 @@ func TestExampleConfigLoads(t *testing.T) {
 		t.Fatalf("Load(config.example.toml) error = %v", err)
 	}
 }
+
+func TestFunctionsSection(t *testing.T) {
+	t.Parallel()
+	data := `core_address = "127.0.0.1:50051"
+connector_id = "instagram-main"
+core_token_env = "TOKEN"
+cookies_file = "c.json"
+session_file = "s.json"
+
+[functions]
+provider_id = "instagram-main"
+token_env = "WUPHF_PROVIDER_INSTAGRAM_TOKEN"
+`
+	var cfg File
+	if err := toml.Unmarshal([]byte(data), &cfg); err != nil {
+		t.Fatal(err)
+	}
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("Validate() error = %v", err)
+	}
+	if cfg.Functions == nil || cfg.Functions.ProviderID != "instagram-main" || cfg.Functions.Concurrency() != DefaultFetchConcurrency {
+		t.Fatalf("functions = %+v", cfg.Functions)
+	}
+	cfg.Functions.TokenEnv = ""
+	if err := cfg.Validate(); err == nil {
+		t.Fatal("Validate() accepted [functions] without token_env")
+	}
+	if (Functions{MaxConcurrency: 5}).Concurrency() != 5 {
+		t.Fatal("max_concurrency ignored")
+	}
+}
