@@ -163,15 +163,15 @@ where
                 "a message needs text or media_ids",
             ));
         }
-        let media_ids = request
-            .media_ids
-            .iter()
-            .map(|id| {
-                Uuid::parse_str(id)
-                    .map(MediaId)
-                    .map_err(|_| Status::invalid_argument(format!("media id {id:?} is not a UUID")))
-            })
-            .collect::<Result<Vec<_>, _>>()?;
+        let mut media_ids = Vec::with_capacity(request.media_ids.len());
+        for id in &request.media_ids {
+            let Ok(uuid) = Uuid::parse_str(id) else {
+                return Err(Status::invalid_argument(format!(
+                    "media id {id:?} is not a UUID"
+                )));
+            };
+            media_ids.push(MediaId(uuid));
+        }
         let client = request.client.filter(|client| !client.is_empty());
         let settled = sender
             .send(OwnerMessage {

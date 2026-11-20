@@ -985,7 +985,7 @@ async fn observer_service_sends_media_ids_and_tags_the_client() {
     let Action::Send { message, .. } = &direct.action else {
         panic!("an owner send dispatches a send, got {:?}", direct.action);
     };
-    assert_eq!(message.attachments, [attachment.clone()]);
+    assert_eq!(message.attachments, std::slice::from_ref(&attachment));
 
     let row = stream.next().await.unwrap().unwrap();
     assert_eq!(row.platform_message_id, "wa-reel");
