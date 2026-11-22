@@ -8,8 +8,10 @@
 //! tested against fakes; the live clients are thin adapters.
 
 use std::future::Future;
+use std::sync::Arc;
 
 use whatsapp_rust::Jid;
+use whatsapp_rust::types::message::AddressingMode;
 use whatsapp_rust::wacore::proto_helpers::{
     MessageBuilderExt, MessageExt, build_quote_context_with_info,
 };
@@ -17,9 +19,11 @@ use whatsapp_rust::waproto::whatsapp as wa;
 use wuphf_connector::{Delivery, Failure, MediaClient, Sender, SessionError};
 use wuphf_proto::connector as pb;
 
+use crate::addressing::AddressBook;
 use crate::chat_state::{mute_call, now_ms};
 use crate::config::Runtime;
 use crate::disappearing::{TimerFallback, stamp};
+use crate::identity::Identity;
 use crate::outbound::{outbound_media, quoted_body, text_exceeds_limit, text_file_media};
 use crate::wa_client::{ChatAction, LiveClient, WaClient};
 
@@ -46,31 +50,67 @@ pub struct WhatsAppSender<C = LiveClient, M = MediaClient> {
     /// Set when the connector stamps disappearing timers: what to do with a
     /// dispatch that arrives without one.
     fallback: Option<TimerFallback>,
+    /// Dispatches name canonical ids; these put an address back into the form
+    /// the chat is addressed in before it goes on the wire.
+    identity: Arc<Identity>,
+    addresses: Arc<AddressBook>,
 }
 
 impl<C: WaClient, M: CoreMedia> WhatsAppSender<C, M> {
-    pub fn new(client: C, media: M, runtime: Runtime, fallback: Option<TimerFallback>) -> Self {
+    pub fn new(
+        client: C,
+        media: M,
+        runtime: Runtime,
+        fallback: Option<TimerFallback>,
+        identity: Arc<Identity>,
+        addresses: Arc<AddressBook>,
+    ) -> Self {
         Self {
             client,
             media,
             runtime,
             fallback,
+            identity,
+            addresses,
         }
+    }
+
+    /// A dispatch's target chat in the form WhatsApp addresses it in, with that
+    /// form for the frame's other addresses (Go `target`). A target that does
+    /// not parse can never succeed, so it is permanent.
+    async fn target(&self, chat_id: &str) -> Result<(Jid, Option<AddressingMode>), Failure> {
+        self.client.linked()?;
+        let chat = parse_chat(chat_id)?;
+        let mode = self.addresses.mode(&self.client, &chat).await;
+        let chat = self
+            .addresses
+            .in_mode(&self.identity, &self.client, &chat, mode)
+            .await;
+        Ok((chat, mode))
     }
 
     /// The reply context of a dispatch: none for a system note (the bridge
     /// speaking quotes nothing) or a plain message, the quote otherwise. A
     /// reply id without its context can never be quoted, so it is permanent.
-    fn reply_context(
+    async fn reply_context(
         &self,
         dispatch: &pb::MessageCreateDispatch,
         chat: &Jid,
+        mode: Option<AddressingMode>,
     ) -> Result<Option<wa::ContextInfo>, Failure> {
         if dispatch.system_note {
             return Ok(None);
         }
         match &dispatch.reply_context {
-            Some(reply) => Ok(Some(self.quote_context(chat, reply)?)),
+            Some(reply) => Ok(Some(build_quote_context_with_info(
+                reply.platform_message_id.clone(),
+                &self.quoted_author(reply, mode).await?,
+                chat,
+                chat,
+                // A typed stub of the parent's media, so the preview shows a
+                // photo rather than empty text.
+                &quoted_body(reply),
+            ))),
             None if dispatch.reply_to_platform_message_id.is_some() => Err(Failure::permanent(
                 "outbound WhatsApp reply requires quoted-message context",
             )),
@@ -78,31 +118,19 @@ impl<C: WaClient, M: CoreMedia> WhatsAppSender<C, M> {
         }
     }
 
-    /// The quote metadata for a reply. The quoted body is a typed stub of the
-    /// parent's media, so the preview shows a photo rather than empty text.
-    fn quote_context(
+    /// Who WhatsApp is told wrote the quoted message (Go `quotedAuthor`):
+    /// WhatsApp links a quote by its id and author together, so the wrong
+    /// author shows the wrong name and leaves the reply unlinked. A copy the
+    /// bridge received here (a message someone in the chat wrote, quoted by an
+    /// owner send such as wuphf-misc's) names its author in this platform's
+    /// canonical ids: the group participant, else the chat peer, put into the
+    /// chat's form. A copy the bridge sent was written by our own account,
+    /// which a LID-addressed chat knows by its LID.
+    async fn quoted_author(
         &self,
-        chat: &Jid,
         reply: &pb::ReplyContext,
-    ) -> Result<wa::ContextInfo, Failure> {
-        Ok(build_quote_context_with_info(
-            reply.platform_message_id.clone(),
-            &self.quoted_author(reply)?,
-            chat,
-            chat,
-            &quoted_body(reply),
-        ))
-    }
-
-    /// Who WhatsApp is told wrote the quoted message (as the Go connector's
-    /// `quotedAuthor`): WhatsApp links a quote by its id and author together,
-    /// so the wrong author shows the wrong name and leaves the reply unlinked.
-    /// A copy the bridge sent into this chat was written by our own account;
-    /// one received here (an owner send, such as wuphf-misc's, replying to a
-    /// message from someone in the chat) names its author in this platform's
-    /// own ids, in the form the chat addressed it in. Plan 053 adds the
-    /// phone / LID form translation the Go connector does.
-    fn quoted_author(&self, reply: &pb::ReplyContext) -> Result<Jid, Failure> {
+        mode: Option<AddressingMode>,
+    ) -> Result<Jid, Failure> {
         if !reply.authored_by_bridge {
             let author = reply
                 .participant
@@ -110,13 +138,15 @@ impl<C: WaClient, M: CoreMedia> WhatsAppSender<C, M> {
                 .filter(|author| !author.is_empty())
                 .unwrap_or(&reply.sender);
             if let Ok(author) = author.parse::<Jid>() {
-                return Ok(author.to_non_ad());
+                return Ok(self
+                    .addresses
+                    .in_mode(&self.identity, &self.client, &author, mode)
+                    .await);
             }
         }
-        let own = self.client.own_pn()?.ok_or_else(|| {
+        self.addresses.own(&self.client, mode).ok_or_else(|| {
             Failure::permanent("outbound WhatsApp reply requires a paired account JID")
-        })?;
-        Ok(own.to_non_ad())
+        })
     }
 
     /// The message for one attachment: downloaded from the core (a failure is
@@ -198,8 +228,8 @@ fn parse_chat(chat_id: &str) -> Result<Jid, Failure> {
 
 impl<C: WaClient, M: CoreMedia> Sender for WhatsAppSender<C, M> {
     async fn send_message(&self, dispatch: pb::MessageCreateDispatch) -> Result<Delivery, Failure> {
-        let chat = parse_chat(&dispatch.target_chat_id)?;
-        let context = self.reply_context(&dispatch, &chat)?;
+        let (chat, mode) = self.target(&dispatch.target_chat_id).await?;
+        let context = self.reply_context(&dispatch, &chat, mode).await?;
         // Every part of a content send carries the chat's timer, so it
         // disappears like the rest of the chat instead of showing "will not
         // disappear".
@@ -245,7 +275,7 @@ impl<C: WaClient, M: CoreMedia> Sender for WhatsAppSender<C, M> {
     /// WhatsApp keeps the original message id across an edit, so the id the
     /// edit API returns is the target id itself.
     async fn edit_message(&self, dispatch: pb::MessageEditDispatch) -> Result<String, Failure> {
-        let chat = parse_chat(&dispatch.target_chat_id)?;
+        let (chat, _) = self.target(&dispatch.target_chat_id).await?;
         let text = dispatch.text.unwrap_or_default();
         self.client
             .edit(
@@ -262,7 +292,7 @@ impl<C: WaClient, M: CoreMedia> Sender for WhatsAppSender<C, M> {
     /// what it stored. WhatsApp has no threads, so `target_thread_id` is
     /// never set here.
     async fn apply_chat_state(&self, dispatch: pb::ChatStateDispatch) -> Result<String, Failure> {
-        let chat = parse_chat(&dispatch.target_chat_id)?;
+        let (chat, _) = self.target(&dispatch.target_chat_id).await?;
         if let Some(pinned) = dispatch.pinned {
             self.client
                 .chat_action(chat.clone(), ChatAction::Pin(pinned))
@@ -285,7 +315,7 @@ impl<C: WaClient, M: CoreMedia> Sender for WhatsAppSender<C, M> {
     /// Revoking our own (bridge-authored) copy; the target id is returned
     /// unchanged for the acknowledgement.
     async fn delete_message(&self, dispatch: pb::MessageDeleteDispatch) -> Result<String, Failure> {
-        let chat = parse_chat(&dispatch.target_chat_id)?;
+        let (chat, _) = self.target(&dispatch.target_chat_id).await?;
         self.client
             .revoke(chat, dispatch.target_platform_message_id.clone())
             .await?;
@@ -302,10 +332,13 @@ mod tests {
     use whatsapp_rust::waproto::buffa::MessageField;
 
     use super::*;
+    use crate::addressing::Account;
     use crate::chat_state::MuteCall;
     use crate::config::Rendering;
     use crate::groups::GroupFacts;
+    use crate::identity::LidStore;
     use crate::normalize::context_info;
+    use crate::testing::FakeAccount;
     use crate::wa_client::OutboundMedia;
 
     const DM: &str = "1555@s.whatsapp.net";
@@ -314,6 +347,8 @@ mod tests {
     /// WhatsApp, recorded: every send, upload, edit, revoke and chat action.
     #[derive(Default)]
     struct FakeClient {
+        /// The paired account (own addresses, LID mappings, group modes).
+        account: FakeAccount,
         sends: Mutex<Vec<(Jid, wa::Message)>>,
         uploads: Mutex<Vec<(Vec<u8>, OutboundMedia)>>,
         edits: Mutex<Vec<(Jid, String, wa::Message)>>,
@@ -394,13 +429,68 @@ mod tests {
             Ok(())
         }
 
-        fn own_pn(&self) -> Result<Option<Jid>, Failure> {
-            Ok(Some("1999@s.whatsapp.net".parse().unwrap()))
+        fn linked(&self) -> Result<(), Failure> {
+            Ok(())
         }
 
         async fn group_facts(&self, group: &Jid) -> Option<GroupFacts> {
             self.groups.get(&group.to_string()).cloned()
         }
+    }
+
+    impl LidStore for FakeClient {
+        async fn lid_for_pn(&self, pn: &Jid) -> Option<Jid> {
+            self.account.lid_for_pn(pn).await
+        }
+
+        async fn pn_for_lid(&self, lid: &Jid) -> Option<Jid> {
+            self.account.pn_for_lid(lid).await
+        }
+    }
+
+    impl Account for FakeClient {
+        fn own_pn(&self) -> Option<Jid> {
+            self.account.own_pn()
+        }
+
+        fn own_lid(&self) -> Option<Jid> {
+            self.account.own_lid()
+        }
+
+        async fn lid_migrated(&self) -> bool {
+            self.account.lid_migrated().await
+        }
+
+        async fn group_mode(&self, group: &Jid) -> Option<AddressingMode> {
+            self.account.group_mode(group).await
+        }
+    }
+
+    /// A client paired as 1999.
+    fn fake() -> FakeClient {
+        FakeClient {
+            account: FakeAccount {
+                own_pn: Some("1999@s.whatsapp.net".parse().unwrap()),
+                ..FakeAccount::default()
+            },
+            ..FakeClient::default()
+        }
+    }
+
+    fn with(
+        client: FakeClient,
+        media: FakeMedia,
+        runtime: Runtime,
+        fallback: Option<TimerFallback>,
+    ) -> WhatsAppSender<FakeClient, FakeMedia> {
+        WhatsAppSender::new(
+            client,
+            media,
+            runtime,
+            fallback,
+            Arc::default(),
+            Arc::default(),
+        )
     }
 
     /// The core's media store.
@@ -430,7 +520,7 @@ mod tests {
     }
 
     fn sender(client: FakeClient, media: FakeMedia) -> WhatsAppSender<FakeClient, FakeMedia> {
-        WhatsAppSender::new(client, media, Runtime::default(), None)
+        with(client, media, Runtime::default(), None)
     }
 
     fn rendering(attachments_as_files: bool, max_message_length: u32) -> Runtime {
@@ -487,7 +577,7 @@ mod tests {
 
     #[tokio::test]
     async fn text_is_sent_as_text() {
-        let sender = sender(FakeClient::default(), FakeMedia::default());
+        let sender = sender(fake(), FakeMedia::default());
         let delivery = sender.send_message(text("hi")).await.unwrap();
         assert_eq!(delivery.message_id, "wa-1");
         assert_eq!(delivery.thread_id, None);
@@ -496,7 +586,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_reply_quotes_its_parent() {
-        let sender = sender(FakeClient::default(), FakeMedia::default());
+        let sender = sender(fake(), FakeMedia::default());
         let dispatch = pb::MessageCreateDispatch {
             reply_context: Some(reply_to("wa-0")),
             ..text("sure")
@@ -515,7 +605,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_quote_names_who_wrote_the_parent() {
-        let sender = sender(FakeClient::default(), FakeMedia::default());
+        let sender = sender(fake(), FakeMedia::default());
         let received = |participant: Option<&str>, sender_id: &str| pb::ReplyContext {
             authored_by_bridge: false,
             participant: participant.map(str::to_owned),
@@ -554,7 +644,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_reply_id_without_a_context_is_permanent() {
-        let sender = sender(FakeClient::default(), FakeMedia::default());
+        let sender = sender(fake(), FakeMedia::default());
         let dispatch = pb::MessageCreateDispatch {
             reply_to_platform_message_id: Some("wa-0".into()),
             ..text("sure")
@@ -567,7 +657,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_note_never_quotes_and_sends_its_photo() {
-        let sender = sender(FakeClient::default(), media(&["m-1"]));
+        let sender = sender(fake(), media(&["m-1"]));
         let dispatch = pb::MessageCreateDispatch {
             system_note: true,
             reply_context: Some(reply_to("wa-0")),
@@ -585,7 +675,7 @@ mod tests {
 
     #[tokio::test]
     async fn the_timer_is_stamped_on_text_and_an_off_one_sets_nothing() {
-        let sender = sender(FakeClient::default(), FakeMedia::default());
+        let sender = sender(fake(), FakeMedia::default());
         let dispatch = pb::MessageCreateDispatch {
             disappearing: Some(timer()),
             ..text("hi")
@@ -609,7 +699,7 @@ mod tests {
 
     #[tokio::test]
     async fn edits_deletes_and_chat_state_return_the_target_id() {
-        let sender = sender(FakeClient::default(), FakeMedia::default());
+        let sender = sender(fake(), FakeMedia::default());
         let edit = pb::MessageEditDispatch {
             target_chat_id: DM.into(),
             target_platform_message_id: "wa-7".into(),
@@ -656,10 +746,10 @@ mod tests {
                     ..Default::default()
                 },
             )]),
-            ..Default::default()
+            ..fake()
         };
         let (inputs, mut frames) = mpsc::channel(4);
-        let sender = WhatsAppSender::new(
+        let sender = with(
             client,
             FakeMedia::default(),
             Runtime::default(),
@@ -679,7 +769,7 @@ mod tests {
 
     #[tokio::test]
     async fn an_attachment_is_downloaded_and_uploaded_with_its_caption() {
-        let sender = sender(FakeClient::default(), media(&["m-1"]));
+        let sender = sender(fake(), media(&["m-1"]));
         let dispatch = pb::MessageCreateDispatch {
             attachments: vec![image("m-1")],
             ..text("look")
@@ -699,12 +789,7 @@ mod tests {
 
     #[tokio::test]
     async fn attachments_as_files_sends_a_document() {
-        let sender = WhatsAppSender::new(
-            FakeClient::default(),
-            media(&["m-1"]),
-            rendering(true, 0),
-            None,
-        );
+        let sender = with(fake(), media(&["m-1"]), rendering(true, 0), None);
         let dispatch = pb::MessageCreateDispatch {
             attachments: vec![image("m-1")],
             ..text("look")
@@ -717,12 +802,7 @@ mod tests {
 
     #[tokio::test]
     async fn over_length_text_goes_out_as_a_file_and_short_text_stays_inline() {
-        let sender = WhatsAppSender::new(
-            FakeClient::default(),
-            FakeMedia::default(),
-            rendering(false, 5),
-            None,
-        );
+        let sender = with(fake(), FakeMedia::default(), rendering(false, 5), None);
         let dispatch = pb::MessageCreateDispatch {
             reply_context: Some(reply_to("wa-0")),
             ..text("héllo!")
@@ -744,7 +824,7 @@ mod tests {
 
     #[tokio::test]
     async fn the_reply_context_and_the_timer_land_on_the_media() {
-        let sender = sender(FakeClient::default(), media(&["m-1"]));
+        let sender = sender(fake(), media(&["m-1"]));
         let dispatch = pb::MessageCreateDispatch {
             reply_context: Some(pb::ReplyContext {
                 attachments: vec![image("m-0")],
@@ -766,7 +846,7 @@ mod tests {
     #[tokio::test]
     async fn a_failed_core_download_is_transient() {
         let sender = sender(
-            FakeClient::default(),
+            fake(),
             FakeMedia {
                 fail: true,
                 ..Default::default()
@@ -794,7 +874,7 @@ mod tests {
 
     #[tokio::test]
     async fn several_attachments_caption_and_quote_only_the_first_and_time_every_part() {
-        let sender = sender(FakeClient::default(), media(&["m-1", "m-2", "m-3"]));
+        let sender = sender(fake(), media(&["m-1", "m-2", "m-3"]));
         let delivery = sender.send_message(album()).await.unwrap();
         assert_eq!(delivery.message_id, "wa-1");
         let sent = sends(&sender);
@@ -812,7 +892,7 @@ mod tests {
     async fn a_failure_after_the_first_part_is_permanent() {
         let client = FakeClient {
             fail_send_at: Some(1),
-            ..Default::default()
+            ..fake()
         };
         let sender = sender(client, media(&["m-1", "m-2", "m-3"]));
         let Err(failure) = sender.send_message(album()).await else {
@@ -831,7 +911,7 @@ mod tests {
     async fn a_failure_on_the_first_part_stays_retryable() {
         let client = FakeClient {
             fail_send_at: Some(0),
-            ..Default::default()
+            ..fake()
         };
         let sender = sender(client, media(&["m-1", "m-2", "m-3"]));
         let Err(failure) = sender.send_message(album()).await else {
@@ -850,12 +930,7 @@ mod tests {
             Kind::File,
             Kind::Sticker,
         ];
-        let sender = WhatsAppSender::new(
-            FakeClient::default(),
-            media(&["m"]),
-            rendering(false, 3),
-            None,
-        );
+        let sender = with(fake(), media(&["m"]), rendering(false, 3), None);
         for kind in kinds {
             let dispatch = pb::MessageCreateDispatch {
                 attachments: vec![pb::Attachment {
@@ -878,5 +953,119 @@ mod tests {
         for message in &sent {
             assert_eq!(context(message).expiration, Some(86_400), "{message:?}");
         }
+    }
+
+    /// A client paired as 1999 (LID 7) that knows 1555 is 9, with a
+    /// LID-addressed group 123 and a phone-addressed group 456.
+    fn addressed() -> FakeClient {
+        FakeClient {
+            account: FakeAccount {
+                own_pn: Some("1999@s.whatsapp.net".parse().unwrap()),
+                own_lid: Some("7@lid".parse().unwrap()),
+                group_modes: HashMap::from([
+                    ("123@g.us".to_owned(), AddressingMode::Lid),
+                    ("456@g.us".to_owned(), AddressingMode::Pn),
+                ]),
+                ..FakeAccount::mapping("1555", "9")
+            },
+            ..FakeClient::default()
+        }
+    }
+
+    async fn quoted_participant(
+        sender: &WhatsAppSender<FakeClient, FakeMedia>,
+        chat: &str,
+        reply: pb::ReplyContext,
+    ) -> Option<String> {
+        let dispatch = pb::MessageCreateDispatch {
+            target_chat_id: chat.into(),
+            reply_context: Some(reply),
+            ..text("here")
+        };
+        sender.send_message(dispatch).await.unwrap();
+        let sent = sends(sender);
+        context(sent.last().unwrap()).participant.clone()
+    }
+
+    #[tokio::test]
+    async fn a_received_copy_is_quoted_under_its_author_in_the_chat_s_form() {
+        let sender = sender(addressed(), FakeMedia::default());
+        let received = |participant: &str| pb::ReplyContext {
+            authored_by_bridge: false,
+            participant: Some(participant.into()),
+            ..reply_to("wa-0")
+        };
+        // Canonical ids name the author by LID; a phone-addressed group quotes
+        // the phone form, a LID-addressed one the LID.
+        assert_eq!(
+            quoted_participant(&sender, "456@g.us", received("9@lid"))
+                .await
+                .as_deref(),
+            Some("1555@s.whatsapp.net")
+        );
+        assert_eq!(
+            quoted_participant(&sender, "123@g.us", received("1555@s.whatsapp.net"))
+                .await
+                .as_deref(),
+            Some("9@lid")
+        );
+    }
+
+    #[tokio::test]
+    async fn a_bridge_copy_is_quoted_under_our_own_address_in_the_chat_s_form() {
+        let sender = sender(addressed(), FakeMedia::default());
+        assert_eq!(
+            quoted_participant(&sender, "123@g.us", reply_to("wa-0"))
+                .await
+                .as_deref(),
+            Some("7@lid")
+        );
+        assert_eq!(
+            quoted_participant(&sender, "456@g.us", reply_to("wa-0"))
+                .await
+                .as_deref(),
+            Some("1999@s.whatsapp.net")
+        );
+    }
+
+    #[tokio::test]
+    async fn an_unpaired_account_cannot_quote() {
+        let sender = sender(FakeClient::default(), FakeMedia::default());
+        let dispatch = pb::MessageCreateDispatch {
+            reply_context: Some(reply_to("wa-0")),
+            ..text("here")
+        };
+        let Err(failure) = sender.send_message(dispatch).await else {
+            panic!("nothing to quote as");
+        };
+        assert!(failure.is_permanent());
+    }
+
+    #[tokio::test]
+    async fn a_chat_is_addressed_in_its_form() {
+        let addresses = Arc::new(AddressBook::default());
+        // The DM last arrived under its phone form.
+        addresses.observe(
+            "9@lid",
+            &whatsapp_rust::types::message::MessageSource {
+                chat: "1555@s.whatsapp.net".parse().unwrap(),
+                ..Default::default()
+            },
+        );
+        let sender = WhatsAppSender::new(
+            addressed(),
+            FakeMedia::default(),
+            Runtime::default(),
+            None,
+            Arc::default(),
+            addresses,
+        );
+        let dispatch = pb::MessageCreateDispatch {
+            target_chat_id: "9@lid".into(),
+            ..text("hi")
+        };
+        sender.send_message(dispatch).await.unwrap();
+        let to = sender.client.sends.lock().unwrap()[0].0.clone();
+        assert_eq!(to.to_string(), "1555@s.whatsapp.net");
     }
 }

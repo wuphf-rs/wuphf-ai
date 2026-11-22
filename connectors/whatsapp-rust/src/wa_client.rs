@@ -17,12 +17,15 @@ use whatsapp_rust::media::{
     image_message, video_message,
 };
 use whatsapp_rust::send::RevokeType;
+use whatsapp_rust::types::message::AddressingMode;
 use whatsapp_rust::waproto::whatsapp as wa;
 use whatsapp_rust::{AppStateError, Jid, SendError, UploadOptions};
 use wuphf_connector::Failure;
 
+use crate::addressing::Account;
 use crate::chat_state::MuteCall;
 use crate::groups::{GroupDirectory, GroupFacts};
+use crate::identity::LidStore;
 use crate::session::LinkedClient;
 
 /// What an upload becomes: the library builder that carries it, with its
@@ -43,7 +46,13 @@ pub enum ChatAction {
     Archive(bool),
 }
 
-pub trait WaClient: Send + Sync + 'static {
+/// The account side (own addresses, LID migration, group addressing) and the
+/// LID store come with it, for the address book and the identity resolver.
+pub trait WaClient: Account + LidStore + Send + Sync + 'static {
+    /// Whether a session is linked: without one every send fails as
+    /// transient, so the core redelivers once a new session is linked.
+    fn linked(&self) -> Result<(), Failure>;
+
     /// Send `message` to `to`, returning its message id.
     fn send(
         &self,
@@ -76,9 +85,6 @@ pub trait WaClient: Send + Sync + 'static {
         chat: Jid,
         action: ChatAction,
     ) -> impl Future<Output = Result<(), Failure>> + Send;
-
-    /// The account's own phone JID, which a quote of our own message names.
-    fn own_pn(&self) -> Result<Option<Jid>, Failure>;
 
     /// A group's facts (subject, timer, …), cached.
     fn group_facts(&self, group: &Jid) -> impl Future<Output = Option<GroupFacts>> + Send;
@@ -176,12 +182,43 @@ impl WaClient for LiveClient {
         result.map_err(app_state_failure)
     }
 
-    fn own_pn(&self) -> Result<Option<Jid>, Failure> {
-        Ok(self.linked.get()?.get_pn())
+    fn linked(&self) -> Result<(), Failure> {
+        self.linked.get().map(|_| ())
     }
 
     async fn group_facts(&self, group: &Jid) -> Option<GroupFacts> {
         let client = self.linked.get().ok()?;
         self.groups.facts(&client, group).await
+    }
+}
+
+impl LidStore for LiveClient {
+    async fn lid_for_pn(&self, pn: &Jid) -> Option<Jid> {
+        self.linked.get().ok()?.lid_for_pn(pn).await
+    }
+
+    async fn pn_for_lid(&self, lid: &Jid) -> Option<Jid> {
+        self.linked.get().ok()?.pn_for_lid(lid).await
+    }
+}
+
+impl Account for LiveClient {
+    fn own_pn(&self) -> Option<Jid> {
+        self.linked.get().ok()?.get_pn()
+    }
+
+    fn own_lid(&self) -> Option<Jid> {
+        self.linked.get().ok()?.get_lid()
+    }
+
+    async fn lid_migrated(&self) -> bool {
+        match self.linked.get() {
+            Ok(client) => client.is_lid_migrated().await,
+            Err(_) => false,
+        }
+    }
+
+    async fn group_mode(&self, group: &Jid) -> Option<AddressingMode> {
+        Account::group_mode(&*self.linked.get().ok()?, group).await
     }
 }

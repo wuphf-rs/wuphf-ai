@@ -16,6 +16,7 @@ use whatsapp_rust::{Jid, Server};
 use wuphf_connector::MediaClient;
 use wuphf_proto::connector as pb;
 
+use crate::addressing::AddressBook;
 use crate::avatars::Avatars;
 use crate::chats::{Sightings, sighting_updates};
 use crate::disappearing::{
@@ -36,6 +37,7 @@ pub struct Normalizer {
     sightings: Arc<Sightings>,
     identity: Arc<Identity>,
     migrations: Arc<MigrationGate>,
+    addresses: Arc<AddressBook>,
 }
 
 /// The names a message needs, resolved from the contacts table before it is
@@ -60,6 +62,7 @@ impl Normalizer {
         media: MediaClient,
         identity: Arc<Identity>,
         migrations: Arc<MigrationGate>,
+        addresses: Arc<AddressBook>,
     ) -> Self {
         Self {
             inputs,
@@ -69,6 +72,7 @@ impl Normalizer {
             sightings: Arc::new(Sightings::default()),
             identity,
             migrations,
+            addresses,
         }
     }
 
@@ -103,6 +107,7 @@ impl Normalizer {
             }
         }
         let chat_id = chat.to_string();
+        self.addresses.observe(&chat_id, &info.source);
         let title = self.titles.title(client, info).await;
         // A message's media is fetched before it is mapped: the create names the
         // stored attachment. Protocol messages and reactions carry none.

@@ -3,6 +3,7 @@
 //! core events and executes dispatch commands; all routing decisions live in
 //! the core.
 
+mod addressing;
 mod avatars;
 mod chat_state;
 mod chats;
@@ -39,10 +40,12 @@ use tokio_util::sync::CancellationToken;
 use tracing::{error, info};
 use tracing_subscriber::EnvFilter;
 
+use crate::addressing::AddressBook;
 use crate::avatars::Avatars;
 use crate::config::Config;
 use crate::disappearing::TimerFallback;
 use crate::groups::GroupDirectory;
+use crate::identity::Identity;
 use crate::linking::Linking;
 use crate::sender::WhatsAppSender;
 use crate::session::{LinkedClient, Shared};
@@ -88,6 +91,11 @@ async fn main() -> anyhow::Result<()> {
     let (inputs_tx, inputs_rx) = mpsc::channel(EVENT_CAPACITY);
     let groups = Arc::new(GroupDirectory::new());
     let linked = LinkedClient::default();
+    // One identity resolver and address book for the process: the sessions
+    // name ids canonically and record each chat's form; the sender puts them
+    // back into that form.
+    let identity = Arc::new(Identity::default());
+    let addresses = Arc::new(AddressBook::default());
 
     let core_client = wuphf_connector::Client::new(wuphf_connector::Options {
         core_address: config.core_address.clone(),
@@ -116,6 +124,8 @@ async fn main() -> anyhow::Result<()> {
             media.clone(),
             config.runtime.clone(),
             fallback,
+            Arc::clone(&identity),
+            Arc::clone(&addresses),
         ),
         inputs_rx,
         cancel.clone(),
@@ -136,7 +146,8 @@ async fn main() -> anyhow::Result<()> {
         groups,
         linked,
         resync_all: AtomicBool::new(cli.resync_app_state),
-        identity: Arc::default(),
+        identity,
+        addresses,
         migrations: Arc::default(),
     };
     let mut whatsapp = tokio::spawn({

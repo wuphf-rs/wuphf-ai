@@ -26,6 +26,7 @@ use whatsapp_rust::types::events::Event;
 use wuphf_connector::{Failure, MediaClient};
 use wuphf_proto::connector as pb;
 
+use crate::addressing::AddressBook;
 use crate::avatars::Avatars;
 use crate::chats::ChatEvents;
 use crate::config::Config;
@@ -81,6 +82,7 @@ pub struct Shared {
     /// migrations already reported; process-wide, as a mapping outlives a
     /// session.
     pub identity: Arc<Identity>,
+    pub addresses: Arc<AddressBook>,
     pub migrations: Arc<MigrationGate>,
 }
 
@@ -141,6 +143,7 @@ async fn run_once(shared: &Shared, cancel: &CancellationToken) -> anyhow::Result
         shared.media.clone(),
         Arc::clone(&shared.identity),
         Arc::clone(&shared.migrations),
+        Arc::clone(&shared.addresses),
     );
     let chat_events = ChatEvents::new(
         inputs.clone(),
