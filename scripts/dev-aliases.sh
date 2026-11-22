@@ -31,11 +31,13 @@ wuphf dev session
   wmi    wuphf-misc         non-bridging features (Instagram downloader)
   wtui   wuphf-tui          observer TUI
 
-Each command runs with no arguments for the usual dev config. Pass any
-argument to drive it yourself, e.g. `wtg reset -chat telegram:channel:123`
-or `ws serve --config config.local.toml`.
+Each command runs with no arguments on its component's config.local.toml
+(git-ignored; copy the component's config.example.toml to start one), or on
+the example when there is none, and says which on stderr. Pass any argument
+to drive it yourself, e.g. `wtg reset -config config.local.toml -chat
+telegram:channel:123`; arguments replace the config flag too.
 
-Override a config without arguments: WUPHF_SERVER_CONFIG,
+Point a command at another config without arguments: WUPHF_SERVER_CONFIG,
 WUPHF_TELEGRAM_CONFIG, WUPHF_WHATSAPP_CONFIG, WUPHF_INSTAGRAM_CONFIG,
 WUPHF_MEDIACONV_CONFIG, WUPHF_WHATSAPP_RUST_CONFIG, WUPHF_MISC_CONFIG.
 

@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
-# Run the whatsapp-rust connector from its own directory, where its session and
-# config files live. Config comes from $WUPHF_WHATSAPP_RUST_CONFIG, or the
-# checked-in example. Any argument switches to passthrough.
+# Run the whatsapp-rust connector from its own directory, where its session
+# and config files live. Config comes from $WUPHF_WHATSAPP_RUST_CONFIG,
+# else config.local.toml, else the checked-in example. Any argument switches
+# to passthrough.
 # Runs the binary scripts/install-dev-bins.sh installed, when there is one, and
 # builds with `cargo run` otherwise. Its whatsapp-rust dependency uses the
 # nightly-only portable_simd feature, which RUSTC_BOOTSTRAP lets the dev shell's
@@ -13,6 +14,7 @@
 set -euo pipefail
 
 repo="$(cd "$(dirname "$(readlink -f "$0")")/../.." && pwd)"
+. "$repo/scripts/lib/dev-config.sh"
 installed="$repo/scripts/dev-bin/.bin/wuphf-whatsapp-rust"
 cd "$repo/connectors/whatsapp-rust"
 
@@ -24,4 +26,4 @@ fi
 if [ "$#" -gt 0 ]; then
     exec "${run[@]}" "$@"
 fi
-exec "${run[@]}" --config "${WUPHF_WHATSAPP_RUST_CONFIG:-config.example.toml}"
+exec "${run[@]}" --config "$(dev_config "${WUPHF_WHATSAPP_RUST_CONFIG:-}" config.example.toml)"

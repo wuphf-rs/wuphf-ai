@@ -28,10 +28,8 @@
 *.sqlite.*
 /.env
 /.env.*
-/config.local.toml
-/connectors/*/config.local.toml
-/providers/*/config.local.toml
-/misc/config.local.toml
+# Every component's own config, which the dev launchers pick over the example.
+config.local.toml
 *.session.json
 *.cookies.json
 *.state.json

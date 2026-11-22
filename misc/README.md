@@ -59,7 +59,8 @@ export WUPHF_OBSERVER_TOKEN=<the core's observer_token>
 (cd misc && go run ./cmd/wuphf-misc -config config.local.toml)
 ```
 
-In the dev session: `wmi` (`WUPHF_MISC_CONFIG` names the config). Under
+In the dev session: `wmi` (it runs on `misc/config.local.toml` when there is
+one; `WUPHF_MISC_CONFIG` names another). Under
 systemd: `deploy/systemd/wuphf-misc.service`.
 
 **The observer token is full access.** It reads every chat the core has
