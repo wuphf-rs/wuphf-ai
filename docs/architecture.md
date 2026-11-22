@@ -158,6 +158,9 @@ botconf section at `connector_settings.<id>` (`connector_settings` in
 remembers the declaration in `connector_settings_declarations` so the section
 exists before the connector reconnects, and pushes changes back through
 `Watch`, which a connector may follow for its own section without an actor.
+The Go connectors do this through `connectors/shared/settings`, the Rust ones
+through the connector SDK's `settings` module (`crates/wuphf-connector`),
+which talks to the service through `botconf-proto` only.
 See docs/connector-protocol.md, "A connector's own settings".
 
 ## Data Flow

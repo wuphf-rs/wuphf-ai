@@ -174,7 +174,12 @@ another format (Telegram video and Lottie stickers) are first converted to
 animated WebP by the core's `media.convert` provider (`providers/mediaconv`),
 and arrive as files when it is not running or takes longer than
 `media_convert_timeout_ms` (default 20000). Set `functions_token_env` when
-the core sets `[functions] invoke_token_env`. It registers
+the core sets `[functions] invoke_token_env`. Its runtime settings are the Go
+connector's (`log_level`, `media_convert_timeout_ms`, `[sticker_metadata]`,
+`[rendering]`, with the same keys and choices): it declares them when it
+registers, so they can be changed from the settings panel or `wuphf settings`
+under `connector_settings.<connector id>` and apply without a restart; a
+changed log level applies at once unless `WUPHF_LOG_LEVEL` is set. It registers
 as an Android client so WhatsApp delivers view-once media: set `client_mode`
 to `"android"` for a personal account or `"android_business"` for a WhatsApp
 Business account. The mode is sent at pairing, so changing it needs a fresh
