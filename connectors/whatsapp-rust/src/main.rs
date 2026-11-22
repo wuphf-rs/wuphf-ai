@@ -12,11 +12,14 @@ mod device;
 mod disappearing;
 mod groups;
 mod health;
+mod linking;
 mod media;
 mod names;
 mod normalize;
+mod qr_png;
 mod receipts;
 mod sender;
+mod session;
 mod supervise;
 
 use std::path::PathBuf;
@@ -26,22 +29,16 @@ use anyhow::Context as _;
 use clap::Parser;
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
-use tracing::{error, info, warn};
+use tracing::{error, info};
 use tracing_subscriber::EnvFilter;
-use whatsapp_rust::pair_code::PairCodeOptions;
-use whatsapp_rust::prelude::*;
 
 use crate::avatars::Avatars;
-use crate::chats::ChatEvents;
 use crate::config::Config;
-use crate::contacts::Contacts;
 use crate::disappearing::TimerFallback;
 use crate::groups::GroupDirectory;
-use crate::health::Health;
-use crate::names::ChatTitles;
-use crate::normalize::Normalizer;
-use crate::receipts::Receipts;
+use crate::linking::Linking;
 use crate::sender::WhatsAppSender;
+use crate::session::{LinkedClient, Shared};
 use crate::supervise::{Stop, supervise};
 
 /// Buffers normalized inbound events ahead of the core session so a core
@@ -74,128 +71,11 @@ async fn main() -> anyhow::Result<()> {
             )
         })?;
 
-    let store = SqliteStore::new(&config.session_database)
-        .await
-        .context("open WhatsApp session store")?;
-    // The connector's contact names live in the session store's file, through
-    // its shared pool.
-    let contacts = Arc::new(
-        Contacts::open(store.shared())
-            .await
-            .context("prepare the WhatsApp contacts table")?,
-    );
-    // One core media client stores inbound attachments and chat pictures.
     let media = wuphf_connector::MediaClient::connect(&config.core_address, &core_token)
         .context("prepare the core media client")?;
-    let avatars = Arc::new(Avatars::new(media.clone()));
     let (inputs_tx, inputs_rx) = mpsc::channel(EVENT_CAPACITY);
-    // One group directory serves the namer (subjects), the first-sighting
-    // report (description, members) and the sender (timers).
     let groups = Arc::new(GroupDirectory::new());
-    let titles = Arc::new(ChatTitles::new(Arc::clone(&groups), contacts));
-    let normalizer = Normalizer::new(
-        inputs_tx.clone(),
-        Arc::clone(&titles),
-        Arc::clone(&avatars),
-        media,
-    );
-    let chat_events = ChatEvents::new(inputs_tx.clone(), titles, avatars);
-    let health = Health::new(inputs_tx.clone());
-    let receipts = Receipts::new(inputs_tx.clone());
-
-    let (profile, device_props) = device::client_identity(config.client_mode);
-    warn!(
-        client_mode = ?config.client_mode,
-        "registering the WhatsApp session as an Android client (experimental)"
-    );
-    let mut builder = Bot::builder()
-        .with_backend(store)
-        .with_device_props(device_props)
-        .on_qr_code(|code, timeout| async move {
-            info!(
-                valid_for_seconds = timeout.as_secs(),
-                "scan the QR code with WhatsApp"
-            );
-            match qrcode::QrCode::new(code.as_bytes()) {
-                Ok(image) => println!(
-                    "{}",
-                    image
-                        .render::<qrcode::render::unicode::Dense1x2>()
-                        .quiet_zone(false)
-                        .build()
-                ),
-                // The raw payload still pairs when pasted into a QR tool.
-                Err(_) => println!("QR payload: {code}"),
-            }
-        })
-        .on_pair_code(|code, timeout| async move {
-            println!(
-                "WhatsApp pair code (valid for {} seconds): {code}",
-                timeout.as_secs()
-            );
-        })
-        .on_connected(|_client| async {
-            info!("connected to WhatsApp");
-        })
-        .on_logged_out(|info| async move {
-            error!(
-                ?info,
-                "logged out of WhatsApp; delete the session database and restart to pair again"
-            );
-        })
-        .on_message(move |ctx| {
-            let normalizer = normalizer.clone();
-            async move { normalizer.handle(ctx).await }
-        })
-        // Chat profiles (titles, descriptions, members, pictures, timers, pin /
-        // mute / archive) come from group notifications, picture changes,
-        // app-state syncs and history syncs. DisappearingModeChanged is
-        // deliberately not handled: a contact's account-wide default applies
-        // only to chats started after it changes.
-        .on_event_for(
-            &[
-                EventKind::GroupUpdate,
-                EventKind::PictureUpdate,
-                EventKind::ContactUpdate,
-                EventKind::PinUpdate,
-                EventKind::MuteUpdate,
-                EventKind::ArchiveUpdate,
-                EventKind::HistorySync,
-            ],
-            move |event, client| {
-                let chat_events = chat_events.clone();
-                async move { chat_events.handle(event, client).await }
-            },
-        )
-        // Session loss and recovery become owner notices, like the Go
-        // connector's.
-        .on_event_for(
-            &[
-                EventKind::LoggedOut,
-                EventKind::StreamReplaced,
-                EventKind::ClientOutdated,
-                EventKind::TemporaryBan,
-                EventKind::Connected,
-            ],
-            move |event, _client| {
-                let health = health.clone();
-                async move { health.handle(event).await }
-            },
-        )
-        // Delivered and read receipts in direct chats mark the mirror copies.
-        .on_event_for(&[EventKind::Receipt], move |event, _client| {
-            let receipts = receipts.clone();
-            async move { receipts.handle(event).await }
-        });
-    if let Some(phone_number) = config.phone_number.clone() {
-        builder = builder.with_pair_code(PairCodeOptions::for_phone(phone_number));
-    }
-    let bot = builder.build().await.context("build WhatsApp bot")?;
-    // The profile is in-memory only, and the library reads it for every login
-    // and registration payload: set once before the first connect, it holds
-    // for every reconnect of this process.
-    bot.client().set_client_profile(profile).await;
-    let mut handle = bot.spawn();
+    let linked = LinkedClient::default();
 
     let core_client = wuphf_connector::Client::new(wuphf_connector::Options {
         core_address: config.core_address.clone(),
@@ -215,12 +95,38 @@ async fn main() -> anyhow::Result<()> {
         .supports_disappearing_timers
         .then(|| TimerFallback::new(Arc::clone(&groups), inputs_tx.clone()));
     let cancel = CancellationToken::new();
+    // The core session lives as long as the process; the WhatsApp session
+    // below is replaced after a logout, and the sender always reaches the
+    // current one.
     let session = core_client.run(
-        WhatsAppSender::new(handle.client(), fallback),
+        WhatsAppSender::new(linked.clone(), fallback),
         inputs_rx,
         cancel.clone(),
     );
     tokio::pin!(session);
+
+    let whatsapp_cancel = CancellationToken::new();
+    let shared = Shared {
+        linking: Arc::new(Linking::new(
+            inputs_tx.clone(),
+            media.clone(),
+            config.login_method(),
+        )),
+        avatars: Arc::new(Avatars::new(media.clone())),
+        config,
+        inputs: inputs_tx,
+        media,
+        groups,
+        linked,
+    };
+    let mut whatsapp = tokio::spawn({
+        let cancel = whatsapp_cancel.clone();
+        async move {
+            if let Err(error) = session::run(shared, cancel).await {
+                error!(%error, "the WhatsApp session could not run");
+            }
+        }
+    });
 
     let shutdown = async {
         // A failure to listen for Ctrl-C leaves the connector to its session.
@@ -228,22 +134,28 @@ async fn main() -> anyhow::Result<()> {
             std::future::pending::<()>().await;
         }
     };
-    let stop = supervise(&mut session, &mut handle, shutdown, || {
+    let stop = supervise(&mut session, &mut whatsapp, shutdown, || {
         error!(
             "the WhatsApp client stopped and will not reconnect (the owner was sent a notice); \
              the connector stays up so the notice reaches the core: fix the session and restart it"
         );
     })
     .await;
-    match stop {
-        Stop::SessionEnded(result) => result?,
+    let result = match stop {
+        Stop::SessionEnded(result) => result,
         Stop::Shutdown => {
             info!("shutting down");
             cancel.cancel();
-            session.await?;
+            session.await
         }
+    };
+    // The WhatsApp session shuts its client down cleanly. supervise may have
+    // seen the task end already; a finished task is not awaited twice.
+    whatsapp_cancel.cancel();
+    if !whatsapp.is_finished() {
+        let _ = whatsapp.await;
     }
-    handle.shutdown().await;
+    result?;
     Ok(())
 }
 

@@ -18,6 +18,8 @@ clap = { version = "4", features = ["derive"] }
 # The contacts table runs on the session store's diesel pool; pinned to the
 # version that store links (see src/contacts.rs).
 diesel = { version = "=2.3.11", default-features = false, features = ["sqlite"] }
+# Only zlib-rs, the backend the lock already has, for the QR PNG.
+flate2 = { version = "1", default-features = false, features = ["zlib-rs"] }
 qrcode = { version = "0.14", default-features = false }
 serde = { version = "1", features = ["derive"] }
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "signal", "sync", "time"] }

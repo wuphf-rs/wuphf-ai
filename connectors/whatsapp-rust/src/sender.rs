@@ -2,8 +2,6 @@
 //! sends. WhatsApp has no threads, so dispatches never carry a thread target
 //! and no delivery ever reports a provisioned thread.
 
-use std::sync::Arc;
-
 use whatsapp_rust::client::Client;
 use whatsapp_rust::send::RevokeType;
 use whatsapp_rust::wacore::proto_helpers::{MessageBuilderExt, build_quote_context_with_info};
@@ -14,17 +12,19 @@ use wuphf_proto::connector as pb;
 
 use crate::chat_state::{MuteCall, mute_call, now_ms};
 use crate::disappearing::{TimerFallback, stamp};
+use crate::session::LinkedClient;
 
 pub struct WhatsAppSender {
-    client: Arc<Client>,
+    /// The running session's client, read per dispatch: a logout replaces it.
+    linked: LinkedClient,
     /// Set when the connector stamps disappearing timers: what to do with a
     /// dispatch that arrives without one.
     fallback: Option<TimerFallback>,
 }
 
 impl WhatsAppSender {
-    pub fn new(client: Arc<Client>, fallback: Option<TimerFallback>) -> Self {
-        Self { client, fallback }
+    pub fn new(linked: LinkedClient, fallback: Option<TimerFallback>) -> Self {
+        Self { linked, fallback }
     }
 }
 
@@ -66,11 +66,14 @@ impl Sender for WhatsAppSender {
     async fn send_message(&self, dispatch: pb::MessageCreateDispatch) -> Result<Delivery, Failure> {
         check_attachments(&dispatch)?;
         let chat = parse_chat(&dispatch.target_chat_id)?;
+        let client = self.linked.get()?;
         let text = dispatch.text.unwrap_or_default();
         let mut message = match dispatch.reply_context {
             // A system note is plain text: no sender label, no reply.
             _ if dispatch.system_note => wa::Message::text(text),
-            Some(reply) => wa::Message::text_with_context(text, self.quote_context(&chat, &reply)?),
+            Some(reply) => {
+                wa::Message::text_with_context(text, quote_context(&client, &chat, &reply)?)
+            }
             None => {
                 if dispatch.reply_to_platform_message_id.is_some() {
                     return Err(Failure::permanent(
@@ -86,7 +89,7 @@ impl Sender for WhatsAppSender {
             Some(fallback) => {
                 fallback
                     .resolve(
-                        &self.client,
+                        &client,
                         &dispatch.target_chat_id,
                         &chat,
                         dispatch.disappearing,
@@ -96,8 +99,7 @@ impl Sender for WhatsAppSender {
             None => dispatch.disappearing,
         };
         stamp(&mut message, timer.as_ref());
-        let result = self
-            .client
+        let result = client
             .send_message(chat, message)
             .await
             .map_err(transient)?;
@@ -112,7 +114,8 @@ impl Sender for WhatsAppSender {
     async fn edit_message(&self, dispatch: pb::MessageEditDispatch) -> Result<String, Failure> {
         let chat = parse_chat(&dispatch.target_chat_id)?;
         let text = dispatch.text.unwrap_or_default();
-        self.client
+        self.linked
+            .get()?
             .edit_message(
                 chat,
                 dispatch.target_platform_message_id.clone(),
@@ -129,7 +132,8 @@ impl Sender for WhatsAppSender {
     /// never set here.
     async fn apply_chat_state(&self, dispatch: pb::ChatStateDispatch) -> Result<String, Failure> {
         let chat = parse_chat(&dispatch.target_chat_id)?;
-        let actions = self.client.chat_actions();
+        let client = self.linked.get()?;
+        let actions = client.chat_actions();
         if let Some(pinned) = dispatch.pinned {
             let result = if pinned {
                 actions.pin_chat(&chat).await
@@ -161,7 +165,8 @@ impl Sender for WhatsAppSender {
     /// id is returned unchanged for the acknowledgement.
     async fn delete_message(&self, dispatch: pb::MessageDeleteDispatch) -> Result<String, Failure> {
         let chat = parse_chat(&dispatch.target_chat_id)?;
-        self.client
+        self.linked
+            .get()?
             .revoke_message(
                 chat,
                 dispatch.target_platform_message_id.clone(),
@@ -173,29 +178,27 @@ impl Sender for WhatsAppSender {
     }
 }
 
-impl WhatsAppSender {
-    /// Build the quote metadata for a reply dispatch. The quoted copy at this
-    /// endpoint is always bridge-authored, since the router never dispatches a
-    /// message back to its origin endpoint, so the quoted participant is our
-    /// own account.
-    fn quote_context(
-        &self,
-        chat: &Jid,
-        reply: &pb::ReplyContext,
-    ) -> Result<wa::ContextInfo, Failure> {
-        let own = self.client.get_pn().ok_or_else(|| {
-            Failure::permanent("outbound WhatsApp reply requires a paired account JID")
-        })?;
-        let own = own.to_non_ad();
-        let quoted = wa::Message::text(reply.text.clone().unwrap_or_default());
-        Ok(build_quote_context_with_info(
-            reply.platform_message_id.clone(),
-            &own,
-            chat,
-            chat,
-            &quoted,
-        ))
-    }
+/// Build the quote metadata for a reply dispatch. The quoted copy at this
+/// endpoint is always bridge-authored, since the router never dispatches a
+/// message back to its origin endpoint, so the quoted participant is our own
+/// account.
+fn quote_context(
+    client: &Client,
+    chat: &Jid,
+    reply: &pb::ReplyContext,
+) -> Result<wa::ContextInfo, Failure> {
+    let own = client.get_pn().ok_or_else(|| {
+        Failure::permanent("outbound WhatsApp reply requires a paired account JID")
+    })?;
+    let own = own.to_non_ad();
+    let quoted = wa::Message::text(reply.text.clone().unwrap_or_default());
+    Ok(build_quote_context_with_info(
+        reply.platform_message_id.clone(),
+        &own,
+        chat,
+        chat,
+        &quoted,
+    ))
 }
 
 #[cfg(test)]

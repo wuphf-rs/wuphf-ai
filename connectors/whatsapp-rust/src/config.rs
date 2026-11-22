@@ -21,10 +21,15 @@ pub struct Config {
     /// environment variable overrides it.
     #[serde(default = "default_log_level")]
     pub log_level: String,
-    /// When set, pair with an 8-character code for this phone number
-    /// (country code, digits only) instead of requiring a QR scan.
+    /// The account's phone number (country code, digits only), which a pair
+    /// code is issued for. Required by `login_method = "pair_code"`.
     #[serde(default)]
     pub phone_number: Option<String>,
+    /// How the session is linked, at first start and again after a logout:
+    /// `"qr"` (scan a QR code) or `"pair_code"` (type an 8-character code into
+    /// WhatsApp). Unset: `pair_code` when `phone_number` is set, else `qr`.
+    #[serde(default)]
+    login_method: Option<LoginMethod>,
     /// Stamp each chat's disappearing-messages timer on what this connector
     /// sends, look a group's timer up when the core does not know it, and
     /// warn the owner when a DM's timer is unknown. Part of the registration,
@@ -52,6 +57,17 @@ pub enum ClientMode {
     AndroidBusiness,
 }
 
+/// How the WhatsApp session is linked to the account.
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum LoginMethod {
+    /// Scan a QR code in WhatsApp → Linked devices → Link a device.
+    Qr,
+    /// Type an 8-character code into WhatsApp after "Link with phone number
+    /// instead"; needs `phone_number`.
+    PairCode,
+}
+
 fn default_log_level() -> String {
     "info".into()
 }
@@ -64,8 +80,30 @@ impl Config {
             .map_err(|error| anyhow::anyhow!("parse config {}: {error}", path.display()))
     }
 
-    fn parse(contents: &str) -> Result<Self, toml::de::Error> {
-        toml::from_str(contents)
+    fn parse(contents: &str) -> anyhow::Result<Self> {
+        let config: Self = toml::from_str(contents)?;
+        if config.login_method() == LoginMethod::PairCode && config.phone_number.is_none() {
+            anyhow::bail!("login_method = \"pair_code\" needs phone_number");
+        }
+        Ok(config)
+    }
+
+    /// The configured login method, defaulted from `phone_number`: before the
+    /// key existed, a set phone number meant pairing by code.
+    pub fn login_method(&self) -> LoginMethod {
+        self.login_method.unwrap_or(match self.phone_number {
+            Some(_) => LoginMethod::PairCode,
+            None => LoginMethod::Qr,
+        })
+    }
+
+    /// The phone number a pair code is issued for, when the session pairs by
+    /// code.
+    pub fn pair_code_phone(&self) -> Option<&str> {
+        match self.login_method() {
+            LoginMethod::PairCode => self.phone_number.as_deref(),
+            LoginMethod::Qr => None,
+        }
     }
 }
 
@@ -91,6 +129,32 @@ mod tests {
         let config =
             Config::parse(&format!("{MINIMAL}client_mode = \"android_business\"\n")).unwrap();
         assert_eq!(config.client_mode, ClientMode::AndroidBusiness);
+    }
+
+    #[test]
+    fn the_login_method_defaults_from_the_phone_number() {
+        let config = Config::parse(MINIMAL).unwrap();
+        assert_eq!(config.login_method(), LoginMethod::Qr);
+        assert_eq!(config.pair_code_phone(), None);
+        let config = Config::parse(&format!("{MINIMAL}phone_number = \"15551234567\"\n")).unwrap();
+        assert_eq!(config.login_method(), LoginMethod::PairCode);
+        assert_eq!(config.pair_code_phone(), Some("15551234567"));
+    }
+
+    #[test]
+    fn qr_login_ignores_a_phone_number() {
+        let config = Config::parse(&format!(
+            "{MINIMAL}phone_number = \"15551234567\"\nlogin_method = \"qr\"\n"
+        ))
+        .unwrap();
+        assert_eq!(config.login_method(), LoginMethod::Qr);
+        assert_eq!(config.pair_code_phone(), None);
+    }
+
+    #[test]
+    fn pair_code_login_needs_a_phone_number() {
+        let error = Config::parse(&format!("{MINIMAL}login_method = \"pair_code\"\n")).unwrap_err();
+        assert!(error.to_string().contains("needs phone_number"), "{error}");
     }
 
     #[test]

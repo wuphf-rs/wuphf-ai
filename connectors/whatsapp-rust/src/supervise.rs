@@ -13,9 +13,10 @@ pub enum Stop<E> {
 }
 
 /// Runs until the core session returns or `shutdown` fires. The WhatsApp
-/// client finishing does not end the connector: the library reconnects by
-/// itself after every recoverable drop, so it finishes only when the session
-/// is gone for good (a logout, a replaced stream, a ban, an outdated client).
+/// session ending does not end the connector: the library reconnects by
+/// itself after every recoverable drop, and a logout links a new session, so
+/// it ends only when a client is gone for good otherwise (a replaced stream, a
+/// ban, an outdated client).
 /// The core session stays up so the notice saying why reaches the core and the
 /// owner; `on_whatsapp_stopped` runs once, then the loop keeps waiting.
 pub async fn supervise<S, W, Q, E>(

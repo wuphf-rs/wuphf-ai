@@ -14,8 +14,17 @@ session_database = "whatsapp-rust.session.db"
 # Log verbosity: trace, debug, info, warn, error. WUPHF_LOG_LEVEL overrides.
 log_level = "info"
 
-# Omit to pair with a terminal QR code, or set an E.164 number without `+` to
-# request a pair code.
+# How the session is linked, at the first start and again by itself after
+# WhatsApp logs it out: "qr" (scan a QR code in WhatsApp → Linked devices →
+# Link a device) or "pair_code" (type an 8-character code after "Link with
+# phone number instead"; needs phone_number). Either way the code is printed
+# here and sent to the owner through the core's notice chats (the QR code as a
+# picture): the first at once, later ones at growing gaps until it is linked.
+# Unset: "pair_code" when phone_number is set, else "qr".
+# login_method = "qr"
+
+# The account's number, country code first, digits only (no `+`): the number a
+# pair code is issued for.
 # phone_number = "15551234567"
 
 # Stamp each chat's disappearing-messages timer on what this connector sends,

@@ -3092,6 +3092,7 @@ dependencies = [
  "anyhow",
  "clap",
  "diesel",
+ "flate2",
  "qrcode",
  "serde",
  "tokio",
