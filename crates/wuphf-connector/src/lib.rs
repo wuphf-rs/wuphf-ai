@@ -4,8 +4,8 @@
 //! crate maintains the gRPC session against the core, uploads media to and
 //! downloads it from the core's media store through [`MediaClient`], calls
 //! the core's remote functions through [`FunctionsClient`], queues owner
-//! notices with [`send_notice`], and installs the log subscriber with a live
-//! level ([`logging`]).
+//! notices with [`send_notice`], installs the log subscriber with a live level
+//! ([`logging`]), and declares and follows runtime settings ([`settings`]).
 
 mod client;
 mod functions;
@@ -13,6 +13,7 @@ pub mod logging;
 mod media;
 mod notice;
 mod sender;
+pub mod settings;
 
 pub use client::{Client, Options, PermanentFailureClassifier, SessionError};
 pub use functions::{

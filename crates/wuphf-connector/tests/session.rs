@@ -150,6 +150,7 @@ fn sdk_client(address: &str) -> Client {
         supports_disappearing_timers: false,
         token: TG_TOKEN.into(),
         is_permanent: None,
+        settings: None,
     })
 }
 
@@ -348,6 +349,7 @@ async fn inbound_event_frames_are_forwarded_to_the_core() {
             supports_disappearing_timers: false,
             token: WA_TOKEN.into(),
             is_permanent: None,
+            settings: None,
         });
         let received = Arc::new(StdMutex::new(Vec::new()));
         let sender = HarnessSender::succeeding(received);
@@ -422,6 +424,7 @@ async fn the_registration_carries_the_disappearing_capability() {
             supports_disappearing_timers: true,
             token: WA_TOKEN.into(),
             is_permanent: None,
+            settings: None,
         });
         let sender = HarnessSender::succeeding(Arc::new(StdMutex::new(Vec::new())));
         async move { client.run(sender, inputs_rx, cancel).await }

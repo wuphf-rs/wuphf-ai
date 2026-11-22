@@ -53,6 +53,11 @@ pub struct Options {
     /// When set, classifies platform-specific failures as permanent in
     /// addition to explicit [`Failure::Permanent`] marking.
     pub is_permanent: Option<Arc<PermanentFailureClassifier>>,
+    /// The connector's runtime settings, declared at registration (see
+    /// [`crate::settings`]): the core stores and validates them and pushes
+    /// every change back. `None` declares none; a section declared earlier is
+    /// kept.
+    pub settings: Option<pb::ConnectorSettingsDeclaration>,
 }
 
 #[derive(Debug, Error)]
@@ -151,8 +156,7 @@ impl Client {
                         supports_topic_create: self.opts.supports_topic_create,
                         supports_disappearing_timers: self.opts.supports_disappearing_timers,
                     }),
-                    // This SDK declares no runtime settings yet.
-                    settings: None,
+                    settings: self.opts.settings.clone(),
                 })),
             })
             .map_err(|_| SessionError::StreamClosed)?;

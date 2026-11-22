@@ -301,8 +301,8 @@ checksum = "dc0b364ead1874514c8c2855ab558056ebfeb775653e7ae45ff72f28f8f3166c"
 
 [[package]]
 name = "botconf"
-version = "0.10.0"
-source = "git+https://github.com/propheci/botconf?tag=v0.10.0#c6e72c6badac88b8849c1a76221bbac2b84f012d"
+version = "0.11.0"
+source = "git+https://github.com/propheci/botconf?tag=v0.11.0#01e01041cc8607991521ba288fc00cda0a5076f2"
 dependencies = [
  "arc-swap",
  "clap",
@@ -317,30 +317,40 @@ dependencies = [
 
 [[package]]
 name = "botconf-grpc"
-version = "0.10.0"
-source = "git+https://github.com/propheci/botconf?tag=v0.10.0#c6e72c6badac88b8849c1a76221bbac2b84f012d"
+version = "0.11.0"
+source = "git+https://github.com/propheci/botconf?tag=v0.11.0#01e01041cc8607991521ba288fc00cda0a5076f2"
 dependencies = [
  "botconf",
  "botconf-panel",
+ "botconf-proto",
  "prost",
  "serde_json",
  "tokio",
  "tokio-stream",
  "tonic",
- "tonic-build",
  "tracing",
 ]
 
 [[package]]
 name = "botconf-panel"
-version = "0.10.0"
-source = "git+https://github.com/propheci/botconf?tag=v0.10.0#c6e72c6badac88b8849c1a76221bbac2b84f012d"
+version = "0.11.0"
+source = "git+https://github.com/propheci/botconf?tag=v0.11.0#01e01041cc8607991521ba288fc00cda0a5076f2"
 dependencies = [
  "botconf",
  "futures",
  "serde_json",
  "thiserror 2.0.21",
  "tracing",
+]
+
+[[package]]
+name = "botconf-proto"
+version = "0.11.0"
+source = "git+https://github.com/propheci/botconf?tag=v0.11.0#01e01041cc8607991521ba288fc00cda0a5076f2"
+dependencies = [
+ "prost",
+ "tonic",
+ "tonic-build",
 ]
 
 [[package]]
@@ -3910,6 +3920,8 @@ name = "wuphf-connector"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "botconf-proto",
+ "prost",
  "serde",
  "serde_json",
  "thiserror 2.0.21",
