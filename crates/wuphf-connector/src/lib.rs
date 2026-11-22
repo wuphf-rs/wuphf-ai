@@ -3,11 +3,13 @@
 //! a [`Sender`] implementation and a stream of inbound event frames; this
 //! crate maintains the gRPC session against the core, uploads media to and
 //! downloads it from the core's media store through [`MediaClient`], calls
-//! the core's remote functions through [`FunctionsClient`], and queues owner
-//! notices with [`send_notice`].
+//! the core's remote functions through [`FunctionsClient`], queues owner
+//! notices with [`send_notice`], and installs the log subscriber with a live
+//! level ([`logging`]).
 
 mod client;
 mod functions;
+pub mod logging;
 mod media;
 mod notice;
 mod sender;
