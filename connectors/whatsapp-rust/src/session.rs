@@ -32,7 +32,7 @@ use crate::contacts::Contacts;
 use crate::device;
 use crate::groups::GroupDirectory;
 use crate::health::Health;
-use crate::linking::Linking;
+use crate::linking::{Linking, PairCodeAsk};
 use crate::names::ChatTitles;
 use crate::normalize::Normalizer;
 use crate::receipts::Receipts;
@@ -147,36 +147,33 @@ async fn run_once(shared: &Shared, cancel: &CancellationToken) -> anyhow::Result
     let builder = Bot::builder()
         .with_backend(store)
         .with_device_props(device_props)
-        // Every pairing round's QR codes, and in pair-code mode a pair code when
-        // one is due: the library asks for a pair code only once per bot, so a
-        // round after the first would offer none. Off the event path, since
-        // asking waits on WhatsApp.
-        .on_event_for(&[EventKind::PairingQrCode], move |event, client| {
-            let linking = Arc::clone(&qr_linking);
-            let phone = pair_code_phone.clone();
-            async move {
-                let Event::PairingQrCode(qr) = &*event else {
-                    return;
-                };
-                let (code, valid) = (qr.code.clone(), qr.timeout);
-                tokio::spawn(async move {
-                    linking.qr(code, valid).await;
-                    let (Some(phone), Some(next)) = (phone, linking.pair_code_due()) else {
-                        return;
-                    };
-                    match client
-                        .pair_with_code(PairCodeOptions::for_phone(phone))
-                        .await
-                    {
-                        Ok(code) => linking.pair_code(code, next).await,
-                        Err(error) => warn!(
-                            %error,
-                            "could not get a WhatsApp pair code; this round offers the QR code only"
-                        ),
-                    }
-                });
-            }
-        })
+        // Every pairing round's QR codes, and in pair-code mode the round's pair
+        // code: the library asks for a pair code only once per bot, so a round
+        // after the first would offer none. When WhatsApp asks for a new code
+        // (one entered that it no longer takes), a new one at once. Off the
+        // event path, since asking waits on WhatsApp.
+        .on_event_for(
+            &[EventKind::PairingQrCode, EventKind::PairingCodeRefresh],
+            move |event, client| {
+                let linking = Arc::clone(&qr_linking);
+                let phone = pair_code_phone.clone();
+                async move {
+                    tokio::spawn(async move {
+                        let ask = match &*event {
+                            Event::PairingQrCode(qr) => {
+                                linking.qr(qr.code.clone(), qr.timeout).await;
+                                linking.pair_code_ask()
+                            }
+                            Event::PairingCodeRefresh(_) => linking.pair_code_refresh(),
+                            _ => None,
+                        };
+                        if let (Some(phone), Some(ask)) = (phone, ask) {
+                            ask_pair_code(&client, &linking, phone, ask).await;
+                        }
+                    });
+                }
+            },
+        )
         .on_connected(move |_client| {
             connected_linking.linked();
             async {
@@ -262,11 +259,30 @@ async fn run_once(shared: &Shared, cancel: &CancellationToken) -> anyhow::Result
     Ok(end)
 }
 
-/// Rename the session database at `path` and its `-wal` / `-shm` files to
-/// `<path>.logged-out-<at>…`, returning the database's new path. Files that do
-/// not exist are skipped.
+/// Ask WhatsApp for a pair code for `phone` and hand it to `linking`.
+async fn ask_pair_code(client: &Arc<Client>, linking: &Linking, phone: String, ask: PairCodeAsk) {
+    let options = PairCodeOptions {
+        show_push_notification: ask.prompt_phone,
+        ..PairCodeOptions::for_phone(phone)
+    };
+    match client.pair_with_code(options).await {
+        Ok(code) => linking.pair_code(code, ask.tell).await,
+        Err(error) => warn!(%error, "could not get a WhatsApp pair code"),
+    }
+}
+
+/// Rename the session database at `path` and its `-wal` / `-shm` files with
+/// `.logged-out-<at>` before the extension (`session.db` becomes
+/// `session.logged-out-<at>.db`, so ignore rules for `*.db` still match),
+/// returning the database's new path. Files that do not exist are skipped.
 fn move_aside(path: &Path, at: u64) -> std::io::Result<PathBuf> {
-    let kept = PathBuf::from(format!("{}.logged-out-{at}", path.display()));
+    let mut name = path.file_stem().unwrap_or_default().to_os_string();
+    name.push(format!(".logged-out-{at}"));
+    if let Some(extension) = path.extension() {
+        name.push(".");
+        name.push(extension);
+    }
+    let kept = path.with_file_name(name);
     for suffix in ["", "-wal", "-shm"] {
         let from = PathBuf::from(format!("{}{suffix}", path.display()));
         if from.exists() {
@@ -300,14 +316,14 @@ mod tests {
         std::fs::write(dir.join("session.db-wal"), b"wal").unwrap();
 
         let kept = move_aside(&db, 7).unwrap();
-        assert_eq!(kept, dir.join("session.db.logged-out-7"));
+        assert_eq!(kept, dir.join("session.logged-out-7.db"));
         assert_eq!(std::fs::read(&kept).unwrap(), b"db");
         assert_eq!(
-            std::fs::read(dir.join("session.db.logged-out-7-wal")).unwrap(),
+            std::fs::read(dir.join("session.logged-out-7.db-wal")).unwrap(),
             b"wal"
         );
         // No -shm existed; the path is free for the new session.
-        assert!(!dir.join("session.db.logged-out-7-shm").exists());
+        assert!(!dir.join("session.logged-out-7.db-shm").exists());
         assert!(!db.exists());
         std::fs::remove_dir_all(&dir).unwrap();
     }

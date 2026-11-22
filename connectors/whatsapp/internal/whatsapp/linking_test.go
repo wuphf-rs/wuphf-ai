@@ -81,33 +81,36 @@ func TestAQRCodeIsToldWithItsPicture(t *testing.T) {
 	}
 }
 
-func TestPairCodesAreAskedForOnlyWhenTold(t *testing.T) {
+func TestEveryRoundAsksForAPairCodeButOnlyAToldOnePrompts(t *testing.T) {
 	t.Parallel()
 	inputs := make(chan *wuphfpb.ClientFrame, 4)
 	qrMode := newLinking(inputs, &uploadBroker{}, config.LoginMethodQR, zerolog.Nop())
-	if _, due := qrMode.PairCodeDue(); due {
+	if _, ok := qrMode.PairCodeAsk(); ok {
 		t.Fatal("a QR-mode connector asks for no pair code")
 	}
 	codeMode := newLinking(inputs, &uploadBroker{}, config.LoginMethodPairCode, zerolog.Nop())
-	next, due := codeMode.PairCodeDue()
-	if !due || next != linkGaps[0] {
-		t.Fatalf("PairCodeDue() = (%v, %v), want (%v, true)", next, due, linkGaps[0])
+	first, ok := codeMode.PairCodeAsk()
+	if want := (pairCodeAsk{promptPhone: true, tell: true, next: linkGaps[0]}); !ok || first != want {
+		t.Fatalf("first round PairCodeAsk() = (%+v, %v), want (%+v, true)", first, ok, want)
 	}
-	if _, due := codeMode.PairCodeDue(); due {
-		t.Fatal("a second round inside the gap asks for no pair code")
+	// The next round, inside the gap, still asks for a code, quietly.
+	quiet, ok := codeMode.PairCodeAsk()
+	if !ok || quiet.promptPhone || quiet.tell {
+		t.Fatalf("second round PairCodeAsk() = (%+v, %v), want an untold, unprompted ask", quiet, ok)
 	}
-	codeMode.PairCode(context.Background(), "ABCD-EFGH", next)
+	codeMode.PairCode(context.Background(), "ABCD-EFGH", first)
 	notice := (<-inputs).GetOwnerNotice()
 	want := "in WhatsApp → Settings → Linked devices → Link a device → Link with phone number instead, " +
 		"enter ABCD-EFGH. It is valid for 2 min; if it expires first, a new one follows in about 5 min."
 	if notice.GetDetail() != want || len(notice.GetMediaIds()) != 0 {
 		t.Fatalf("notice = %v, want detail %q and no media", notice, want)
 	}
-	// QR codes in pair-code mode go to the terminal only.
+	// An untold code goes to the terminal only, and so do no QR codes.
+	codeMode.PairCode(context.Background(), "WXYZ-1234", quiet)
 	codeMode.Linked()
 	codeMode.QR(context.Background(), "2@abc,def,ghi", time.Minute)
 	if len(inputs) != 0 {
-		t.Fatalf("a pair-code connector tells no QR code: %d notices", len(inputs))
+		t.Fatalf("nothing more is told: %d notices", len(inputs))
 	}
 }
 

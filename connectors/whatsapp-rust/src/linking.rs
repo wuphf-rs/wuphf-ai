@@ -1,21 +1,27 @@
 //! Linking the WhatsApp session to the account, at the first start and again
-//! after a logout. Every QR code and pair code the library issues goes to the
-//! terminal. The owner is also told through a link-required notice — the QR
-//! code as a picture, or the pair code — so a connector can be linked again
-//! from wherever the owner reads the other connectors.
+//! after a logout, by the configured login method. The owner is told through a
+//! link-required notice — the QR code as a picture, or the pair code — so a
+//! connector can be linked again from wherever the owner reads the other
+//! connectors; every code also goes to the terminal.
 //!
 //! Not every code is told: WhatsApp rotates a QR code every 20-60 s and ends a
 //! pairing round after about 160 s, and the library then starts another, so a
-//! connector nobody links would otherwise post one picture a minute for as
-//! long as it runs. The first code is told at once; after that a code is told
-//! only once the gap since the last told one has passed ([`GAPS`]), until the
+//! connector nobody links would otherwise post one notice a minute for as long
+//! as it runs. The first code is told at once; after that a code is told only
+//! once the gap since the last told one has passed ([`GAPS`]), until the
 //! session is linked.
+//!
+//! With a pair code, every round asks for one, so a valid code is always in
+//! the terminal; only a told one makes the phone show its prompt, which would
+//! otherwise come every few minutes. When WhatsApp asks for a new code (the
+//! owner entered one it no longer takes) a new one is asked for, told and
+//! prompted at once: the owner is linking right then.
 
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
 use tokio::sync::mpsc;
-use tracing::{info, warn};
+use tracing::{debug, info, warn};
 use wuphf_connector::MediaClient;
 use wuphf_proto::connector as pb;
 
@@ -35,6 +41,15 @@ const GAPS: [Duration; 4] = [
     Duration::from_secs(60 * 60),
 ];
 
+/// A pair code to ask WhatsApp for.
+#[derive(Debug, PartialEq, Eq)]
+pub struct PairCodeAsk {
+    /// Whether the phone shows its "enter code" prompt for it.
+    pub prompt_phone: bool,
+    /// When the owner is told the code: the gap before the next told one.
+    pub tell: Option<Duration>,
+}
+
 /// Prints every pairing code and tells the owner about some of them. Shared
 /// by every WhatsApp session the process runs, so the schedule spans the
 /// pairing rounds of one logout.
@@ -42,7 +57,14 @@ pub struct Linking {
     inputs: mpsc::Sender<pb::ClientFrame>,
     media: MediaClient,
     method: LoginMethod,
-    schedule: Mutex<Schedule>,
+    state: Mutex<State>,
+}
+
+/// What the owner was told, and when a pair code was last asked for.
+#[derive(Debug, Default)]
+struct State {
+    schedule: Schedule,
+    asked: Option<Instant>,
 }
 
 impl Linking {
@@ -55,12 +77,17 @@ impl Linking {
             inputs,
             media,
             method,
-            schedule: Mutex::new(Schedule::default()),
+            state: Mutex::new(State::default()),
         }
     }
 
-    /// A QR code the library issued, valid for `valid`.
+    /// A QR code the library issued, valid for `valid`. Pairing by code shows
+    /// none: the QR codes only mark the pairing rounds.
     pub async fn qr(&self, code: String, valid: Duration) {
+        if self.method != LoginMethod::Qr {
+            debug!("a WhatsApp pairing round is open; waiting for the pair code to be entered");
+            return;
+        }
         info!(
             valid_for_seconds = valid.as_secs(),
             "scan the QR code with WhatsApp"
@@ -76,10 +103,7 @@ impl Linking {
             // The raw payload still pairs when pasted into a QR tool.
             Err(_) => println!("QR payload: {code}"),
         }
-        if self.method != LoginMethod::Qr {
-            return;
-        }
-        let Some(next) = self.due() else {
+        let Some(next) = self.state.lock().unwrap().schedule.due(Instant::now()) else {
             return;
         };
         let media_ids = match self.upload_qr(&code).await {
@@ -97,38 +121,41 @@ impl Linking {
         self.tell(detail, media_ids).await;
     }
 
-    /// Whether this pairing round asks for a pair code, and if so the gap
-    /// before the next one. A code is asked for only when the owner will be
-    /// told it: each request makes the phone show a prompt, so asking every
-    /// round would prompt every few minutes.
-    pub fn pair_code_due(&self) -> Option<Duration> {
-        (self.method == LoginMethod::PairCode)
-            .then(|| self.due())
-            .flatten()
+    /// The pair code to ask for now that a pairing round's QR code came, when
+    /// pairing by code and the last code asked for has lapsed.
+    pub fn pair_code_ask(&self) -> Option<PairCodeAsk> {
+        if self.method != LoginMethod::PairCode {
+            return None;
+        }
+        self.state.lock().unwrap().ask(Instant::now())
     }
 
-    /// A pair code issued for the configured phone number after
-    /// [`Self::pair_code_due`]; `next` is the gap it returned.
-    pub async fn pair_code(&self, code: String, next: Duration) {
+    /// The pair code to ask for now that WhatsApp asked for a new one.
+    pub fn pair_code_refresh(&self) -> Option<PairCodeAsk> {
+        if self.method != LoginMethod::PairCode {
+            return None;
+        }
+        Some(self.state.lock().unwrap().refresh(Instant::now()))
+    }
+
+    /// A pair code WhatsApp issued for an ask; `tell` is the ask's.
+    pub async fn pair_code(&self, code: String, tell: Option<Duration>) {
         println!(
             "WhatsApp pair code (valid for about {} seconds): {code}",
             PAIR_CODE_VALIDITY.as_secs()
         );
-        self.tell(
-            pair_code_detail(&code, PAIR_CODE_VALIDITY, next),
-            Vec::new(),
-        )
-        .await;
+        if let Some(next) = tell {
+            self.tell(
+                pair_code_detail(&code, PAIR_CODE_VALIDITY, next),
+                Vec::new(),
+            )
+            .await;
+        }
     }
 
-    /// The session is linked: the next logout starts the schedule afresh.
+    /// The session is linked: the next logout starts afresh.
     pub fn linked(&self) {
-        *self.schedule.lock().unwrap() = Schedule::default();
-    }
-
-    /// Whether a code issued now is told, and if so the gap before the next.
-    fn due(&self) -> Option<Duration> {
-        self.schedule.lock().unwrap().due(Instant::now())
+        *self.state.lock().unwrap() = State::default();
     }
 
     async fn upload_qr(&self, code: &str) -> anyhow::Result<String> {
@@ -154,6 +181,35 @@ impl Linking {
     }
 }
 
+impl State {
+    /// The pair code a round opening at `now` asks for, unless the last one
+    /// asked for is still valid.
+    fn ask(&mut self, now: Instant) -> Option<PairCodeAsk> {
+        if self
+            .asked
+            .is_some_and(|asked| now.duration_since(asked) < PAIR_CODE_VALIDITY)
+        {
+            return None;
+        }
+        self.asked = Some(now);
+        let tell = self.schedule.due(now);
+        Some(PairCodeAsk {
+            prompt_phone: tell.is_some(),
+            tell,
+        })
+    }
+
+    /// The pair code to ask for at `now` because WhatsApp asked for a new one:
+    /// prompted and told whatever the gap.
+    fn refresh(&mut self, now: Instant) -> PairCodeAsk {
+        self.asked = Some(now);
+        PairCodeAsk {
+            prompt_phone: true,
+            tell: Some(self.schedule.told(now)),
+        }
+    }
+}
+
 /// When the owner was last told about a code, and how many times.
 #[derive(Debug, Default)]
 struct Schedule {
@@ -171,9 +227,15 @@ impl Schedule {
                 return None;
             }
         }
+        Some(self.told(now))
+    }
+
+    /// Record a code told at `now`, whatever the gap, returning the gap before
+    /// the next told code.
+    fn told(&mut self, now: Instant) -> Duration {
         self.told += 1;
         self.last = Some(now);
-        Some(GAPS[(self.told - 1).min(GAPS.len() - 1)])
+        GAPS[(self.told - 1).min(GAPS.len() - 1)]
     }
 }
 
@@ -238,32 +300,78 @@ mod tests {
         assert_eq!(schedule.due(at(6600 + 3600)), Some(GAPS[3]));
     }
 
-    #[tokio::test]
-    async fn a_link_starts_the_schedule_afresh() {
-        let (inputs, _outputs) = mpsc::channel(1);
-        let media = MediaClient::connect("127.0.0.1:1", "token").unwrap();
-        let linking = Linking::new(inputs, media, LoginMethod::Qr);
-        assert!(linking.due().is_some());
-        assert!(linking.due().is_none());
-        linking.linked();
-        assert!(linking.due().is_some());
+    #[test]
+    fn every_round_asks_for_a_pair_code_but_only_a_told_one_prompts() {
+        let start = Instant::now();
+        let at = |seconds: u64| start + Duration::from_secs(seconds);
+        let mut state = State::default();
+        // The first round: told and prompted.
+        assert_eq!(
+            state.ask(at(0)),
+            Some(PairCodeAsk {
+                prompt_phone: true,
+                tell: Some(GAPS[0]),
+            })
+        );
+        // The round's later QR codes ask for nothing while the code holds.
+        assert_eq!(state.ask(at(20)), None);
+        assert_eq!(state.ask(at(159)), None);
+        // The next round asks again, quietly, inside the gap.
+        assert_eq!(
+            state.ask(at(160)),
+            Some(PairCodeAsk {
+                prompt_phone: false,
+                tell: None,
+            })
+        );
+        // Past the gap the code is told and prompted again.
+        assert_eq!(
+            state.ask(at(320)),
+            Some(PairCodeAsk {
+                prompt_phone: true,
+                tell: Some(GAPS[1]),
+            })
+        );
+    }
+
+    #[test]
+    fn a_refresh_asks_prompts_and_tells_at_once() {
+        let start = Instant::now();
+        let mut state = State::default();
+        state.ask(start);
+        let refreshed = state.refresh(start + Duration::from_secs(30));
+        assert_eq!(
+            refreshed,
+            PairCodeAsk {
+                prompt_phone: true,
+                tell: Some(GAPS[1]),
+            }
+        );
+        // The refreshed code holds for its own 160 s.
+        assert_eq!(state.ask(start + Duration::from_secs(150)), None);
     }
 
     #[tokio::test]
-    async fn pair_codes_are_asked_for_only_when_told() {
-        let (inputs, mut outputs) = mpsc::channel(4);
+    async fn a_link_starts_afresh_and_qr_mode_asks_for_no_pair_code() {
+        let (inputs, _outputs) = mpsc::channel(1);
         let media = MediaClient::connect("127.0.0.1:1", "token").unwrap();
         let qr_mode = Linking::new(inputs.clone(), media.clone(), LoginMethod::Qr);
-        assert_eq!(qr_mode.pair_code_due(), None);
+        assert_eq!(qr_mode.pair_code_ask(), None);
+        assert_eq!(qr_mode.pair_code_refresh(), None);
 
         let code_mode = Linking::new(inputs, media, LoginMethod::PairCode);
-        let next = code_mode
-            .pair_code_due()
-            .expect("the first round asks for a code");
-        assert_eq!(next, GAPS[0]);
-        // A second round inside the gap asks for none.
-        assert_eq!(code_mode.pair_code_due(), None);
-        code_mode.pair_code("ABCD-EFGH".into(), next).await;
+        assert!(code_mode.pair_code_ask().is_some());
+        assert!(code_mode.pair_code_ask().is_none());
+        code_mode.linked();
+        assert!(code_mode.pair_code_ask().is_some());
+    }
+
+    #[tokio::test]
+    async fn a_told_pair_code_reaches_the_owner() {
+        let (inputs, mut outputs) = mpsc::channel(4);
+        let media = MediaClient::connect("127.0.0.1:1", "token").unwrap();
+        let linking = Linking::new(inputs, media, LoginMethod::PairCode);
+        linking.pair_code("ABCD-EFGH".into(), Some(GAPS[0])).await;
         let Some(pb::client_frame::Body::OwnerNotice(notice)) = outputs.try_recv().unwrap().body
         else {
             panic!("expected an owner notice");
@@ -276,6 +384,8 @@ mod tests {
              follows in about 5 min."
         );
         assert!(notice.media_ids.is_empty());
+        // An untold code goes to the terminal only.
+        linking.pair_code("WXYZ-1234".into(), None).await;
         assert!(outputs.try_recv().is_err());
     }
 

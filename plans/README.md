@@ -1344,6 +1344,15 @@ read receipts, albums, polls, locations, vCards) wait for a later plan.
     itself after a logout, since whatsmeow's own delete runs concurrently.
   - Not live-tested. Follow-up: a "send me a fresh code" owner command (the
     panel-command plan), since a told QR code is stale within a minute.
+  - **Fixed after the owner's first pair-code try (2026-11-23)**: the code was
+    asked for only on told rounds, so it lapsed with its round, and WhatsApp
+    asking for a new one (whatsapp-rust `PairingCodeRefresh`, after a code it
+    no longer took) went unanswered. Now every round asks for a code (the
+    phone prompts only for told ones), whatsapp-rust answers a refresh at once
+    (prompted and told), and pair-code mode prints no QR codes. whatsmeow has
+    no refresh event; Go's next round brings the new code. A logged-out
+    session is kept as `<name>.logged-out-<seconds>.db` so `*.db` ignore
+    rules cover it. whatsapp-rust 88 → 90 tests.
   Owner: restart the server, Telegram and both WhatsApp connectors (the wire
   gained fields). Live test: unlink a connector on the phone; the logged-out
   notice, then a link-required notice with the QR code (or the code) arrive in

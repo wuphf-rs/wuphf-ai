@@ -43,7 +43,7 @@ connectors (Telegram), not only in the connector's terminal.
    pairing (today it starts after).
 4. **A fresh device for every new link.** Go: whatsmeow has already deleted the
    device; `GetFirstDevice` hands out a new one. Rust: the session database
-   (and its `-wal` / `-shm`) is renamed to `<path>.logged-out-<unix seconds>`
+   (and its `-wal` / `-shm`) is renamed to `<name>.logged-out-<unix seconds>.db`
    (kept, never deleted) and a new one is opened at the same path. The
    connector's own tables in it (`wuphf_contacts`) start empty; the new link's
    full app-state and history sync fill them again.

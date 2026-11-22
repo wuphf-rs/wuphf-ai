@@ -155,7 +155,7 @@ a pair code typed into WhatsApp. The code is printed in the terminal and sent
 to the owner through the core's notice chats (the QR code as a picture), at
 the first launch and again by itself whenever WhatsApp logs the device out:
 the dead session database is moved aside as
-`<session_database>.logged-out-<seconds>` and a new one links at the same path,
+`whatsapp-rust.session.logged-out-<seconds>.db` and a new one links at the same path,
 while messages for WhatsApp wait in the core. Inbound, the connector bridges
 text, photos, videos, GIFs, voice notes, documents and stickers (captions
 become the text; view-once media is marked `👁️ View once`), edits, deletes and

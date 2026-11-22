@@ -49,13 +49,14 @@ func newLinking(inputs chan<- *wuphfpb.ClientFrame, media MediaBroker, method st
 	return &linking{inputs: inputs, media: media, method: method, logger: logger}
 }
 
-// QR handles a QR code whatsmeow issued, valid for valid.
+// QR handles a QR code whatsmeow issued, valid for valid. Pairing by code
+// shows none: the QR codes only mark the pairing rounds.
 func (l *linking) QR(ctx context.Context, code string, valid time.Duration) {
-	fmt.Fprintln(os.Stderr, "Scan WhatsApp QR code:")
-	qrterminal.GenerateHalfBlock(code, qrterminal.L, os.Stderr)
 	if l.method != config.LoginMethodQR {
 		return
 	}
+	fmt.Fprintln(os.Stderr, "Scan WhatsApp QR code:")
+	qrterminal.GenerateHalfBlock(code, qrterminal.L, os.Stderr)
 	next, due := l.due(time.Now())
 	if !due {
 		return
@@ -69,22 +70,34 @@ func (l *linking) QR(ctx context.Context, code string, valid time.Duration) {
 	l.tell(ctx, qrDetail(valid, next), []string{mediaID})
 }
 
-// PairCodeDue reports whether this pairing round asks for a pair code, and if
-// so the gap before the next one. A code is asked for only when the owner
-// will be told it: each request makes the phone show a prompt, so asking every
-// round would prompt every few minutes.
-func (l *linking) PairCodeDue() (time.Duration, bool) {
-	if l.method != config.LoginMethodPairCode {
-		return 0, false
-	}
-	return l.due(time.Now())
+// pairCodeAsk is a pair code to ask WhatsApp for.
+type pairCodeAsk struct {
+	// promptPhone makes the phone show its "enter code" prompt.
+	promptPhone bool
+	// tell is whether the owner is told the code, and next the gap before the
+	// next told one.
+	tell bool
+	next time.Duration
 }
 
-// PairCode handles a pair code issued for the configured phone number after
-// PairCodeDue; next is the gap it returned.
-func (l *linking) PairCode(ctx context.Context, code string, next time.Duration) {
+// PairCodeAsk reports the pair code a pairing round asks for, when pairing by
+// code. Every round asks for one, so a valid code is always in the terminal;
+// only a told one prompts the phone, which would otherwise prompt every few
+// minutes.
+func (l *linking) PairCodeAsk() (pairCodeAsk, bool) {
+	if l.method != config.LoginMethodPairCode {
+		return pairCodeAsk{}, false
+	}
+	next, tell := l.due(time.Now())
+	return pairCodeAsk{promptPhone: tell, tell: tell, next: next}, true
+}
+
+// PairCode handles a pair code issued for the configured phone number for ask.
+func (l *linking) PairCode(ctx context.Context, code string, ask pairCodeAsk) {
 	fmt.Fprintf(os.Stderr, "WhatsApp pair code (valid for about %d seconds): %s\n", int(pairCodeValidity.Seconds()), code)
-	l.tell(ctx, pairCodeDetail(code, pairCodeValidity, next), nil)
+	if ask.tell {
+		l.tell(ctx, pairCodeDetail(code, pairCodeValidity, ask.next), nil)
+	}
 }
 
 // Linked starts the schedule afresh for the next logout.

@@ -276,7 +276,9 @@ func (c Connector) link(ctx context.Context, client *whatsmeow.Client, linking *
 }
 
 // pairRound runs one pairing round: whatsmeow's QR codes, and in pair-code
-// mode one pair code. It reports whether the device was linked.
+// mode the round's pair code. It reports whether the device was linked.
+// whatsmeow has no event for WhatsApp asking for a new code, so a code it no
+// longer takes is replaced by the next round's.
 func (c Connector) pairRound(ctx context.Context, client *whatsmeow.Client, linking *linking) (bool, error) {
 	codes, err := client.GetQRChannel(ctx)
 	if err != nil {
@@ -293,12 +295,12 @@ func (c Connector) pairRound(ctx context.Context, client *whatsmeow.Client, link
 			// first QR code shows it is).
 			if !asked {
 				asked = true
-				if next, due := linking.PairCodeDue(); due {
-					pairCode, err := client.PairPhone(ctx, c.cfg.PhoneNumber, true, whatsmeow.PairClientChrome, "Chrome (Linux)")
+				if ask, ok := linking.PairCodeAsk(); ok {
+					pairCode, err := client.PairPhone(ctx, c.cfg.PhoneNumber, ask.promptPhone, whatsmeow.PairClientChrome, "Chrome (Linux)")
 					if err != nil {
-						c.logger.Warn().Err(err).Msg("could not get a WhatsApp pair code; this round offers the QR code only")
+						c.logger.Warn().Err(err).Msg("could not get a WhatsApp pair code")
 					} else {
-						linking.PairCode(ctx, pairCode, next)
+						linking.PairCode(ctx, pairCode, ask)
 					}
 				}
 			}
