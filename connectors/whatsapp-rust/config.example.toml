@@ -48,6 +48,27 @@ client_mode = "android_business"
 # using WhatsApp JIDs such as "12345@s.whatsapp.net" or "12345@g.us" as chat
 # IDs.
 
+# Animated stickers from other platforms (Telegram video and Lottie stickers)
+# are converted to WebP by the core's media.convert provider
+# (providers/mediaconv); without one they arrive as files.
+#
+# Environment variable holding the core's invoke token, when the core sets
+# [functions] invoke_token_env.
+# functions_token_env = "WUPHF_INVOKE_TOKEN"
+# Bound on one sticker conversion, including waiting for the converter. This
+# connector delivers in order, so later messages wait behind it. Read at
+# startup.
+# media_convert_timeout_ms = 20000
+
+# Sticker-pack metadata embedded in stickers bridged to WhatsApp, shown in
+# WhatsApp's sticker info. Any field left blank falls back to the defaults shown
+# here. WhatsApp has no link field for received stickers, so the link is appended
+# to the publisher text (visible, not clickable). Read at startup.
+[sticker_metadata]
+pack_name = "wuphf"
+author_name = "wuphf-ai"
+link = "https://github.com/wuphf/wuphf-ai"
+
 # How replicated copies are rendered on WhatsApp. This connector's own policy;
 # the core dispatches content only. Read at startup: restart after a change.
 [rendering]

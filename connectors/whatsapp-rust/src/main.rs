@@ -24,6 +24,7 @@ mod receipts;
 mod resync;
 mod sender;
 mod session;
+mod stickermeta;
 mod supervise;
 #[cfg(test)]
 mod testing;
@@ -88,6 +89,27 @@ async fn main() -> anyhow::Result<()> {
 
     let media = wuphf_connector::MediaClient::connect(&config.core_address, &core_token)
         .context("prepare the core media client")?;
+    // Animated stickers from other platforms are converted to WebP by the
+    // core's media.convert provider; the invoke token, when the core sets one,
+    // also comes from the environment only.
+    let functions_token = config
+        .functions_token_env
+        .as_deref()
+        .and_then(|name| std::env::var(name).ok());
+    let functions = wuphf_connector::FunctionsClient::connect(
+        &config.core_address,
+        functions_token.as_deref(),
+        &config.connector_id,
+    )
+    .context("prepare the core functions client")?;
+    let converter = wuphf_connector::MediaConverter {
+        functions,
+        media: media.clone(),
+        timeout: Arc::new({
+            let runtime = config.runtime.clone();
+            move || runtime.media_convert_timeout()
+        }),
+    };
     let (inputs_tx, inputs_rx) = mpsc::channel(EVENT_CAPACITY);
     let groups = Arc::new(GroupDirectory::new());
     let linked = LinkedClient::default();
@@ -122,6 +144,7 @@ async fn main() -> anyhow::Result<()> {
         WhatsAppSender::new(
             LiveClient::new(linked.clone(), Arc::clone(&groups)),
             media.clone(),
+            converter,
             config.runtime.clone(),
             fallback,
             Arc::clone(&identity),

@@ -10,13 +10,14 @@
 use std::future::Future;
 use std::sync::Arc;
 
+use tracing::warn;
 use whatsapp_rust::Jid;
 use whatsapp_rust::types::message::AddressingMode;
 use whatsapp_rust::wacore::proto_helpers::{
     MessageBuilderExt, MessageExt, build_quote_context_with_info,
 };
 use whatsapp_rust::waproto::whatsapp as wa;
-use wuphf_connector::{Delivery, Failure, MediaClient, Sender, SessionError};
+use wuphf_connector::{Delivery, Failure, MediaClient, MediaConverter, Sender, SessionError};
 use wuphf_proto::connector as pb;
 
 use crate::addressing::AddressBook;
@@ -24,8 +25,12 @@ use crate::chat_state::{mute_call, now_ms};
 use crate::config::Runtime;
 use crate::disappearing::{TimerFallback, stamp};
 use crate::identity::Identity;
-use crate::outbound::{outbound_media, quoted_body, text_exceeds_limit, text_file_media};
-use crate::wa_client::{ChatAction, LiveClient, WaClient};
+use crate::outbound::{optional, outbound_media, quoted_body, text_exceeds_limit, text_file_media};
+use crate::stickermeta::apply_sticker_metadata;
+use crate::wa_client::{ChatAction, LiveClient, OutboundMedia, StickerOptions, WaClient};
+
+/// A WhatsApp sticker's format; an animated one is an animated WebP.
+const WEBP: &str = "image/webp";
 
 /// The core's media store, as the sender needs it: the bytes a dispatch's
 /// attachment names.
@@ -42,10 +47,36 @@ impl CoreMedia for MediaClient {
     }
 }
 
-pub struct WhatsAppSender<C = LiveClient, M = MediaClient> {
+/// Converts stored media to another format: the core's media.convert
+/// provider, in production (Go `StickerConverter`).
+pub trait StickerConverter: Send + Sync + 'static {
+    fn convert(
+        &self,
+        media_id: &str,
+        source_mime: &str,
+        source_name: &str,
+        target_mime: &str,
+    ) -> impl Future<Output = anyhow::Result<Vec<u8>>> + Send;
+}
+
+impl StickerConverter for MediaConverter {
+    async fn convert(
+        &self,
+        media_id: &str,
+        source_mime: &str,
+        source_name: &str,
+        target_mime: &str,
+    ) -> anyhow::Result<Vec<u8>> {
+        Ok(MediaConverter::convert(self, media_id, source_mime, source_name, target_mime).await?)
+    }
+}
+
+pub struct WhatsAppSender<C = LiveClient, M = MediaClient, S = MediaConverter> {
     client: C,
     media: M,
-    /// How copies are rendered (`[rendering]`), read once at startup.
+    converter: S,
+    /// How copies are rendered (`[rendering]`) and stickers labelled, read
+    /// once at startup.
     runtime: Runtime,
     /// Set when the connector stamps disappearing timers: what to do with a
     /// dispatch that arrives without one.
@@ -56,10 +87,11 @@ pub struct WhatsAppSender<C = LiveClient, M = MediaClient> {
     addresses: Arc<AddressBook>,
 }
 
-impl<C: WaClient, M: CoreMedia> WhatsAppSender<C, M> {
+impl<C: WaClient, M: CoreMedia, S: StickerConverter> WhatsAppSender<C, M, S> {
     pub fn new(
         client: C,
         media: M,
+        converter: S,
         runtime: Runtime,
         fallback: Option<TimerFallback>,
         identity: Arc<Identity>,
@@ -68,6 +100,7 @@ impl<C: WaClient, M: CoreMedia> WhatsAppSender<C, M> {
         Self {
             client,
             media,
+            converter,
             runtime,
             fallback,
             identity,
@@ -156,11 +189,8 @@ impl<C: WaClient, M: CoreMedia> WhatsAppSender<C, M> {
         attachment: &pb::Attachment,
         caption: &str,
     ) -> Result<wa::Message, Failure> {
-        let media = outbound_media(
-            attachment,
-            caption,
-            self.runtime.rendering.attachments_as_files,
-        )?;
+        let as_file = self.runtime.rendering.attachments_as_files;
+        let media = outbound_media(attachment, caption, as_file)?;
         let bytes = self
             .media
             .download(&attachment.media_id)
@@ -170,7 +200,55 @@ impl<C: WaClient, M: CoreMedia> WhatsAppSender<C, M> {
                     anyhow::Error::new(error).context("download media from the core"),
                 )
             })?;
+        if attachment.kind() == pb::attachment::Kind::Sticker && !as_file {
+            return self.sticker_message(attachment, bytes, media).await;
+        }
         self.client.upload(bytes, media).await
+    }
+
+    /// A sticker as a WhatsApp sticker (Go `stickerMessage`). WhatsApp
+    /// stickers are WebP, so an animated sticker in another format (a Telegram
+    /// video or Lottie sticker) is converted to animated WebP by the core's
+    /// media.convert provider first; a WebP then gets the pack metadata. When
+    /// the conversion fails (no provider, a timeout), the original goes out as
+    /// `fallback`, a file, so the message is not lost.
+    async fn sticker_message(
+        &self,
+        attachment: &pb::Attachment,
+        bytes: Vec<u8>,
+        fallback: OutboundMedia,
+    ) -> Result<wa::Message, Failure> {
+        let mut bytes = bytes;
+        let mut mime = attachment.mime_type.clone().unwrap_or_default();
+        if attachment.animated && mime != WEBP {
+            let source_name = attachment.file_name.as_deref().unwrap_or_default();
+            match self
+                .converter
+                .convert(&attachment.media_id, &mime, source_name, WEBP)
+                .await
+            {
+                Ok(converted) => (bytes, mime) = (converted, WEBP.to_owned()),
+                Err(error) => {
+                    warn!(
+                        error = format!("{error:#}"),
+                        media_id = attachment.media_id,
+                        mime,
+                        "could not convert a sticker to WebP; sending it as a file"
+                    );
+                    return self.client.upload(bytes, fallback).await;
+                }
+            }
+        }
+        if mime == WEBP {
+            bytes = apply_sticker_metadata(bytes, &self.runtime.sticker_metadata());
+        }
+        let options = StickerOptions {
+            mimetype: optional(Some(&mime)),
+            is_animated: attachment.animated,
+        };
+        self.client
+            .upload(bytes, OutboundMedia::Sticker(options))
+            .await
     }
 
     /// A dispatch with several attachments, as consecutive messages: WhatsApp
@@ -226,7 +304,7 @@ fn parse_chat(chat_id: &str) -> Result<Jid, Failure> {
     })
 }
 
-impl<C: WaClient, M: CoreMedia> Sender for WhatsAppSender<C, M> {
+impl<C: WaClient, M: CoreMedia, S: StickerConverter> Sender for WhatsAppSender<C, M, S> {
     async fn send_message(&self, dispatch: pb::MessageCreateDispatch) -> Result<Delivery, Failure> {
         let (chat, mode) = self.target(&dispatch.target_chat_id).await?;
         let context = self.reply_context(&dispatch, &chat, mode).await?;
@@ -339,7 +417,6 @@ mod tests {
     use crate::identity::LidStore;
     use crate::normalize::context_info;
     use crate::testing::FakeAccount;
-    use crate::wa_client::OutboundMedia;
 
     const DM: &str = "1555@s.whatsapp.net";
     const GROUP: &str = "123@g.us";
@@ -421,6 +498,14 @@ mod tests {
                     }),
                     ..Default::default()
                 },
+                OutboundMedia::Sticker(options) => wa::Message {
+                    sticker_message: MessageField::some(wa::message::StickerMessage {
+                        mimetype: options.mimetype,
+                        is_animated: Some(options.is_animated),
+                        ..Default::default()
+                    }),
+                    ..Default::default()
+                },
             })
         }
 
@@ -477,15 +562,58 @@ mod tests {
         }
     }
 
+    type TestSender = WhatsAppSender<FakeClient, FakeMedia, FakeConverter>;
+
+    /// The media.convert provider: answers every conversion with `result`
+    /// and records each call's media id, source mime, source name and target.
+    struct FakeConverter {
+        result: Result<Vec<u8>, String>,
+        calls: Mutex<Vec<(String, String, String, String)>>,
+    }
+
+    impl Default for FakeConverter {
+        fn default() -> Self {
+            Self::answering(Err("no converter in this test".into()))
+        }
+    }
+
+    impl FakeConverter {
+        fn answering(result: Result<Vec<u8>, String>) -> Self {
+            Self {
+                result,
+                calls: Mutex::default(),
+            }
+        }
+    }
+
+    impl StickerConverter for FakeConverter {
+        async fn convert(
+            &self,
+            media_id: &str,
+            source_mime: &str,
+            source_name: &str,
+            target_mime: &str,
+        ) -> anyhow::Result<Vec<u8>> {
+            self.calls.lock().unwrap().push((
+                media_id.into(),
+                source_mime.into(),
+                source_name.into(),
+                target_mime.into(),
+            ));
+            self.result.clone().map_err(anyhow::Error::msg)
+        }
+    }
+
     fn with(
         client: FakeClient,
         media: FakeMedia,
         runtime: Runtime,
         fallback: Option<TimerFallback>,
-    ) -> WhatsAppSender<FakeClient, FakeMedia> {
+    ) -> TestSender {
         WhatsAppSender::new(
             client,
             media,
+            FakeConverter::default(),
             runtime,
             fallback,
             Arc::default(),
@@ -519,7 +647,7 @@ mod tests {
         }
     }
 
-    fn sender(client: FakeClient, media: FakeMedia) -> WhatsAppSender<FakeClient, FakeMedia> {
+    fn sender(client: FakeClient, media: FakeMedia) -> TestSender {
         with(client, media, Runtime::default(), None)
     }
 
@@ -529,6 +657,7 @@ mod tests {
                 attachments_as_files,
                 max_message_length,
             },
+            ..Runtime::default()
         }
     }
 
@@ -566,7 +695,7 @@ mod tests {
         }
     }
 
-    fn sends(sender: &WhatsAppSender<FakeClient, FakeMedia>) -> Vec<wa::Message> {
+    fn sends(sender: &TestSender) -> Vec<wa::Message> {
         let sends = sender.client.sends.lock().unwrap();
         sends.iter().map(|(_, message)| message.clone()).collect()
     }
@@ -973,7 +1102,7 @@ mod tests {
     }
 
     async fn quoted_participant(
-        sender: &WhatsAppSender<FakeClient, FakeMedia>,
+        sender: &TestSender,
         chat: &str,
         reply: pb::ReplyContext,
     ) -> Option<String> {
@@ -1055,6 +1184,7 @@ mod tests {
         let sender = WhatsAppSender::new(
             addressed(),
             FakeMedia::default(),
+            FakeConverter::default(),
             Runtime::default(),
             None,
             Arc::default(),
@@ -1067,5 +1197,185 @@ mod tests {
         sender.send_message(dispatch).await.unwrap();
         let to = sender.client.sends.lock().unwrap()[0].0.clone();
         assert_eq!(to.to_string(), "1555@s.whatsapp.net");
+    }
+
+    /// A static WebP, as the converter returns one and Telegram sends a static
+    /// sticker.
+    const WEBP_STICKER: &[u8] =
+        include_bytes!("../../whatsapp/internal/whatsapp/testdata/sticker-lossy.webp");
+
+    fn sticker(mime: &str, animated: bool) -> pb::Attachment {
+        pb::Attachment {
+            media_id: "s-1".into(),
+            kind: pb::attachment::Kind::Sticker.into(),
+            mime_type: Some(mime.into()),
+            animated,
+            ..Default::default()
+        }
+    }
+
+    /// A sender whose core holds `stored` as the sticker's bytes.
+    fn sticker_sender(converter: FakeConverter, runtime: Runtime, stored: &[u8]) -> TestSender {
+        let media = FakeMedia {
+            blobs: HashMap::from([("s-1".to_owned(), stored.to_vec())]),
+            fail: false,
+        };
+        WhatsAppSender::new(
+            fake(),
+            media,
+            converter,
+            runtime,
+            None,
+            Arc::default(),
+            Arc::default(),
+        )
+    }
+
+    async fn send_sticker(sender: &TestSender, attachment: pb::Attachment) {
+        let dispatch = pb::MessageCreateDispatch {
+            attachments: vec![attachment],
+            ..text("")
+        };
+        sender.send_message(dispatch).await.unwrap();
+    }
+
+    fn only_upload(sender: &TestSender) -> (Vec<u8>, OutboundMedia) {
+        let uploads = sender.client.uploads.lock().unwrap();
+        assert_eq!(uploads.len(), 1);
+        uploads[0].clone()
+    }
+
+    fn sticker_options(media: &OutboundMedia) -> Option<&StickerOptions> {
+        match media {
+            OutboundMedia::Sticker(options) => Some(options),
+            _ => None,
+        }
+    }
+
+    fn carries(bytes: &[u8], needle: &str) -> bool {
+        bytes
+            .windows(needle.len())
+            .any(|window| window == needle.as_bytes())
+    }
+
+    #[tokio::test]
+    async fn an_animated_webm_sticker_is_converted() {
+        let converter = FakeConverter::answering(Ok(WEBP_STICKER.to_vec()));
+        let sender = sticker_sender(converter, Runtime::default(), b"webm");
+        let attachment = pb::Attachment {
+            file_name: Some("hi.webm".into()),
+            ..sticker("video/webm", true)
+        };
+        send_sticker(&sender, attachment).await;
+
+        assert_eq!(
+            *sender.converter.calls.lock().unwrap(),
+            [(
+                "s-1".into(),
+                "video/webm".into(),
+                "hi.webm".into(),
+                "image/webp".into()
+            )]
+        );
+        let (bytes, media) = only_upload(&sender);
+        assert_eq!(
+            sticker_options(&media),
+            Some(&StickerOptions {
+                mimetype: Some("image/webp".into()),
+                is_animated: true,
+            })
+        );
+        assert!(carries(&bytes, r#""sticker-pack-name":"wuphf""#));
+        assert!(sends(&sender)[0].sticker_message.is_set());
+    }
+
+    #[tokio::test]
+    async fn a_lottie_sticker_is_converted() {
+        let converter = FakeConverter::answering(Ok(WEBP_STICKER.to_vec()));
+        let sender = sticker_sender(converter, Runtime::default(), b"tgs");
+        send_sticker(&sender, sticker("application/x-tgsticker", true)).await;
+        let calls = sender.converter.calls.lock().unwrap().clone();
+        assert_eq!(calls[0].1, "application/x-tgsticker");
+        let (bytes, media) = only_upload(&sender);
+        assert!(matches!(media, OutboundMedia::Sticker(_)));
+        assert!(carries(&bytes, r#""sticker-pack-name":"wuphf""#));
+    }
+
+    #[tokio::test]
+    async fn a_failed_conversion_sends_the_original_as_a_file() {
+        let converter = FakeConverter::answering(Err("no provider".into()));
+        let sender = sticker_sender(converter, Runtime::default(), b"webm");
+        let dispatch = pb::MessageCreateDispatch {
+            attachments: vec![sticker("video/webm", true)],
+            ..text("a caption")
+        };
+        sender.send_message(dispatch).await.unwrap();
+        let (bytes, media) = only_upload(&sender);
+        assert_eq!(bytes, b"webm");
+        let OutboundMedia::Document(document) = media else {
+            panic!("a document upload");
+        };
+        assert_eq!(document.file_name.as_deref(), Some("sticker.webm"));
+        assert_eq!(document.caption, None);
+    }
+
+    #[tokio::test]
+    async fn a_static_webp_sticker_is_not_converted() {
+        let sender = sticker_sender(FakeConverter::default(), Runtime::default(), WEBP_STICKER);
+        send_sticker(&sender, sticker("image/webp", false)).await;
+        assert!(sender.converter.calls.lock().unwrap().is_empty());
+        let (bytes, media) = only_upload(&sender);
+        assert_eq!(
+            sticker_options(&media),
+            Some(&StickerOptions {
+                mimetype: Some("image/webp".into()),
+                is_animated: false,
+            })
+        );
+        assert!(carries(&bytes, r#""sticker-pack-name":"wuphf""#));
+    }
+
+    #[tokio::test]
+    async fn the_configured_pack_metadata_is_used() {
+        let runtime = Runtime {
+            sticker_metadata: crate::config::StickerMetadata {
+                pack_name: "mine".into(),
+                ..Default::default()
+            },
+            ..Runtime::default()
+        };
+        let sender = sticker_sender(FakeConverter::default(), runtime, WEBP_STICKER);
+        send_sticker(&sender, sticker("image/webp", false)).await;
+        let (bytes, _) = only_upload(&sender);
+        assert!(carries(&bytes, r#""sticker-pack-name":"mine""#));
+        assert!(carries(&bytes, r#""sticker-pack-publisher":"wuphf-ai"#));
+    }
+
+    #[tokio::test]
+    async fn a_sticker_carries_the_timer_and_the_reply() {
+        let converter = FakeConverter::answering(Ok(WEBP_STICKER.to_vec()));
+        let sender = sticker_sender(converter, Runtime::default(), b"webm");
+        let dispatch = pb::MessageCreateDispatch {
+            reply_context: Some(reply_to("wa-0")),
+            attachments: vec![sticker("video/webm", true)],
+            disappearing: Some(timer()),
+            ..text("")
+        };
+        sender.send_message(dispatch).await.unwrap();
+        let message = &sends(&sender)[0];
+        assert!(message.sticker_message.is_set());
+        let context = context(message);
+        assert_eq!(context.stanza_id.as_deref(), Some("wa-0"));
+        assert_eq!(context.expiration, Some(86_400));
+    }
+
+    #[tokio::test]
+    async fn files_mode_sends_stickers_as_files() {
+        let sender = sticker_sender(FakeConverter::default(), rendering(true, 0), b"webm");
+        send_sticker(&sender, sticker("video/webm", true)).await;
+        assert!(sender.converter.calls.lock().unwrap().is_empty());
+        let (bytes, media) = only_upload(&sender);
+        assert_eq!(bytes, b"webm");
+        assert!(matches!(media, OutboundMedia::Document(_)));
     }
 }

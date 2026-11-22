@@ -26,6 +26,7 @@ use crate::addressing::Account;
 use crate::chat_state::MuteCall;
 use crate::groups::{GroupDirectory, GroupFacts};
 use crate::identity::LidStore;
+use crate::outbound::{UploadedMedia, sticker_message};
 use crate::session::LinkedClient;
 
 /// What an upload becomes: the library builder that carries it, with its
@@ -36,6 +37,16 @@ pub enum OutboundMedia {
     Video(VideoOptions),
     Audio(AudioOptions),
     Document(DocumentOptions),
+    /// whatsapp-rust has no sticker builder: [`sticker_message`] is the
+    /// connector's own.
+    Sticker(StickerOptions),
+}
+
+/// The options of a sticker message, like the library's builder options.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct StickerOptions {
+    pub mimetype: Option<String>,
+    pub is_animated: bool,
 }
 
 /// One chat action of a chat-state dispatch.
@@ -152,6 +163,7 @@ impl WaClient for LiveClient {
             OutboundMedia::Video(_) => MediaType::Video,
             OutboundMedia::Audio(_) => MediaType::Audio,
             OutboundMedia::Document(_) => MediaType::Document,
+            OutboundMedia::Sticker(_) => MediaType::Sticker,
         };
         let upload = client
             .upload(bytes, kind, UploadOptions::new())
@@ -162,6 +174,9 @@ impl WaClient for LiveClient {
             OutboundMedia::Video(options) => video_message(upload, options),
             OutboundMedia::Audio(options) => audio_message(upload, options),
             OutboundMedia::Document(options) => document_message(upload, options),
+            OutboundMedia::Sticker(options) => {
+                sticker_message(UploadedMedia::from(&upload), options)
+            }
         })
     }
 

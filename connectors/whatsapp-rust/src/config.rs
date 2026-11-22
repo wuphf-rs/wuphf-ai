@@ -1,4 +1,5 @@
 use std::path::Path;
+use std::time::Duration;
 
 use serde::Deserialize;
 
@@ -43,6 +44,10 @@ pub struct Config {
     /// Applied at pairing, so a change needs a fresh pairing.
     #[serde(default)]
     pub client_mode: ClientMode,
+    /// Environment variable holding the core's invoke token, when the core
+    /// sets `[functions] invoke_token_env`; unset or empty means none.
+    #[serde(default)]
+    pub functions_token_env: Option<String>,
     /// Settings that may change while the connector runs (plan 056 makes them
     /// live; until then they are read once at startup). Flattened, so the file
     /// keeps its layout (`[rendering]`).
@@ -54,8 +59,49 @@ pub struct Config {
 /// connector's `config.Runtime`.
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, Eq)]
 pub struct Runtime {
+    /// Bounds a sticker conversion, waiting for the converter included;
+    /// deliveries on this connector wait behind it. 0 means 20000.
+    #[serde(default)]
+    pub media_convert_timeout_ms: u32,
+    /// The pack metadata embedded in stickers bridged to WhatsApp; blank
+    /// fields fall back to the defaults (see [`Runtime::sticker_metadata`]).
+    #[serde(default)]
+    pub sticker_metadata: StickerMetadata,
     #[serde(default)]
     pub rendering: Rendering,
+}
+
+const DEFAULT_MEDIA_CONVERT_TIMEOUT: Duration = Duration::from_secs(20);
+
+/// Default sticker-pack metadata, for any field the configuration leaves
+/// blank, so bridged stickers are always attributed.
+const DEFAULT_STICKER_PACK_NAME: &str = "wuphf";
+const DEFAULT_STICKER_AUTHOR: &str = "wuphf-ai";
+const DEFAULT_STICKER_LINK: &str = "https://github.com/wuphf/wuphf-ai";
+
+impl Runtime {
+    /// The sticker conversion bound (Go `MediaConvertTimeout`).
+    pub fn media_convert_timeout(&self) -> Duration {
+        match self.media_convert_timeout_ms {
+            0 => DEFAULT_MEDIA_CONVERT_TIMEOUT,
+            ms => Duration::from_millis(u64::from(ms)),
+        }
+    }
+
+    /// The configured sticker-pack metadata with the defaults filled in for
+    /// any blank field (Go `StickerMetadata`).
+    pub fn sticker_metadata(&self) -> StickerMetadata {
+        let or = |value: &str, default: &str| match value {
+            "" => default.to_owned(),
+            value => value.to_owned(),
+        };
+        let meta = &self.sticker_metadata;
+        StickerMetadata {
+            pack_name: or(&meta.pack_name, DEFAULT_STICKER_PACK_NAME),
+            author_name: or(&meta.author_name, DEFAULT_STICKER_AUTHOR),
+            link: or(&meta.link, DEFAULT_STICKER_LINK),
+        }
+    }
 }
 
 /// How mirrored copies are rendered on WhatsApp: this connector's own policy;
@@ -69,6 +115,18 @@ pub struct Rendering {
     /// limit.
     #[serde(default)]
     pub max_message_length: u32,
+}
+
+/// The sticker-pack metadata embedded in stickers bridged to WhatsApp, shown in
+/// WhatsApp's sticker info. A blank field falls back to its default.
+#[derive(Clone, Debug, Default, Deserialize, PartialEq, Eq)]
+pub struct StickerMetadata {
+    #[serde(default)]
+    pub pack_name: String,
+    #[serde(default)]
+    pub author_name: String,
+    #[serde(default)]
+    pub link: String,
 }
 
 /// The WhatsApp client kind the session registers as.
@@ -193,6 +251,46 @@ mod tests {
         .unwrap();
         assert!(config.runtime.rendering.attachments_as_files);
         assert_eq!(config.runtime.rendering.max_message_length, 4096);
+    }
+
+    #[test]
+    fn sticker_settings_default_like_go() {
+        let config = Config::parse(MINIMAL).unwrap();
+        assert_eq!(
+            config.runtime.sticker_metadata(),
+            StickerMetadata {
+                pack_name: "wuphf".into(),
+                author_name: "wuphf-ai".into(),
+                link: "https://github.com/wuphf/wuphf-ai".into(),
+            }
+        );
+        assert_eq!(
+            config.runtime.media_convert_timeout(),
+            Duration::from_secs(20)
+        );
+        assert_eq!(config.functions_token_env, None);
+
+        let config = Config::parse(&format!(
+            "functions_token_env = \"INVOKE\"\nmedia_convert_timeout_ms = 5000\n{MINIMAL}\
+             [sticker_metadata]\npack_name = \"mine\"\n"
+        ))
+        .unwrap();
+        assert_eq!(config.functions_token_env.as_deref(), Some("INVOKE"));
+        assert_eq!(
+            config.runtime.media_convert_timeout(),
+            Duration::from_secs(5)
+        );
+        let meta = config.runtime.sticker_metadata();
+        assert_eq!(
+            (meta.pack_name.as_str(), meta.author_name.as_str()),
+            ("mine", "wuphf-ai")
+        );
+    }
+
+    #[test]
+    fn the_example_parses() {
+        let config = Config::parse(include_str!("../config.example.toml")).unwrap();
+        assert_eq!(config.runtime.sticker_metadata().pack_name, "wuphf");
     }
 
     #[test]

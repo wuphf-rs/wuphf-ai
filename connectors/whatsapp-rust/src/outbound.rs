@@ -7,18 +7,20 @@
 use std::path::Path;
 
 use whatsapp_rust::media::{AudioOptions, DocumentOptions, ImageOptions, VideoOptions};
+use whatsapp_rust::upload::UploadResponse;
 use whatsapp_rust::wacore::proto_helpers::MessageBuilderExt;
 use whatsapp_rust::waproto::buffa::MessageField;
 use whatsapp_rust::waproto::whatsapp as wa;
 use wuphf_connector::Failure;
 use wuphf_proto::connector as pb;
 
-use crate::wa_client::OutboundMedia;
+use crate::wa_client::{OutboundMedia, StickerOptions};
 
 /// The upload request for one attachment: its kind, or a document when
-/// `as_file`; `caption` on an image, video or document. A sticker is a
-/// document until plan 055 (named by [`sticker_file_name`], no caption). An
-/// unspecified kind can never succeed, so it is permanent.
+/// `as_file`; `caption` on an image, video or document. For a sticker it is
+/// the document the sender falls back to when the sticker cannot be sent as
+/// one (named by [`sticker_file_name`], no caption); the sender builds the
+/// sticker itself. An unspecified kind can never succeed, so it is permanent.
 pub fn outbound_media(
     attachment: &pb::Attachment,
     caption: &str,
@@ -141,6 +143,54 @@ pub fn quoted_body(reply: &pb::ReplyContext) -> wa::Message {
     }
 }
 
+/// What an upload returned, as the connector's own value: the library's
+/// `UploadResponse` cannot be built outside it, so builders the connector
+/// writes take this instead.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct UploadedMedia {
+    pub url: String,
+    pub direct_path: String,
+    pub media_key: [u8; 32],
+    pub file_enc_sha256: [u8; 32],
+    pub file_sha256: [u8; 32],
+    pub file_length: u64,
+    pub media_key_timestamp: i64,
+}
+
+impl From<&UploadResponse> for UploadedMedia {
+    fn from(upload: &UploadResponse) -> Self {
+        Self {
+            url: upload.url.clone(),
+            direct_path: upload.direct_path.clone(),
+            media_key: upload.media_key,
+            file_enc_sha256: upload.file_enc_sha256,
+            file_sha256: upload.file_sha256,
+            file_length: upload.file_length,
+            media_key_timestamp: upload.media_key_timestamp,
+        }
+    }
+}
+
+/// A sticker message, filled by hand as the library's builders fill theirs:
+/// whatsapp-rust has no sticker builder.
+pub fn sticker_message(upload: UploadedMedia, options: StickerOptions) -> wa::Message {
+    wa::Message {
+        sticker_message: MessageField::some(wa::message::StickerMessage {
+            url: Some(upload.url),
+            direct_path: Some(upload.direct_path),
+            media_key: Some(upload.media_key.to_vec()),
+            file_sha256: Some(upload.file_sha256.to_vec()),
+            file_enc_sha256: Some(upload.file_enc_sha256.to_vec()),
+            file_length: Some(upload.file_length),
+            media_key_timestamp: Some(upload.media_key_timestamp),
+            mimetype: options.mimetype,
+            is_animated: Some(options.is_animated),
+            ..Default::default()
+        }),
+        ..Default::default()
+    }
+}
+
 /// A sticker's fallback document name: its own, else "sticker" and the source
 /// extension (`.webm`, `.tgs`, the file name's, else `.bin`).
 pub fn sticker_file_name(attachment: &pb::Attachment) -> String {
@@ -162,7 +212,7 @@ pub fn sticker_file_name(attachment: &pb::Attachment) -> String {
 
 /// An absent or empty string as `None`, as the Go connector's
 /// `optionalProtoString`.
-fn optional(value: Option<&str>) -> Option<String> {
+pub fn optional(value: Option<&str>) -> Option<String> {
     value.filter(|value| !value.is_empty()).map(str::to_owned)
 }
 
@@ -237,7 +287,35 @@ mod tests {
     }
 
     #[test]
-    fn a_sticker_goes_out_as_a_document_for_now() {
+    fn the_sticker_message_is_filled_by_hand() {
+        let upload = UploadedMedia {
+            url: "https://mmg/x".into(),
+            direct_path: "/v/x".into(),
+            media_key: [1; 32],
+            file_enc_sha256: [2; 32],
+            file_sha256: [3; 32],
+            file_length: 42,
+            media_key_timestamp: 1_700_000_000,
+        };
+        let options = StickerOptions {
+            mimetype: Some("image/webp".into()),
+            is_animated: true,
+        };
+        let message = sticker_message(upload, options);
+        let sticker = &message.sticker_message;
+        assert_eq!(sticker.url.as_deref(), Some("https://mmg/x"));
+        assert_eq!(sticker.direct_path.as_deref(), Some("/v/x"));
+        assert_eq!(sticker.media_key.as_deref(), Some([1; 32].as_slice()));
+        assert_eq!(sticker.file_enc_sha256.as_deref(), Some([2; 32].as_slice()));
+        assert_eq!(sticker.file_sha256.as_deref(), Some([3; 32].as_slice()));
+        assert_eq!(sticker.file_length, Some(42));
+        assert_eq!(sticker.media_key_timestamp, Some(1_700_000_000));
+        assert_eq!(sticker.mimetype.as_deref(), Some("image/webp"));
+        assert_eq!(sticker.is_animated, Some(true));
+    }
+
+    #[test]
+    fn a_sticker_falls_back_to_a_document() {
         let sticker = pb::Attachment {
             kind: pb::attachment::Kind::Sticker.into(),
             mime_type: Some("video/webm".into()),
