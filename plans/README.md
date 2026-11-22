@@ -72,7 +72,7 @@ code).
 | 052 | whatsapp-rust: owner notices, inbound receipts, staying up when the WhatsApp client stops | P2 | S–M | — | DONE (see notes) |
 | 053 | whatsapp-rust: canonical ids, identity migrations, the addressing book, quote authors, channel titles | P1 | M–L | — (051 soft) | DONE (see notes) |
 | 054 | whatsapp-rust: outbound media of every kind, rendering options, SDK media download | P1 | L | 051 (053 soft) | DONE (see notes) |
-| 055 | whatsapp-rust: stickers — SDK functions client, media.convert, pure-Rust sticker EXIF | P2 | M–L | 054 | TODO |
+| 055 | whatsapp-rust: stickers — SDK functions client, media.convert, pure-Rust sticker EXIF | P2 | M–L | 054 | DONE (see notes) |
 | 056 | Runtime settings in the Rust SDK; whatsapp-rust declares the Go connector's settings | P2 | L | botconf 013 (055 soft) | TODO |
 | 057 | WhatsApp connectors link again by themselves after a logout (QR or pair code, delivered to the owner) | P1 | L | — | DONE (no migration; see notes) |
 
@@ -1370,6 +1370,28 @@ read receipts, albums, polls, locations, vCards) wait for a later plan.
   arrives under its phone number one day and its LID the next stays in one
   topic; reply from Telegram to a message a contact sent (the quote links);
   a channel's topic is named `[C] <name>`.
+- **055 done 2026-11-23** (on `v2`, `628e579`..this commit), after 053.
+  SDK functions tests +7; Go whatsapp +fixture tests (8 shared fixtures in
+  `connectors/whatsapp/internal/whatsapp/testdata/`); whatsapp-rust 140 →
+  157 (+7 stickermeta, +7 sender, +1 outbound, +2 config). clippy, fmt
+  clean; no new package in either lock (edges only: `serde`/`serde_json`).
+  Mutations (each failed a test): no alpha flag, no HTML escape, no pad
+  byte, keeping the old EXIF, converting static WebP, metadata before
+  conversion only. Deviations:
+  - Steps 3 and 4 landed as one commit (`c0ce7ce`): the writer alone is
+    dead code in the binary, which `-D warnings` refuses.
+  - A simple file's chunks are all copied after the new `VP8X` (not only the
+    bitstream), so nothing is ever dropped; webpmux output is still matched.
+  - `outbound_media` still builds a sticker's fallback document (named by
+    `sticker_file_name`); the sender takes the sticker path first and uses
+    that document when conversion fails.
+  - `the_example_parses` (config) was added: `config.example.toml` now
+    carries the sticker keys.
+  Owner: restart `wwr`; run `wmc` for animated stickers. Config:
+  `functions_token_env` only when the core sets `[functions]
+  invoke_token_env`; `media_convert_timeout_ms`; `[sticker_metadata]`. Live
+  test: plan 055 Step 6 (static, video and Lottie stickers; `wmc` stopped →
+  a file after the timeout; a sticker reply in a disappearing chat).
 
 ### 057: linking WhatsApp again after a logout
 
