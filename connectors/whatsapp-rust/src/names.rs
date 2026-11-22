@@ -1,14 +1,17 @@
 //! Chat titles and person names, formatted like the Go connector's
-//! `ChatNamer` (`connectors/whatsapp/internal/whatsapp/names.go`): a `[G]` or
-//! `[P]` tag, then the group subject or the person's name.
+//! `ChatNamer` (`connectors/whatsapp/internal/whatsapp/names.go`): a `[G]`, `[P]`
+//! or `[C]` tag, then the group subject, the person's name or the channel's.
 //!
 //! People are named from the connector's own contacts table (saved full
 //! names from contact syncs, push names from messages and history syncs).
 //! whatsapp-rust has no business-name source, so the order is the Go one
 //! without its business step: saved full name, then push name, then number.
 
-use std::sync::Arc;
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 
+use tracing::debug;
 use whatsapp_rust::client::Client;
 use whatsapp_rust::types::message::MessageInfo;
 use whatsapp_rust::{Jid, Server};
@@ -38,11 +41,21 @@ impl Person {
 pub struct ChatTitles {
     groups: Arc<GroupDirectory>,
     contacts: Arc<Contacts>,
+    /// Channel titles by channel JID, with when they were fetched.
+    channels: Mutex<HashMap<String, (String, Instant)>>,
 }
+
+/// How long a channel's title is reused before it is asked again, like the Go
+/// connector's title TTL: a renamed channel is picked up after that.
+const CHANNEL_TTL: Duration = Duration::from_secs(5 * 60);
 
 impl ChatTitles {
     pub fn new(groups: Arc<GroupDirectory>, contacts: Arc<Contacts>) -> Self {
-        Self { groups, contacts }
+        Self {
+            groups,
+            contacts,
+            channels: Mutex::default(),
+        }
     }
 
     pub fn contacts(&self) -> &Contacts {
@@ -63,8 +76,32 @@ impl ChatTitles {
                 tagged("G", &facts.subject)
             }
             Server::Pn | Server::Lid => self.dm_title(client, &chat, info.source.is_from_me).await,
+            Server::Newsletter => self.channel_title(client, &chat).await,
             _ => None,
         }
+    }
+
+    /// A channel's `[C] <name>`, from WhatsApp, reused for [`CHANNEL_TTL`]. A
+    /// failed lookup names nothing (logged at debug); only a non-empty title is
+    /// cached.
+    async fn channel_title(&self, client: &Client, channel: &Jid) -> Option<String> {
+        let key = channel.to_string();
+        if let Some(title) = fresh(self.channels.lock().unwrap().get(&key), Instant::now()) {
+            return Some(title);
+        }
+        let metadata = match client.newsletter().get_metadata(channel).await {
+            Ok(metadata) => metadata,
+            Err(error) => {
+                debug!(%error, %channel, "could not look a WhatsApp channel's name up");
+                return None;
+            }
+        };
+        let title = tagged("C", &metadata.name)?;
+        self.channels
+            .lock()
+            .unwrap()
+            .insert(key, (title.clone(), Instant::now()));
+        Some(title)
     }
 
     /// A DM's title from the contacts table. `is_from_me` says the owner's
@@ -127,6 +164,12 @@ pub fn dm_title(is_from_me: bool, number: &str, names: &ContactNames) -> Option<
 
 /// Prefix a chat title with its kind (`[G]` group, `[P]` private) so a mirror
 /// thread shows what it bridges. An empty title names nothing.
+/// A cached title still within [`CHANNEL_TTL`] at `now`.
+fn fresh(entry: Option<&(String, Instant)>, now: Instant) -> Option<String> {
+    let (title, fetched_at) = entry?;
+    (now.duration_since(*fetched_at) < CHANNEL_TTL).then(|| title.clone())
+}
+
 pub fn tagged(kind: &str, title: &str) -> Option<String> {
     let title = title.trim();
     (!title.is_empty()).then(|| format!("[{kind}] {title}"))
@@ -229,5 +272,23 @@ mod tests {
         assert_eq!(number_of(&lid, Some(("8888", "1555")), None), "1555");
         assert_eq!(number_of(&lid, None, Some(&pn)), "1555");
         assert_eq!(number_of(&lid, None, None), "8888");
+    }
+
+    #[test]
+    fn a_channel_title_is_tagged_c() {
+        assert_eq!(tagged("C", " News "), Some("[C] News".to_owned()));
+        assert_eq!(tagged("C", "  "), None);
+    }
+
+    #[test]
+    fn a_channel_title_is_reused_until_it_expires() {
+        let fetched = Instant::now();
+        let entry = ("[C] News".to_owned(), fetched);
+        assert_eq!(
+            fresh(Some(&entry), fetched + Duration::from_secs(60)).as_deref(),
+            Some("[C] News")
+        );
+        assert_eq!(fresh(Some(&entry), fetched + CHANNEL_TTL), None);
+        assert_eq!(fresh(None, fetched), None);
     }
 }
