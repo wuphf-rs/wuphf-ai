@@ -176,12 +176,18 @@ start again).
 
 It names mirror threads like the Go connector (`[G]` group subject, `[P]` saved
 name, else push name and number, from its own `wuphf_contacts` table in the
-session database), reports chat profiles (group subject, description, members,
+session database, `[C]` channel name), reports chat profiles (group subject, description, members,
 pictures) for the core's info cards and notes, syncs pin, mute and archive with
 the mirror topics, and stamps disappearing timers when
 `supports_disappearing_timers = true` is set in both
 `connectors/whatsapp-rust/config.example.toml` (or your copy) and the core's
 `whatsapp-rust` `[[connectors]]` entry.
+
+Its ids are canonical exactly as the Go connector's: the device is stripped and
+a phone number becomes its LID when the mapping is known, and the core is told
+when a chat's address changes, so a connector id can move between the two
+implementations without splitting conversations. Outbound, each chat is
+addressed in the form WhatsApp uses for it, and a reply quotes the real author.
 
 Saved contact names and pin / mute / archive come from WhatsApp's app-state
 sync, which the library fetches in full only once per link. A session the

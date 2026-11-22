@@ -70,7 +70,7 @@ code).
 | 050 | wuphf-misc: a host for non-bridging features, first an Instagram reel/post downloader | P3 | L | 011 | DONE (see notes; not yet tried against a live Instagram session) |
 | 051 | whatsapp-rust: inbound media, captions, view-once, and the Android client identity | P1 | M | — | DONE (see notes) |
 | 052 | whatsapp-rust: owner notices, inbound receipts, staying up when the WhatsApp client stops | P2 | S–M | — | DONE (see notes) |
-| 053 | whatsapp-rust: canonical ids, identity migrations, the addressing book, quote authors, channel titles | P1 | M–L | — (051 soft) | TODO |
+| 053 | whatsapp-rust: canonical ids, identity migrations, the addressing book, quote authors, channel titles | P1 | M–L | — (051 soft) | DONE (see notes) |
 | 054 | whatsapp-rust: outbound media of every kind, rendering options, SDK media download | P1 | L | 051 (053 soft) | DONE (see notes) |
 | 055 | whatsapp-rust: stickers — SDK functions client, media.convert, pure-Rust sticker EXIF | P2 | M–L | 054 | TODO |
 | 056 | Runtime settings in the Rust SDK; whatsapp-rust declares the Go connector's settings | P2 | L | botconf 013 (055 soft) | TODO |
@@ -1344,6 +1344,32 @@ read receipts, albums, polls, locations, vCards) wait for a later plan.
   caption, a video, a GIF, a voice note, a PDF and an album of three into a
   chat mirrored to whatsapp-rust; reply from Telegram to a WhatsApp photo
   (the quote previews the photo); wuphf-misc's reel replies now arrive.
+- **053 done 2026-11-23** (on `v2`, `9812998`..this commit), after 054.
+  whatsapp-rust 116 → 140 (+10 identity, +7 addressing, +5 sender, +1
+  normalize, +2 names; 045/046's three dual-form tests now expect one form);
+  core +1, storage +2. clippy and fmt clean; no lock changed. Mutations
+  (each failed a test): ignoring `authored_by_bridge`, dropping the
+  LID-migrated branch, reading a profile own-form-first. Deviations:
+  - **A core change first** (`9812998`): `source_profile` read the
+    conversation's own form first, so after a migration the stale row won;
+    it now reads the endpoint's canonical alias first (new storage lookup
+    `canonical_chat_id`) and fills unknown fields from the other forms
+    (the merge an earlier run had in `f4ad410`). This matters for the Go
+    connector too. The upstream 046 core already posts one note for a
+    change reported under two forms.
+  - Chat updates are canonicalized in one place (`Identity::canonical_updates`,
+    deduped per chat) rather than in each producer; `chat_forms` is gone
+    (`forms_of` / `lid_pn` stay for the contacts lookups).
+  - Steps 1–2 and 3–4 each landed as one commit; on 054's port,
+    `WaClient` gained `Account + LidStore` and a `linked()` check (a send
+    while no session is linked stays transient), and `Shared` carries the
+    process-wide `Identity`, `MigrationGate` and `AddressBook`.
+  - The order "migrations before the message" is in the handler, not unit
+    tested (it needs a client).
+  Owner: restart the server and whatsapp-rust. Live test: a DM that
+  arrives under its phone number one day and its LID the next stays in one
+  topic; reply from Telegram to a message a contact sent (the quote links);
+  a channel's topic is named `[C] <name>`.
 
 ### 057: linking WhatsApp again after a logout
 
