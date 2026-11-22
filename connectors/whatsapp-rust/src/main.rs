@@ -39,11 +39,11 @@ use clap::Parser;
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 use tracing::{error, info};
-use tracing_subscriber::EnvFilter;
+use wuphf_connector::settings::Connection;
 
 use crate::addressing::AddressBook;
 use crate::avatars::Avatars;
-use crate::config::Config;
+use crate::config::{Config, Runtime};
 use crate::disappearing::TimerFallback;
 use crate::groups::GroupDirectory;
 use crate::identity::Identity;
@@ -73,7 +73,7 @@ struct Cli {
 async fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
     let config = Config::load(&cli.config)?;
-    init_logging(&config.log_level);
+    let log = wuphf_connector::logging::init(&config.runtime.log_level);
 
     // The token comes from the environment only, so it stays out of the config
     // file and the process list.
@@ -86,6 +86,19 @@ async fn main() -> anyhow::Result<()> {
                 config.core_token_env
             )
         })?;
+
+    // The runtime settings are declared to the core, which keeps every change
+    // made from its settings panel or `wuphf settings` and pushes it back; the
+    // file's values, defaults filled in, are the base.
+    let settings = Arc::new(
+        Connection::connect(
+            &config.core_address,
+            &core_token,
+            &config.connector_id,
+            config.runtime.clone().with_defaults(),
+        )
+        .context("declare the runtime settings")?,
+    );
 
     let media = wuphf_connector::MediaClient::connect(&config.core_address, &core_token)
         .context("prepare the core media client")?;
@@ -105,9 +118,10 @@ async fn main() -> anyhow::Result<()> {
     let converter = wuphf_connector::MediaConverter {
         functions,
         media: media.clone(),
+        // Read per conversion, so a changed timeout applies to the next one.
         timeout: Arc::new({
-            let runtime = config.runtime.clone();
-            move || runtime.media_convert_timeout()
+            let live = Arc::clone(&settings.live);
+            move || live.load().media_convert_timeout()
         }),
     };
     let (inputs_tx, inputs_rx) = mpsc::channel(EVENT_CAPACITY);
@@ -130,6 +144,7 @@ async fn main() -> anyhow::Result<()> {
         supports_disappearing_timers: config.supports_disappearing_timers,
         token: core_token,
         is_permanent: None,
+        settings: Some(settings.declaration.clone()),
     });
     // With the flag off the sender stamps only what the core sends: no group
     // lookups, no owner notices.
@@ -137,6 +152,19 @@ async fn main() -> anyhow::Result<()> {
         .supports_disappearing_timers
         .then(|| TimerFallback::new(inputs_tx.clone()));
     let cancel = CancellationToken::new();
+    tokio::spawn({
+        let settings = Arc::clone(&settings);
+        let cancel = cancel.clone();
+        async move {
+            settings
+                .follow(cancel, move |old: &Runtime, new: &Runtime| {
+                    if old.log_level != new.log_level {
+                        log.set(&new.log_level);
+                    }
+                })
+                .await;
+        }
+    });
     // The core session lives as long as the process; the WhatsApp session
     // below is replaced after a logout, and the sender always reaches the
     // current one.
@@ -145,7 +173,7 @@ async fn main() -> anyhow::Result<()> {
             LiveClient::new(linked.clone(), Arc::clone(&groups)),
             media.clone(),
             converter,
-            config.runtime.clone(),
+            Arc::clone(&settings.live),
             fallback,
             Arc::clone(&identity),
             Arc::clone(&addresses),
@@ -211,11 +239,4 @@ async fn main() -> anyhow::Result<()> {
     }
     result?;
     Ok(())
-}
-
-/// WUPHF_LOG_LEVEL overrides the configured level, matching the Go connectors.
-fn init_logging(level: &str) {
-    let filter =
-        EnvFilter::try_from_env("WUPHF_LOG_LEVEL").unwrap_or_else(|_| EnvFilter::new(level));
-    tracing_subscriber::fmt().with_env_filter(filter).init();
 }

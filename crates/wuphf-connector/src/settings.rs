@@ -30,6 +30,10 @@ use wuphf_proto::connector as pb;
 use crate::client::core_uri;
 use crate::media::MediaConnectError;
 
+/// The settings service's messages and stubs, for connectors' tests and
+/// tools.
+pub use botconf_proto as proto;
+
 /// Where the core keeps connectors' settings: `connector_settings.<id>`.
 pub const NAMESPACE: &str = "connector_settings";
 

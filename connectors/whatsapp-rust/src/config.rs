@@ -1,7 +1,9 @@
 use std::path::Path;
 use std::time::Duration;
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
+use wuphf_connector::logging::{LEVELS, check_level};
+use wuphf_connector::settings::{RuntimeSettings, Setting, SettingKind};
 
 /// Connector-local configuration. Routing is owned entirely by the core; this
 /// file only carries how to reach the core and how to run the WhatsApp
@@ -18,10 +20,6 @@ pub struct Config {
     /// Path of the SQLite database holding the WhatsApp device session.
     /// Reopening the same path restores the paired session.
     pub session_database: String,
-    /// Log verbosity (trace, debug, info, warn, error); the WUPHF_LOG_LEVEL
-    /// environment variable overrides it.
-    #[serde(default = "default_log_level")]
-    pub log_level: String,
     /// The account's phone number (country code, digits only), which a pair
     /// code is issued for. Required by `login_method = "pair_code"`.
     #[serde(default)]
@@ -48,17 +46,21 @@ pub struct Config {
     /// sets `[functions] invoke_token_env`; unset or empty means none.
     #[serde(default)]
     pub functions_token_env: Option<String>,
-    /// Settings that may change while the connector runs (plan 056 makes them
-    /// live; until then they are read once at startup). Flattened, so the file
-    /// keeps its layout (`[rendering]`).
+    /// Settings that may change while the connector runs: declared to the core,
+    /// which pushes every change back (see [`RuntimeSettings`]). Flattened, so
+    /// the file keeps its layout (`log_level`, `[rendering]`).
     #[serde(flatten)]
     pub runtime: Runtime,
 }
 
 /// Settings that may change while the connector runs, the shape of the Go
 /// connector's `config.Runtime`.
-#[derive(Clone, Debug, Default, Deserialize, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
 pub struct Runtime {
+    /// Log verbosity (trace, debug, info, warn, error; empty means info); the
+    /// WUPHF_LOG_LEVEL environment variable overrides it.
+    #[serde(default)]
+    pub log_level: String,
     /// Bounds a sticker conversion, waiting for the converter included;
     /// deliveries on this connector wait behind it. 0 means 20000.
     #[serde(default)]
@@ -102,11 +104,80 @@ impl Runtime {
             link: or(&meta.link, DEFAULT_STICKER_LINK),
         }
     }
+
+    /// What an empty setting stands for, filled in, so the values declared to
+    /// the core are explicit (Go `WithDefaults`).
+    pub fn with_defaults(mut self) -> Self {
+        self.log_level = match self.log_level.to_lowercase() {
+            level if level.is_empty() => "info".into(),
+            level => level,
+        };
+        self.sticker_metadata = self.sticker_metadata();
+        self
+    }
+}
+
+/// The Go connector's runtime settings, word for word and in its order
+/// (`connectors/whatsapp/internal/config/config.go`), so the settings panel
+/// and `wuphf settings` treat both connectors alike; the shared fixture test
+/// checks it.
+impl RuntimeSettings for Runtime {
+    fn settings() -> Vec<Setting> {
+        let up_to_u32 = SettingKind::Number {
+            min: 0,
+            max: i64::from(u32::MAX),
+        };
+        vec![
+            Setting {
+                key: "log_level",
+                title: "Log level",
+                description: "How much the connector logs (WUPHF_LOG_LEVEL wins)",
+                kind: SettingKind::Choice(&LEVELS),
+            },
+            Setting {
+                key: "media_convert_timeout_ms",
+                title: "Sticker conversion timeout (ms)",
+                description: "How long converting a sticker may take, waiting for the converter \
+                              included; 0 means 20000",
+                kind: up_to_u32.clone(),
+            },
+            Setting {
+                key: "sticker_metadata.pack_name",
+                title: "Sticker pack name",
+                description: "The pack name WhatsApp shows for bridged stickers",
+                kind: SettingKind::Text,
+            },
+            Setting {
+                key: "sticker_metadata.author_name",
+                title: "Sticker author",
+                description: "The author WhatsApp shows for bridged stickers",
+                kind: SettingKind::Text,
+            },
+            Setting {
+                key: "sticker_metadata.link",
+                title: "Sticker link",
+                description: "A link folded into the sticker's publisher",
+                kind: SettingKind::Text,
+            },
+            Setting {
+                key: "rendering.attachments_as_files",
+                title: "Attachments as files",
+                description: "Send every attachment as a file, whatever its kind",
+                kind: SettingKind::Bool,
+            },
+            Setting {
+                key: "rendering.max_message_length",
+                title: "Longest inline message",
+                description: "Longer text is sent as a file; 0 means no limit",
+                kind: up_to_u32,
+            },
+        ]
+    }
 }
 
 /// How mirrored copies are rendered on WhatsApp: this connector's own policy;
 /// the core dispatches content only.
-#[derive(Clone, Debug, Default, Deserialize, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
 pub struct Rendering {
     /// Send every attachment as a file, whatever its kind.
     #[serde(default)]
@@ -119,7 +190,7 @@ pub struct Rendering {
 
 /// The sticker-pack metadata embedded in stickers bridged to WhatsApp, shown in
 /// WhatsApp's sticker info. A blank field falls back to its default.
-#[derive(Clone, Debug, Default, Deserialize, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
 pub struct StickerMetadata {
     #[serde(default)]
     pub pack_name: String,
@@ -152,10 +223,6 @@ pub enum LoginMethod {
     PairCode,
 }
 
-fn default_log_level() -> String {
-    "info".into()
-}
-
 impl Config {
     pub fn load(path: &Path) -> anyhow::Result<Self> {
         let contents = std::fs::read_to_string(path)
@@ -166,6 +233,7 @@ impl Config {
 
     fn parse(contents: &str) -> anyhow::Result<Self> {
         let config: Self = toml::from_str(contents)?;
+        check_level(&config.runtime.log_level).map_err(anyhow::Error::msg)?;
         if config.login_method() == LoginMethod::PairCode && config.phone_number.is_none() {
             anyhow::bail!("login_method = \"pair_code\" needs phone_number");
         }
@@ -285,6 +353,53 @@ mod tests {
             (meta.pack_name.as_str(), meta.author_name.as_str()),
             ("mine", "wuphf-ai")
         );
+    }
+
+    /// The declaration the Go connector writes, checked by its own test
+    /// (`TestRuntimeDeclarationMatchesTheSharedFixture`).
+    const GO_DECLARATION: &str =
+        include_str!("../../whatsapp/internal/config/testdata/runtime-declaration.json");
+
+    #[test]
+    fn the_declaration_matches_the_go_connector() {
+        use prost::Message as _;
+        use wuphf_connector::settings::proto::DescribeResponse;
+
+        let go: serde_json::Value = serde_json::from_str(GO_DECLARATION).unwrap();
+        let ours = wuphf_connector::settings::declare(&Runtime::default().with_defaults()).unwrap();
+
+        let hex = go["descriptor_hex"].as_str().unwrap();
+        let go_descriptor: Vec<u8> = (0..hex.len())
+            .step_by(2)
+            .map(|at| u8::from_str_radix(&hex[at..at + 2], 16).unwrap())
+            .collect();
+        assert_eq!(
+            DescribeResponse::decode(ours.descriptor.as_slice()).unwrap(),
+            DescribeResponse::decode(go_descriptor.as_slice()).unwrap()
+        );
+
+        // Go's reflector names its package in `$id`; nothing reads it.
+        let mut go_schema = go["json_schema"].clone();
+        go_schema.as_object_mut().unwrap().remove("$id");
+        let our_schema: serde_json::Value = serde_json::from_str(&ours.json_schema).unwrap();
+        assert_eq!(our_schema, go_schema);
+
+        let our_base: serde_json::Value = serde_json::from_str(&ours.base_json).unwrap();
+        assert_eq!(our_base, go["base"]);
+    }
+
+    #[test]
+    fn the_log_level_is_checked() {
+        let error = Config::parse(&format!("log_level = \"VERBOSE\"\n{MINIMAL}")).unwrap_err();
+        assert!(
+            error.to_string().contains("log_level must be one of"),
+            "{error}"
+        );
+        let config = Config::parse(&format!("log_level = \"INFO\"\n{MINIMAL}")).unwrap();
+        assert_eq!(config.runtime.with_defaults().log_level, "info");
+        let config = Config::parse(MINIMAL).unwrap();
+        assert_eq!(config.runtime.log_level, "");
+        assert_eq!(config.runtime.with_defaults().log_level, "info");
     }
 
     #[test]

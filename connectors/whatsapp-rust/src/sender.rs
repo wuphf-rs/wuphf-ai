@@ -17,6 +17,7 @@ use whatsapp_rust::wacore::proto_helpers::{
     MessageBuilderExt, MessageExt, build_quote_context_with_info,
 };
 use whatsapp_rust::waproto::whatsapp as wa;
+use wuphf_connector::settings::Live;
 use wuphf_connector::{Delivery, Failure, MediaClient, MediaConverter, Sender, SessionError};
 use wuphf_proto::connector as pb;
 
@@ -75,9 +76,10 @@ pub struct WhatsAppSender<C = LiveClient, M = MediaClient, S = MediaConverter> {
     client: C,
     media: M,
     converter: S,
-    /// How copies are rendered (`[rendering]`) and stickers labelled, read
-    /// once at startup.
-    runtime: Runtime,
+    /// How copies are rendered (`[rendering]`) and stickers labelled: the
+    /// live runtime settings, read once per dispatch (Go `pin`), so every part
+    /// of one dispatch sees the same value and a change applies from the next.
+    runtime: Arc<Live<Runtime>>,
     /// Set when the connector stamps disappearing timers: what to do with a
     /// dispatch that arrives without one.
     fallback: Option<TimerFallback>,
@@ -92,7 +94,7 @@ impl<C: WaClient, M: CoreMedia, S: StickerConverter> WhatsAppSender<C, M, S> {
         client: C,
         media: M,
         converter: S,
-        runtime: Runtime,
+        runtime: Arc<Live<Runtime>>,
         fallback: Option<TimerFallback>,
         identity: Arc<Identity>,
         addresses: Arc<AddressBook>,
@@ -188,8 +190,9 @@ impl<C: WaClient, M: CoreMedia, S: StickerConverter> WhatsAppSender<C, M, S> {
         &self,
         attachment: &pb::Attachment,
         caption: &str,
+        runtime: &Runtime,
     ) -> Result<wa::Message, Failure> {
-        let as_file = self.runtime.rendering.attachments_as_files;
+        let as_file = runtime.rendering.attachments_as_files;
         let media = outbound_media(attachment, caption, as_file)?;
         let bytes = self
             .media
@@ -201,7 +204,9 @@ impl<C: WaClient, M: CoreMedia, S: StickerConverter> WhatsAppSender<C, M, S> {
                 )
             })?;
         if attachment.kind() == pb::attachment::Kind::Sticker && !as_file {
-            return self.sticker_message(attachment, bytes, media).await;
+            return self
+                .sticker_message(attachment, bytes, media, runtime)
+                .await;
         }
         self.client.upload(bytes, media).await
     }
@@ -217,6 +222,7 @@ impl<C: WaClient, M: CoreMedia, S: StickerConverter> WhatsAppSender<C, M, S> {
         attachment: &pb::Attachment,
         bytes: Vec<u8>,
         fallback: OutboundMedia,
+        runtime: &Runtime,
     ) -> Result<wa::Message, Failure> {
         let mut bytes = bytes;
         let mut mime = attachment.mime_type.clone().unwrap_or_default();
@@ -240,7 +246,7 @@ impl<C: WaClient, M: CoreMedia, S: StickerConverter> WhatsAppSender<C, M, S> {
             }
         }
         if mime == WEBP {
-            bytes = apply_sticker_metadata(bytes, &self.runtime.sticker_metadata());
+            bytes = apply_sticker_metadata(bytes, &runtime.sticker_metadata());
         }
         let options = StickerOptions {
             mimetype: optional(Some(&mime)),
@@ -262,6 +268,7 @@ impl<C: WaClient, M: CoreMedia, S: StickerConverter> WhatsAppSender<C, M, S> {
         dispatch: &pb::MessageCreateDispatch,
         context: Option<wa::ContextInfo>,
         timer: Option<&pb::DisappearingTimer>,
+        runtime: &Runtime,
     ) -> Result<String, Failure> {
         let text = dispatch.text.as_deref().unwrap_or_default();
         let mut context = context;
@@ -269,7 +276,9 @@ impl<C: WaClient, M: CoreMedia, S: StickerConverter> WhatsAppSender<C, M, S> {
         for (index, attachment) in dispatch.attachments.iter().enumerate() {
             let caption = if index == 0 { text } else { "" };
             let part = async {
-                let mut message = self.attachment_message(attachment, caption).await?;
+                let mut message = self
+                    .attachment_message(attachment, caption, runtime)
+                    .await?;
                 if let Some(context) = context.take() {
                     message.set_context_info(context);
                 }
@@ -306,6 +315,8 @@ fn parse_chat(chat_id: &str) -> Result<Jid, Failure> {
 
 impl<C: WaClient, M: CoreMedia, S: StickerConverter> Sender for WhatsAppSender<C, M, S> {
     async fn send_message(&self, dispatch: pb::MessageCreateDispatch) -> Result<Delivery, Failure> {
+        // One value for the whole dispatch (Go `pin`).
+        let runtime = self.runtime.load();
         let (chat, mode) = self.target(&dispatch.target_chat_id).await?;
         let context = self.reply_context(&dispatch, &chat, mode).await?;
         // Every part of a content send carries the chat's timer, so it
@@ -325,13 +336,13 @@ impl<C: WaClient, M: CoreMedia, S: StickerConverter> Sender for WhatsAppSender<C
             None => dispatch.disappearing,
         };
         let message_id = if dispatch.attachments.len() > 1 {
-            self.send_attachments(chat, &dispatch, context, timer.as_ref())
+            self.send_attachments(chat, &dispatch, context, timer.as_ref(), &runtime)
                 .await?
         } else {
             let text = dispatch.text.as_deref().unwrap_or_default();
             let mut message = match dispatch.attachments.first() {
-                Some(attachment) => self.attachment_message(attachment, text).await?,
-                None if text_exceeds_limit(text, self.runtime.rendering.max_message_length) => {
+                Some(attachment) => self.attachment_message(attachment, text, &runtime).await?,
+                None if text_exceeds_limit(text, runtime.rendering.max_message_length) => {
                     self.client
                         .upload(text.as_bytes().to_vec(), text_file_media())
                         .await?
@@ -433,6 +444,8 @@ mod tests {
         actions: Mutex<Vec<ChatAction>>,
         /// The send (0-based) that fails, transiently.
         fail_send_at: Option<usize>,
+        /// Runs once, after the first upload.
+        after_upload: Mutex<Option<Box<dyn FnOnce() + Send>>>,
         groups: HashMap<String, GroupFacts>,
     }
 
@@ -464,6 +477,9 @@ mod tests {
             media: OutboundMedia,
         ) -> Result<wa::Message, Failure> {
             self.uploads.lock().unwrap().push((bytes, media.clone()));
+            if let Some(hook) = self.after_upload.lock().unwrap().take() {
+                hook();
+            }
             Ok(match media {
                 OutboundMedia::Image(options) => wa::Message {
                     image_message: MessageField::some(wa::message::ImageMessage {
@@ -614,7 +630,7 @@ mod tests {
             client,
             media,
             FakeConverter::default(),
-            runtime,
+            Arc::new(Live::new(runtime)),
             fallback,
             Arc::default(),
             Arc::default(),
@@ -1185,7 +1201,7 @@ mod tests {
             addressed(),
             FakeMedia::default(),
             FakeConverter::default(),
-            Runtime::default(),
+            Arc::new(Live::new(Runtime::default())),
             None,
             Arc::default(),
             addresses,
@@ -1224,7 +1240,7 @@ mod tests {
             fake(),
             media,
             converter,
-            runtime,
+            Arc::new(Live::new(runtime)),
             None,
             Arc::default(),
             Arc::default(),
@@ -1377,5 +1393,50 @@ mod tests {
         let (bytes, media) = only_upload(&sender);
         assert_eq!(bytes, b"webm");
         assert!(matches!(media, OutboundMedia::Document(_)));
+    }
+
+    #[tokio::test]
+    async fn a_changed_setting_applies_to_the_next_dispatch() {
+        let sender = sticker_sender(FakeConverter::default(), Runtime::default(), WEBP_STICKER);
+        sender.send_message(text("ten chars!")).await.unwrap();
+        sender.runtime.set(Runtime {
+            sticker_metadata: crate::config::StickerMetadata {
+                pack_name: "mine".into(),
+                ..Default::default()
+            },
+            ..rendering(false, 5)
+        });
+        sender.send_message(text("ten chars!")).await.unwrap();
+        send_sticker(&sender, sticker("image/webp", false)).await;
+
+        let sent = sends(&sender);
+        assert_eq!(sent[0].text_content(), Some("ten chars!"));
+        assert_eq!(
+            sent[1].document_message.file_name.as_deref(),
+            Some("message.txt")
+        );
+        let uploads = sender.client.uploads.lock().unwrap();
+        assert!(carries(&uploads[1].0, r#""sticker-pack-name":"mine""#));
+    }
+
+    #[tokio::test]
+    async fn one_dispatch_sees_one_value() {
+        let sender = sender(fake(), media(&["m-1", "m-2", "m-3"]));
+        let live = Arc::clone(&sender.runtime);
+        *sender.client.after_upload.lock().unwrap() = Some(Box::new(move || {
+            live.set(rendering(true, 0));
+        }));
+        let dispatch = pb::MessageCreateDispatch {
+            attachments: vec![image("m-1"), image("m-2"), image("m-3")],
+            ..text("three")
+        };
+        sender.send_message(dispatch).await.unwrap();
+        let uploads = sender.client.uploads.lock().unwrap();
+        assert_eq!(uploads.len(), 3);
+        for (_, media) in uploads.iter() {
+            assert!(matches!(media, OutboundMedia::Image(_)), "{media:?}");
+        }
+        // The change applies from the next dispatch.
+        assert!(sender.runtime.load().rendering.attachments_as_files);
     }
 }

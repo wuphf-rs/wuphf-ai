@@ -1,3 +1,9 @@
+# Keys marked "Runtime." can also change while the connector runs: the
+# connector declares them to the core, which keeps any change (made from its
+# settings panel or `wuphf settings`, under
+# `connector_settings.<connector id>`) and pushes it back here. The values in
+# this file are the base; unsetting a change returns to them.
+
 core_address = "127.0.0.1:50051"
 
 # Must match a [[connectors]] entry in the core config.
@@ -11,7 +17,8 @@ core_token_env = "WUPHF_CONNECTOR_WHATSAPP_RUST_TOKEN"
 # database and restart the connector to pair again.
 session_database = "whatsapp-rust.session.db"
 
-# Log verbosity: trace, debug, info, warn, error. WUPHF_LOG_LEVEL overrides.
+# Runtime. Log verbosity: trace, debug, info, warn, error (any case; anything
+# else is refused). WUPHF_LOG_LEVEL overrides it.
 log_level = "info"
 
 # How the session is linked, at the first start and again by itself after
@@ -55,22 +62,21 @@ client_mode = "android_business"
 # Environment variable holding the core's invoke token, when the core sets
 # [functions] invoke_token_env.
 # functions_token_env = "WUPHF_INVOKE_TOKEN"
-# Bound on one sticker conversion, including waiting for the converter. This
-# connector delivers in order, so later messages wait behind it. Read at
-# startup.
+# Runtime. Bound on one sticker conversion, including waiting for the
+# converter. This connector delivers in order, so later messages wait behind it.
 # media_convert_timeout_ms = 20000
 
-# Sticker-pack metadata embedded in stickers bridged to WhatsApp, shown in
-# WhatsApp's sticker info. Any field left blank falls back to the defaults shown
-# here. WhatsApp has no link field for received stickers, so the link is appended
-# to the publisher text (visible, not clickable). Read at startup.
+# Runtime. Sticker-pack metadata embedded in stickers bridged to WhatsApp, shown
+# in WhatsApp's sticker info. Any field left blank falls back to the defaults
+# shown here. WhatsApp has no link field for received stickers, so the link is
+# appended to the publisher text (visible, not clickable).
 [sticker_metadata]
 pack_name = "wuphf"
 author_name = "wuphf-ai"
 link = "https://github.com/wuphf/wuphf-ai"
 
-# How replicated copies are rendered on WhatsApp. This connector's own policy;
-# the core dispatches content only. Read at startup: restart after a change.
+# Runtime. How replicated copies are rendered on WhatsApp. This connector's own
+# policy; the core dispatches content only.
 [rendering]
 # Send every attachment as a generic file/document instead of its origin kind.
 attachments_as_files = false

@@ -268,6 +268,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "botconf-proto"
+version = "0.11.0"
+source = "git+https://github.com/propheci/botconf?tag=v0.11.0#01e01041cc8607991521ba288fc00cda0a5076f2"
+dependencies = [
+ "prost",
+ "tonic",
+ "tonic-build",
+]
+
+[[package]]
 name = "buffa"
 version = "0.8.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3076,6 +3086,8 @@ name = "wuphf-connector"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "botconf-proto",
+ "prost",
  "serde",
  "serde_json",
  "thiserror",
@@ -3084,6 +3096,7 @@ dependencies = [
  "tokio-util",
  "tonic",
  "tracing",
+ "tracing-subscriber",
  "wuphf-proto",
 ]
 
@@ -3095,6 +3108,7 @@ dependencies = [
  "clap",
  "diesel",
  "flate2",
+ "prost",
  "qrcode",
  "serde",
  "serde_json",
@@ -3102,7 +3116,6 @@ dependencies = [
  "tokio-util",
  "toml 0.8.23",
  "tracing",
- "tracing-subscriber",
  "whatsapp-rust",
  "whatsapp-rust-sqlite-storage",
  "wuphf-connector",
