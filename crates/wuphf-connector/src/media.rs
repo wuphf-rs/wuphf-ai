@@ -15,8 +15,8 @@ use crate::client::{SessionError, core_uri};
 /// The largest chunk one upload frame carries, as in the Go client.
 const UPLOAD_CHUNK_BYTES: usize = 64 * 1024;
 
-/// Why a [`MediaClient`] could not be built: only its inputs can be wrong,
-/// since it connects on first use.
+/// Why a [`MediaClient`] (or a [`crate::FunctionsClient`]) could not be built:
+/// only its inputs can be wrong, since it connects on first use.
 #[derive(Debug, Error)]
 pub enum MediaConnectError {
     #[error("invalid core address: {0}")]
