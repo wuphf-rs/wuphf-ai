@@ -165,9 +165,16 @@ core when the WhatsApp session is lost (a logout, another client taking over,
 a temporary ban, an outdated client), when it is back, and when an incoming
 message's media could not be downloaded. Outbound it
 sends text, edits, deletes and media of every kind (photos, videos, GIFs,
-audio, files; stickers as files for now), several attachments as consecutive
-messages with the text on the first, and follows `[rendering]` as the Go
-connector does (`attachments_as_files`, `max_message_length`). It registers
+audio, files, stickers), several attachments as consecutive messages with the
+text on the first, and follows `[rendering]` as the Go connector does
+(`attachments_as_files`, `max_message_length`). Stickers go out as WhatsApp
+stickers carrying the `[sticker_metadata]` pack name, author and link (the
+EXIF is written in Rust, so no `webpmux` is needed); animated stickers in
+another format (Telegram video and Lottie stickers) are first converted to
+animated WebP by the core's `media.convert` provider (`providers/mediaconv`),
+and arrive as files when it is not running or takes longer than
+`media_convert_timeout_ms` (default 20000). Set `functions_token_env` when
+the core sets `[functions] invoke_token_env`. It registers
 as an Android client so WhatsApp delivers view-once media: set `client_mode`
 to `"android"` for a personal account or `"android_business"` for a WhatsApp
 Business account. The mode is sent at pairing, so changing it needs a fresh
