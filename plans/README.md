@@ -73,7 +73,7 @@ code).
 | 053 | whatsapp-rust: canonical ids, identity migrations, the addressing book, quote authors, channel titles | P1 | M–L | — (051 soft) | DONE (see notes) |
 | 054 | whatsapp-rust: outbound media of every kind, rendering options, SDK media download | P1 | L | 051 (053 soft) | DONE (see notes) |
 | 055 | whatsapp-rust: stickers — SDK functions client, media.convert, pure-Rust sticker EXIF | P2 | M–L | 054 | DONE (see notes) |
-| 056 | Runtime settings in the Rust SDK; whatsapp-rust declares the Go connector's settings | P2 | L | botconf 013 (055 soft) | TODO |
+| 056 | Runtime settings in the Rust SDK; whatsapp-rust declares the Go connector's settings | P2 | L | botconf 013 (055 soft) | DONE (see notes) |
 | 057 | WhatsApp connectors link again by themselves after a logout (QR or pair code, delivered to the owner) | P1 | L | — | DONE (no migration; see notes) |
 
 Status values: TODO | IN PROGRESS | DONE | BLOCKED (with one-line reason) |
@@ -1392,6 +1392,39 @@ read receipts, albums, polls, locations, vCards) wait for a later plan.
   invoke_token_env`; `media_convert_timeout_ms`; `[sticker_metadata]`. Live
   test: plan 055 Step 6 (static, video and Lottie stickers; `wmc` stopped →
   a file after the timeout; a sticker reply in a disappearing chat).
+- **056 done 2026-11-23** (on `v2`, `29764d9`..this commit), after botconf
+  013 (`v0.11.0`, `go/v0.11.0`, executed and pushed first, this session).
+  SDK tests 22 → 37 (+2 logging, +10 settings unit, +3 settings
+  integration); Go config 16 → 17 (the fixture); whatsapp-rust 157 → 161.
+  All seven Go runtime keys are declared; the Rust declaration equals the Go
+  fixture (descriptor messages, schema less `$id`, base). Locks: the main
+  lock moves botconf to 0.11.0 and gains `botconf-proto`; the whatsapp-rust
+  lock gains only `botconf-proto` (one tonic, prost, tokio and serde each).
+  clippy, fmt, `go vet` clean. Mutations (each failed a test): no base on an
+  initial event, no authorization header, reading the live value per part.
+  Deviations:
+  - Step 3 (the Go fixture) landed first, so the Rust schema was written
+    against it: invopop emits `$schema`, `$id`, `properties`,
+    `additionalProperties: false`, `type`, and `enum` for the level; integers
+    carry no bounds in the schema (only in the descriptor).
+  - `declare` refuses a section whose fields are not all listed
+    (`every_field_must_be_listed`, +1 test), so the closed schema always
+    admits the base.
+  - The registration test lives in `tests/settings.rs` against a recording
+    core (as Go's), not in `tests/session.rs`: the real-core harness has no
+    settings store and refuses any declaration.
+  - `Connection::with_backoff` shortens the reconnect delays for the tests.
+  - The SDK re-exports `botconf_proto` as `settings::proto`; whatsapp-rust
+    gains `prost` as a dev-dependency (already locked) to decode the
+    fixture's descriptor, and drops its own `tracing-subscriber` dependency.
+  - `log_level` is checked in `Config::parse` (so `load` and the tests both
+    check it).
+  Owner: restart `wwr` (no core restart; the core takes the declaration at
+  registration). `log_level` must be one of the five levels. Live test:
+  plan 056 Step 6 (the panel lists the same seven settings as
+  `whatsapp-main`; "Longest inline message" 20 → a 30-character message
+  arrives as `message.txt`; log level debug → verbose at once; a new sticker
+  pack name on the next sticker).
 
 ### 057: linking WhatsApp again after a logout
 
