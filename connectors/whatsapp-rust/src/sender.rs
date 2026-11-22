@@ -78,26 +78,45 @@ impl<C: WaClient, M: CoreMedia> WhatsAppSender<C, M> {
         }
     }
 
-    /// The quote metadata for a reply. The quoted copy at this endpoint is
-    /// always bridge-authored, since the router never dispatches a message
-    /// back to its origin endpoint, so the quoted participant is our own
-    /// account. The quoted body is a typed stub of the parent's media, so the
-    /// preview shows a photo rather than empty text.
+    /// The quote metadata for a reply. The quoted body is a typed stub of the
+    /// parent's media, so the preview shows a photo rather than empty text.
     fn quote_context(
         &self,
         chat: &Jid,
         reply: &pb::ReplyContext,
     ) -> Result<wa::ContextInfo, Failure> {
-        let own = self.client.own_pn()?.ok_or_else(|| {
-            Failure::permanent("outbound WhatsApp reply requires a paired account JID")
-        })?;
         Ok(build_quote_context_with_info(
             reply.platform_message_id.clone(),
-            &own.to_non_ad(),
+            &self.quoted_author(reply)?,
             chat,
             chat,
             &quoted_body(reply),
         ))
+    }
+
+    /// Who WhatsApp is told wrote the quoted message (as the Go connector's
+    /// `quotedAuthor`): WhatsApp links a quote by its id and author together,
+    /// so the wrong author shows the wrong name and leaves the reply unlinked.
+    /// A copy the bridge sent into this chat was written by our own account;
+    /// one received here (an owner send, such as wuphf-misc's, replying to a
+    /// message from someone in the chat) names its author in this platform's
+    /// own ids, in the form the chat addressed it in. Plan 053 adds the
+    /// phone / LID form translation the Go connector does.
+    fn quoted_author(&self, reply: &pb::ReplyContext) -> Result<Jid, Failure> {
+        if !reply.authored_by_bridge {
+            let author = reply
+                .participant
+                .as_deref()
+                .filter(|author| !author.is_empty())
+                .unwrap_or(&reply.sender);
+            if let Ok(author) = author.parse::<Jid>() {
+                return Ok(author.to_non_ad());
+            }
+        }
+        let own = self.client.own_pn()?.ok_or_else(|| {
+            Failure::permanent("outbound WhatsApp reply requires a paired account JID")
+        })?;
+        Ok(own.to_non_ad())
     }
 
     /// The message for one attachment: downloaded from the core (a failure is
@@ -444,6 +463,8 @@ mod tests {
         pb::ReplyContext {
             platform_message_id: id.into(),
             text: Some("earlier".into()),
+            // A copy the bridge sent here, as most replies quote.
+            authored_by_bridge: true,
             ..Default::default()
         }
     }
@@ -490,6 +511,45 @@ mod tests {
             quote.quoted_message.conversation.as_deref(),
             Some("earlier")
         );
+    }
+
+    #[tokio::test]
+    async fn a_quote_names_who_wrote_the_parent() {
+        let sender = sender(FakeClient::default(), FakeMedia::default());
+        let received = |participant: Option<&str>, sender_id: &str| pb::ReplyContext {
+            authored_by_bridge: false,
+            participant: participant.map(str::to_owned),
+            sender: sender_id.into(),
+            ..reply_to("wa-0")
+        };
+        for (reply, author) in [
+            // A group message: its participant.
+            (
+                received(Some("1777:3@s.whatsapp.net"), "123@g.us"),
+                "1777@s.whatsapp.net",
+            ),
+            // A DM: its sender.
+            (received(None, "1888@lid"), "1888@lid"),
+            // Nothing usable: our own account, as for a bridge-authored copy.
+            (received(None, ""), "1999@s.whatsapp.net"),
+            (
+                pb::ReplyContext {
+                    participant: Some("1777@s.whatsapp.net".into()),
+                    ..reply_to("wa-0")
+                },
+                "1999@s.whatsapp.net",
+            ),
+        ] {
+            let dispatch = pb::MessageCreateDispatch {
+                target_chat_id: GROUP.into(),
+                reply_context: Some(reply),
+                ..text("here")
+            };
+            sender.send_message(dispatch).await.unwrap();
+            let sent = sends(&sender);
+            let quote = context(sent.last().unwrap());
+            assert_eq!(quote.participant.as_deref(), Some(author));
+        }
     }
 
     #[tokio::test]
