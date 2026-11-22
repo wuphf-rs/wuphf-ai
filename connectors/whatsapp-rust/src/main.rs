@@ -18,12 +18,14 @@ mod names;
 mod normalize;
 mod qr_png;
 mod receipts;
+mod resync;
 mod sender;
 mod session;
 mod supervise;
 
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
 
 use anyhow::Context as _;
 use clap::Parser;
@@ -51,6 +53,10 @@ struct Cli {
     /// Path to the connector TOML configuration.
     #[arg(long, default_value = "config.example.toml")]
     config: PathBuf,
+    /// Fetch every WhatsApp app-state collection (contacts, pin, mute,
+    /// archive, settings) in full again once connected, as if newly linked.
+    #[arg(long)]
+    resync_app_state: bool,
 }
 
 #[tokio::main]
@@ -118,6 +124,7 @@ async fn main() -> anyhow::Result<()> {
         media,
         groups,
         linked,
+        resync_all: AtomicBool::new(cli.resync_app_state),
     };
     let mut whatsapp = tokio::spawn({
         let cancel = whatsapp_cancel.clone();

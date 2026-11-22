@@ -139,7 +139,7 @@ impl Contacts {
     }
 }
 
-fn database(error: diesel::result::Error) -> StoreError {
+pub(crate) fn database(error: diesel::result::Error) -> StoreError {
     StoreError::Database(Box::new(error))
 }
 

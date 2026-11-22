@@ -180,6 +180,13 @@ the mirror topics, and stamps disappearing timers when
 `connectors/whatsapp-rust/config.example.toml` (or your copy) and the core's
 `whatsapp-rust` `[[connectors]]` entry.
 
+Saved contact names and pin / mute / archive come from WhatsApp's app-state
+sync, which the library fetches in full only once per link. A session the
+connector did not link itself (or linked before it read a collection) is
+fetched in full again once, on its first connect; to force that for every
+collection, start it with `--resync-app-state` (`wwr --config
+config.local.toml --resync-app-state`).
+
 ## Verify
 
 ```sh

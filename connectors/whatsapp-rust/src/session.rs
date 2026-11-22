@@ -11,6 +11,7 @@
 //! alone: linking again would not help, and the owner has been told.
 
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, RwLock};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -36,6 +37,7 @@ use crate::linking::{Linking, PairCodeAsk};
 use crate::names::ChatTitles;
 use crate::normalize::Normalizer;
 use crate::receipts::Receipts;
+use crate::resync::Resync;
 
 /// The client of the session that is running, for the sender: empty while a
 /// new session is being set up after a logout. Cheap to clone.
@@ -71,6 +73,9 @@ pub struct Shared {
     pub groups: Arc<GroupDirectory>,
     pub linking: Arc<Linking>,
     pub linked: LinkedClient,
+    /// `--resync-app-state`: the first session resyncs every app-state
+    /// collection, then this is cleared.
+    pub resync_all: AtomicBool,
 }
 
 /// How long a session whose client stopped waits for the logout handler before
@@ -132,6 +137,13 @@ async fn run_once(shared: &Shared, cancel: &CancellationToken) -> anyhow::Result
     let chat_events = ChatEvents::new(inputs.clone(), titles, Arc::clone(&shared.avatars));
     let health = Health::new(inputs.clone());
     let receipts = Receipts::new(inputs.clone());
+    let resync = Resync::open(
+        store.shared(),
+        shared.resync_all.swap(false, Ordering::SeqCst),
+    )
+    .await
+    .context("prepare the WhatsApp app-state seeds table")?;
+    let paired = resync.clone();
     let logged_out = Arc::new(Notify::new());
 
     let (profile, device_props) = device::client_identity(config.client_mode);
@@ -174,11 +186,18 @@ async fn run_once(shared: &Shared, cancel: &CancellationToken) -> anyhow::Result
                 }
             },
         )
-        .on_connected(move |_client| {
+        .on_connected(move |client| {
             connected_linking.linked();
+            resync.connected(client);
             async {
                 info!("connected to WhatsApp");
             }
+        })
+        // A link made here syncs every collection in full, through these
+        // handlers: nothing is left to resync.
+        .on_event_for(&[EventKind::PairSuccess], move |_event, _client| {
+            let paired = paired.clone();
+            async move { paired.linked().await }
         })
         .on_logged_out(move |info| {
             on_logout.notify_one();
