@@ -71,7 +71,7 @@ code).
 | 051 | whatsapp-rust: inbound media, captions, view-once, and the Android client identity | P1 | M | — | DONE (see notes) |
 | 052 | whatsapp-rust: owner notices, inbound receipts, staying up when the WhatsApp client stops | P2 | S–M | — | DONE (see notes) |
 | 053 | whatsapp-rust: canonical ids, identity migrations, the addressing book, quote authors, channel titles | P1 | M–L | — (051 soft) | TODO |
-| 054 | whatsapp-rust: outbound media of every kind, rendering options, SDK media download | P1 | L | 051 (053 soft) | TODO |
+| 054 | whatsapp-rust: outbound media of every kind, rendering options, SDK media download | P1 | L | 051 (053 soft) | DONE (see notes) |
 | 055 | whatsapp-rust: stickers — SDK functions client, media.convert, pure-Rust sticker EXIF | P2 | M–L | 054 | TODO |
 | 056 | Runtime settings in the Rust SDK; whatsapp-rust declares the Go connector's settings | P2 | L | botconf 013 (055 soft) | TODO |
 | 057 | WhatsApp connectors link again by themselves after a logout (QR or pair code, delivered to the owner) | P1 | L | — | DONE (no migration; see notes) |
@@ -1323,6 +1323,27 @@ read receipts, albums, polls, locations, vCards) wait for a later plan.
   watch for the delivered and read marks; unlink the device on the phone and
   check the logged-out notice arrives while the connector keeps running;
   re-pair and check the "working again" notice.
+- **054 done 2026-11-23** (on `v2`, `62ea8e2`..this commit), after 057 and
+  the resync (`2b25e02`), not 053. SDK media tests 2 → 5 (download: chunks,
+  wrong token, unknown / malformed id); whatsapp-rust 94 → 115 (+1 config,
+  +6 outbound, +14 sender, the two old sender tests folded in). clippy and
+  fmt clean; neither lock changed. Mutations (each failed a test): ignoring
+  `as_file`, counting bytes for the length limit, stamping only the first
+  part, every group failure permanent. D2 = (a), D3 = (a). Deviations:
+  - Steps 2–4 landed as one commit (`dc6524b`): the sender was written once
+    on the port rather than three times.
+  - `WaClient` also carries 047's chat actions (`ChatAction`) and the own
+    number, and returns `Failure` (not `anyhow`) so a chat action keeps its
+    permanent / transient class; `LiveClient` reads 057's `LinkedClient` per
+    call, so a send while no session is linked is transient.
+  - `TimerFallback::new` takes only the input channel; a group's timer comes
+    through `WaClient::group_facts`.
+  - Quotes keep the own-number participant (053 is not done; it adds the
+    author rule on this harness).
+  Owner: restart whatsapp-rust. Live test: from Telegram send a photo with a
+  caption, a video, a GIF, a voice note, a PDF and an album of three into a
+  chat mirrored to whatsapp-rust; reply from Telegram to a WhatsApp photo
+  (the quote previews the photo); wuphf-misc's reel replies now arrive.
 
 ### 057: linking WhatsApp again after a logout
 

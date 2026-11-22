@@ -47,3 +47,12 @@ client_mode = "android_business"
 # Routing is owned entirely by the core: configure [rules.<id>] entries there
 # using WhatsApp JIDs such as "12345@s.whatsapp.net" or "12345@g.us" as chat
 # IDs.
+
+# How replicated copies are rendered on WhatsApp. This connector's own policy;
+# the core dispatches content only. Read at startup: restart after a change.
+[rendering]
+# Send every attachment as a generic file/document instead of its origin kind.
+attachments_as_files = false
+# Text longer than this many characters is sent as a plain-text file instead of
+# an inline message. 0 (or omitted) leaves text unbounded.
+# max_message_length = 4096

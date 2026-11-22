@@ -164,7 +164,10 @@ delivered and read receipts in direct chats, and tells the owner through the
 core when the WhatsApp session is lost (a logout, another client taking over,
 a temporary ban, an outdated client), when it is back, and when an incoming
 message's media could not be downloaded. Outbound it
-sends text, edits and deletes; outbound media is still to come. It registers
+sends text, edits, deletes and media of every kind (photos, videos, GIFs,
+audio, files; stickers as files for now), several attachments as consecutive
+messages with the text on the first, and follows `[rendering]` as the Go
+connector does (`attachments_as_files`, `max_message_length`). It registers
 as an Android client so WhatsApp delivers view-once media: set `client_mode`
 to `"android"` for a personal account or `"android_business"` for a WhatsApp
 Business account. The mode is sent at pairing, so changing it needs a fresh
