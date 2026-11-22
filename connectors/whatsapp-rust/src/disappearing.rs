@@ -7,12 +7,11 @@
 //! so they are tested without a network client.
 
 use std::collections::HashSet;
-use std::sync::{Arc, Mutex};
+use std::sync::Mutex;
 
 use tokio::sync::mpsc;
 use tracing::warn;
 use whatsapp_rust::chrono::{DateTime, Utc};
-use whatsapp_rust::client::Client;
 use whatsapp_rust::types::message::MessageInfo;
 use whatsapp_rust::wacore::proto_helpers::MessageExt;
 use whatsapp_rust::wacore::stanza::groups::GroupNotificationAction;
@@ -20,8 +19,8 @@ use whatsapp_rust::waproto::whatsapp as wa;
 use whatsapp_rust::{Jid, Server};
 use wuphf_proto::connector as pb;
 
-use crate::groups::GroupDirectory;
 use crate::normalize::{canonical, context_info, frame};
+use crate::wa_client::WaClient;
 
 /// The most chat updates one frame carries. A history sync reports every
 /// conversation at once; batching keeps each frame well under gRPC limits.
@@ -220,24 +219,23 @@ impl NoticeGate {
 /// timer is looked up (and reported to the core), and a DM's unknown timer is
 /// raised with the owner once per chat until it becomes known.
 pub struct TimerFallback {
-    groups: Arc<GroupDirectory>,
     inputs: mpsc::Sender<pb::ClientFrame>,
     gate: NoticeGate,
 }
 
 impl TimerFallback {
-    pub fn new(groups: Arc<GroupDirectory>, inputs: mpsc::Sender<pb::ClientFrame>) -> Self {
+    pub fn new(inputs: mpsc::Sender<pb::ClientFrame>) -> Self {
         Self {
-            groups,
             inputs,
             gate: NoticeGate::default(),
         }
     }
 
-    /// The timer to stamp on a send to `chat`.
+    /// The timer to stamp on a send to `chat`; a group's is looked up through
+    /// `client`.
     pub async fn resolve(
         &self,
-        client: &Client,
+        client: &impl WaClient,
         chat_id: &str,
         chat: &Jid,
         dispatched: Option<pb::DisappearingTimer>,
@@ -247,7 +245,7 @@ impl TimerFallback {
             return Some(timer);
         }
         if chat.server == Server::Group
-            && let Some(facts) = self.groups.facts(client, chat).await
+            && let Some(facts) = client.group_facts(chat).await
         {
             let timer = pb::DisappearingTimer {
                 seconds: facts.disappearing_seconds,

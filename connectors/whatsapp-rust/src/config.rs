@@ -43,6 +43,32 @@ pub struct Config {
     /// Applied at pairing, so a change needs a fresh pairing.
     #[serde(default)]
     pub client_mode: ClientMode,
+    /// Settings that may change while the connector runs (plan 056 makes them
+    /// live; until then they are read once at startup). Flattened, so the file
+    /// keeps its layout (`[rendering]`).
+    #[serde(flatten)]
+    pub runtime: Runtime,
+}
+
+/// Settings that may change while the connector runs, the shape of the Go
+/// connector's `config.Runtime`.
+#[derive(Clone, Debug, Default, Deserialize, PartialEq, Eq)]
+pub struct Runtime {
+    #[serde(default)]
+    pub rendering: Rendering,
+}
+
+/// How mirrored copies are rendered on WhatsApp: this connector's own policy;
+/// the core dispatches content only.
+#[derive(Clone, Debug, Default, Deserialize, PartialEq, Eq)]
+pub struct Rendering {
+    /// Send every attachment as a file, whatever its kind.
+    #[serde(default)]
+    pub attachments_as_files: bool,
+    /// Longer text (in characters) is sent as a plain-text file; 0 means no
+    /// limit.
+    #[serde(default)]
+    pub max_message_length: u32,
 }
 
 /// The WhatsApp client kind the session registers as.
@@ -155,6 +181,18 @@ mod tests {
     fn pair_code_login_needs_a_phone_number() {
         let error = Config::parse(&format!("{MINIMAL}login_method = \"pair_code\"\n")).unwrap_err();
         assert!(error.to_string().contains("needs phone_number"), "{error}");
+    }
+
+    #[test]
+    fn rendering_defaults_off_and_reads_its_section() {
+        let config = Config::parse(MINIMAL).unwrap();
+        assert_eq!(config.runtime, Runtime::default());
+        let config = Config::parse(&format!(
+            "{MINIMAL}[rendering]\nattachments_as_files = true\nmax_message_length = 4096\n"
+        ))
+        .unwrap();
+        assert!(config.runtime.rendering.attachments_as_files);
+        assert_eq!(config.runtime.rendering.max_message_length, 4096);
     }
 
     #[test]

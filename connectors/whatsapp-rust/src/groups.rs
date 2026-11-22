@@ -19,7 +19,7 @@ use whatsapp_rust::client::Client;
 const GROUP_TTL: Duration = Duration::from_secs(5 * 60);
 
 /// What the connector knows about one group.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct GroupFacts {
     pub subject: String,
     /// The group description; empty when the group has none.

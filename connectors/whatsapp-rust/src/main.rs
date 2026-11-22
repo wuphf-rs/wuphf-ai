@@ -16,12 +16,14 @@ mod linking;
 mod media;
 mod names;
 mod normalize;
+mod outbound;
 mod qr_png;
 mod receipts;
 mod resync;
 mod sender;
 mod session;
 mod supervise;
+mod wa_client;
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -42,6 +44,7 @@ use crate::linking::Linking;
 use crate::sender::WhatsAppSender;
 use crate::session::{LinkedClient, Shared};
 use crate::supervise::{Stop, supervise};
+use crate::wa_client::LiveClient;
 
 /// Buffers normalized inbound events ahead of the core session so a core
 /// reconnect applies backpressure instead of losing messages.
@@ -99,13 +102,18 @@ async fn main() -> anyhow::Result<()> {
     // lookups, no owner notices.
     let fallback = config
         .supports_disappearing_timers
-        .then(|| TimerFallback::new(Arc::clone(&groups), inputs_tx.clone()));
+        .then(|| TimerFallback::new(inputs_tx.clone()));
     let cancel = CancellationToken::new();
     // The core session lives as long as the process; the WhatsApp session
     // below is replaced after a logout, and the sender always reaches the
     // current one.
     let session = core_client.run(
-        WhatsAppSender::new(linked.clone(), fallback),
+        WhatsAppSender::new(
+            LiveClient::new(linked.clone(), Arc::clone(&groups)),
+            media.clone(),
+            config.runtime.clone(),
+            fallback,
+        ),
         inputs_rx,
         cancel.clone(),
     );
