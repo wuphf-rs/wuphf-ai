@@ -17,10 +17,11 @@ use wuphf_connector::MediaClient;
 use wuphf_proto::connector as pb;
 
 use crate::avatars::Avatars;
-use crate::chats::{Sightings, chat_forms, sighting_updates};
+use crate::chats::{Sightings, sighting_updates};
 use crate::disappearing::{
     CHAT_UPDATE_BATCH, chat_update_frames, ephemeral_setting, message_timer,
 };
+use crate::identity::{Identity, MigrationGate, migrations_for};
 use crate::media;
 use crate::names::ChatTitles;
 
@@ -33,6 +34,8 @@ pub struct Normalizer {
     avatars: Arc<Avatars>,
     media: MediaClient,
     sightings: Arc<Sightings>,
+    identity: Arc<Identity>,
+    migrations: Arc<MigrationGate>,
 }
 
 /// The names a message needs, resolved from the contacts table before it is
@@ -43,6 +46,10 @@ struct Names {
     sender: Option<String>,
     /// `(user part, display name)` for each mentioned person with a known name.
     mentions: Vec<(String, String)>,
+    /// The chat's and the sender's canonical ids; `None` (as in tests)
+    /// reports their bare ids.
+    chat_id: Option<String>,
+    sender_id: Option<String>,
 }
 
 impl Normalizer {
@@ -51,6 +58,8 @@ impl Normalizer {
         titles: Arc<ChatTitles>,
         avatars: Arc<Avatars>,
         media: MediaClient,
+        identity: Arc<Identity>,
+        migrations: Arc<MigrationGate>,
     ) -> Self {
         Self {
             inputs,
@@ -58,6 +67,8 @@ impl Normalizer {
             avatars,
             media,
             sightings: Arc::new(Sightings::default()),
+            identity,
+            migrations,
         }
     }
 
@@ -68,9 +79,30 @@ impl Normalizer {
         if !info.source.is_from_me && is_person(&info.source.sender) {
             self.titles
                 .contacts()
-                .upsert_push_name(canonical(&info.source.sender), &info.push_name)
+                .upsert_push_name(bare_id(&info.source.sender), &info.push_name)
                 .await;
         }
+        // The chat is canonicalized once and threaded through every frame, and
+        // any address change is reported before them, so the core binds both
+        // forms to one conversation before it resolves this message (Go
+        // `Handle`).
+        let chat = self.identity.canonical(client, &info.source.chat).await;
+        let sender = self
+            .identity
+            .canonical_id(client, &info.source.sender)
+            .await;
+        let alternate = self.identity.alternate(client, &chat).await;
+        let migrations =
+            self.migrations
+                .unseen(migrations_for(&info.source, &chat, alternate.as_ref()));
+        for migration in migrations {
+            let frame = frame(pb::client_frame::Body::IdentityMigrated(migration));
+            if self.inputs.send(frame).await.is_err() {
+                warn!("core session input closed; dropping a WhatsApp identity migration");
+                return;
+            }
+        }
+        let chat_id = chat.to_string();
         let title = self.titles.title(client, info).await;
         // A message's media is fetched before it is mapped: the create names the
         // stored attachment. Protocol messages and reactions carry none.
@@ -87,7 +119,7 @@ impl Normalizer {
                         "dropping a WhatsApp media message: the media could not be fetched"
                     );
                     // The owner is told, so the drop is never silent.
-                    let chat = title.unwrap_or_else(|| canonical(&info.source.chat));
+                    let chat = title.unwrap_or_else(|| bare_id(&info.source.chat));
                     wuphf_connector::send_notice(
                         &self.inputs,
                         pb::NoticeKind::MediaUnavailable,
@@ -100,17 +132,14 @@ impl Normalizer {
         let names = Names {
             sender: self.sender_display_name(client, info).await,
             mentions: self.mentions(client, &ctx.message).await,
+            chat_id: Some(chat_id.clone()),
+            sender_id: Some(sender),
         };
-        let Some(mut frame) = normalize(info, &ctx.message, title.clone(), &names, &attachments)
-        else {
+        let Some(frame) = normalize(info, &ctx.message, title.clone(), &names, &attachments) else {
             return;
         };
-        // A DM's timer is reported under both its LID and phone forms: the core
-        // has no link between them for this connector.
-        if let Some(pb::client_frame::Body::ChatUpdate(event)) = &mut frame.body {
-            with_other_forms(client, info, event).await;
-        }
-        self.report_first_sighting(client, info, title).await;
+        self.report_first_sighting(client, info, &chat_id, title)
+            .await;
         if self.inputs.send(frame).await.is_err() {
             warn!("core session input closed; dropping inbound WhatsApp event");
         }
@@ -120,26 +149,27 @@ impl Normalizer {
     /// about it (title, a group's description and member count, the picture),
     /// before the message: it gives a new mirror thread's info card its
     /// content. Sent from here, an event handler, never from the sender.
+    /// Reported under `chat_id`, the chat's canonical id, only.
     async fn report_first_sighting(
         &self,
         client: &Client,
         info: &MessageInfo,
+        chat_id: &str,
         title: Option<String>,
     ) {
         let chat = info.source.chat.to_non_ad();
         if !matches!(chat.server, Server::Pn | Server::Lid | Server::Group)
-            || !self.sightings.first(&canonical(&chat))
+            || !self.sightings.first(chat_id)
         {
             return;
         }
-        let (forms, facts) = if chat.server == Server::Group {
-            let facts = self.titles.groups().facts(client, &chat).await;
-            (vec![canonical(&chat)], facts)
+        let facts = if chat.server == Server::Group {
+            self.titles.groups().facts(client, &chat).await
         } else {
-            (chat_forms(client, &chat).await, None)
+            None
         };
         let avatar = self.avatars.fetch(client, &chat).await;
-        let updates = sighting_updates(forms, title, facts.as_ref(), avatar);
+        let updates = sighting_updates(vec![chat_id.to_owned()], title, facts.as_ref(), avatar);
         for frame in chat_update_frames(updates, CHAT_UPDATE_BATCH, true) {
             if self.inputs.send(frame).await.is_err() {
                 warn!("core session input closed; dropping a WhatsApp chat snapshot");
@@ -220,21 +250,6 @@ pub fn render_mentions(text: &str, mentions: &[(String, String)]) -> String {
     rendered
 }
 
-/// Add the chat's other address forms to a chat update about it.
-async fn with_other_forms(client: &Client, info: &MessageInfo, event: &mut pb::ChatUpdateEvent) {
-    let Some(update) = event.updates.first().cloned() else {
-        return;
-    };
-    for form in chat_forms(client, &info.source.chat).await {
-        if form != update.chat_id {
-            event.updates.push(pb::ChatUpdate {
-                chat_id: form,
-                ..update.clone()
-            });
-        }
-    }
-}
-
 /// The detail of the owner notice for media that could not be fetched: what it
 /// was, who sent it, where, and why it failed.
 fn media_failure_detail(
@@ -255,16 +270,16 @@ fn media_failure_detail(
     let sender = if info.source.is_from_me {
         "you".to_owned()
     } else if info.push_name.trim().is_empty() {
-        canonical(&info.source.sender)
+        bare_id(&info.source.sender)
     } else {
         info.push_name.trim().to_owned()
     };
     format!("{what} from {sender} in {chat}: {error}")
 }
 
-/// The device part of a JID is always stripped so a per-device address never
-/// splits a chat or an author into two identities.
-pub fn canonical(jid: &whatsapp_rust::Jid) -> String {
+/// The device part stripped, nothing else: the key of the connector's own
+/// tables. Ids on the wire go through `Identity::canonical`.
+pub fn bare_id(jid: &whatsapp_rust::Jid) -> String {
     jid.to_non_ad().to_string()
 }
 
@@ -279,7 +294,14 @@ fn normalize(
     names: &Names,
     attachments: &[pb::Attachment],
 ) -> Option<pb::ClientFrame> {
-    let chat = canonical(&info.source.chat);
+    let chat = names
+        .chat_id
+        .clone()
+        .unwrap_or_else(|| bare_id(&info.source.chat));
+    let sender = names
+        .sender_id
+        .clone()
+        .unwrap_or_else(|| bare_id(&info.source.sender));
     // Ephemeral, view-once, device-sent and document-with-caption wrappers are
     // looked through: in a chat with disappearing messages on, nearly every
     // message arrives wrapped.
@@ -345,7 +367,7 @@ fn normalize(
             chat_id: chat,
             thread_id: None,
             platform_message_id: target,
-            sender: canonical(&info.source.sender),
+            sender,
             sender_name: sender_name(info, names.sender.as_deref()),
             emoji: reaction.text.clone().unwrap_or_default(),
             from_me: info.source.is_from_me,
@@ -363,7 +385,6 @@ fn normalize(
     if text.is_empty() && attachments.is_empty() {
         return None;
     }
-    let sender = canonical(&info.source.sender);
     Some(frame(pb::client_frame::Body::MessageCreate(
         pb::MessageCreateEvent {
             chat_id: chat,
@@ -659,6 +680,43 @@ mod tests {
     }
 
     #[test]
+    fn frames_use_the_canonical_ids() {
+        // The message arrived under the phone form; the handler resolved its LID.
+        let names = Names {
+            chat_id: Some("9@lid".into()),
+            sender_id: Some("9@lid".into()),
+            ..Names::default()
+        };
+        let event = create(normalize(
+            &info(None),
+            &wa::Message::text("hi"),
+            None,
+            &names,
+            &[],
+        ));
+        assert_eq!(event.chat_id, "9@lid");
+        assert_eq!(event.sender, "9@lid");
+        assert_eq!(event.participant.as_deref(), Some("9@lid"));
+        let reaction = wa::Message {
+            reaction_message: MessageField::some(wa::message::ReactionMessage {
+                key: key("wa-0"),
+                text: Some("👍".into()),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        match normalize(&info(None), &reaction, None, &names, &[]).and_then(|f| f.body) {
+            Some(pb::client_frame::Body::Reaction(event)) => {
+                assert_eq!(
+                    (event.chat_id.as_str(), event.sender.as_str()),
+                    ("9@lid", "9@lid")
+                );
+            }
+            other => panic!("expected a reaction, got {other:?}"),
+        }
+    }
+
+    #[test]
     fn a_create_carries_the_resolved_names() {
         let mut info = info(None);
         info.source.chat = "123@g.us".parse().unwrap();
@@ -672,6 +730,7 @@ mod tests {
         let names = Names {
             sender: Some("Alice Smith".into()),
             mentions: vec![("1777".into(), "Bob (1777)".into())],
+            ..Names::default()
         };
         let event = create(normalize(&info, &message, None, &names, &[]));
         assert_eq!(event.sender_name.as_deref(), Some("Alice Smith"));

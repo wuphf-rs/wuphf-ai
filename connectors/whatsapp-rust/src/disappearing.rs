@@ -19,7 +19,7 @@ use whatsapp_rust::waproto::whatsapp as wa;
 use whatsapp_rust::{Jid, Server};
 use wuphf_proto::connector as pb;
 
-use crate::normalize::{canonical, context_info, frame};
+use crate::normalize::{bare_id, context_info, frame};
 use crate::wa_client::WaClient;
 
 /// The most chat updates one frame carries. A history sync reports every
@@ -74,7 +74,7 @@ pub fn group_action_update(
         return None;
     };
     Some(pb::ChatUpdate {
-        chat_id: canonical(group),
+        chat_id: bare_id(group),
         disappearing: Some(pb::DisappearingTimer {
             seconds: *expiration,
             setting_timestamp: Some(at.timestamp()),
@@ -88,7 +88,7 @@ pub fn group_action_update(
 /// sync snapshot omits the expiration when the timer is off, so an absent one
 /// reports 0. `profile_of` gives the rest of each conversation's update (its
 /// title, its pin / mute / archive state), given the conversation and its chat
-/// JID; it goes on every form. Chats other than DMs and groups (status,
+/// JID. Chats other than DMs and groups (status,
 /// broadcasts, newsletters) are skipped.
 pub fn history_updates(
     sync: &wa::HistorySync,
@@ -107,22 +107,14 @@ pub fn history_updates(
                 .filter(|timestamp| *timestamp > 0),
         };
         let profile = profile_of(conversation, &chat);
-        let primary = canonical(&chat);
-        let alternates = [&conversation.pn_jid, &conversation.lid_jid]
-            .into_iter()
-            .flatten()
-            .filter_map(|id| chat_jid(id))
-            .map(|jid| canonical(&jid))
-            .filter(|id| *id != primary)
-            .collect::<Vec<_>>();
-        for chat_id in std::iter::once(primary).chain(alternates) {
-            if !seen.insert(chat_id.clone()) {
-                continue;
-            }
+        // Under the conversation's own id only: `ChatEvents` canonicalizes it,
+        // and the identity migrations link it to its other form.
+        let chat_id = bare_id(&chat);
+        if seen.insert(chat_id.clone()) {
             updates.push(pb::ChatUpdate {
                 chat_id,
                 disappearing: Some(timer),
-                ..profile.clone()
+                ..profile
             });
         }
     }
@@ -420,7 +412,7 @@ mod tests {
     }
 
     #[test]
-    fn history_sync_reports_every_chat_and_its_other_form() {
+    fn history_sync_reports_every_chat_once_under_its_own_id() {
         let sync = wa::HistorySync {
             conversations: vec![
                 conversation("1@g.us", Some(86_400)),
@@ -444,11 +436,6 @@ mod tests {
                 },
                 pb::ChatUpdate {
                     chat_id: "88887777@lid".into(),
-                    disappearing: Some(timer(604_800, Some(1_700_000_000))),
-                    ..Default::default()
-                },
-                pb::ChatUpdate {
-                    chat_id: "15550001111@s.whatsapp.net".into(),
                     disappearing: Some(timer(604_800, Some(1_700_000_000))),
                     ..Default::default()
                 },

@@ -31,8 +31,9 @@ use crate::disappearing::{
     CHAT_UPDATE_BATCH, chat_update_frames, group_action_update, history_updates,
 };
 use crate::groups::GroupFacts;
+use crate::identity::Identity;
 use crate::names::{ChatTitles, Person, dm_title, number_of, tagged};
-use crate::normalize::canonical;
+use crate::normalize::bare_id;
 
 /// Handles group notifications, picture changes, contact syncs and history
 /// syncs. Cheap to clone: every handle shares the one frame sink, namer and
@@ -42,6 +43,7 @@ pub struct ChatEvents {
     inputs: mpsc::Sender<pb::ClientFrame>,
     titles: Arc<ChatTitles>,
     avatars: Arc<Avatars>,
+    identity: Arc<Identity>,
 }
 
 impl ChatEvents {
@@ -49,11 +51,13 @@ impl ChatEvents {
         inputs: mpsc::Sender<pb::ClientFrame>,
         titles: Arc<ChatTitles>,
         avatars: Arc<Avatars>,
+        identity: Arc<Identity>,
     ) -> Self {
         Self {
             inputs,
             titles,
             avatars,
+            identity,
         }
     }
 
@@ -75,23 +79,20 @@ impl ChatEvents {
                 let Some(report) = state_report(&event, now_ms()) else {
                     return;
                 };
-                // A DM goes out under both its forms, as its timer does.
-                let updates = chat_forms(&client, &report.jid)
-                    .await
-                    .into_iter()
-                    .map(|chat_id| pb::ChatUpdate {
-                        chat_id,
-                        ..report.update.clone()
-                    })
-                    .collect();
-                (updates, report.snapshot)
+                let update = pb::ChatUpdate {
+                    chat_id: bare_id(&report.jid),
+                    ..report.update
+                };
+                (vec![update], report.snapshot)
             }
             _ => return,
         };
-        self.send(updates, snapshot).await;
+        self.send(&client, updates, snapshot).await;
     }
 
-    async fn send(&self, updates: Vec<pb::ChatUpdate>, snapshot: bool) {
+    /// Every update goes out under its chat's canonical id, once per chat.
+    async fn send(&self, client: &Client, updates: Vec<pb::ChatUpdate>, snapshot: bool) {
+        let updates = self.identity.canonical_updates(client, updates).await;
         for frame in chat_update_frames(updates, CHAT_UPDATE_BATCH, snapshot) {
             if self.inputs.send(frame).await.is_err() {
                 warn!("core session input closed; dropping WhatsApp chat updates");
@@ -115,18 +116,18 @@ impl ChatEvents {
                 .person(client, &member.jid, member.phone_number.as_ref())
                 .await;
             names.insert(
-                canonical(&member.jid),
+                bare_id(&member.jid),
                 member_name(&person, member.display_name.as_deref()),
             );
         }
         if let Some(actor) = actor
-            && !names.contains_key(&canonical(actor))
+            && !names.contains_key(&bare_id(actor))
         {
             let person = self
                 .titles
                 .person(client, actor, update.participant_pn.as_ref())
                 .await;
-            names.insert(canonical(actor), member_name(&person, None));
+            names.insert(bare_id(actor), member_name(&person, None));
         }
         group_report(
             &update.group_jid,
@@ -139,8 +140,7 @@ impl ChatEvents {
         .collect()
     }
 
-    /// A chat's new picture (uploaded) or its removal, under every form the
-    /// core may know the chat by.
+    /// A chat's new picture (uploaded) or its removal.
     async fn picture_update(&self, client: &Client, update: &PictureUpdate) -> Vec<pb::ChatUpdate> {
         let jid = update.jid.to_non_ad();
         if !is_chat(&jid) {
@@ -154,15 +154,11 @@ impl ChatEvents {
                 None => return Vec::new(),
             }
         };
-        chat_forms(client, &jid)
-            .await
-            .into_iter()
-            .map(|chat_id| pb::ChatUpdate {
-                chat_id,
-                avatar: Some(avatar.clone()),
-                ..Default::default()
-            })
-            .collect()
+        vec![pb::ChatUpdate {
+            chat_id: bare_id(&jid),
+            avatar: Some(avatar),
+            ..Default::default()
+        }]
     }
 
     /// A contact sync: store the saved names, then retitle the person's DM so
@@ -172,33 +168,24 @@ impl ChatEvents {
         if !matches!(jid.server, Server::Pn | Server::Lid) {
             return Vec::new();
         }
-        let mut forms = contact_forms(&jid, &update.action);
         self.titles
             .contacts()
             .upsert_contact_name(
-                forms.clone(),
+                contact_forms(&jid, &update.action),
                 update.action.full_name.as_deref(),
                 update.action.first_name.as_deref(),
             )
             .await;
-        for form in chat_forms(client, &jid).await {
-            if !forms.contains(&form) {
-                forms.push(form);
-            }
-        }
         let phone = update.action.pn_jid.as_deref().and_then(user_jid);
         let person = self.titles.person(client, &jid, phone.as_ref()).await;
         let Some(title) = dm_title(false, &person.number, &person.names) else {
             return Vec::new();
         };
-        forms
-            .into_iter()
-            .map(|chat_id| pb::ChatUpdate {
-                chat_id,
-                title: Some(title.clone()),
-                ..Default::default()
-            })
-            .collect()
+        vec![pb::ChatUpdate {
+            chat_id: bare_id(&jid),
+            title: Some(title),
+            ..Default::default()
+        }]
     }
 
     /// A history sync's push names, then every conversation's timer and title.
@@ -256,9 +243,9 @@ fn user_jid(id: &str) -> Option<Jid> {
 /// The forms a contact sync names a person by: its JID, and the phone and LID
 /// forms the action carries.
 fn contact_forms(jid: &Jid, action: &wa::sync_action_value::ContactAction) -> Vec<String> {
-    let mut forms = vec![canonical(jid)];
+    let mut forms = vec![bare_id(jid)];
     for other in [&action.pn_jid, &action.lid_jid].into_iter().flatten() {
-        if let Some(other) = user_jid(other).map(|jid| canonical(&jid))
+        if let Some(other) = user_jid(other).map(|jid| bare_id(&jid))
             && !forms.contains(&other)
         {
             forms.push(other);
@@ -315,7 +302,7 @@ fn group_report(
     actor: Option<&Jid>,
     names: &HashMap<String, String>,
 ) -> Option<pb::ChatUpdate> {
-    let chat_id = canonical(group);
+    let chat_id = bare_id(group);
     let kind = match action {
         GroupNotificationAction::Ephemeral { .. } => {
             return group_action_update(group, at, action);
@@ -340,12 +327,12 @@ fn group_report(
         GroupNotificationAction::Demote { .. } => Kind::Demoted,
         _ => return None,
     };
-    let actor = actor.map(canonical);
+    let actor = actor.map(bare_id);
     let actor_name = actor.as_ref().and_then(|actor| names.get(actor).cloned());
     let participant_changes = members(action)
         .iter()
         .map(|member| {
-            let participant = canonical(&member.jid);
+            let participant = bare_id(&member.jid);
             pb::ParticipantChange {
                 kind: kind.into(),
                 name: names.get(&participant).cloned(),
@@ -377,7 +364,7 @@ pub fn history_report(
         .iter()
         .filter_map(|entry| {
             let jid = user_jid(entry.id.as_deref()?)?;
-            Some((canonical(&jid), entry.pushname.clone()?))
+            Some((bare_id(&jid), entry.pushname.clone()?))
         })
         .collect::<Vec<_>>();
     contacts::store_push_names(conn, &push_names, at)?;
@@ -406,12 +393,12 @@ fn history_title(
             .as_deref()
             .and_then(|name| tagged("G", name))),
         Server::Pn | Server::Lid => {
-            let mut forms = vec![canonical(chat)];
+            let mut forms = vec![bare_id(chat)];
             for other in [&conversation.pn_jid, &conversation.lid_jid]
                 .into_iter()
                 .flatten()
             {
-                if let Some(other) = user_jid(other).map(|jid| canonical(&jid))
+                if let Some(other) = user_jid(other).map(|jid| bare_id(&jid))
                     && !forms.contains(&other)
                 {
                     forms.push(other);
@@ -476,30 +463,17 @@ pub async fn lid_pn(client: &Client, jid: &Jid) -> Option<(String, String)> {
     Some((entry.lid.to_string(), entry.phone_number.to_string()))
 }
 
-/// Every form the core may know a chat by: its canonical id, plus for a DM the
-/// other (phone or LID) form when the client knows the mapping. This
-/// connector reports no identity migrations, so the core cannot link the two
-/// forms itself.
-pub async fn chat_forms(client: &Client, jid: &Jid) -> Vec<String> {
-    let jid = jid.to_non_ad();
-    let mapping = lid_pn(client, &jid).await;
-    forms_of(
-        &jid,
-        mapping
-            .as_ref()
-            .map(|(lid, pn)| (lid.as_str(), pn.as_str())),
-    )
-}
-
-/// [`chat_forms`] over a known `(lid, phone)` mapping.
+/// Every form of a chat, for the connector's own contacts-table lookups (never
+/// the wire): its bare id, plus for a DM the other (phone or LID) form under a
+/// known `(lid, phone)` mapping.
 pub fn forms_of(jid: &Jid, mapping: Option<(&str, &str)>) -> Vec<String> {
-    let mut forms = vec![canonical(jid)];
+    let mut forms = vec![bare_id(jid)];
     let other = match (jid.server, mapping) {
         (Server::Lid, Some((_, pn))) => Jid::pn(pn),
         (Server::Pn, Some((lid, _))) => Jid::lid(lid),
         _ => return forms,
     };
-    let other = canonical(&other);
+    let other = bare_id(&other);
     if !forms.contains(&other) {
         forms.push(other);
     }
@@ -863,10 +837,6 @@ mod tests {
                     Some("[P] Alice (1555)".to_owned())
                 ),
                 ("8888@lid".to_owned(), Some("[P] Bob (1666)".to_owned())),
-                (
-                    "1666@s.whatsapp.net".to_owned(),
-                    Some("[P] Bob (1666)".to_owned())
-                ),
                 ("1999@s.whatsapp.net".to_owned(), None),
             ]
         );
@@ -879,7 +849,7 @@ mod tests {
     }
 
     #[test]
-    fn a_history_sync_reports_chat_state_under_every_form() {
+    fn a_history_sync_reports_chat_state() {
         let mut conn = memory();
         let sync = wa::HistorySync {
             conversations: vec![wa::Conversation {
@@ -894,7 +864,7 @@ mod tests {
             ..Default::default()
         };
         let updates = history_report(&mut conn, &sync, 1_700_000_000).unwrap();
-        assert_eq!(updates.len(), 2);
+        assert_eq!(updates.len(), 1);
         for update in updates {
             assert_eq!(update.pinned, Some(true));
             assert_eq!(update.archived, Some(true));

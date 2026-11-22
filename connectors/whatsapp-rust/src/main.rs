@@ -12,6 +12,7 @@ mod device;
 mod disappearing;
 mod groups;
 mod health;
+mod identity;
 mod linking;
 mod media;
 mod names;
@@ -23,6 +24,8 @@ mod resync;
 mod sender;
 mod session;
 mod supervise;
+#[cfg(test)]
+mod testing;
 mod wa_client;
 
 use std::path::PathBuf;
@@ -133,6 +136,8 @@ async fn main() -> anyhow::Result<()> {
         groups,
         linked,
         resync_all: AtomicBool::new(cli.resync_app_state),
+        identity: Arc::default(),
+        migrations: Arc::default(),
     };
     let mut whatsapp = tokio::spawn({
         let cancel = whatsapp_cancel.clone();

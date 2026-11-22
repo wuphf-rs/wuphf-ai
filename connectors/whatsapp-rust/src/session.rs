@@ -33,6 +33,7 @@ use crate::contacts::Contacts;
 use crate::device;
 use crate::groups::GroupDirectory;
 use crate::health::Health;
+use crate::identity::{Identity, MigrationGate};
 use crate::linking::{Linking, PairCodeAsk};
 use crate::names::ChatTitles;
 use crate::normalize::Normalizer;
@@ -76,6 +77,11 @@ pub struct Shared {
     /// `--resync-app-state`: the first session resyncs every app-state
     /// collection, then this is cleared.
     pub resync_all: AtomicBool,
+    /// Canonical ids for every frame the sessions send, and the identity
+    /// migrations already reported; process-wide, as a mapping outlives a
+    /// session.
+    pub identity: Arc<Identity>,
+    pub migrations: Arc<MigrationGate>,
 }
 
 /// How long a session whose client stopped waits for the logout handler before
@@ -133,10 +139,17 @@ async fn run_once(shared: &Shared, cancel: &CancellationToken) -> anyhow::Result
         Arc::clone(&titles),
         Arc::clone(&shared.avatars),
         shared.media.clone(),
+        Arc::clone(&shared.identity),
+        Arc::clone(&shared.migrations),
     );
-    let chat_events = ChatEvents::new(inputs.clone(), titles, Arc::clone(&shared.avatars));
+    let chat_events = ChatEvents::new(
+        inputs.clone(),
+        titles,
+        Arc::clone(&shared.avatars),
+        Arc::clone(&shared.identity),
+    );
     let health = Health::new(inputs.clone());
-    let receipts = Receipts::new(inputs.clone());
+    let receipts = Receipts::new(inputs.clone(), Arc::clone(&shared.identity));
     let resync = Resync::open(
         store.shared(),
         shared.resync_all.swap(false, Ordering::SeqCst),
@@ -245,9 +258,9 @@ async fn run_once(shared: &Shared, cancel: &CancellationToken) -> anyhow::Result
             },
         )
         // Delivered and read receipts in direct chats mark the mirror copies.
-        .on_event_for(&[EventKind::Receipt], move |event, _client| {
+        .on_event_for(&[EventKind::Receipt], move |event, client| {
             let receipts = receipts.clone();
-            async move { receipts.handle(event).await }
+            async move { receipts.handle(event, &client).await }
         });
     let bot = builder.build().await.context("build WhatsApp bot")?;
     // The profile is in-memory only, and the library reads it for every login

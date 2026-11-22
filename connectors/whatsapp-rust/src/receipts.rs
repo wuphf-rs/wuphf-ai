@@ -8,12 +8,14 @@ use std::sync::Arc;
 use tokio::sync::mpsc;
 use tracing::warn;
 use whatsapp_rust::Server;
+use whatsapp_rust::client::Client;
 use whatsapp_rust::types::events::Event;
 use whatsapp_rust::types::message::MessageSource;
 use whatsapp_rust::types::presence::ReceiptType;
 use wuphf_proto::connector as pb;
 
-use crate::normalize::{canonical, frame};
+use crate::identity::Identity;
+use crate::normalize::frame;
 
 /// The receipt kinds the bridge surfaces. A `Sent` receipt (the library's
 /// downgraded delivery for a peer that cannot receive), self-reads, plays and
@@ -26,24 +28,25 @@ pub fn receipt_kind(kind: &ReceiptType) -> Option<pb::ReceiptKind> {
     }
 }
 
-/// One event per message id; none for a group.
+/// One event per message id, under the chat's and the observer's canonical
+/// ids; none for a group.
 pub fn receipt_events(
     source: &MessageSource,
+    chat: &str,
+    observer: &str,
     message_ids: &[String],
     kind: pb::ReceiptKind,
 ) -> Vec<pb::ReceiptEvent> {
     if source.is_group || source.chat.server == Server::Group {
         return Vec::new();
     }
-    let chat = canonical(&source.chat);
-    let observer = canonical(&source.sender);
     message_ids
         .iter()
         .map(|id| pb::ReceiptEvent {
-            chat_id: chat.clone(),
+            chat_id: chat.to_owned(),
             thread_id: None,
             platform_message_id: id.clone(),
-            observer: observer.clone(),
+            observer: observer.to_owned(),
             from_me: source.is_from_me,
             kind: kind.into(),
         })
@@ -55,22 +58,37 @@ pub fn receipt_events(
 #[derive(Clone)]
 pub struct Receipts {
     inputs: mpsc::Sender<pb::ClientFrame>,
+    identity: Arc<Identity>,
 }
 
 impl Receipts {
-    pub fn new(inputs: mpsc::Sender<pb::ClientFrame>) -> Self {
-        Self { inputs }
+    pub fn new(inputs: mpsc::Sender<pb::ClientFrame>, identity: Arc<Identity>) -> Self {
+        Self { inputs, identity }
     }
 
     /// An event handler, so awaiting the input channel is safe here.
-    pub async fn handle(&self, event: Arc<Event>) {
+    pub async fn handle(&self, event: Arc<Event>, client: &Client) {
         let Event::Receipt(receipt) = &*event else {
             return;
         };
         let Some(kind) = receipt_kind(&receipt.r#type) else {
             return;
         };
-        for event in receipt_events(&receipt.source, &receipt.message_ids, kind) {
+        let chat = self
+            .identity
+            .canonical_id(client, &receipt.source.chat)
+            .await;
+        let observer = self
+            .identity
+            .canonical_id(client, &receipt.source.sender)
+            .await;
+        for event in receipt_events(
+            &receipt.source,
+            &chat,
+            &observer,
+            &receipt.message_ids,
+            kind,
+        ) {
             if self
                 .inputs
                 .send(frame(pb::client_frame::Body::Receipt(event)))
@@ -102,7 +120,13 @@ mod tests {
 
     #[test]
     fn a_dm_receipt_reports_each_message() {
-        let events = receipt_events(&dm(), &ids(&["wa-1", "wa-2"]), pb::ReceiptKind::Delivered);
+        let events = receipt_events(
+            &dm(),
+            "1555@s.whatsapp.net",
+            "1555@s.whatsapp.net",
+            &ids(&["wa-1", "wa-2"]),
+            pb::ReceiptKind::Delivered,
+        );
         assert_eq!(events.len(), 2);
         for (event, id) in events.iter().zip(["wa-1", "wa-2"]) {
             assert_eq!(event.platform_message_id, id);
@@ -132,7 +156,16 @@ mod tests {
             is_group: true,
             ..dm()
         };
-        assert!(receipt_events(&group, &ids(&["wa-1"]), pb::ReceiptKind::Read).is_empty());
+        assert!(
+            receipt_events(
+                &group,
+                "1555@s.whatsapp.net",
+                "1555@s.whatsapp.net",
+                &ids(&["wa-1"]),
+                pb::ReceiptKind::Read
+            )
+            .is_empty()
+        );
         for kind in [
             ReceiptType::Sent,
             ReceiptType::ReadSelf,
@@ -145,14 +178,22 @@ mod tests {
     }
 
     #[test]
-    fn devices_are_stripped_and_from_me_is_kept() {
+    fn the_ids_given_are_reported_and_from_me_is_kept() {
         let source = MessageSource {
-            sender: "1555:3@s.whatsapp.net".parse().unwrap(),
             is_from_me: true,
             ..dm()
         };
-        let events = receipt_events(&source, &ids(&["wa-1"]), pb::ReceiptKind::Read);
-        assert_eq!(events[0].observer, "1555@s.whatsapp.net");
+        // The handler passes the canonical ids (devices stripped, a phone
+        // number promoted to its LID).
+        let events = receipt_events(
+            &source,
+            "9@lid",
+            "9@lid",
+            &ids(&["wa-1"]),
+            pb::ReceiptKind::Read,
+        );
+        assert_eq!(events[0].chat_id, "9@lid");
+        assert_eq!(events[0].observer, "9@lid");
         assert!(events[0].from_me);
     }
 }
