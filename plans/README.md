@@ -74,6 +74,7 @@ code).
 | 054 | whatsapp-rust: outbound media of every kind, rendering options, SDK media download | P1 | L | 051 (053 soft) | TODO |
 | 055 | whatsapp-rust: stickers — SDK functions client, media.convert, pure-Rust sticker EXIF | P2 | M–L | 054 | TODO |
 | 056 | Runtime settings in the Rust SDK; whatsapp-rust declares the Go connector's settings | P2 | L | botconf 013 (055 soft) | TODO |
+| 057 | WhatsApp connectors link again by themselves after a logout (QR or pair code, delivered to the owner) | P1 | L | — | IN PROGRESS |
 
 Status values: TODO | IN PROGRESS | DONE | BLOCKED (with one-line reason) |
 REJECTED (with one-line rationale).
