@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"os"
+	"path/filepath"
 	"os/exec"
 	"strings"
 	"testing"
@@ -119,4 +120,67 @@ func sampleWebP(t *testing.T) []byte {
 		t.Fatal(err)
 	}
 	return data
+}
+
+// The sticker fixtures are shared with the Rust connector, which writes the same
+// EXIF payload and chunk layout without webpmux and checks its bytes against
+// these files. WUPHF_UPDATE_FIXTURES=1 regenerates them; otherwise this checks
+// that the Go connector still produces them.
+var updateFixtures = os.Getenv("WUPHF_UPDATE_FIXTURES") == "1"
+
+func checkFixture(t *testing.T, name string, got []byte) {
+	t.Helper()
+	path := filepath.Join("testdata", name)
+	if updateFixtures {
+		if err := os.WriteFile(path, got, 0o644); err != nil {
+			t.Fatal(err)
+		}
+		return
+	}
+	want, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(got, want) {
+		t.Fatalf("%s differs from what this connector produces (regenerate with WUPHF_UPDATE_FIXTURES=1)", name)
+	}
+}
+
+func defaultStickerMetadata() config.StickerMetadata {
+	return config.StickerMetadata{
+		PackName:   "wuphf",
+		AuthorName: "wuphf-ai",
+		Link:       "https://github.com/wuphf/wuphf-ai",
+	}
+}
+
+func TestStickerExifMatchesTheSharedFixture(t *testing.T) {
+	t.Parallel()
+	exif, err := stickerExif(defaultStickerMetadata())
+	if err != nil {
+		t.Fatal(err)
+	}
+	checkFixture(t, "sticker-meta.exif", exif)
+	// encoding/json escapes <, > and &; the Rust writer must match.
+	escaped, err := stickerExif(config.StickerMetadata{PackName: "Tom & Jerry <3", AuthorName: "wuphf-ai"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	checkFixture(t, "sticker-meta-escaped.exif", escaped)
+}
+
+func TestStickerMetadataMatchesTheSharedFixtures(t *testing.T) {
+	t.Parallel()
+	requireTool(t, "webpmux")
+	for _, name := range []string{"sticker-lossless-alpha", "sticker-lossy", "sticker-animated"} {
+		input, err := os.ReadFile(filepath.Join("testdata", name+".webp"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		out, err := writeStickerMetadata(context.Background(), input, defaultStickerMetadata())
+		if err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		checkFixture(t, name+".exif.webp", out)
+	}
 }
