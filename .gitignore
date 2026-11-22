@@ -24,12 +24,14 @@
 *.sqlite
 *.sqlite-shm
 *.sqlite-wal
-*.sqlite.backup
+# Copies set aside, e.g. wuphf.sqlite.backup or wuphf.sqlite.2026-11-23-0311.
+*.sqlite.*
 /.env
 /.env.*
 /config.local.toml
 /connectors/*/config.local.toml
 /providers/*/config.local.toml
+/misc/config.local.toml
 *.session.json
 *.cookies.json
 *.state.json
