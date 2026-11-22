@@ -341,6 +341,10 @@ alone, and the connector itself limits it to once per chat until the timer is
 known. The media notice (`NOTICE_KIND_MEDIA_UNAVAILABLE`: an inbound message
 was dropped because its media could not be downloaded) bypasses it the same
 way, once per dropped message.
+The link notice (`NOTICE_KIND_LINK_REQUIRED`: a WhatsApp connector is waiting
+to be linked again, with the QR code attached as `media_ids` or a pair code in
+the detail) bypasses it too: every pairing round the connector reports is
+news, and the connector spaces them out itself.
 
 ## Media
 

@@ -5,7 +5,9 @@ shared gRPC contract under `proto/go`.
 
 Implemented slice:
 
-- linked-device authentication with terminal QR pairing on first run
+- linked-device authentication by QR code or pair code (`login_method`), at
+  the first run and again by itself after a logout, with the code also sent to
+  the owner through the core's notice chats
 - connector-private SQLite session storage
 - raw-pipe inbound/outbound text, image, and file replication keyed by
   WhatsApp JID chat IDs
@@ -59,8 +61,14 @@ export WUPHF_CONNECTOR_WHATSAPP_MAIN_TOKEN=replace-me
 go run ./cmd/wuphf-whatsapp --config config.example.toml
 ```
 
-First run prints QR code; scan using WhatsApp linked-device flow. Session is
-stored at configured `session_database` path.
+First run links the session: by default it prints a QR code to scan in
+WhatsApp → Linked devices; with `login_method = "pair_code"` and
+`phone_number` set it asks for a pair code to type in after "Link with phone
+number instead". Either way the code also reaches the owner as a link-required
+notice (the QR code as a picture). When WhatsApp logs the device out the
+connector links a new one the same way, without a restart; messages for
+WhatsApp wait in the core meanwhile. The session is stored at the configured
+`session_database` path.
 
 The keys marked "Runtime." in `config.example.toml` can also change while the
 connector runs, from the core's settings panel or `wuphf settings`: the

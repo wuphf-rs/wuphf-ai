@@ -105,6 +105,13 @@ connection dies silently; the SDKs keep retrying with backoff until then.
   health either: an inbound message was not bridged because its media could not
   be downloaded (`detail` names the media kind, the sender, the chat and the
   error). It is relayed the same way, once per dropped message.
+  `NOTICE_KIND_LINK_REQUIRED` is not about health: the connector is waiting to
+  be linked to its account again (a WhatsApp pairing, at the first start or
+  after a logout). `detail` says how (scan a QR code, or enter the pair code it
+  names) and for how long; `media_ids` may carry the QR code, uploaded to the
+  core's media store first. The core attaches the media to every message of
+  the notice, leaving out an id the store does not hold; the connector limits
+  repeats (the first code at once, later ones at growing gaps).
 
 ## Server frames (core → connector)
 

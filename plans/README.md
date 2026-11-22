@@ -74,7 +74,7 @@ code).
 | 054 | whatsapp-rust: outbound media of every kind, rendering options, SDK media download | P1 | L | 051 (053 soft) | TODO |
 | 055 | whatsapp-rust: stickers — SDK functions client, media.convert, pure-Rust sticker EXIF | P2 | M–L | 054 | TODO |
 | 056 | Runtime settings in the Rust SDK; whatsapp-rust declares the Go connector's settings | P2 | L | botconf 013 (055 soft) | TODO |
-| 057 | WhatsApp connectors link again by themselves after a logout (QR or pair code, delivered to the owner) | P1 | L | — | IN PROGRESS |
+| 057 | WhatsApp connectors link again by themselves after a logout (QR or pair code, delivered to the owner) | P1 | L | — | DONE (no migration; see notes) |
 
 Status values: TODO | IN PROGRESS | DONE | BLOCKED (with one-line reason) |
 REJECTED (with one-line rationale).
@@ -1323,6 +1323,32 @@ read receipts, albums, polls, locations, vCards) wait for a later plan.
   watch for the delivered and read marks; unlink the device on the phone and
   check the logged-out notice arrives while the connector keeps running;
   re-pair and check the "working again" notice.
+
+### 057: linking WhatsApp again after a logout
+
+- **057 done 2026-11-23** (on `v2`, `d253148`..this commit). No migration;
+  the wire gains `NOTICE_KIND_LINK_REQUIRED = 7` and `OwnerNotice.media_ids =
+  3` (Go bindings regenerated). Tests: core +1, runtime +1, SDK +1 (Rust) and
+  +1 (Go `coreclient`); whatsapp-rust 77 → 88 (+3 config, +2 QR PNG, +4
+  linking, +2 session); Go WhatsApp +2 config, +5 linking (race-clean).
+  clippy, fmt, `go vet` clean. The whatsapp-rust lock gains only the
+  `flate2` edge; Go `go.mod` makes `rsc.io/qr` direct, `go.sum` unchanged.
+  Deviations from the plan:
+  - **Pair codes are requested by the connectors, not the libraries**, and
+    only when the owner will be told one: whatsapp-rust's `with_pair_code`
+    asks once per bot (a second round would offer none), and every request
+    prompts the phone. Both connectors ask on a round's first QR code when the
+    schedule is due; a failed request leaves that round to the QR code.
+  - Go treats a device with no JID after connecting as logged out (whatsmeow
+    deletes it on a connect-time rejection) and deletes the dead device row
+    itself after a logout, since whatsmeow's own delete runs concurrently.
+  - Not live-tested. Follow-up: a "send me a fresh code" owner command (the
+    panel-command plan), since a told QR code is stale within a minute.
+  Owner: restart the server, Telegram and both WhatsApp connectors (the wire
+  gained fields). Live test: unlink a connector on the phone; the logged-out
+  notice, then a link-required notice with the QR code (or the code) arrive in
+  the notice chats; link it; the recovered notice follows and messages sent
+  meanwhile are delivered. Repeat with the other `login_method`.
 
 ## Findings considered and rejected
 
