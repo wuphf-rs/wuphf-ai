@@ -3455,3 +3455,52 @@ async fn the_archive_unpin_crosses_too() {
         ]
     );
 }
+
+#[tokio::test]
+async fn a_migrated_chat_s_profile_is_read_from_its_new_form_first() {
+    let core = profile_core(false);
+    let whatsapp = ConnectorId(WHATSAPP.into());
+    core.ingest(event(WHATSAPP, GROUP, "wa-1", None))
+        .await
+        .unwrap();
+    update_group(
+        &core,
+        ChatUpdate {
+            title: Some("[G] Old".into()),
+            disappearing: Some(DisappearingTimer::new(604_800)),
+            ..ChatUpdate::new(GROUP)
+        },
+        true,
+    )
+    .await;
+    // The platform now names the chat by another form, and reports there.
+    core.migrate_identity(
+        whatsapp.clone(),
+        ChatAddress::new(GROUP, None),
+        ChatAddress::new("222@g.us", None),
+    )
+    .await
+    .unwrap();
+    core.update_chats(
+        &whatsapp,
+        vec![ChatUpdate {
+            title: Some("[G] New".into()),
+            ..ChatUpdate::new("222@g.us")
+        }],
+        false,
+    )
+    .await
+    .unwrap();
+
+    let [(conversation, _)] = core
+        .conversations_of_chat(&whatsapp, GROUP)
+        .await
+        .unwrap()
+        .try_into()
+        .expect("one conversation");
+    let profile = core.source_profile(&conversation).await.unwrap().unwrap();
+    // The current form's title wins over the conversation's own stale one; the
+    // timer known only under the old form fills the gap.
+    assert_eq!(profile.title.as_deref(), Some("[G] New"));
+    assert_eq!(profile.disappearing, Some(DisappearingTimer::new(604_800)));
+}

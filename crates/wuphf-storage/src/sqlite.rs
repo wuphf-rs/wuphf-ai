@@ -100,6 +100,16 @@ impl TopologyStore for SqliteStorage {
             .transpose()
     }
 
+    async fn canonical_chat_id(&self, endpoint_id: EndpointId) -> StorageResult<Option<String>> {
+        let row = sqlx::query(
+            "SELECT chat_id FROM aliases WHERE endpoint_id = ? AND is_canonical = 1 LIMIT 1",
+        )
+        .bind(endpoint_id.to_string())
+        .fetch_optional(&self.pool)
+        .await?;
+        Ok(row.map(|row| row.get("chat_id")))
+    }
+
     async fn put_address_link(&self, link: AddressLink) -> StorageResult<()> {
         if link.address == link.linked_address {
             return Ok(());

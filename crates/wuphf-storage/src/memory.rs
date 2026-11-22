@@ -112,6 +112,17 @@ impl TopologyStore for InMemoryStorage {
             .map(|alias| alias.endpoint_id))
     }
 
+    async fn canonical_chat_id(&self, endpoint_id: EndpointId) -> StorageResult<Option<String>> {
+        Ok(self
+            .state
+            .read()
+            .await
+            .aliases
+            .values()
+            .find(|alias| alias.endpoint_id == endpoint_id && alias.is_canonical)
+            .map(|alias| alias.address.chat_id.clone()))
+    }
+
     async fn put_address_link(&self, link: AddressLink) -> StorageResult<()> {
         if link.address == link.linked_address {
             return Ok(());

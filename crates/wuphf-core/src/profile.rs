@@ -172,6 +172,17 @@ fn sha256_hex(bytes: &[u8]) -> String {
         .collect()
 }
 
+/// Fill the fields `into` does not know from `from`. The pin, mute and
+/// archive states are deliberately left alone: they drive outbound chat-state
+/// dispatches, so they belong to the form that reported them.
+fn fill_unknown(into: &mut ChatProfile, from: ChatProfile) {
+    into.disappearing = into.disappearing.or(from.disappearing);
+    into.title = into.title.take().or(from.title);
+    into.description = into.description.take().or(from.description);
+    into.avatar = into.avatar.take().or(from.avatar);
+    into.participant_count = into.participant_count.or(from.participant_count);
+}
+
 impl<S> Core<S>
 where
     S: Storage,
@@ -410,25 +421,53 @@ where
             .await
     }
 
-    /// The profile of a conversation's source chat, under any of its address
-    /// forms (its own form first).
+    /// The profile of a conversation's source chat, read across its address
+    /// forms: the form the connector names the chat by now (the endpoint's
+    /// canonical alias) first, then the conversation's own, then the other
+    /// linked ones, with the fields the first does not know filled in from
+    /// the rest.
+    ///
+    /// A connector reports a chat under its current form, which an identity
+    /// migration moves (a WhatsApp phone number becomes its LID) while the
+    /// conversation keeps the form it was created under: read own-form-first,
+    /// the stale row would win. A profile learned only under an older form
+    /// (a timer, a photo) still fills the gaps.
     pub(crate) async fn source_profile(
         &self,
         conversation: &Conversation,
     ) -> Result<Option<ChatProfile>, CoreError> {
         let source = &conversation.source;
         let own = ChatAddress::new(source.address.chat_id.clone(), None);
+        let mut order = Vec::new();
+        if let Some(endpoint) = self
+            .storage
+            .resolve_endpoint(&source.connector_id, &source.address)
+            .await?
+            && let Some(current) = self.storage.canonical_chat_id(endpoint).await?
+        {
+            order.push(current);
+        }
         let forms = address_forms(&*self.storage, &source.connector_id, &own).await?;
-        for form in forms.iter() {
-            if let Some(profile) = self
+        order.extend(forms.iter().map(|form| form.chat_id.clone()));
+        let mut seen = HashSet::new();
+        let mut merged: Option<ChatProfile> = None;
+        for chat_id in order {
+            if !seen.insert(chat_id.clone()) {
+                continue;
+            }
+            let Some(profile) = self
                 .storage
-                .chat_profile(&source.connector_id, &form.chat_id)
+                .chat_profile(&source.connector_id, &chat_id)
                 .await?
-            {
-                return Ok(Some(profile));
+            else {
+                continue;
+            };
+            match &mut merged {
+                Some(merged) => fill_unknown(merged, profile),
+                None => merged = Some(profile),
             }
         }
-        Ok(None)
+        Ok(merged)
     }
 }
 

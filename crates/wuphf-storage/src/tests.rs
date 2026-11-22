@@ -1483,3 +1483,55 @@ async fn pruning_spares_media_a_profile_references<S: Storage>(storage: S) {
     assert!(storage.media(avatar.media_id).await.unwrap().is_some());
     assert!(storage.media(orphan.media_id).await.unwrap().is_none());
 }
+
+#[tokio::test]
+async fn memory_canonical_chat_id_follows_the_last_canonical_alias() {
+    canonical_chat_id_follows_the_last_canonical_alias(InMemoryStorage::default()).await;
+}
+
+#[tokio::test]
+async fn sqlite_canonical_chat_id_follows_the_last_canonical_alias() {
+    let path = std::env::temp_dir().join(format!("wuphf-canonical-{}.sqlite", DispatchId::new()));
+    let url = format!("sqlite://{}", path.display());
+    canonical_chat_id_follows_the_last_canonical_alias(SqliteStorage::connect(&url).await.unwrap())
+        .await;
+}
+
+/// The canonical alias moves with an identity migration; a non-canonical one
+/// added later leaves it where it is.
+async fn canonical_chat_id_follows_the_last_canonical_alias<S: Storage>(storage: S) {
+    let connector_id = ConnectorId("whatsapp-rust".into());
+    let endpoint_id = EndpointId::new();
+    assert_eq!(storage.canonical_chat_id(endpoint_id).await.unwrap(), None);
+    let alias = |chat_id: &str, is_canonical: bool| Alias {
+        connector_id: connector_id.clone(),
+        address: ChatAddress::new(chat_id, None),
+        endpoint_id,
+        is_canonical,
+    };
+    storage
+        .put_alias(alias("1555@s.whatsapp.net", true))
+        .await
+        .unwrap();
+    assert_eq!(
+        storage
+            .canonical_chat_id(endpoint_id)
+            .await
+            .unwrap()
+            .as_deref(),
+        Some("1555@s.whatsapp.net")
+    );
+    storage.put_alias(alias("9@lid", true)).await.unwrap();
+    storage
+        .put_alias(alias("1555:2@s.whatsapp.net", false))
+        .await
+        .unwrap();
+    assert_eq!(
+        storage
+            .canonical_chat_id(endpoint_id)
+            .await
+            .unwrap()
+            .as_deref(),
+        Some("9@lid")
+    );
+}

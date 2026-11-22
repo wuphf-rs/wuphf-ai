@@ -56,6 +56,10 @@ pub trait TopologyStore: Send + Sync + 'static {
         connector_id: &ConnectorId,
         address: &ChatAddress,
     ) -> StorageResult<Option<EndpointId>>;
+    /// The chat id of the endpoint's canonical alias: the form the connector
+    /// names the chat by now (the newest side of its last identity
+    /// migration).
+    async fn canonical_chat_id(&self, endpoint_id: EndpointId) -> StorageResult<Option<String>>;
     /// Record that two addresses on a connector name the same chat. Stored
     /// symmetrically, so a later lookup from either address finds the other.
     /// Independent of endpoints: a link is kept for chats that have never been
