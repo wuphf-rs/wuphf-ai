@@ -254,6 +254,7 @@ where
             connector_id,
             kind,
             detail,
+            media_ids,
         } => {
             warn!(
                 connector = %connector_id.0,
@@ -263,7 +264,7 @@ where
             );
             // The core is clock-free, so the send time comes from here.
             let dispatches = core
-                .notify_owners(connector_id, kind, &detail, now_ms())
+                .notify_owners(connector_id, kind, &detail, &media_ids, now_ms())
                 .await?;
             Ok(dispatches)
         }

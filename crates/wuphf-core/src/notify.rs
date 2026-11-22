@@ -11,7 +11,7 @@
 //! itself offline, and shows up in the observation log like any other message.
 
 use crate::{Core, CoreError};
-use wuphf_model::{ConnectorId, Dispatch, NoticeKind, OwnerMessage};
+use wuphf_model::{ConnectorId, Dispatch, MediaId, NoticeKind, OwnerMessage};
 use wuphf_storage::Storage;
 
 impl<S> Core<S>
@@ -21,12 +21,14 @@ where
     /// Relay a connector's notice to the owner, returning the dispatches to
     /// deliver. Empty when no target is configured, when every target is
     /// served by the reporting connector, or when a health notice repeats the
-    /// state already sent.
+    /// state already sent. `media_ids` go with every message of the notice;
+    /// one the store does not hold is left out rather than failing the notice.
     pub async fn notify_owners(
         &self,
         connector_id: ConnectorId,
         kind: NoticeKind,
         detail: &str,
+        media_ids: &[MediaId],
         timestamp_ms: i64,
     ) -> Result<Vec<Dispatch>, CoreError> {
         // Only health kinds go through the per-connector state: a notice about
@@ -36,6 +38,12 @@ where
             return Ok(Vec::new());
         }
         let text = notice_text(&connector_id, kind, detail);
+        let mut stored = Vec::with_capacity(media_ids.len());
+        for &media_id in media_ids {
+            if self.storage.media(media_id).await?.is_some() {
+                stored.push(media_id);
+            }
+        }
         // One snapshot for the whole notice: the targets and every send to them.
         let routing = self.routing.routing();
         let targets: Vec<_> = routing
@@ -53,7 +61,7 @@ where
                         chat_id: target.address.chat_id,
                         thread_id: target.address.thread_id,
                         text: text.clone(),
-                        media_ids: Vec::new(),
+                        media_ids: stored.clone(),
                         client: None,
                         reply_to_native_id: None,
                         timestamp_ms,
@@ -99,6 +107,7 @@ where
 fn notice_text(connector_id: &ConnectorId, kind: NoticeKind, detail: &str) -> String {
     let marker = match kind {
         NoticeKind::Recovered => "✅",
+        NoticeKind::LinkRequired => "🔗",
         _ => "⚠️",
     };
     let mut text = format!("{marker} {} {}", connector_id.0, kind.summary());

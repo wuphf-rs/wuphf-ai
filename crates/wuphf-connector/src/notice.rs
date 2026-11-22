@@ -13,10 +13,21 @@ use wuphf_proto::connector as pb;
 /// An owner-notice frame of `kind`, with platform specifics in `detail`
 /// (empty when there are none).
 pub fn notice(kind: pb::NoticeKind, detail: impl Into<String>) -> pb::ClientFrame {
+    notice_with_media(kind, detail, Vec::new())
+}
+
+/// [`notice`] with media the connector uploaded to the core's media store
+/// (through [`crate::MediaClient`]), shown with the notice: a QR code to scan.
+pub fn notice_with_media(
+    kind: pb::NoticeKind,
+    detail: impl Into<String>,
+    media_ids: Vec<String>,
+) -> pb::ClientFrame {
     pb::ClientFrame {
         body: Some(pb::client_frame::Body::OwnerNotice(pb::OwnerNotice {
             kind: kind.into(),
             detail: detail.into(),
+            media_ids,
         })),
     }
 }
@@ -60,6 +71,18 @@ mod tests {
         ));
         assert_eq!(sent.kind(), pb::NoticeKind::LoggedOut);
         assert_eq!(sent.detail, "WhatsApp ended the session");
+        assert!(sent.media_ids.is_empty());
+    }
+
+    #[test]
+    fn a_notice_frame_carries_its_media() {
+        let sent = owner_notice(notice_with_media(
+            pb::NoticeKind::LinkRequired,
+            "scan the QR code",
+            vec!["m-1".into()],
+        ));
+        assert_eq!(sent.kind(), pb::NoticeKind::LinkRequired);
+        assert_eq!(sent.media_ids, ["m-1"]);
     }
 
     #[tokio::test]

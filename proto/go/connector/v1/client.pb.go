@@ -99,6 +99,12 @@ const (
 	// the sender, the chat and the error. The core does not fold it into the
 	// connector's health state.
 	NoticeKind_NOTICE_KIND_MEDIA_UNAVAILABLE NoticeKind = 6
+	// Not about the connector's health: the connector is waiting to be linked to
+	// its account again (a WhatsApp pairing after a logout). `detail` says how
+	// (scan the attached QR code, or enter a pair code it names) and for how
+	// long; `media_ids` may carry the QR code. The core does not fold it into the
+	// connector's health state; the connector limits repeats.
+	NoticeKind_NOTICE_KIND_LINK_REQUIRED NoticeKind = 7
 )
 
 // Enum value maps for NoticeKind.
@@ -111,6 +117,7 @@ var (
 		4: "NOTICE_KIND_RECOVERED",
 		5: "NOTICE_KIND_DISAPPEARING_TIMER_UNKNOWN",
 		6: "NOTICE_KIND_MEDIA_UNAVAILABLE",
+		7: "NOTICE_KIND_LINK_REQUIRED",
 	}
 	NoticeKind_value = map[string]int32{
 		"NOTICE_KIND_UNSPECIFIED":                0,
@@ -120,6 +127,7 @@ var (
 		"NOTICE_KIND_RECOVERED":                  4,
 		"NOTICE_KIND_DISAPPEARING_TIMER_UNKNOWN": 5,
 		"NOTICE_KIND_MEDIA_UNAVAILABLE":          6,
+		"NOTICE_KIND_LINK_REQUIRED":              7,
 	}
 )
 
@@ -1203,7 +1211,11 @@ type OwnerNotice struct {
 	Kind  NoticeKind             `protobuf:"varint,1,opt,name=kind,proto3,enum=wuphf.connector.v1.NoticeKind" json:"kind,omitempty"`
 	// Platform-supplied specifics, if any (a ban expiry, a failure reason).
 	// Appended to the core's wording; safe to leave empty.
-	Detail        string `protobuf:"bytes,2,opt,name=detail,proto3" json:"detail,omitempty"`
+	Detail string `protobuf:"bytes,2,opt,name=detail,proto3" json:"detail,omitempty"`
+	// Media the connector uploaded to the core's media store, shown with the
+	// notice (a QR code to scan). An id the store does not hold is dropped; the
+	// text still goes out.
+	MediaIds      []string `protobuf:"bytes,3,rep,name=media_ids,json=mediaIds,proto3" json:"media_ids,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1250,6 +1262,13 @@ func (x *OwnerNotice) GetDetail() string {
 		return x.Detail
 	}
 	return ""
+}
+
+func (x *OwnerNotice) GetMediaIds() []string {
+	if x != nil {
+		return x.MediaIds
+	}
+	return nil
 }
 
 type ClientFrame struct {
@@ -1607,10 +1626,11 @@ const file_client_proto_rawDesc = "" +
 	"\afrom_me\x18\x05 \x01(\bR\x06fromMe\x123\n" +
 	"\x04kind\x18\x06 \x01(\x0e2\x1f.wuphf.connector.v1.ReceiptKindR\x04kindB\f\n" +
 	"\n" +
-	"_thread_id\"Y\n" +
+	"_thread_id\"v\n" +
 	"\vOwnerNotice\x122\n" +
 	"\x04kind\x18\x01 \x01(\x0e2\x1e.wuphf.connector.v1.NoticeKindR\x04kind\x12\x16\n" +
-	"\x06detail\x18\x02 \x01(\tR\x06detail\"\xcc\x06\n" +
+	"\x06detail\x18\x02 \x01(\tR\x06detail\x12\x1b\n" +
+	"\tmedia_ids\x18\x03 \x03(\tR\bmediaIds\"\xcc\x06\n" +
 	"\vClientFrame\x12F\n" +
 	"\fregistration\x18\x01 \x01(\v2 .wuphf.connector.v1.RegistrationH\x00R\fregistration\x12O\n" +
 	"\x0emessage_create\x18\x02 \x01(\v2&.wuphf.connector.v1.MessageCreateEventH\x00R\rmessageCreate\x12O\n" +
@@ -1629,7 +1649,7 @@ const file_client_proto_rawDesc = "" +
 	"\vReceiptKind\x12\x1c\n" +
 	"\x18RECEIPT_KIND_UNSPECIFIED\x10\x00\x12\x1a\n" +
 	"\x16RECEIPT_KIND_DELIVERED\x10\x01\x12\x15\n" +
-	"\x11RECEIPT_KIND_READ\x10\x02*\xe8\x01\n" +
+	"\x11RECEIPT_KIND_READ\x10\x02*\x87\x02\n" +
 	"\n" +
 	"NoticeKind\x12\x1b\n" +
 	"\x17NOTICE_KIND_UNSPECIFIED\x10\x00\x12\x1a\n" +
@@ -1638,7 +1658,8 @@ const file_client_proto_rawDesc = "" +
 	"\x14NOTICE_KIND_DEGRADED\x10\x03\x12\x19\n" +
 	"\x15NOTICE_KIND_RECOVERED\x10\x04\x12*\n" +
 	"&NOTICE_KIND_DISAPPEARING_TIMER_UNKNOWN\x10\x05\x12!\n" +
-	"\x1dNOTICE_KIND_MEDIA_UNAVAILABLE\x10\x06B:Z8github.com/akshettrj/wuphf/proto/go/connector/v1;wuphfpbb\x06proto3"
+	"\x1dNOTICE_KIND_MEDIA_UNAVAILABLE\x10\x06\x12\x1d\n" +
+	"\x19NOTICE_KIND_LINK_REQUIRED\x10\aB:Z8github.com/akshettrj/wuphf/proto/go/connector/v1;wuphfpbb\x06proto3"
 
 var (
 	file_client_proto_rawDescOnce sync.Once

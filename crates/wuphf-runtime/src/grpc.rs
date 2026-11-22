@@ -275,6 +275,7 @@ fn input_from_proto(
                     NoticeKind::DisappearingTimerUnknown
                 }
                 Ok(pb::NoticeKind::MediaUnavailable) => NoticeKind::MediaUnavailable,
+                Ok(pb::NoticeKind::LinkRequired) => NoticeKind::LinkRequired,
                 // An unset or unknown kind still means the connector is trying
                 // to say something is wrong, so it is reported as a degradation
                 // rather than dropped.
@@ -284,6 +285,11 @@ fn input_from_proto(
                 connector_id: connector_id.clone(),
                 kind,
                 detail: notice.detail,
+                media_ids: notice
+                    .media_ids
+                    .iter()
+                    .map(|id| parse_uuid(id, "owner_notice.media_ids").map(MediaId))
+                    .collect::<Result<_, _>>()?,
             })))
         }
         Some(pb::client_frame::Body::DispatchFailed(failure)) => {
@@ -1110,6 +1116,7 @@ mod tests {
         let frame = pb::client_frame::Body::OwnerNotice(pb::OwnerNotice {
             kind: pb::NoticeKind::DisappearingTimerUnknown.into(),
             detail: "chat 1@s.whatsapp.net".into(),
+            media_ids: vec![],
         });
         assert_eq!(
             work(frame),
@@ -1117,6 +1124,7 @@ mod tests {
                 connector_id: whatsapp(),
                 kind: NoticeKind::DisappearingTimerUnknown,
                 detail: "chat 1@s.whatsapp.net".into(),
+                media_ids: vec![],
             }
         );
     }
@@ -1126,6 +1134,7 @@ mod tests {
         let frame = pb::client_frame::Body::OwnerNotice(pb::OwnerNotice {
             kind: pb::NoticeKind::MediaUnavailable.into(),
             detail: "image from Alice".into(),
+            media_ids: vec![],
         });
         assert_eq!(
             work(frame),
@@ -1133,8 +1142,37 @@ mod tests {
                 connector_id: whatsapp(),
                 kind: NoticeKind::MediaUnavailable,
                 detail: "image from Alice".into(),
+                media_ids: vec![],
             }
         );
+    }
+
+    #[test]
+    fn the_link_notice_kind_carries_its_media() {
+        let qr = Uuid::new_v4();
+        let frame = pb::client_frame::Body::OwnerNotice(pb::OwnerNotice {
+            kind: pb::NoticeKind::LinkRequired.into(),
+            detail: "scan the QR code".into(),
+            media_ids: vec![qr.to_string()],
+        });
+        assert_eq!(
+            work(frame),
+            InboundWork::Notice {
+                connector_id: whatsapp(),
+                kind: NoticeKind::LinkRequired,
+                detail: "scan the QR code".into(),
+                media_ids: vec![MediaId(qr)],
+            }
+        );
+        // A malformed id rejects the frame, as a malformed attachment does.
+        let frame = pb::ClientFrame {
+            body: Some(pb::client_frame::Body::OwnerNotice(pb::OwnerNotice {
+                kind: pb::NoticeKind::LinkRequired.into(),
+                detail: String::new(),
+                media_ids: vec!["not-a-uuid".into()],
+            })),
+        };
+        assert!(input_from_proto(frame, &whatsapp()).is_err());
     }
 
     #[test]

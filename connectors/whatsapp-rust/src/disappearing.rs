@@ -271,12 +271,10 @@ impl TimerFallback {
                 chat = chat_id,
                 "sending without a disappearing timer: the chat's timer is unknown"
             );
-            self.emit(frame(pb::client_frame::Body::OwnerNotice(
-                pb::OwnerNotice {
-                    kind: pb::NoticeKind::DisappearingTimerUnknown.into(),
-                    detail: format!("chat {chat_id}"),
-                },
-            )));
+            self.emit(wuphf_connector::notice(
+                pb::NoticeKind::DisappearingTimerUnknown,
+                format!("chat {chat_id}"),
+            ));
         }
         None
     }

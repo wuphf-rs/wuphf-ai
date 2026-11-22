@@ -382,6 +382,7 @@ async fn hub_stamps_the_session_connector_on_all_work() {
             connector_id: impostor,
             kind: NoticeKind::Degraded,
             detail: "rate limited".into(),
+            media_ids: vec![],
         },
     ];
     for item in work {

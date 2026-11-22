@@ -13,9 +13,15 @@ import (
 // Report only what happened. The wording the owner reads, which chats it
 // reaches, and whether a repeat is worth sending are all decided by the core.
 func Notice(kind wuphfpb.NoticeKind, detail string) *wuphfpb.ClientFrame {
+	return NoticeWithMedia(kind, detail, nil)
+}
+
+// NoticeWithMedia is Notice with media the connector uploaded to the core's
+// media store (MediaClient.Upload), shown with the notice: a QR code to scan.
+func NoticeWithMedia(kind wuphfpb.NoticeKind, detail string, mediaIDs []string) *wuphfpb.ClientFrame {
 	return &wuphfpb.ClientFrame{
 		Body: &wuphfpb.ClientFrame_OwnerNotice{
-			OwnerNotice: &wuphfpb.OwnerNotice{Kind: kind, Detail: detail},
+			OwnerNotice: &wuphfpb.OwnerNotice{Kind: kind, Detail: detail, MediaIds: mediaIDs},
 		},
 	}
 }

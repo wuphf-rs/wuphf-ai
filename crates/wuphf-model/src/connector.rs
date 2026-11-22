@@ -50,6 +50,10 @@ pub enum NoticeKind {
     /// Not about the connector's health: an inbound message's media could not be
     /// downloaded, so the message was not bridged.
     MediaUnavailable,
+    /// Not about the connector's health: the connector is waiting to be linked
+    /// to its account again (a new WhatsApp pairing after a logout). The detail
+    /// says how; the notice may carry the QR code to scan.
+    LinkRequired,
 }
 
 impl NoticeKind {
@@ -68,6 +72,7 @@ impl NoticeKind {
             NoticeKind::MediaUnavailable => {
                 "could not download the media of an incoming message, so that message was not bridged"
             }
+            NoticeKind::LinkRequired => "is waiting to be linked to its account again",
         }
     }
 
@@ -77,7 +82,9 @@ impl NoticeKind {
     pub fn is_health(self) -> bool {
         !matches!(
             self,
-            NoticeKind::DisappearingTimerUnknown | NoticeKind::MediaUnavailable
+            NoticeKind::DisappearingTimerUnknown
+                | NoticeKind::MediaUnavailable
+                | NoticeKind::LinkRequired
         )
     }
 }
@@ -107,6 +114,9 @@ pub enum InboundWork {
         connector_id: ConnectorId,
         kind: NoticeKind,
         detail: String,
+        /// Media in the core's store shown with the notice (a QR code to scan).
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        media_ids: Vec<MediaId>,
     },
     /// The platform reported chat properties (a timer setting, a group
     /// notification, a history sync); batched. `snapshot` updates describe

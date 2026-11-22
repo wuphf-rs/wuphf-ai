@@ -12,5 +12,5 @@ mod sender;
 
 pub use client::{Client, Options, PermanentFailureClassifier, SessionError};
 pub use media::{MediaClient, MediaConnectError};
-pub use notice::{notice, send_notice};
+pub use notice::{notice, notice_with_media, send_notice};
 pub use sender::{Delivery, Failure, Sender};

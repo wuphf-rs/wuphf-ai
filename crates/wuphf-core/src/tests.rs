@@ -1744,6 +1744,7 @@ async fn an_owner_notice_reaches_the_other_connectors_only() {
             ConnectorId(WHATSAPP.into()),
             NoticeKind::LoggedOut,
             "WhatsApp ended the session",
+            &[],
             1,
         )
         .await
@@ -1766,26 +1767,70 @@ async fn an_owner_notice_reaches_the_other_connectors_only() {
 }
 
 #[tokio::test]
+async fn a_link_notice_shows_its_stored_qr_and_every_round_is_sent() {
+    let core = notifying_core();
+    let whatsapp = ConnectorId(WHATSAPP.into());
+    let qr = Attachment {
+        media_id: MediaId::new(),
+        kind: AttachmentKind::Image,
+        file_name: Some("qr.png".into()),
+        mime_type: Some("image/png".into()),
+        size_bytes: Some(3),
+        animated: false,
+    };
+    core.storage
+        .put_media(
+            MediaBlob {
+                attachment: qr.clone(),
+                bytes: b"png".to_vec(),
+            },
+            1,
+        )
+        .await
+        .unwrap();
+    // An id the store does not hold is left out; the text still goes.
+    let media = [qr.media_id, MediaId::new()];
+    let notify = || {
+        core.notify_owners(
+            whatsapp.clone(),
+            NoticeKind::LinkRequired,
+            "scan the QR code",
+            &media,
+            1,
+        )
+    };
+    let first = notify().await.unwrap();
+    assert_eq!(first.len(), 1);
+    let Action::Send { message, .. } = &first[0].action else {
+        panic!("a notice should dispatch a message create");
+    };
+    assert_eq!(message.attachments, vec![qr]);
+    assert!(notice_text(&first[0]).contains("scan the QR code"));
+    // Not a health state: the next pairing round is news too.
+    assert_eq!(notify().await.unwrap().len(), 1);
+}
+
+#[tokio::test]
 async fn a_repeated_notice_is_sent_once_until_the_state_changes() {
     let core = notifying_core();
     let whatsapp = ConnectorId(WHATSAPP.into());
 
     let first = core
-        .notify_owners(whatsapp.clone(), NoticeKind::LoggedOut, "", 1)
+        .notify_owners(whatsapp.clone(), NoticeKind::LoggedOut, "", &[], 1)
         .await
         .unwrap();
     assert_eq!(first.len(), 1);
 
     // A connector in a reconnect loop repeats itself; the owner is told once.
     let repeat = core
-        .notify_owners(whatsapp.clone(), NoticeKind::LoggedOut, "", 2)
+        .notify_owners(whatsapp.clone(), NoticeKind::LoggedOut, "", &[], 2)
         .await
         .unwrap();
     assert!(repeat.is_empty());
 
     // A change is news again, and reads as a recovery.
     let recovered = core
-        .notify_owners(whatsapp, NoticeKind::Recovered, "", 3)
+        .notify_owners(whatsapp, NoticeKind::Recovered, "", &[], 3)
         .await
         .unwrap();
     assert_eq!(recovered.len(), 1);
@@ -1798,7 +1843,13 @@ async fn a_recovery_without_prior_trouble_says_nothing() {
     // Connectors report health on every connect, so a healthy start-up must not
     // announce that nothing is wrong.
     let dispatches = core
-        .notify_owners(ConnectorId(WHATSAPP.into()), NoticeKind::Recovered, "", 1)
+        .notify_owners(
+            ConnectorId(WHATSAPP.into()),
+            NoticeKind::Recovered,
+            "",
+            &[],
+            1,
+        )
         .await
         .unwrap();
     assert!(dispatches.is_empty());
@@ -1808,7 +1859,13 @@ async fn a_recovery_without_prior_trouble_says_nothing() {
 async fn a_notice_with_no_configured_target_is_dropped() {
     let core = core(vec![]);
     let dispatches = core
-        .notify_owners(ConnectorId(WHATSAPP.into()), NoticeKind::LoggedOut, "", 1)
+        .notify_owners(
+            ConnectorId(WHATSAPP.into()),
+            NoticeKind::LoggedOut,
+            "",
+            &[],
+            1,
+        )
         .await
         .unwrap();
     assert!(dispatches.is_empty());
@@ -1961,7 +2018,7 @@ async fn notice_targets_follow_runtime_changes() {
     let whatsapp = ConnectorId(WHATSAPP.into());
 
     let first = core
-        .notify_owners(whatsapp.clone(), NoticeKind::LoggedOut, "", 1)
+        .notify_owners(whatsapp.clone(), NoticeKind::LoggedOut, "", &[], 1)
         .await
         .unwrap();
     assert_eq!(first.len(), 1);
@@ -1969,7 +2026,7 @@ async fn notice_targets_follow_runtime_changes() {
 
     swap(&shared, with_target("-100222"));
     let second = core
-        .notify_owners(whatsapp, NoticeKind::Recovered, "", 2)
+        .notify_owners(whatsapp, NoticeKind::Recovered, "", &[], 2)
         .await
         .unwrap();
     assert_eq!(second.len(), 1);
@@ -2013,9 +2070,15 @@ async fn each_operation_reads_routing_once() {
 
     // A notice reads once for its targets and all of its sends.
     let before = reads.load(Ordering::SeqCst);
-    core.notify_owners(ConnectorId(WHATSAPP.into()), NoticeKind::LoggedOut, "", 2)
-        .await
-        .unwrap();
+    core.notify_owners(
+        ConnectorId(WHATSAPP.into()),
+        NoticeKind::LoggedOut,
+        "",
+        &[],
+        2,
+    )
+    .await
+    .unwrap();
     read_once(before);
 
     // An owner message into the mirrored chat: resolve plus fan-out.
@@ -2302,7 +2365,7 @@ async fn owner_messages_carry_the_target_timer() {
 async fn timer_notices_bypass_the_health_state() {
     let core = notifying_core();
     let whatsapp = ConnectorId(WHATSAPP.into());
-    let notify = |kind| core.notify_owners(whatsapp.clone(), kind, "chat 1@s.whatsapp.net", 1);
+    let notify = |kind| core.notify_owners(whatsapp.clone(), kind, "chat 1@s.whatsapp.net", &[], 1);
 
     assert_eq!(notify(NoticeKind::Degraded).await.unwrap().len(), 1);
     let first = notify(NoticeKind::DisappearingTimerUnknown).await.unwrap();
@@ -2327,13 +2390,14 @@ async fn timer_notices_bypass_the_health_state() {
             whatsapp.clone(),
             NoticeKind::DisappearingTimerUnknown,
             "",
+            &[],
             1,
         )
         .await
         .unwrap();
     assert!(
         fresh
-            .notify_owners(whatsapp, NoticeKind::Recovered, "", 2)
+            .notify_owners(whatsapp, NoticeKind::Recovered, "", &[], 2)
             .await
             .unwrap()
             .is_empty()
@@ -2345,7 +2409,7 @@ async fn a_media_notice_never_changes_health() {
     let core = notifying_core();
     let whatsapp = ConnectorId(WHATSAPP.into());
     let detail = "image from Alice in [P] Alice: download from WhatsApp: media expired";
-    let notify = |kind| core.notify_owners(whatsapp.clone(), kind, detail, 1);
+    let notify = |kind| core.notify_owners(whatsapp.clone(), kind, detail, &[], 1);
 
     assert_eq!(notify(NoticeKind::Degraded).await.unwrap().len(), 1);
     // Every failed download is told, and none of them touches the health state.
