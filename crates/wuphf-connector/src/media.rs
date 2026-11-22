@@ -1,7 +1,8 @@
-//! Uploads to the core's media store: the counterpart of the Go
-//! `coreclient.DialMedia` / `MediaClient.Upload`. A connector uploads the
-//! bytes of an attachment (or a chat's picture) here first, then names the
-//! returned media id in the frame that carries it.
+//! Uploads to and downloads from the core's media store: the counterpart of the
+//! Go `coreclient.DialMedia` / `MediaClient.Upload` / `Download`. A connector
+//! uploads the bytes of an attachment (or a chat's picture) here first, then
+//! names the returned media id in the frame that carries it; it downloads the
+//! media a dispatch names before sending it on.
 
 use thiserror::Error;
 use tonic::metadata::{Ascii, MetadataValue};
@@ -75,5 +76,27 @@ impl MediaClient {
             .await?
             .into_inner();
         Ok(attachment)
+    }
+
+    /// Download the stored media `media_id`: the core streams it in chunks,
+    /// which are joined in order.
+    pub async fn download(&self, media_id: &str) -> Result<Vec<u8>, SessionError> {
+        let mut request = tonic::Request::new(pb::DownloadMediaRequest {
+            media_id: media_id.to_owned(),
+        });
+        request
+            .metadata_mut()
+            .insert("authorization", self.authorization.clone());
+        let mut stream = self
+            .client
+            .clone()
+            .download_media(request)
+            .await?
+            .into_inner();
+        let mut bytes = Vec::new();
+        while let Some(chunk) = stream.message().await? {
+            bytes.extend_from_slice(&chunk.chunk);
+        }
+        Ok(bytes)
     }
 }

@@ -76,3 +76,54 @@ async fn upload_with_a_wrong_token_is_refused() {
     );
     server.abort();
 }
+
+#[tokio::test]
+async fn a_download_returns_every_chunk() {
+    let (address, server) = serve(Arc::new(InMemoryStorage::default())).await;
+    let client = MediaClient::connect(&address, TOKEN).unwrap();
+    // More than two 64 KiB chunks, and not a multiple of one.
+    let bytes: Vec<u8> = (0..150_000u32).map(|n| (n % 251) as u8).collect();
+    let attachment = client
+        .upload(photo(bytes.len()), bytes.clone())
+        .await
+        .unwrap();
+
+    assert_eq!(client.download(&attachment.media_id).await.unwrap(), bytes);
+    server.abort();
+}
+
+#[tokio::test]
+async fn a_download_with_the_wrong_token_is_refused() {
+    let storage = Arc::new(InMemoryStorage::default());
+    let (address, server) = serve(Arc::clone(&storage)).await;
+    let attachment = MediaClient::connect(&address, TOKEN)
+        .unwrap()
+        .upload(photo(3), b"abc".to_vec())
+        .await
+        .unwrap();
+    let client = MediaClient::connect(&address, "not-the-token").unwrap();
+
+    let error = client.download(&attachment.media_id).await.unwrap_err();
+
+    assert!(
+        matches!(&error, SessionError::Transport(status) if status.code() == tonic::Code::Unauthenticated),
+        "{error:?}"
+    );
+    server.abort();
+}
+
+#[tokio::test]
+async fn an_unknown_media_id_is_not_found() {
+    let (address, server) = serve(Arc::new(InMemoryStorage::default())).await;
+    let client = MediaClient::connect(&address, TOKEN).unwrap();
+    let code = |error: SessionError| match error {
+        SessionError::Transport(status) => status.code(),
+        other => panic!("expected a status, got {other:?}"),
+    };
+
+    let unknown = client.download(&MediaId::new().0.to_string()).await;
+    assert_eq!(code(unknown.unwrap_err()), tonic::Code::NotFound);
+    let malformed = client.download("x").await;
+    assert_eq!(code(malformed.unwrap_err()), tonic::Code::InvalidArgument);
+    server.abort();
+}
