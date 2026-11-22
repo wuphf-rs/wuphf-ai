@@ -1,10 +1,16 @@
 package config
 
 import (
+	"bytes"
+	"encoding/hex"
+	"encoding/json"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/akshettrj/wuphf/connectors/shared/settings"
 	"github.com/pelletier/go-toml/v2"
 )
 
@@ -214,5 +220,47 @@ func TestValidateChecksTheLoginMethod(t *testing.T) {
 	noPhone.LoginMethod = LoginMethodPairCode
 	if err := noPhone.Validate(); err == nil || !strings.Contains(err.Error(), "needs phone_number") {
 		t.Fatalf("Validate() = %v, want a phone_number error", err)
+	}
+}
+
+// The runtime settings declaration is shared with the Rust connector, which
+// declares the same settings and checks its declaration against this file.
+// WUPHF_UPDATE_FIXTURES=1 regenerates it; otherwise this checks that the Go
+// connector still declares it.
+func TestRuntimeDeclarationMatchesTheSharedFixture(t *testing.T) {
+	t.Parallel()
+	declaration, err := settings.Declare(Runtime{}.WithDefaults())
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := json.MarshalIndent(struct {
+		DescriptorHex string          `json:"descriptor_hex"`
+		JSONSchema    json.RawMessage `json:"json_schema"`
+		Base          json.RawMessage `json:"base"`
+	}{
+		DescriptorHex: hex.EncodeToString(declaration.GetDescriptor_()),
+		JSONSchema:    json.RawMessage(declaration.GetJsonSchema()),
+		Base:          json.RawMessage(declaration.GetBaseJson()),
+	}, "", "  ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	got = append(got, '\n')
+	path := filepath.Join("testdata", "runtime-declaration.json")
+	if os.Getenv("WUPHF_UPDATE_FIXTURES") == "1" {
+		if err := os.MkdirAll("testdata", 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, got, 0o644); err != nil {
+			t.Fatal(err)
+		}
+		return
+	}
+	want, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(got, want) {
+		t.Fatalf("%s differs from what this connector declares (regenerate with WUPHF_UPDATE_FIXTURES=1)", path)
 	}
 }
