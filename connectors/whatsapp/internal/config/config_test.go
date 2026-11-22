@@ -1,6 +1,7 @@
 package config
 
 import (
+	"strings"
 	"testing"
 	"time"
 
@@ -177,5 +178,41 @@ func TestSupportsDisappearingTimersParsesAndDefaultsOff(t *testing.T) {
 	}
 	if !set.SupportsDisappearingTimers {
 		t.Fatal("supports_disappearing_timers = true did not parse")
+	}
+}
+
+func TestResolvedLoginMethodDefaultsFromThePhoneNumber(t *testing.T) {
+	t.Parallel()
+	if got := (File{}).ResolvedLoginMethod(); got != LoginMethodQR {
+		t.Fatalf("ResolvedLoginMethod() = %q, want %q", got, LoginMethodQR)
+	}
+	if got := (File{PhoneNumber: "15551234567"}).ResolvedLoginMethod(); got != LoginMethodPairCode {
+		t.Fatalf("ResolvedLoginMethod() = %q, want %q", got, LoginMethodPairCode)
+	}
+	if got := (File{PhoneNumber: "15551234567", LoginMethod: LoginMethodQR}).ResolvedLoginMethod(); got != LoginMethodQR {
+		t.Fatalf("ResolvedLoginMethod() = %q, want %q", got, LoginMethodQR)
+	}
+}
+
+func TestValidateChecksTheLoginMethod(t *testing.T) {
+	t.Parallel()
+	base := File{
+		CoreAddress:     "127.0.0.1:50051",
+		ConnectorID:     "whatsapp-main",
+		CoreTokenEnv:    "WUPHF_CONNECTOR_WHATSAPP_MAIN_TOKEN",
+		SessionDatabase: "file:wa.db",
+	}
+	if err := base.Validate(); err != nil {
+		t.Fatalf("Validate() = %v", err)
+	}
+	unknown := base
+	unknown.LoginMethod = "sms"
+	if err := unknown.Validate(); err == nil || !strings.Contains(err.Error(), "login_method") {
+		t.Fatalf("Validate() = %v, want a login_method error", err)
+	}
+	noPhone := base
+	noPhone.LoginMethod = LoginMethodPairCode
+	if err := noPhone.Validate(); err == nil || !strings.Contains(err.Error(), "needs phone_number") {
+		t.Fatalf("Validate() = %v, want a phone_number error", err)
 	}
 }

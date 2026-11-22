@@ -32,6 +32,13 @@ type File struct {
 	// ClientMode selects which WhatsApp client identity the session registers
 	// as. Empty defaults to ClientModeAndroid; see ClientMode for the choices.
 	ClientMode string `toml:"client_mode"`
+	// LoginMethod is how the session is linked, at the first start and again
+	// after a logout: LoginMethodQR or LoginMethodPairCode. Empty: pair code
+	// when PhoneNumber is set, else QR.
+	LoginMethod string `toml:"login_method"`
+	// PhoneNumber is the account's number, country code first, digits only:
+	// the number a pair code is issued for. Required by LoginMethodPairCode.
+	PhoneNumber string `toml:"phone_number"`
 	// FunctionsTokenEnv names the environment variable holding the core's
 	// invoke token, when the core requires one.
 	FunctionsTokenEnv string `toml:"functions_token_env"`
@@ -145,6 +152,27 @@ func (c File) ResolvedClientMode() string {
 	return c.ClientMode
 }
 
+// How the session is linked to the account.
+const (
+	// LoginMethodQR scans a QR code in WhatsApp → Linked devices → Link a device.
+	LoginMethodQR = "qr"
+	// LoginMethodPairCode types an 8-character code into WhatsApp after "Link
+	// with phone number instead"; it needs PhoneNumber.
+	LoginMethodPairCode = "pair_code"
+)
+
+// ResolvedLoginMethod returns the configured login method, defaulting to a
+// pair code when a phone number is set and to a QR code otherwise.
+func (c File) ResolvedLoginMethod() string {
+	if c.LoginMethod != "" {
+		return c.LoginMethod
+	}
+	if c.PhoneNumber != "" {
+		return LoginMethodPairCode
+	}
+	return LoginMethodQR
+}
+
 func Load(path string) (File, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -174,6 +202,14 @@ func (c File) Validate() error {
 	case "", ClientModeAndroid, ClientModeAndroidBusiness:
 	default:
 		return fmt.Errorf("client_mode must be %q or %q", ClientModeAndroid, ClientModeAndroidBusiness)
+	}
+	switch c.LoginMethod {
+	case "", LoginMethodQR, LoginMethodPairCode:
+	default:
+		return fmt.Errorf("login_method must be %q or %q", LoginMethodQR, LoginMethodPairCode)
+	}
+	if c.ResolvedLoginMethod() == LoginMethodPairCode && c.PhoneNumber == "" {
+		return fmt.Errorf("login_method = %q needs phone_number", LoginMethodPairCode)
 	}
 	return nil
 }

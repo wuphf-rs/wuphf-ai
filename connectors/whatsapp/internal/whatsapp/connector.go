@@ -14,9 +14,9 @@ import (
 	"github.com/akshettrj/wuphf/connectors/whatsapp/internal/config"
 	wuphfpb "github.com/akshettrj/wuphf/proto/go/connector/v1"
 	_ "github.com/mattn/go-sqlite3"
-	"github.com/mdp/qrterminal/v3"
 	"github.com/rs/zerolog"
 	"go.mau.fi/whatsmeow"
+	"go.mau.fi/whatsmeow/store"
 	"go.mau.fi/whatsmeow/store/sqlstore"
 	"go.mau.fi/whatsmeow/types/events"
 	waLog "go.mau.fi/whatsmeow/util/log"
@@ -31,6 +31,25 @@ func New(cfg config.File, logger zerolog.Logger) Connector {
 	return Connector{cfg: cfg, logger: logger}
 }
 
+// errLoggedOut ends a WhatsApp session that WhatsApp logged out; the next one
+// links a new device.
+var errLoggedOut = errors.New("WhatsApp logged the device out")
+
+// sessionDeps is what every WhatsApp session of the process shares.
+type sessionDeps struct {
+	container *sqlstore.Container
+	media     *coreclient.MediaClient
+	converter functions.MediaConverter
+	runtime   *settings.Connection[config.Runtime]
+	inputs    chan *wuphfpb.ClientFrame
+	linked    *linkedSender
+	linking   *linking
+}
+
+// Run runs the connector: one core session for the process, and a WhatsApp
+// session that is replaced whenever WhatsApp logs the device out. Dispatches
+// that arrive while no session is linked fail as transient, so the core
+// delivers them once the new one is.
 func (c Connector) Run(ctx context.Context) error {
 	dbLog := waLog.Zerolog(c.logger.With().Str("component", "whatsmeow-db").Logger())
 	container, err := sqlstore.New(ctx, "sqlite3", c.cfg.SessionDatabase, dbLog)
@@ -39,17 +58,13 @@ func (c Connector) Run(ctx context.Context) error {
 	}
 	defer container.Close()
 	// Register as an Android client (experimental) so WhatsApp delivers
-	// view-once media to this companion; must be set before pairing, which
-	// connect() may trigger below. A WhatsApp Business account pairs as the SMB
-	// Android client instead.
+	// view-once media to this companion; must be set before pairing, which a
+	// session may start. A WhatsApp Business account pairs as the SMB Android
+	// client instead.
 	mode := c.cfg.ResolvedClientMode()
-	c.logger.Warn().Str("client_mode", mode).Msg("registering WhatsApp session as an Android client (experimental)")
+	c.logger.Warn().Str("client_mode", mode).Str("login_method", c.cfg.ResolvedLoginMethod()).
+		Msg("registering WhatsApp session as an Android client (experimental)")
 	useAndroidClientIdentity(mode == config.ClientModeAndroidBusiness)
-	device, err := container.GetFirstDevice(ctx)
-	if err != nil {
-		return fmt.Errorf("load WhatsApp device: %w", err)
-	}
-	client := whatsmeow.NewClient(device, waLog.Zerolog(c.logger.With().Str("component", "whatsmeow").Logger()))
 	coreToken, err := coreclient.TokenFromEnv(c.cfg.CoreTokenEnv)
 	if err != nil {
 		return err
@@ -84,12 +99,75 @@ func (c Connector) Run(ctx context.Context) error {
 		return runtime.Live.Load().MediaConvertTimeout()
 	}}
 	inputs := make(chan *wuphfpb.ClientFrame, 128)
+	deps := sessionDeps{
+		container: container,
+		media:     media,
+		converter: converter,
+		runtime:   runtime,
+		inputs:    inputs,
+		linked:    &linkedSender{},
+		linking:   newLinking(inputs, media, c.cfg.ResolvedLoginMethod(), c.logger),
+	}
+
+	// The core session starts first, so the codes of a pairing reach the owner.
+	sessionCtx, stopSessions := context.WithCancel(ctx)
+	defer stopSessions()
+	runResult := make(chan error, 1)
+	go func() {
+		runResult <- coreclient.New(coreclient.Options{
+			CoreAddress:                c.cfg.CoreAddress,
+			Token:                      coreToken,
+			ConnectorID:                c.cfg.ConnectorID,
+			Platform:                   wuphfpb.Platform_PLATFORM_WHATSAPP,
+			SupportsThreads:            c.cfg.SupportsThreads,
+			SupportsTopicCreate:        c.cfg.SupportsTopicCreate,
+			SupportsDisappearingTimers: c.cfg.SupportsDisappearingTimers,
+			Settings:                   runtime.Declaration,
+		}, c.logger).Run(ctx, deps.linked, inputs)
+	}()
+	sessionResult := make(chan error, 1)
+	go func() { sessionResult <- c.runSessions(sessionCtx, deps) }()
+	select {
+	case <-ctx.Done():
+		<-sessionResult
+		return ctx.Err()
+	case err := <-runResult:
+		stopSessions()
+		<-sessionResult
+		return err
+	case err := <-sessionResult:
+		return err
+	}
+}
+
+// runSessions runs WhatsApp sessions back to back while each ends in a logout.
+func (c Connector) runSessions(ctx context.Context, deps sessionDeps) error {
+	for {
+		err := c.runSession(ctx, deps)
+		if !errors.Is(err, errLoggedOut) {
+			return err
+		}
+		c.logger.Warn().Msg("WhatsApp logged this device out; linking a new one")
+	}
+}
+
+// runSession runs one WhatsApp session on the session database's device,
+// linking a new device first when there is none, until ctx ends, an event
+// cannot be normalized, or WhatsApp logs the device out (errLoggedOut).
+func (c Connector) runSession(ctx context.Context, deps sessionDeps) error {
+	device, err := deps.container.GetFirstDevice(ctx)
+	if err != nil {
+		return fmt.Errorf("load WhatsApp device: %w", err)
+	}
+	client := whatsmeow.NewClient(device, waLog.Zerolog(c.logger.With().Str("component", "whatsmeow").Logger()))
+	inputs := deps.inputs
 	identity := newIdentityResolver(client)
 	addresses := newAddressBook(identity, whatsmeowAccount{client: client})
 	namer := newChatNamer(client)
-	profiles := newChatProfiler(client, httpFetch, media, namer, c.logger)
-	normalizer := NewNormalizer(inputs, NewMediaCodec(media, client), namer, identity, client, addresses).WithProfiles(profiles)
+	profiles := newChatProfiler(client, httpFetch, deps.media, namer, c.logger)
+	normalizer := NewNormalizer(inputs, NewMediaCodec(deps.media, client), namer, identity, client, addresses).WithProfiles(profiles)
 	eventErrors := make(chan error, 1)
+	loggedOut := make(chan struct{}, 1)
 	client.AddEventHandler(func(raw any) {
 		var err error
 		switch evt := raw.(type) {
@@ -124,6 +202,17 @@ func (c Connector) Run(ctx context.Context) error {
 				c.logger.Warn().Str("detail", detail).Msg("WhatsApp session health changed")
 				coreclient.SendNotice(ctx, inputs, kind, detail)
 			}
+			switch raw.(type) {
+			case *events.LoggedOut:
+				// Only a logout links again: a replaced stream, a ban or an
+				// outdated client would fail the same way with a new device.
+				select {
+				case loggedOut <- struct{}{}:
+				default:
+				}
+			case *events.Connected:
+				deps.linking.Linked()
+			}
 			return
 		}
 		if err != nil {
@@ -133,68 +222,101 @@ func (c Connector) Run(ctx context.Context) error {
 			}
 		}
 	})
-	if err := connect(ctx, client); err != nil {
+	if err := c.link(ctx, client, deps.linking); err != nil {
 		return err
 	}
 	defer client.Disconnect()
 	if client.Store.ID == nil {
-		return errors.New("WhatsApp session has no account JID after pairing")
+		// whatsmeow deletes the device when WhatsApp rejects it on connect.
+		return errLoggedOut
 	}
 	ownJID := *client.Store.ID
 	c.logger.Info().Str("jid", ownJID.String()).Msg("WhatsApp session connected")
-	sender := NewSender(client, media, converter, addresses, runtime.Live)
+	sender := NewSender(client, deps.media, deps.converter, addresses, deps.runtime.Live)
 	if c.cfg.SupportsDisappearingTimers {
 		sender = sender.WithTimers(newTimerSource(client, inputs, ctx))
 	}
-	runResult := make(chan error, 1)
-	go func() {
-		runResult <- coreclient.New(coreclient.Options{
-			CoreAddress:                c.cfg.CoreAddress,
-			Token:                      coreToken,
-			ConnectorID:                c.cfg.ConnectorID,
-			Platform:                   wuphfpb.Platform_PLATFORM_WHATSAPP,
-			SupportsThreads:            c.cfg.SupportsThreads,
-			SupportsTopicCreate:        c.cfg.SupportsTopicCreate,
-			SupportsDisappearingTimers: c.cfg.SupportsDisappearingTimers,
-			Settings:                   runtime.Declaration,
-		}, c.logger).Run(ctx, sender, inputs)
-	}()
+	deps.linked.set(&sender)
+	defer deps.linked.set(nil)
 	select {
 	case <-ctx.Done():
 		return ctx.Err()
 	case err := <-eventErrors:
 		return fmt.Errorf("normalize WhatsApp event: %w", err)
-	case err := <-runResult:
-		return err
+	case <-loggedOut:
+		client.Disconnect()
+		// whatsmeow deletes the device itself, but on its own goroutine;
+		// deleting the row here too (an idempotent DELETE) makes sure the next
+		// session starts from a fresh device rather than the dead one.
+		if err := deps.container.DeleteDevice(ctx, &store.Device{ID: &ownJID}); err != nil {
+			return fmt.Errorf("forget the logged-out WhatsApp device: %w", err)
+		}
+		return errLoggedOut
 	}
 }
 
-func connect(ctx context.Context, client *whatsmeow.Client) error {
+// link connects the session's device, or links a new one by the configured
+// login method, one pairing round after another until one succeeds.
+func (c Connector) link(ctx context.Context, client *whatsmeow.Client, linking *linking) error {
 	if client.Store.ID != nil {
 		if err := client.Connect(); err != nil {
 			return fmt.Errorf("connect WhatsApp session: %w", err)
 		}
 		return nil
 	}
+	for {
+		linked, err := c.pairRound(ctx, client, linking)
+		if err != nil || linked {
+			return err
+		}
+		// The round's codes ran out before one was used; whatsmeow closed the
+		// pairing socket, and the next round opens a new one.
+		client.Disconnect()
+	}
+}
+
+// pairRound runs one pairing round: whatsmeow's QR codes, and in pair-code
+// mode one pair code. It reports whether the device was linked.
+func (c Connector) pairRound(ctx context.Context, client *whatsmeow.Client, linking *linking) (bool, error) {
 	codes, err := client.GetQRChannel(ctx)
 	if err != nil {
-		return fmt.Errorf("open WhatsApp QR pairing: %w", err)
+		return false, fmt.Errorf("open WhatsApp pairing: %w", err)
 	}
 	if err := client.Connect(); err != nil {
-		return fmt.Errorf("connect WhatsApp for pairing: %w", err)
+		return false, fmt.Errorf("connect WhatsApp for pairing: %w", err)
 	}
+	asked := false
 	for code := range codes {
 		switch code.Event {
-		case "code":
-			fmt.Fprintln(os.Stderr, "Scan WhatsApp QR code:")
-			qrterminal.GenerateHalfBlock(code.Code, qrterminal.L, os.Stderr)
-		case "success":
-			return nil
+		case whatsmeow.QRChannelEventCode:
+			// A pair code is asked for once the round's socket is up (the
+			// first QR code shows it is).
+			if !asked {
+				asked = true
+				if next, due := linking.PairCodeDue(); due {
+					pairCode, err := client.PairPhone(ctx, c.cfg.PhoneNumber, true, whatsmeow.PairClientChrome, "Chrome (Linux)")
+					if err != nil {
+						c.logger.Warn().Err(err).Msg("could not get a WhatsApp pair code; this round offers the QR code only")
+					} else {
+						linking.PairCode(ctx, pairCode, next)
+					}
+				}
+			}
+			linking.QR(ctx, code.Code, code.Timeout)
+		case whatsmeow.QRChannelSuccess.Event:
+			return true, nil
+		case whatsmeow.QRChannelTimeout.Event:
+			return false, nil
+		case whatsmeow.QRChannelEventPasskeyRequest, whatsmeow.QRChannelEventPasskeyResponse:
+			c.logger.Info().Str("event", code.Event).Msg("WhatsApp pairing step")
 		default:
-			return fmt.Errorf("WhatsApp QR pairing failed: %s", code.Event)
+			return false, fmt.Errorf("WhatsApp pairing failed: %s", code.Event)
 		}
 	}
-	return errors.New("WhatsApp QR pairing stopped before success")
+	if err := ctx.Err(); err != nil {
+		return false, err
+	}
+	return false, errors.New("WhatsApp pairing stopped before success")
 }
 
 // sessionNotice maps the whatsmeow events that stop a session from bridging to
