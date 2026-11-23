@@ -33,6 +33,9 @@ config.local.toml
 *.session.json
 *.cookies.json
 *.state.json
+# A running connector's session lock (`<session>.lock`).
+*.db.lock
+*.session.json.lock
 
 # Editor and operating system files
 .DS_Store
