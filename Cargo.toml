@@ -26,11 +26,11 @@ version = "0.1.0"
 
 [workspace.dependencies]
 async-trait = "0.1"
-botconf = { git = "https://github.com/propheci/botconf", tag = "v0.16.0" }
-botconf-grpc = { git = "https://github.com/propheci/botconf", tag = "v0.16.0" }
-botconf-panel = { git = "https://github.com/propheci/botconf", tag = "v0.16.0" }
-botconf-proto = { git = "https://github.com/propheci/botconf", tag = "v0.16.0" }
-botconf-tui = { git = "https://github.com/propheci/botconf", tag = "v0.16.0" }
+botconf = { git = "https://github.com/propheci/botconf", tag = "v0.16.1" }
+botconf-grpc = { git = "https://github.com/propheci/botconf", tag = "v0.16.1" }
+botconf-panel = { git = "https://github.com/propheci/botconf", tag = "v0.16.1" }
+botconf-proto = { git = "https://github.com/propheci/botconf", tag = "v0.16.1" }
+botconf-tui = { git = "https://github.com/propheci/botconf", tag = "v0.16.1" }
 anyhow = "1"
 clap = { version = "4", features = ["derive"] }
 crossterm = { version = "0.29", features = ["event-stream"] }

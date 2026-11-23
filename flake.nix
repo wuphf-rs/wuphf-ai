@@ -1,16 +1,20 @@
 {
-  description = "wuphf development environment";
+  description = "wuphf: a multi-platform messaging bridge (packages, a NixOS module, the dev shell)";
 
   inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
 
   outputs =
-    { nixpkgs, ... }:
+    { self, nixpkgs, ... }:
     let
       supportedSystems = [
         "aarch64-linux"
         "x86_64-linux"
         "aarch64-darwin"
         "x86_64-darwin"
+      ];
+      linuxSystems = [
+        "aarch64-linux"
+        "x86_64-linux"
       ];
       forAllSystems =
         function:
@@ -24,6 +28,69 @@
         );
     in
     {
+      packages = nixpkgs.lib.genAttrs linuxSystems (
+        system:
+        let
+          # callPackage adds override functions; packages holds derivations only.
+          packages = nixpkgs.lib.filterAttrs (_: nixpkgs.lib.isDerivation) (
+            nixpkgs.legacyPackages.${system}.callPackage ./nix/packages.nix { }
+          );
+        in
+        packages // { default = packages.wuphf; }
+      );
+
+      # services.wuphf.<part>: every part as a systemd service (nix/module.nix).
+      nixosModules.default = import ./nix/module.nix (
+        pkgs: self.packages.${pkgs.stdenv.hostPlatform.system}
+      );
+
+      # The module in a whole NixOS system: its units are built, so a broken
+      # option or unit fails here.
+      checks = nixpkgs.lib.genAttrs linuxSystems (system: {
+        nixos-module =
+          let
+            machine = nixpkgs.lib.nixosSystem {
+              inherit system;
+              modules = [
+                self.nixosModules.default
+                {
+                  boot.isContainer = true;
+                  system.stateVersion = "25.05";
+                  services.wuphf = {
+                    core = {
+                      enable = true;
+                      settings = {
+                        listen = "127.0.0.1:50051";
+                        database_url = "sqlite://wuphf.sqlite";
+                      };
+                      environmentFile = "/run/secrets/wuphf-core.env";
+                    };
+                    telegram.enable = true;
+                    mediaconv.enable = true;
+                  };
+                }
+              ];
+            };
+            units = machine.config.systemd.units;
+          in
+          nixpkgs.legacyPackages.${system}.linkFarm "wuphf-nixos-module" (
+            map
+              (name: {
+                inherit name;
+                path = units.${name}.unit;
+              })
+              [
+                "wuphf-core.service"
+                "wuphf-telegram.service"
+                "wuphf-mediaconv.service"
+              ]
+          );
+      });
+
+      overlays.default = final: _: {
+        wuphf-packages = final.callPackage ./nix/packages.nix { };
+      };
+
       devShells = forAllSystems (pkgs: {
         default = pkgs.mkShell {
           packages = with pkgs; [

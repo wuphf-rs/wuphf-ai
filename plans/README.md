@@ -82,6 +82,7 @@ code).
 | 063 | Link a connector's account from its setup (WhatsApp Go and Rust, Telegram, Instagram) and fetch its chats into the directory | P1 | L | botconf 017, 062 | DONE |
 | 061 | Settings backup: `wuphf-server export` / `import` (config + every stored override, connectors' included; secrets only with a flag), online `wuphf settings export` / `import` | P1 | M | botconf 016, 059; after 062, 063 | DONE |
 | 064 | Versions, releases and `wuphf-server update` (every binary, third-party sources, release or source builds, signed checksums, a scheduled check that tells the owner) | P1 | L | — | DONE (see notes) |
+| 065 | Nix packages for every binary, a NixOS module (`services.wuphf.<part>`), and a Cachix cache built by CI | P2 | M | 064 | DONE (see notes) |
 
 Status values: TODO | IN PROGRESS | DONE | BLOCKED (with one-line reason) |
 REJECTED (with one-line rationale).
@@ -1789,3 +1790,19 @@ From the 2026-10-22 remote-functions design:
   check queued both notices for the `notify` chat. Pending on the owner:
   the release key (`release/minisign.pub` is empty until generated; see
   `release/README.md`) and the GitHub repository for a real release.
+
+- **065 (2026-11-24).** `nix/packages.nix`: every binary as a package
+  (`wuphf-server` with `wuphf-tui`, `wuphf-whatsapp-rust`, the five Go
+  binaries, `wuphf` for all), version-stamped, sources filtered; Rust git
+  dependencies from the lock files, a `vendorHash` per Go module, mediaconv
+  wrapped with ffmpeg and ImageMagick. It needed botconf `v0.16.1` (the proto
+  moved into the `botconf-proto` crate: a vendored crate has nothing outside
+  itself). `nixosModules.default`: `services.wuphf.<part>` with `settings` or
+  `configFile` and `environmentFile`, units as `deploy/systemd`'s, the
+  release check off by default. `checks.<system>.nixos-module` builds the
+  units of a NixOS system using it. `.github/workflows/nix.yml` builds
+  `.#wuphf` and the check on x86_64-linux and pushes to Cachix
+  (`CACHIX_CACHE` variable, `CACHIX_AUTH_TOKEN` secret). Verified: all seven
+  packages build and report `0.1.0`; the units and the generated config were
+  read; `nix flake check --all-systems` passes. Pending on the owner: the
+  Cachix cache and its variable and secret.

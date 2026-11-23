@@ -44,6 +44,7 @@ cargo test --workspace && cargo clippy --workspace --all-targets -- -D warnings
 for m in proto/go connectors/shared connectors/telegram connectors/whatsapp \
          connectors/instagram providers/mediaconv misc; do (cd $m && go vet ./... && go test ./...); done
 scripts/install-dev-bins.sh        # release builds into scripts/dev-bin/.bin
+nix build .#wuphf                  # every binary as a Nix package (nix/packages.nix)
 ./scripts/dev-session.sh           # everything in a zellij session
 ```
 
@@ -58,6 +59,7 @@ conflicts with the core's.
 | A Go part's `config.example.toml` | `WUPHF_WRITE_EXAMPLES=1 go test ./...` in its module |
 | `proto/go/**` | `nix develop -c scripts/gen-proto-go.sh` |
 | WhatsApp sticker fixtures | `WUPHF_UPDATE_FIXTURES=1 go test ./internal/whatsapp/` in `connectors/whatsapp` |
+| A Go module's `vendorHash` (`nix/packages.nix`), after its dependencies change | set it to `lib.fakeHash`, `nix build .#<binary>`, copy the hash it prints |
 
 A test fails whenever a generated file is out of date.
 

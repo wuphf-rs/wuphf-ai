@@ -27,6 +27,75 @@ journalctl -fu 'wuphf-*'
 Each unit runs sandboxed and read-only outside its state directory. The
 connectors stop on SIGINT so they save their sessions.
 
+## On NixOS
+
+The flake has every binary as a package and a NixOS module. Each part is a
+service, with the same user, state directories and hardening as the systemd
+units:
+
+```nix
+{
+  inputs.wuphf.url = "git+ssh://git@github.com/wuphf-rs/wuphf-ai?ref=v2";
+
+  outputs = { nixpkgs, wuphf, ... }: {
+    nixosConfigurations.server = nixpkgs.lib.nixosSystem {
+      system = "x86_64-linux";
+      modules = [
+        wuphf.nixosModules.default
+        {
+          services.wuphf = {
+            core = {
+              enable = true;
+              settings = {            # config/example.toml, as Nix
+                listen = "127.0.0.1:50051";
+                database_url = "sqlite://wuphf.sqlite";
+                notify = [ "telegram-main:telegram:user:704338780" ];
+                connectors = [ /* … */ ];
+                rules = { /* … */ };
+              };
+              environmentFile = "/run/secrets/wuphf-core.env";  # the tokens
+            };
+            telegram = {
+              enable = true;
+              settings = { /* connectors/telegram/config.example.toml */ };
+              environmentFile = "/run/secrets/wuphf-telegram.env";
+            };
+            whatsapp.enable = true;    # also: whatsapp-rust, instagram, mediaconv, misc
+          };
+        }
+      ];
+    };
+  };
+}
+```
+
+- Every part has `enable`, `settings` (its TOML file as Nix) or `configFile`,
+  `environmentFile` (its tokens, kept out of the store; sops-nix or agenix
+  work), and `package`.
+- The core's `observer_token` is a value, not a variable name: leave it out
+  of `settings` (the store is world-readable) and put
+  `WUPHF_CORE_OBSERVER_TOKEN=…` in its `environmentFile` instead.
+- State is in `/var/lib/wuphf/<part>`, as on any server; relative paths in
+  the settings resolve there.
+- First logins: stop the part, then run its `setup` (Link account) or run it
+  once by hand as `wuphf` in its state directory, as the
+  [systemd guide](../../deploy/systemd/README.md#first-login) shows.
+- **Updates come from the flake** (`nix flake update wuphf`, then rebuild).
+  `wuphf-server update` cannot write to the store, so the module turns the
+  core's release check off by default.
+- **The binary cache:** CI builds every package for x86_64-linux and pushes
+  them to Cachix. Add the cache as a substituter (its name and public key are
+  on its Cachix page) to download instead of build:
+
+  ```nix
+  nix.settings = {
+    substituters = [ "https://<cache>.cachix.org" ];
+    trusted-public-keys = [ "<cache>.cachix.org-1:…" ];
+  };
+  ```
+
+  Without the cache, or on aarch64, the machine builds wuphf itself.
+
 ## Updates
 
 Every binary reports one project version (`wuphf-server --version`). A
