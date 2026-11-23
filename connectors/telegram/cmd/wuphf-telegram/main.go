@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/signal"
 
+	"github.com/akshettrj/wuphf/connectors/shared/chatdir"
 	"github.com/akshettrj/wuphf/connectors/shared/logging"
 	"github.com/akshettrj/wuphf/connectors/shared/setup"
 	"github.com/akshettrj/wuphf/connectors/telegram/internal/config"
@@ -30,7 +31,11 @@ func main() {
 	case "reset":
 		runReset(args)
 	case "setup":
-		if err := setup.Run(args, tui.Setup{Description: config.Description(), Validate: validate}); err != nil {
+		if err := setup.Run(args, tui.Setup{
+			Description: config.Description(),
+			Validate:    validate,
+			Actions:     setup.AccountActions(chatdir.Dir(), openAccount),
+		}); err != nil {
 			exit(err)
 		}
 	default:
@@ -46,6 +51,20 @@ func validate(candidate tui.Candidate) error {
 		return err
 	}
 	return setup.RequireToken(candidate, "core_token_env", cfg.CoreTokenEnv)
+}
+
+// openAccount is setup's account on the saved config, its credentials read
+// from the env file being edited before the environment.
+func openAccount(candidate tui.Candidate) (*setup.Account, error) {
+	cfg, err := config.Parse([]byte(candidate.Config))
+	if err != nil {
+		return nil, err
+	}
+	credentials, err := config.ReadCredentials(cfg, func(name string) string { return setup.Env(candidate, name) })
+	if err != nil {
+		return nil, err
+	}
+	return telegramconnector.SetupAccount(cfg, credentials), nil
 }
 
 func runConnector(args []string) {

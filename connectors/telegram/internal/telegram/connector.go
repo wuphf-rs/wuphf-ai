@@ -14,6 +14,7 @@ import (
 	coreclient "github.com/akshettrj/wuphf/connectors/shared/coreclient"
 	"github.com/akshettrj/wuphf/connectors/shared/functions"
 	"github.com/akshettrj/wuphf/connectors/shared/logging"
+	"github.com/akshettrj/wuphf/connectors/shared/sessionlock"
 	"github.com/akshettrj/wuphf/connectors/shared/settings"
 	"github.com/akshettrj/wuphf/connectors/telegram/internal/config"
 	"github.com/akshettrj/wuphf/proto/go/connector/v1"
@@ -39,6 +40,13 @@ func New(cfg config.File, credentials config.Credentials, logger zerolog.Logger)
 }
 
 func (c Connector) Run(ctx context.Context) error {
+	// Held while the connector runs, so setup's actions never use the session
+	// at the same time.
+	lock, err := sessionlock.Acquire(c.cfg.SessionFile)
+	if err != nil {
+		return fmt.Errorf("lock the Telegram session (is another wuphf-telegram, or its setup, using it?): %w", err)
+	}
+	defer lock.Release()
 	coreToken, err := coreclient.TokenFromEnv(c.cfg.CoreTokenEnv)
 	if err != nil {
 		return err

@@ -202,32 +202,42 @@ func (c File) Validate() error {
 // token falls back to the file's bot_token when WUPHF_TELEGRAM_BOT_TOKEN is
 // unset.
 func LoadCredentials(file File) (Credentials, error) {
-	appID, err := strconv.Atoi(os.Getenv("WUPHF_TELEGRAM_APP_ID"))
-	if err != nil || appID <= 0 {
-		return Credentials{}, errors.New("WUPHF_TELEGRAM_APP_ID must be a positive integer")
-	}
-	credentials := Credentials{
-		AppID:    appID,
-		AppHash:  os.Getenv("WUPHF_TELEGRAM_APP_HASH"),
-		Phone:    os.Getenv("WUPHF_TELEGRAM_PHONE"),
-		Password: os.Getenv("WUPHF_TELEGRAM_PASSWORD"),
-		BotToken: strings.TrimSpace(os.Getenv("WUPHF_TELEGRAM_BOT_TOKEN")),
-	}
-	if credentials.BotToken == "" {
-		credentials.BotToken = strings.TrimSpace(file.BotToken)
-	}
-	credentials.PanelBotToken = strings.TrimSpace(os.Getenv("WUPHF_TELEGRAM_PANEL_BOT_TOKEN"))
-	if credentials.PanelBotToken == "" {
-		credentials.PanelBotToken = strings.TrimSpace(file.PanelBotToken)
-	}
-	if credentials.AppHash == "" {
-		return Credentials{}, errors.New("WUPHF_TELEGRAM_APP_HASH is required")
+	credentials, err := ReadCredentials(file, os.Getenv)
+	if err != nil {
+		return Credentials{}, err
 	}
 	if credentials.BotToken == "" && credentials.Phone == "" {
 		return Credentials{}, errors.New("set bot_token (or WUPHF_TELEGRAM_BOT_TOKEN) or WUPHF_TELEGRAM_PHONE")
 	}
 	if credentials.BotToken == "" && credentials.PanelBotToken != "" && file.Panel.SessionFile == "" {
 		return Credentials{}, errors.New("panel.session_file is required for the panel bot (panel_bot_token)")
+	}
+	return credentials, nil
+}
+
+// ReadCredentials reads the credentials from getenv without requiring a bot
+// token or a phone number: setup asks for the phone when neither is set.
+func ReadCredentials(file File, getenv func(string) string) (Credentials, error) {
+	appID, err := strconv.Atoi(getenv("WUPHF_TELEGRAM_APP_ID"))
+	if err != nil || appID <= 0 {
+		return Credentials{}, errors.New("WUPHF_TELEGRAM_APP_ID must be a positive integer")
+	}
+	credentials := Credentials{
+		AppID:    appID,
+		AppHash:  getenv("WUPHF_TELEGRAM_APP_HASH"),
+		Phone:    getenv("WUPHF_TELEGRAM_PHONE"),
+		Password: getenv("WUPHF_TELEGRAM_PASSWORD"),
+		BotToken: strings.TrimSpace(getenv("WUPHF_TELEGRAM_BOT_TOKEN")),
+	}
+	if credentials.BotToken == "" {
+		credentials.BotToken = strings.TrimSpace(file.BotToken)
+	}
+	credentials.PanelBotToken = strings.TrimSpace(getenv("WUPHF_TELEGRAM_PANEL_BOT_TOKEN"))
+	if credentials.PanelBotToken == "" {
+		credentials.PanelBotToken = strings.TrimSpace(file.PanelBotToken)
+	}
+	if credentials.AppHash == "" {
+		return Credentials{}, errors.New("WUPHF_TELEGRAM_APP_HASH is required")
 	}
 	return credentials, nil
 }
