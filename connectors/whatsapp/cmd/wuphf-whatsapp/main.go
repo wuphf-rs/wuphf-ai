@@ -7,16 +7,22 @@ import (
 	"os"
 	"os/signal"
 
+	"github.com/akshettrj/wuphf/connectors/shared/chatdir"
 	"github.com/akshettrj/wuphf/connectors/shared/logging"
 	"github.com/akshettrj/wuphf/connectors/shared/setup"
 	"github.com/akshettrj/wuphf/connectors/whatsapp/internal/config"
 	whatsappconnector "github.com/akshettrj/wuphf/connectors/whatsapp/internal/whatsapp"
 	"github.com/propheci/botconf/go/tui"
+	"github.com/rs/zerolog"
 )
 
 func main() {
 	if setup.Requested(os.Args[1:]) {
-		if err := setup.Run(os.Args[2:], tui.Setup{Description: config.Description(), Validate: validate}); err != nil {
+		if err := setup.Run(os.Args[2:], tui.Setup{
+			Description: config.Description(),
+			Validate:    validate,
+			Actions:     setup.AccountActions(chatdir.Dir(), openAccount),
+		}); err != nil {
 			exit(err)
 		}
 		return
@@ -44,6 +50,16 @@ func validate(candidate tui.Candidate) error {
 		return err
 	}
 	return setup.RequireToken(candidate, "core_token_env", cfg.CoreTokenEnv)
+}
+
+// openAccount is setup's account on the saved config. whatsmeow logs
+// nowhere: the terminal is the setup screen.
+func openAccount(candidate tui.Candidate) (*setup.Account, error) {
+	cfg, err := config.Parse([]byte(candidate.Config))
+	if err != nil {
+		return nil, err
+	}
+	return whatsappconnector.SetupAccount(cfg, zerolog.Nop()), nil
 }
 
 func exit(err error) {

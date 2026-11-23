@@ -166,6 +166,19 @@ func (c File) ResolvedLoginMethod() string {
 	return LoginMethodQR
 }
 
+// SessionFile is the session database's file: session_database without its
+// `file:` scheme (and empty authority) and its URI parameters.
+func (c File) SessionFile() string {
+	path, _, _ := strings.Cut(c.SessionDatabase, "?")
+	if rest, ok := strings.CutPrefix(path, "file:"); ok {
+		path = rest
+		if rest, ok := strings.CutPrefix(path, "//"); ok {
+			path = rest
+		}
+	}
+	return path
+}
+
 func Load(path string) (File, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {

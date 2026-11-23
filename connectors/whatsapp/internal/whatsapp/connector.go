@@ -10,6 +10,7 @@ import (
 	coreclient "github.com/akshettrj/wuphf/connectors/shared/coreclient"
 	"github.com/akshettrj/wuphf/connectors/shared/functions"
 	"github.com/akshettrj/wuphf/connectors/shared/logging"
+	"github.com/akshettrj/wuphf/connectors/shared/sessionlock"
 	"github.com/akshettrj/wuphf/connectors/shared/settings"
 	"github.com/akshettrj/wuphf/connectors/whatsapp/internal/config"
 	wuphfpb "github.com/akshettrj/wuphf/proto/go/connector/v1"
@@ -53,6 +54,13 @@ type sessionDeps struct {
 // that arrive while no session is linked fail as transient, so the core
 // delivers them once the new one is.
 func (c Connector) Run(ctx context.Context) error {
+	// Held while the connector runs, so setup's actions never use the session
+	// at the same time.
+	lock, err := sessionlock.Acquire(c.cfg.SessionFile())
+	if err != nil {
+		return fmt.Errorf("lock the WhatsApp session (is another wuphf-whatsapp, or its setup, using it?): %w", err)
+	}
+	defer lock.Release()
 	dbLog := waLog.Zerolog(c.logger.With().Str("component", "whatsmeow-db").Logger())
 	container, err := sqlstore.New(ctx, "sqlite3", c.cfg.SessionDatabase, dbLog)
 	if err != nil {
@@ -264,7 +272,7 @@ func (c Connector) runSession(ctx context.Context, deps sessionDeps) error {
 
 // link connects the session's device, or links a new one by the configured
 // login method, one pairing round after another until one succeeds.
-func (c Connector) link(ctx context.Context, client *whatsmeow.Client, linking *linking) error {
+func (c Connector) link(ctx context.Context, client *whatsmeow.Client, sink pairCodes) error {
 	if client.Store.ID != nil {
 		if err := client.Connect(); err != nil {
 			return fmt.Errorf("connect WhatsApp session: %w", err)
@@ -272,7 +280,7 @@ func (c Connector) link(ctx context.Context, client *whatsmeow.Client, linking *
 		return nil
 	}
 	for {
-		linked, err := c.pairRound(ctx, client, linking)
+		linked, err := c.pairRound(ctx, client, sink)
 		if err != nil || linked {
 			return err
 		}
@@ -286,7 +294,7 @@ func (c Connector) link(ctx context.Context, client *whatsmeow.Client, linking *
 // mode the round's pair code. It reports whether the device was linked.
 // whatsmeow has no event for WhatsApp asking for a new code, so a code it no
 // longer takes is replaced by the next round's.
-func (c Connector) pairRound(ctx context.Context, client *whatsmeow.Client, linking *linking) (bool, error) {
+func (c Connector) pairRound(ctx context.Context, client *whatsmeow.Client, sink pairCodes) (bool, error) {
 	codes, err := client.GetQRChannel(ctx)
 	if err != nil {
 		return false, fmt.Errorf("open WhatsApp pairing: %w", err)
@@ -301,18 +309,18 @@ func (c Connector) pairRound(ctx context.Context, client *whatsmeow.Client, link
 			// A pair code is asked for once the round's socket is up (the
 			// first QR code shows it is).
 			// The owner asking for a code now asks for one again.
-			if !asked || linking.FreshPending() {
+			if !asked || sink.FreshPending() {
 				asked = true
-				if ask, ok := linking.PairCodeAsk(); ok {
+				if ask, ok := sink.PairCodeAsk(); ok {
 					pairCode, err := client.PairPhone(ctx, c.cfg.PhoneNumber, ask.promptPhone, whatsmeow.PairClientChrome, "Chrome (Linux)")
 					if err != nil {
-						c.logger.Warn().Err(err).Msg("could not get a WhatsApp pair code")
+						sink.PairCodeFailed(err)
 					} else {
-						linking.PairCode(ctx, pairCode, ask)
+						sink.PairCode(ctx, pairCode, ask)
 					}
 				}
 			}
-			linking.QR(ctx, code.Code, code.Timeout)
+			sink.QR(ctx, code.Code, code.Timeout)
 		case whatsmeow.QRChannelSuccess.Event:
 			return true, nil
 		case whatsmeow.QRChannelTimeout.Event:

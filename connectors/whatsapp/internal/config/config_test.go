@@ -273,3 +273,15 @@ func TestTheExampleIsGeneratedFromTheConfigType(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestTheSessionFileIsTheDatabaseURIsPath(t *testing.T) {
+	for database, want := range map[string]string{
+		"file:whatsapp.session.db?_foreign_keys=on": "whatsapp.session.db",
+		"file:///var/lib/wuphf/wa.db":               "/var/lib/wuphf/wa.db",
+		"whatsapp.session.db":                       "whatsapp.session.db",
+	} {
+		if got := (File{SessionDatabase: database}).SessionFile(); got != want {
+			t.Errorf("%s: %q, want %q", database, got, want)
+		}
+	}
+}

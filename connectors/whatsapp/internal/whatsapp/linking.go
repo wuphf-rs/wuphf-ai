@@ -32,6 +32,23 @@ var linkGaps = []time.Duration{5 * time.Minute, 15 * time.Minute, 30 * time.Minu
 // websocket when the round's QR codes run out, about 160 s after it opens.
 const pairCodeValidity = 160 * time.Second
 
+// pairCodes is where a pairing round's codes go: the terminal and the owner's
+// notices while the connector runs (linking), the setup screen in setup
+// (setupCodes).
+type pairCodes interface {
+	// QR is a QR code whatsmeow issued, valid for valid.
+	QR(ctx context.Context, code string, valid time.Duration)
+	// PairCodeAsk is the pair code to ask for, when pairing by code.
+	PairCodeAsk() (pairCodeAsk, bool)
+	// PairCode is a pair code issued for ask.
+	PairCode(ctx context.Context, code string, ask pairCodeAsk)
+	// PairCodeFailed is WhatsApp refusing a pair code; the next round asks
+	// again.
+	PairCodeFailed(err error)
+	// FreshPending makes the round ask for a pair code again.
+	FreshPending() bool
+}
+
 // linking prints every pairing code and tells the owner about some of them.
 // One serves every WhatsApp session of the process, so its schedule spans the
 // pairing rounds after one logout.
@@ -101,6 +118,10 @@ func (l *linking) PairCode(ctx context.Context, code string, ask pairCodeAsk) {
 	if ask.tell {
 		l.tell(ctx, pairCodeDetail(code, pairCodeValidity, ask.next), nil)
 	}
+}
+
+func (l *linking) PairCodeFailed(err error) {
+	l.logger.Warn().Err(err).Msg("could not get a WhatsApp pair code")
 }
 
 // Linked starts the schedule afresh for the next logout.
