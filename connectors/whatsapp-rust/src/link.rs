@@ -180,10 +180,13 @@ fn drive(
     if paired {
         wait_for_contacts(screen, events, contacts_seen)?;
     }
-    screen.progress("Fetching the groups and contacts…");
-    let chats = runtime
+    screen.progress("Fetching the groups, contacts and channels…");
+    let (chats, channels_failed) = runtime
         .block_on(fetch(config, client, contacts))
         .map_err(|error| format!("{error:#}"))?;
+    if let Some(error) = channels_failed {
+        screen.say(&format!("The channels could not be fetched: {error}"));
+    }
     Ok((linked, chats))
 }
 
@@ -340,57 +343,63 @@ fn pair_code_due(last: &Mutex<Option<Instant>>, refresh: bool, now: Instant) -> 
     due
 }
 
-/// The joined groups and the saved contacts, with the ids the connector
-/// reports to the core.
+/// The joined groups, the followed channels and the saved contacts, with the
+/// ids the connector reports to the core; and why the channels could not be
+/// listed, when they could not (the rest is still worth saving).
 async fn fetch(
     config: &Config,
     client: &Arc<Client>,
     contacts: &Contacts,
-) -> anyhow::Result<Vec<DirectoryChat>> {
-    let groups = client
+) -> anyhow::Result<(Vec<DirectoryChat>, Option<String>)> {
+    let mut chats: Vec<(String, String, DirectoryChatKind)> = client
         .groups()
         .get_participating()
         .await
-        .context("fetch the groups")?;
-    let groups = groups
+        .context("fetch the groups")?
         .into_values()
-        .map(|group| (bare_id(&group.id), group.subject))
+        .map(|group| (bare_id(&group.id), group.subject, DirectoryChatKind::Group))
         .collect();
+    let channels_failed = match client.newsletter().list_subscribed().await {
+        Ok(channels) => {
+            chats.extend(channels.into_iter().map(|channel| {
+                (
+                    bare_id(&channel.jid),
+                    channel.name,
+                    DirectoryChatKind::Channel,
+                )
+            }));
+            None
+        }
+        Err(error) => Some(error.to_string()),
+    };
     let saved = contacts
         .run(contacts::saved)
         .await
         .context("read the contacts")?;
     let identity = Identity::default();
-    let mut people = Vec::new();
     for contact in saved {
         if let Ok(jid) = contact.jid.parse::<Jid>() {
-            people.push((
+            chats.push((
                 identity.canonical_id(client.as_ref(), &jid).await,
                 contact.full_name,
+                DirectoryChatKind::Direct,
             ));
         }
     }
-    Ok(directory_chats(&config.connector_id, groups, people))
+    Ok((
+        directory_chats(&config.connector_id, chats),
+        channels_failed,
+    ))
 }
 
-/// The directory's chats from the groups and the people (id, title), each id
-/// once (a contact saved under its phone and its LID form is one chat), by
-/// title.
+/// The directory's chats from (id, title, kind), each id once (a contact
+/// saved under its phone and its LID form is one chat), by title.
 fn directory_chats(
     connector_id: &str,
-    groups: Vec<(String, String)>,
-    people: Vec<(String, String)>,
+    chats: Vec<(String, String, DirectoryChatKind)>,
 ) -> Vec<DirectoryChat> {
     let mut out: Vec<DirectoryChat> = Vec::new();
-    let kinds = groups
-        .into_iter()
-        .map(|chat| (chat, DirectoryChatKind::Group))
-        .chain(
-            people
-                .into_iter()
-                .map(|chat| (chat, DirectoryChatKind::Direct)),
-        );
-    for ((id, title), kind) in kinds {
+    for (id, title, kind) in chats {
         let chat = ChatRef {
             connector_id: ConnectorId(connector_id.to_owned()),
             address: ChatAddress::new(id.clone(), None),
@@ -423,17 +432,21 @@ mod tests {
     use super::*;
 
     #[test]
-    fn the_directory_holds_groups_and_saved_contacts_once_each() {
+    fn the_directory_holds_groups_channels_and_saved_contacts_once_each() {
+        let (group, channel, direct) = (
+            DirectoryChatKind::Group,
+            DirectoryChatKind::Channel,
+            DirectoryChatKind::Direct,
+        );
         let chats = directory_chats(
             "whatsapp-main",
             vec![
-                ("1@g.us".into(), "Family".into()),
-                ("2@g.us".into(), " ".into()),
-            ],
-            vec![
-                ("9@lid".into(), "Alice".into()),
+                ("1@g.us".into(), "Family".into(), group),
+                ("2@g.us".into(), " ".into(), group),
+                ("5@newsletter".into(), "Club news".into(), channel),
+                ("9@lid".into(), "Alice".into(), direct),
                 // Her phone form canonicalized to the same LID.
-                ("9@lid".into(), "Alice".into()),
+                ("9@lid".into(), "Alice".into(), direct),
             ],
         );
         let read: Vec<_> = chats
@@ -452,6 +465,11 @@ mod tests {
                     "whatsapp-main:9@lid".to_owned(),
                     "Alice",
                     DirectoryChatKind::Direct
+                ),
+                (
+                    "whatsapp-main:5@newsletter".to_owned(),
+                    "Club news",
+                    DirectoryChatKind::Channel
                 ),
                 (
                     "whatsapp-main:1@g.us".to_owned(),
