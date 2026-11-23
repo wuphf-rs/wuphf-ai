@@ -76,6 +76,8 @@ code).
 | 056 | Runtime settings in the Rust SDK; whatsapp-rust declares the Go connector's settings | P2 | L | botconf 013 (055 soft) | DONE (see notes) |
 | 057 | WhatsApp connectors link again by themselves after a logout (QR or pair code, delivered to the owner) | P1 | L | — | DONE (no migration; see notes) |
 | 058 | Connector commands in the settings panel: WhatsApp "resync app state" and "send a new link code" | P1 | L | botconf 014, 056, 057 | DONE (see notes) |
+| 059 | Offline setup TUIs for the Rust binaries (core, whatsapp-rust), each option described once on its config type | P1 | L | botconf 015 | TODO |
+| 060 | Offline setup TUIs for the Go binaries (Telegram, WhatsApp, Instagram, mediaconv, misc) | P1 | L | botconf 015, 059 | TODO |
 
 Status values: TODO | IN PROGRESS | DONE | BLOCKED (with one-line reason) |
 REJECTED (with one-line rationale).
