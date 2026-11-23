@@ -47,3 +47,17 @@ pub async fn load(
 ) -> Result<SettingsStore, botconf::SettingsError> {
     SettingsStore::load(schema, base, storage).await
 }
+
+/// Checks a candidate config file as the core would load it: parsed into
+/// [`Configuration`](crate::Configuration), then derived with `env` for the
+/// tokens. The file alone: `WUPHF_CORE_*` overrides are not applied.
+pub fn check(
+    toml: &str,
+    env: impl Fn(&str) -> Option<String> + Send + Sync + 'static,
+) -> Result<(), String> {
+    use botconf::Schema as _;
+    let config: crate::Configuration = Figment::from(Toml::string(toml))
+        .extract()
+        .map_err(|error| error.to_string())?;
+    WuphfSchema::with_env(env).derive(&config).map(drop)
+}

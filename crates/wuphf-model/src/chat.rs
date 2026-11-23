@@ -97,6 +97,7 @@ impl MuteState {
 /// from the conversation's source: `to_mirror` carries the source's state to
 /// its mirror thread, `to_source` the mirror's back to the source.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "describe", derive(botconf::Describe))]
 #[serde(rename_all = "snake_case")]
 pub enum ChatStateDirection {
     Off,

@@ -10,8 +10,13 @@ use std::time::Duration;
 use thiserror::Error;
 use wuphf_proto::connector as pb;
 
-/// `[functions]` in the core configuration. All durations are milliseconds.
+/// Remote functions (see docs/connector-protocol.md, "Remote functions").
+/// Providers dial the core and serve named functions; connectors call them.
+/// A call to a name no provider below may serve fails at once; a call to a
+/// servable name waits for a provider until its deadline. All durations are
+/// milliseconds.
 #[derive(Debug, Clone, Deserialize, Serialize)]
+#[cfg_attr(feature = "describe", derive(botconf::Describe))]
 #[serde(default)]
 pub struct FunctionsConfig {
     /// Deadline for a call whose caller sets none.
@@ -26,10 +31,30 @@ pub struct FunctionsConfig {
     pub max_body_bytes: usize,
     /// Calls that may wait for a provider, per function name and major.
     pub max_queued_calls: usize,
-    /// Env var holding the shared token callers present to FunctionTransport.
+    /// Environment variable holding the shared token callers present to
+    /// FunctionTransport (connectors: their `functions_token_env`). Unset: no
+    /// token is asked for.
+    #[cfg_attr(feature = "describe", botconf(env = token, hint = "WUPHF_INVOKE_TOKEN"))]
     pub invoke_token_env: Option<String>,
+    /// The provider processes, and which function names each may serve.
+    ///
+    /// The sticker converter is one: configure it from
+    /// providers/mediaconv/config.example.toml. The Instagram connector can
+    /// serve `instagram.fetch_media@1` (wuphf-misc uses it): enable its
+    /// `[functions]` section with the same id and token variable, and list it
+    /// here (`id = "instagram-main"`, `token_env =
+    /// "WUPHF_PROVIDER_INSTAGRAM_TOKEN"`, `functions = ["instagram.fetch_media"]`).
+    #[cfg_attr(
+        feature = "describe",
+        botconf(example = [{
+            "id": "mediaconv",
+            "token_env": "WUPHF_PROVIDER_MEDIACONV_TOKEN",
+            "functions": ["media.convert"],
+        }])
+    )]
     pub providers: Vec<ProviderConfig>,
-    /// Keyed by function name (applies to every major).
+    /// Limits for one function name (every major), replacing the global ones:
+    /// `[functions.overrides."media.convert"]`.
     pub overrides: BTreeMap<String, FunctionOverride>,
 }
 
@@ -49,10 +74,15 @@ impl Default for FunctionsConfig {
     }
 }
 
+/// A provider process allowed to serve functions.
 #[derive(Debug, Clone, Deserialize, Serialize)]
+#[cfg_attr(feature = "describe", derive(botconf::Describe))]
 pub struct ProviderConfig {
+    /// The id the provider registers with.
     pub id: String,
-    /// Env var holding this provider's token. Required.
+    /// Environment variable holding this provider's token (the provider's
+    /// own config names the same variable).
+    #[cfg_attr(feature = "describe", botconf(env = token))]
     pub token_env: String,
     /// Names this provider may register: exact names, `prefix.*`, or `*`.
     pub functions: Vec<String>,
@@ -60,12 +90,18 @@ pub struct ProviderConfig {
 
 /// Per-function limits that replace the global ones.
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
+#[cfg_attr(feature = "describe", derive(botconf::Describe))]
 #[serde(default)]
 pub struct FunctionOverride {
+    /// Replaces `default_deadline_ms`.
     pub default_deadline_ms: Option<u64>,
+    /// Replaces `max_deadline_ms`.
     pub max_deadline_ms: Option<u64>,
+    /// Caps the calls one provider runs at once, below what it declares.
     pub max_concurrency: Option<u32>,
+    /// Replaces `max_body_bytes`.
     pub max_body_bytes: Option<usize>,
+    /// Replaces `max_queued_calls`.
     pub max_queued_calls: Option<usize>,
 }
 

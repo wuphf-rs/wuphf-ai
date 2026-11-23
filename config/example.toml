@@ -1,3 +1,5 @@
+# wuphf core
+#
 # Every key can be overridden by an environment variable: `WUPHF_CORE_` plus the
 # key path in upper case, with `__` between levels (`WUPHF_CORE_LISTEN`,
 # `WUPHF_CORE_FUNCTIONS__MAX_DEADLINE_MS`).
@@ -7,179 +9,324 @@
 # before the first `:`, so chat ids may contain `:`. Inside the chat and the
 # thread, write `#` as `%23` and `%` as `%25`. Connector ids may not contain
 # `:`, `#`, `%` or spaces.
+#
+# Runtime settings (`notify`, `rules`, `chat_state`) can also be changed while
+# the core runs, from a settings panel or `wuphf-server settings`: stored
+# overrides win over this file, and unsetting one goes back to it.
 
+# The address the core's gRPC services listen on (connectors, providers, the
+# observer, the settings service).
+# Required.
 listen = "127.0.0.1:50051"
+
+# The SQLite database holding messages, media and the runtime settings'
+# overrides.
+# Required.
 database_url = "sqlite://wuphf.sqlite"
-max_media_bytes = 33554432
-orphan_media_retention_seconds = 86400
 
-# Token the observer service (the TUI read surface) requires as
-# `authorization: Bearer <token>`. Leave unset only when `listen` is bound to a
-# local address — without it the observer, which can read every captured chat,
-# is unauthenticated.
-# observer_token = "change-me"
+# The largest media file the core accepts, in bytes.
+# Default: 33554432.
+# max_media_bytes = 33554432
 
-# Where connectors report their own trouble. A connector that loses its session
-# stops bridging silently — from the outside that looks exactly like nobody
-# writing to you — so it tells the core, which relays a message here.
+# How long media no message refers to is kept, in seconds.
+# Default: 86400.
+# orphan_media_retention_seconds = 86400
+
+# Token the observer service (the TUI read surface) requires as `authorization:
+# Bearer <token>`.
 #
-# A notice is never sent through the connector that raised it: a logged-out
-# WhatsApp cannot deliver the news that it is logged out. List a target on each
-# platform you want to stay reachable on, and leave this out entirely to keep
-# notices in the log only.
+# Leave it unset only when `listen` is bound to a local address: without it the
+# observer, which can read every captured chat, is unauthenticated.
+# observer_token = ""
+
+# Chats that receive notices about connector trouble.
 #
-# Runtime setting: can also be changed while the core runs (stored overrides win
-# over this file; unsetting one goes back to this file). It is a top-level key,
-# so it must stay above the first `[table]`.
+# A connector that loses its session stops bridging silently (from the outside
+# that looks exactly like nobody writing to you), so it tells the core, which
+# relays a message here. A notice is never sent through the connector that
+# raised it: a logged-out WhatsApp cannot deliver the news that it is logged
+# out. List a target on each platform you want to stay reachable on, and leave
+# this out to keep notices in the log only.
+# Default: [].
 notify = ["telegram-main:telegram:user:704338780"]
 
+# The connectors the core accepts.
+#
 # Connectors are thin pipes. The core only trusts a session that presents the
 # connector's token (`authorization: Bearer <token>`, read from the environment
-# variable named by `token_env`) *and* whose registration matches an entry here.
-# The core refuses to start while a connector's variable is unset or empty. A
-# second session for a connector whose session is still live is refused
-# (ALREADY_EXISTS); the connector keeps retrying and gets in once the old
-# session has ended. Media upload and download accept any connector's or
-# function provider's token.
+# variable named by `token_env`) and whose registration matches an entry here.
+# The core refuses to start while a connector's variable is unset or empty: list
+# a connector only when you run it. A second session for a connector whose
+# session is still live is refused (ALREADY_EXISTS); the connector keeps
+# retrying and gets in once the old session has ended. Media upload and download
+# accept any connector's or function provider's token.
 #
-# `supports_threads` / `supports_topic_create` gate which rule ends a connector
-# may serve (a many-to-one destination needs both). How a connector renders
-# replicated copies (attachments-as-files, text spillover, edit/delete
-# rendering) is configured in each connector's own config file under
-# `[rendering]`, not here.
-#
-# `supports_disappearing_timers` lets the core stamp a chat's
-# disappearing-messages timer on sends to this connector (WhatsApp). It is part
-# of the connector's registration, so it must match the connector's own config:
-# when only one side sets it, the core refuses the connector.
-#
-# `owner_ids` lists the owner's platform user ids on a connector, as that
-# connector reports who acted. The core's settings service only obeys a
-# connector acting for one of its own owner ids (or the observer token), so
-# these decide who may change settings from that platform. File-only: never
-# editable at runtime.
+# How a connector renders replicated copies (attachments as files, text
+# spillover, edit and delete rendering) is configured in each connector's own
+# config file under `[rendering]`, not here.
 [[connectors]]
+
+# The connector's id, as its own config names it (`connector_id`).
+# Required.
 id = "whatsapp-main"
+
+# `whatsapp`, `telegram`, `instagram`, `discord`, `signal`, `slack`, `matrix`,
+# or `other:<name>`.
+# Required.
 platform = "whatsapp"
+
+# Environment variable holding this connector's token. The connector presents it
+# as `authorization: Bearer <token>`; its own config names the same variable
+# (`core_token_env`).
+# Required.
 token_env = "WUPHF_CONNECTOR_WHATSAPP_MAIN_TOKEN"
+
+# The connector can post into threads (topics). A many-to-one destination needs
+# it and `supports_topic_create`.
+# Default: false.
+# supports_threads = false
+
+# The connector can create threads (topics).
+# Default: false.
+# supports_topic_create = false
+
+# The core stamps a chat's disappearing-messages timer on sends to this
+# connector and the connector reports the timers it observes. Part of the
+# registration, so it must match the connector's own config.
+# Default: false.
 supports_disappearing_timers = true
-# owner_ids = ["98765432101234@lid"]
 
-# Rust WhatsApp connector, an alternative to whatsapp-main. Uncomment it only
-# when you run it: the core refuses to start while any listed connector's token
-# variable is unset. Keep its id in sync with
-# connectors/whatsapp-rust/config.example.toml.
-# [[connectors]]
-# id = "whatsapp-rust"
-# platform = "whatsapp"
-# token_env = "WUPHF_CONNECTOR_WHATSAPP_RUST_TOKEN"
-# supports_disappearing_timers = true
-
+# Platform user ids of the owner on this connector, as the connector reports
+# actors (e.g. "704338780" for a Telegram user). Settings requests a connector
+# makes on behalf of anyone else are refused. File-only: never a runtime
+# setting, since it decides who may change the others.
+# Default: [].
+# owner_ids = []
 [[connectors]]
+
+# The connector's id, as its own config names it (`connector_id`).
+# Required.
 id = "instagram-main"
+
+# `whatsapp`, `telegram`, `instagram`, `discord`, `signal`, `slack`, `matrix`,
+# or `other:<name>`.
+# Required.
 platform = "instagram"
+
+# Environment variable holding this connector's token. The connector presents it
+# as `authorization: Bearer <token>`; its own config names the same variable
+# (`core_token_env`).
+# Required.
 token_env = "WUPHF_CONNECTOR_INSTAGRAM_MAIN_TOKEN"
 
-[[connectors]]
-id = "telegram-main"
-platform = "telegram"
-token_env = "WUPHF_CONNECTOR_TELEGRAM_MAIN_TOKEN"
-supports_threads = true
-supports_topic_create = true
-# owner_ids = ["704338780"]
+# The connector can post into threads (topics). A many-to-one destination needs
+# it and `supports_topic_create`.
+# Default: false.
+# supports_threads = false
 
-# Rules, keyed by id: `[rules.<id>]`. Runtime setting: each rule is its own
-# entry (`rules.<id>`) and can be set or removed while the core runs (stored
-# overrides win over this file; unsetting goes back to it).
+# The connector can create threads (topics).
+# Default: false.
+# supports_topic_create = false
+
+# The core stamps a chat's disappearing-messages timer on sends to this
+# connector and the connector reports the timers it observes. Part of the
+# registration, so it must match the connector's own config.
+# Default: false.
+# supports_disappearing_timers = false
+
+# Platform user ids of the owner on this connector, as the connector reports
+# actors (e.g. "704338780" for a Telegram user). Settings requests a connector
+# makes on behalf of anyone else are refused. File-only: never a runtime
+# setting, since it decides who may change the others.
+# Default: [].
+# owner_ids = []
+[[connectors]]
+
+# The connector's id, as its own config names it (`connector_id`).
+# Required.
+id = "telegram-main"
+
+# `whatsapp`, `telegram`, `instagram`, `discord`, `signal`, `slack`, `matrix`,
+# or `other:<name>`.
+# Required.
+platform = "telegram"
+
+# Environment variable holding this connector's token. The connector presents it
+# as `authorization: Bearer <token>`; its own config names the same variable
+# (`core_token_env`).
+# Required.
+token_env = "WUPHF_CONNECTOR_TELEGRAM_MAIN_TOKEN"
+
+# The connector can post into threads (topics). A many-to-one destination needs
+# it and `supports_topic_create`.
+# Default: false.
+supports_threads = true
+
+# The connector can create threads (topics).
+# Default: false.
+supports_topic_create = true
+
+# The core stamps a chat's disappearing-messages timer on sends to this
+# connector and the connector reports the timers it observes. Part of the
+# registration, so it must match the connector's own config.
+# Default: false.
+# supports_disappearing_timers = false
+
+# Platform user ids of the owner on this connector, as the connector reports
+# actors (e.g. "704338780" for a Telegram user). Settings requests a connector
+# makes on behalf of anyone else are refused. File-only: never a runtime
+# setting, since it decides who may change the others.
+# Default: [].
+# owner_ids = []
+
+# Routing rules by id: which chats mirror each other. Lower priority numbers
+# match first.
 #
-# A rule's id is how its conversations remember it: renaming a rule (changing
-# its key) starts new mirror threads.
+# Each rule is its own runtime entry (`rules.<id>`). A rule's id is how its
+# conversations remember it: renaming a rule (changing its key) starts new
+# mirror threads.
 #
 # Rules declare a flow between a source and a destination. The source end owns
-# conversation identity; replication itself is two-way.
-#
-# `kind = "one-to-one"`: one fixed source chat mirrored into one fixed
-# destination chat (optionally a thread within it):
-#
-# [rules.direct-pair]
-# kind = "one-to-one"
-# source = "whatsapp-main:12345@s.whatsapp.net"
-# destination = "telegram-main:telegram:channel:2060340733#12"
-#
-# `kind = "many-to-one"`: every chat on the source connector, each mirrored
-# into its own topic auto-created inside the destination container chat. A
-# many-to-one rule may limit its source chats with `only_chats = [...]` (an
-# allowlist) or `except_chats = [...]` (a blocklist), not both; the chats must
-# be on `source_connector`:
-#
-# except_chats = ["whatsapp-main:12345@s.whatsapp.net"]
-#
-# When several rules match the same chat, the one with the lowest `priority`
-# (default 0) wins, then the lowest id. Set it only when rules overlap, e.g.
-# `priority = -1` on a one-to-one exception to a many-to-one catch-all.
+# conversation identity; replication itself is two-way. When several rules match
+# the same chat, the one with the lowest `priority` (default 0) wins, then the
+# lowest id. Set it only when rules overlap, e.g. `priority = -1` on a
+# one-to-one exception to a many-to-one catch-all.
 #
 # Chat ids may be written in any address form the platform uses for the chat.
 # WhatsApp reaches a contact as both a phone JID (`<number>@s.whatsapp.net`) and
 # a hidden LID (`<number>@lid`), and delivers messages under either; a list
-# entry written with one form selects — or, in a blocklist, excludes — the chat
+# entry written with one form selects (or, in a blocklist, excludes) the chat
 # under all of them, as soon as the connector has reported that the forms belong
 # together. Group ids (`<id>@g.us`) have a single form.
-[rules.wa-to-telegram-mirror]
-kind = "many-to-one"
-source_connector = "whatsapp-main"
-destination = "telegram-main:telegram:channel:2060340733"
-
 [rules.ig-to-telegram-mirror]
 kind = "many-to-one"
+
+# Lower numbers are tried first when several rules match the same chat; ties go
+# by id. Only needed when rules overlap.
+# Default: 0.
+# priority = 0
+
+# The connector whose chats are mirrored.
+# Required.
 source_connector = "instagram-main"
+
+# A chat, written `connector:chat`, optionally `#thread`.
+# Required.
 destination = "telegram-main:telegram:channel:2060340733"
 
-# Remote functions (see docs/connector-protocol.md, "Remote functions").
-# Providers dial the core and serve named functions; connectors call them.
-# A call to a name no provider below may serve fails at once; a call to a
-# servable name waits for a provider until its deadline.
-# [functions]
-# default_deadline_ms = 30000
-# max_deadline_ms = 60000
-# keepalive_interval_ms = 10000
-# keepalive_timeout_ms = 20000
-# max_body_bytes = 1048576
-# max_queued_calls = 256
-# invoke_token_env = "WUPHF_INVOKE_TOKEN"
-#
-# The sticker converter; configure it from providers/mediaconv/config.example.toml.
-[[functions.providers]]
-id = "mediaconv"
-token_env = "WUPHF_PROVIDER_MEDIACONV_TOKEN"
-functions = ["media.convert"]
-# [functions.overrides."media.convert"]
-# default_deadline_ms = 20000
-#
-# The Instagram connector can serve instagram.fetch_media@1 (wuphf-misc uses
-# it); enable its [functions] section with the same id and token variable.
-# [[functions.providers]]
-# id = "instagram-main"
-# token_env = "WUPHF_PROVIDER_INSTAGRAM_TOKEN"
-# functions = ["instagram.fetch_media"]
+# Only these source chats are mirrored. Excludes `except_chats`.
+# only_chats = []
 
-# Pin, mute and archive sync both ways between a source chat (WhatsApp) and
-# its mirror topic (Telegram: a pinned topic, the topic's notifications, a
-# closed topic). Each state is `off`, `to_mirror` (source → mirror),
-# `to_source` (mirror → source) or `both`; the default is `both`. Muting a
-# topic needs a Telegram user session (a bot's notify settings mean nothing).
-#
-# Runtime settings: `chat_state.pin`, `chat_state.mute`, `chat_state.archive`
-# and the overrides below can also be changed while the core runs.
-#
-# [chat_state]
+# Every source chat except these is mirrored. Excludes `only_chats`.
+# except_chats = []
+[rules.wa-to-telegram-mirror]
+kind = "many-to-one"
+
+# Lower numbers are tried first when several rules match the same chat; ties go
+# by id. Only needed when rules overlap.
+# Default: 0.
+# priority = 0
+
+# The connector whose chats are mirrored.
+# Required.
+source_connector = "whatsapp-main"
+
+# A chat, written `connector:chat`, optionally `#thread`.
+# Required.
+destination = "telegram-main:telegram:channel:2060340733"
+
+# Only these source chats are mirrored. Excludes `except_chats`.
+# only_chats = []
+
+# Every source chat except these is mirrored. Excludes `only_chats`.
+# except_chats = []
+
+# Pin, mute and archive sync between a source chat and its mirror topic
+# (Telegram: a pinned topic, the topic's notifications, a closed topic). Muting
+# a topic needs a Telegram user session (a bot's notify settings mean nothing).
+[chat_state]
+
+# Which way pinning crosses between a chat and its mirror topic.
+# One of: off, to_mirror, to_source, both.
+# Default: "both".
 # pin = "both"
+
+# Which way muting crosses between a chat and its mirror topic.
+# One of: off, to_mirror, to_source, both.
+# Default: "both".
 # mute = "both"
-# archive = "to_mirror"
+
+# Which way archiving (closing the topic) crosses between a chat and its mirror
+# topic.
+# One of: off, to_mirror, to_source, both.
+# Default: "both".
+# archive = "both"
+
+# Per-conversation overrides of chat_state; the chat is the source chat or its
+# mirror topic.
 #
-# An override for one conversation, named by its source chat or its mirror
-# topic. Its name is free (it cannot contain '.', which chat ids do); an
-# absent state takes the global value.
+# An override's name is free (`[chat_state.chats.family]`); it cannot be the
+# chat id, which may contain `.`. An absent state takes the global value.
+# [chat_state.chats.<name>]
+
+# Remote functions (see docs/connector-protocol.md, "Remote functions").
+# Providers dial the core and serve named functions; connectors call them. A
+# call to a name no provider below may serve fails at once; a call to a servable
+# name waits for a provider until its deadline. All durations are milliseconds.
+[functions]
+
+# Deadline for a call whose caller sets none.
+# Default: 30000.
+# default_deadline_ms = 30000
+
+# Cap on any call's deadline, including the caller's own.
+# Default: 60000.
+# max_deadline_ms = 60000
+
+# HTTP/2 keepalive ping interval, server-wide.
+# Default: 10000.
+# keepalive_interval_ms = 10000
+
+# How long a keepalive ping may go unanswered before the peer is dropped.
+# Default: 20000.
+# keepalive_timeout_ms = 20000
+
+# Cap on a call's JSON args and a provider's JSON result.
+# Default: 1048576.
+# max_body_bytes = 1048576
+
+# Calls that may wait for a provider, per function name and major.
+# Default: 256.
+# max_queued_calls = 256
+
+# Environment variable holding the shared token callers present to
+# FunctionTransport (connectors: their `functions_token_env`). Unset: no token
+# is asked for.
+# invoke_token_env = "WUPHF_INVOKE_TOKEN"
+
+# The provider processes, and which function names each may serve.
 #
-# [chat_state.chats.family]
-# chat = "whatsapp-main:120363000000000000@g.us"
-# mute = "off"
+# The sticker converter is one: configure it from
+# providers/mediaconv/config.example.toml. The Instagram connector can serve
+# `instagram.fetch_media@1` (wuphf-misc uses it): enable its `[functions]`
+# section with the same id and token variable, and list it here (`id =
+# "instagram-main"`, `token_env = "WUPHF_PROVIDER_INSTAGRAM_TOKEN"`, `functions
+# = ["instagram.fetch_media"]`).
+[[functions.providers]]
+
+# The id the provider registers with.
+# Required.
+id = "mediaconv"
+
+# Environment variable holding this provider's token (the provider's own config
+# names the same variable).
+# Required.
+token_env = "WUPHF_PROVIDER_MEDIACONV_TOKEN"
+
+# Names this provider may register: exact names, `prefix.*`, or `*`.
+# Required.
+functions = ["media.convert"]
+
+# Limits for one function name (every major), replacing the global ones:
+# `[functions.overrides."media.convert"]`.
+# [functions.overrides.<name>]

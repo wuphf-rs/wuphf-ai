@@ -6,15 +6,15 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
-botconf.workspace = true
+botconf = { workspace = true, features = ["derive"] }
 botconf-panel.workspace = true
 figment.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
 wuphf-core.workspace = true
-wuphf-functions.workspace = true
-wuphf-model.workspace = true
+wuphf-functions = { workspace = true, features = ["describe"] }
+wuphf-model = { workspace = true, features = ["describe"] }
 wuphf-storage.workspace = true
 
 [dev-dependencies]

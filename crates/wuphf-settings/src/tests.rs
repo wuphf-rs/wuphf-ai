@@ -1516,3 +1516,79 @@ fn a_chat_state_override_is_created_through_a_draft() {
         Ok(())
     });
 }
+
+/// The checked-in example is the description's: regenerate it with
+/// `WUPHF_WRITE_EXAMPLES=1 cargo test -p wuphf-settings example`.
+#[test]
+fn the_example_is_generated_from_the_configuration_type() {
+    let generated = crate::description().example();
+    if std::env::var_os("WUPHF_WRITE_EXAMPLES").is_some() {
+        std::fs::write(EXAMPLE, &generated).unwrap();
+    }
+    let checked_in = std::fs::read_to_string(EXAMPLE).unwrap();
+    assert!(
+        checked_in == generated,
+        "config/example.toml differs from the Configuration type's description; regenerate \
+         it with WUPHF_WRITE_EXAMPLES=1 cargo test -p wuphf-settings example"
+    );
+}
+
+/// The runtime settings come from the `runtime` options of [`Configuration`],
+/// with the keys, titles, kinds and per-entry maps the core declared by hand
+/// before it was described.
+#[test]
+fn the_runtime_settings_are_the_described_ones() {
+    use crate::schema::{CHAT_STATE_OVERRIDE, DIRECTION, RULE};
+    use botconf::{Kind, Schema};
+    let settings = WuphfSchema::new().settings();
+    let got: Vec<(&str, Option<&str>, &Kind, bool)> = settings
+        .iter()
+        .map(|setting| {
+            (
+                &*setting.key,
+                setting.title.as_deref(),
+                &setting.kind,
+                setting.per_entry,
+            )
+        })
+        .collect();
+    let notify = Kind::reference(crate::domains::CHAT, true);
+    let (rules, overrides) = (Kind::map(None, RULE), Kind::map(None, CHAT_STATE_OVERRIDE));
+    assert_eq!(
+        got,
+        [
+            ("rules", Some("Rules"), &rules, true),
+            ("notify", Some("Notice targets"), &notify, false),
+            ("chat_state.pin", Some("Pin"), &DIRECTION, false),
+            ("chat_state.mute", Some("Mute"), &DIRECTION, false),
+            ("chat_state.archive", Some("Archive"), &DIRECTION, false),
+            (
+                "chat_state.chats",
+                Some("Chat state overrides"),
+                &overrides,
+                true
+            ),
+        ]
+    );
+    assert_eq!(
+        &*settings[1].description, "Chats that receive notices about connector trouble.",
+        "a panel shows the doc comment's first paragraph"
+    );
+}
+
+/// What `wuphf-server setup` checks before it writes: the example passes
+/// with every token set, and fails naming the first token it lacks.
+#[test]
+fn a_candidate_is_checked_like_the_core_loads_it() {
+    let example = std::fs::read_to_string(EXAMPLE).unwrap();
+    assert_eq!(
+        crate::check(&example, |name| Some(format!("secret-{name}"))),
+        Ok(())
+    );
+    let error = crate::check(&example, |_| None).unwrap_err();
+    assert!(
+        error.contains("WUPHF_CONNECTOR_WHATSAPP_MAIN_TOKEN"),
+        "{error}"
+    );
+    assert!(crate::check("listen = 1", |_| None).is_err());
+}

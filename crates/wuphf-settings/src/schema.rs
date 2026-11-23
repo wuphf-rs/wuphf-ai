@@ -126,48 +126,12 @@ impl botconf::Schema for WuphfSchema {
         vec![CONNECTOR_SETTINGS]
     }
 
-    /// The keys that may change while the core runs. Everything else (the
-    /// connectors, `listen`, `database_url`, the tokens, `functions`) is read
-    /// once at startup, so it stays file and environment only.
+    /// The keys that may change while the core runs: the options marked
+    /// `runtime` in [`Configuration`]. Everything else (the connectors,
+    /// `listen`, `database_url`, the tokens, `functions`) is read once at
+    /// startup, so it stays file and environment only.
     fn settings(&self) -> Vec<RuntimeSetting> {
-        vec![
-            RuntimeSetting::per_entry(
-                "rules",
-                "Routing rules by id: which chats mirror each other. Lower priority numbers match first.",
-                RULE,
-            )
-            .titled("Rules"),
-            RuntimeSetting::new(
-                "notify",
-                "Chats that receive notices about connector trouble",
-            )
-            .titled("Notice targets")
-            .kind(Kind::reference(domains::CHAT, true)),
-            RuntimeSetting::new(
-                "chat_state.pin",
-                "Which way pinning crosses between a chat and its mirror topic",
-            )
-            .titled("Pin")
-            .kind(DIRECTION),
-            RuntimeSetting::new(
-                "chat_state.mute",
-                "Which way muting crosses between a chat and its mirror topic",
-            )
-            .titled("Mute")
-            .kind(DIRECTION),
-            RuntimeSetting::new(
-                "chat_state.archive",
-                "Which way archiving (closing the topic) crosses between a chat and its mirror topic",
-            )
-            .titled("Archive")
-            .kind(DIRECTION),
-            RuntimeSetting::per_entry(
-                "chat_state.chats",
-                "Per-conversation overrides of chat_state; the chat is the source chat or its mirror topic",
-                CHAT_STATE_OVERRIDE,
-            )
-            .titled("Chat state overrides"),
-        ]
+        crate::config::description().runtime_settings()
     }
 }
 
@@ -179,11 +143,11 @@ const DIRECTIONS: &[FixedChoice] = &[
     FixedChoice::new("to_source", "Mirror → source"),
     FixedChoice::new("both", "Both ways"),
 ];
-const DIRECTION: Kind = Kind::one_of(Choices::fixed(DIRECTIONS), false, false);
+pub(crate) const DIRECTION: Kind = Kind::one_of(Choices::fixed(DIRECTIONS), false, false);
 const OPTIONAL_DIRECTION: Kind = Kind::one_of(Choices::fixed(DIRECTIONS), false, true);
 /// An override names its chat (required, so a new one is built in a panel
 /// draft) and the states it changes; an absent state takes the global value.
-const CHAT_STATE_OVERRIDE: &Kind = &Kind::form(CHAT_STATE_FORM);
+pub(crate) const CHAT_STATE_OVERRIDE: &Kind = &Kind::form(CHAT_STATE_FORM);
 const CHAT_STATE_FORM: &Form = &Form::new(CHAT_STATE_FIELDS, "{}");
 const CHAT_STATE_FIELDS: &[Field] = &[
     Field::new(
@@ -229,7 +193,7 @@ fn chat_state(config: &Configuration) -> Result<ChatStateSettings, String> {
 
 // A rule entry, edited field by field. Nested descriptors are not promoted
 // to `'static`, so the kind, the form and its pieces each get a `const`.
-const RULE: &Kind = &Kind::form(RULE_FORM);
+pub(crate) const RULE: &Kind = &Kind::form(RULE_FORM);
 const RULE_FORM: &Form = &Form::new(RULE_FIELDS, r#"{"kind": "many-to-one"}"#);
 const RULE_KINDS: &[FixedChoice] = &[
     FixedChoice::new("one-to-one", "One chat to one chat"),

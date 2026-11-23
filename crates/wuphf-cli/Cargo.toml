@@ -8,6 +8,7 @@ license.workspace = true
 anyhow.workspace = true
 botconf = { workspace = true, features = ["cli"] }
 botconf-grpc.workspace = true
+botconf-tui.workspace = true
 clap.workspace = true
 tokio.workspace = true
 tonic.workspace = true

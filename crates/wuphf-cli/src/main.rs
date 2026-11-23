@@ -25,6 +25,7 @@ use wuphf_runtime::{
 use wuphf_settings::{LiveRouting, WuphfSchema};
 
 mod settings;
+mod setup;
 
 #[derive(Parser)]
 #[command(about = "Run the wuphf messaging replication runtime")]
@@ -52,6 +53,15 @@ enum Command {
         #[command(subcommand)]
         action: settings::SettingsSubcommand,
     },
+    /// Edit the config file and the env file its options name (tokens can be
+    /// generated) on a setup screen, every option with its description.
+    /// Works while the core is down.
+    Setup {
+        #[arg(long, default_value = "config.local.toml")]
+        config: PathBuf,
+        #[arg(long, default_value = ".env.local")]
+        env_file: PathBuf,
+    },
 }
 
 #[derive(Subcommand)]
@@ -73,6 +83,7 @@ async fn main() -> Result<()> {
             command: FunctionsCommand::List { address },
         } => list_functions(address).await,
         Command::Settings { config, action } => settings::run(&config, action).await,
+        Command::Setup { config, env_file } => setup::run(config, env_file),
     }
 }
 

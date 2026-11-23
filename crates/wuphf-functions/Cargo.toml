@@ -5,7 +5,12 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 
+[features]
+# `botconf::Describe` for the types the core configuration holds.
+describe = ["dep:botconf"]
+
 [dependencies]
+botconf = { workspace = true, features = ["derive"], optional = true }
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true

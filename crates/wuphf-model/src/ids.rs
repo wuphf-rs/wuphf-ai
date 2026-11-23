@@ -65,6 +65,14 @@ macro_rules! string_id {
                 self.0.fmt(formatter)
             }
         }
+
+        // Written in a config file as plain text.
+        #[cfg(feature = "describe")]
+        impl botconf::describe::Describe for $name {
+            fn node() -> botconf::describe::Node {
+                <String as botconf::describe::Describe>::node()
+            }
+        }
     };
 }
 
