@@ -179,7 +179,12 @@ connector's (`log_level`, `media_convert_timeout_ms`, `[sticker_metadata]`,
 `[rendering]`, with the same keys and choices): it declares them when it
 registers, so they can be changed from the settings panel or `wuphf settings`
 under `connector_settings.<connector id>` and apply without a restart; a
-changed log level applies at once unless `WUPHF_LOG_LEVEL` is set. It registers
+changed log level applies at once unless `WUPHF_LOG_LEVEL` is set. Its section
+in the settings panel (`/wuphf`) also has two buttons while it is connected, as
+the Go connector's does: "🔄 Resync app state" fetches every app-state
+collection (contacts, pins, mutes, archives) whole again, and "🔗 Send a new
+link code" sends the next link code at once rather than at the next gap while
+it waits to be linked. It registers
 as an Android client so WhatsApp delivers view-once media: set `client_mode`
 to `"android"` for a personal account or `"android_business"` for a WhatsApp
 Business account. The mode is sent at pairing, so changing it needs a fresh

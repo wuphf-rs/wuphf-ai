@@ -323,6 +323,25 @@ configuration may not hold `[connector_settings]`.
   `connectors/shared/settings` for all of this, reading the settings once per
   dispatch.
 
+### A connector's commands
+
+A connector may also declare commands, things the owner can run on it that are
+not settings (a resync, say): `Registration.commands`, each a
+`ConnectorCommand { id, title }`. While the session is live, the core's
+settings panel shows them as buttons on the connector's section (`title` is the
+label). A press is sent on the session as `ServerFrame.run_command`
+(`RunCommand { request_id, command_id }`); the connector answers with
+`ClientFrame.command_result` (`CommandResult { request_id, ok, message }`),
+whose `message` the panel shows (as an error when not `ok`). The core waits
+10 s; answer at once and do slow work in the background.
+
+Commands are requests, not dispatches: nothing is stored or redelivered, and
+a command for a connector that is not connected is refused. The core decides
+nothing about them beyond offering what the live session declared; a
+`RunCommand` for an id the connector did not declare is answered not `ok`.
+The SDKs take a commands handler beside the sender (`Options.commands` in
+Rust, `Options.Commands` in Go).
+
 ## Connectors
 
 - **Telegram** (`connectors/telegram`, `gotd/td`) — registers with forum-topic
