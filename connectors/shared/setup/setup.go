@@ -58,7 +58,7 @@ func RequireToken(candidate tui.Candidate, option, name string) error {
 		return nil
 	}
 	if strings.TrimSpace(Env(candidate, name)) == "" {
-		return fmt.Errorf("%s (%s) is unset or empty: set it or generate it (g)", name, option)
+		return fmt.Errorf("%s (%s) is unset or empty: set its value in the env file (e)", name, option)
 	}
 	return nil
 }

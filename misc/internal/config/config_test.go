@@ -3,7 +3,17 @@ package config
 import (
 	"testing"
 	"time"
+
+	"github.com/akshettrj/wuphf/connectors/shared/setup"
 )
+
+// The checked-in example is the description's: WUPHF_WRITE_EXAMPLES=1 go
+// test ./... rewrites it.
+func TestTheExampleIsGeneratedFromTheConfigType(t *testing.T) {
+	if err := setup.CheckExample(Description(), "../../config.example.toml"); err != nil {
+		t.Fatal(err)
+	}
+}
 
 func TestExampleConfigLoads(t *testing.T) {
 	t.Parallel()
