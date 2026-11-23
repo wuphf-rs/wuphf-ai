@@ -18,7 +18,7 @@ let
     ;
   cfg = config.services.wuphf;
   toml = pkgs.formats.toml { };
-  ours = packages pkgs;
+  ours = cfg.packages;
 
   # The parts: their binary, package, how they take a config, and how they
   # stop (the connectors and the provider save their session on SIGINT).
@@ -156,6 +156,20 @@ let
 in
 {
   options.services.wuphf = {
+    packages = mkOption {
+      type = types.attrsOf types.anything;
+      default = packages pkgs;
+      defaultText = lib.literalMD "the flake's packages for the host (those its CI puts in the cache)";
+      example = lib.literalExpression "pkgs.wuphf-packages";
+      description = ''
+        The package set every part's `package` defaults to. The default is the
+        flake's own builds, which the binary cache holds, so a machine
+        (or a laptop deploying to it, cross or not) downloads them. To build
+        them with this system's nixpkgs instead (natively, or cross-compiled
+        for a cross-built system), add the flake's `overlays.default` and set
+        this to `pkgs.wuphf-packages`.
+      '';
+    };
     user = mkOption {
       type = types.str;
       default = "wuphf";

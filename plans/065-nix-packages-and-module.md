@@ -30,10 +30,13 @@ compiling (2026-11-24).
    (TOML) or `configFile`, `environmentFile`; units as `deploy/systemd`'s.
    The core's release check is off by default (the store is read-only).
 3. **Cache: Cachix** (the owner's choice). `.github/workflows/nix.yml` builds
-   `.#wuphf` and the module check on x86_64-linux and pushes to the cache
+   `.#wuphf` and the module check natively on x86_64-linux and aarch64-linux
+   (the repository went public: hosted arm runners are free) and pushes to the cache
    named by the repository variable `CACHIX_CACHE` with the secret
-   `CACHIX_AUTH_TOKEN`; without them it builds and checks only. aarch64 is
-   not built (hosted arm runners are public-repository only).
+   `CACHIX_AUTH_TOKEN`; without them it builds and checks only. A laptop
+   cross-deploying to aarch64 downloads those native builds;
+   `services.wuphf.packages = pkgs.wuphf-packages` (the overlay) builds
+   them with the system's own nixpkgs instead, cross-compiled if it is.
 
 ## Verification
 

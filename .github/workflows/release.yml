@@ -23,9 +23,10 @@ jobs:
         include:
           - arch: x86_64
             target: x86_64-unknown-linux-gnu
-          # Cross-compiled: hosted arm runners are for public repositories
-          # only. The only C is bundled (SQLite, image codecs, ring), so a
-          # cross gcc is all it takes.
+          # Cross-compiled, as scripts/build-release.sh --target does on an
+          # x86_64 laptop: the release keeps glibc 2.35 (no 22.04 arm image
+          # is needed), and the only C is bundled (SQLite, image codecs,
+          # ring), so a cross gcc is all it takes.
           - arch: aarch64
             target: aarch64-unknown-linux-gnu
             cross: aarch64-linux-gnu

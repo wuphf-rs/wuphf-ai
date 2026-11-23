@@ -34,10 +34,8 @@ sudo useradd --system --home-dir /var/lib/wuphf --shell /usr/sbin/nologin wuphf
 
 # 2. Binaries: from a release (wuphf-server first, checked by hand once, then
 #    it installs the parts you run, checked against the signed SHA256SUMS) ...
-gh release download --repo wuphf-rs/wuphf-ai \
-    --pattern "wuphf-server-linux-$(uname -m)" --pattern "SHA256SUMS*"
-# (once the repository is public, curl works too:
-# curl -fLO https://github.com/wuphf-rs/wuphf-ai/releases/latest/download/<file>)
+release=https://github.com/wuphf-rs/wuphf-ai/releases/latest/download
+curl -fL -O "$release/wuphf-server-linux-$(uname -m)" -O "$release/SHA256SUMS" -O "$release/SHA256SUMS.minisig"
 minisign -V -p release/minisign.pub -m SHA256SUMS && sha256sum --check --ignore-missing SHA256SUMS
 sudo install -m 0755 "wuphf-server-linux-$(uname -m)" /usr/local/bin/wuphf-server
 #    (the other parts come with step 3) ... or built here (scripts/install-dev-bins.sh builds them all).
@@ -54,10 +52,8 @@ done
 # Fill the tokens: one random value per part, the same in core.env and in
 # that part's own file (`openssl rand -hex 32`). wuphf-misc's token is the
 # core's observer token (WUPHF_CORE_OBSERVER_TOKEN in core.env).
-# From a release, the parts you run (wuphf-server installs and checks them).
-# While the repository is private, set [updates.wuphf] token_env in core.toml
-# to a variable in core.env holding a GitHub token that can read it.
-sudo wuphf-server update --config /etc/wuphf/core.toml --env-file /etc/wuphf/core.env --yes \
+# From a release, the parts you run (wuphf-server installs and checks them):
+sudo wuphf-server update --config /etc/wuphf/core.toml --yes \
     --only wuphf-telegram --only wuphf-whatsapp --only wuphf-mediaconv --only wuphf-tui
 
 # 4. Units.

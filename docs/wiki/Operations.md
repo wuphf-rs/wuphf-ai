@@ -35,7 +35,7 @@ units:
 
 ```nix
 {
-  inputs.wuphf.url = "git+ssh://git@github.com/wuphf-rs/wuphf-ai?ref=v2";
+  inputs.wuphf.url = "github:wuphf-rs/wuphf-ai/v2";   # or a release tag: /v0.2.0
 
   outputs = { nixpkgs, wuphf, ... }: {
     nixosConfigurations.server = nixpkgs.lib.nixosSystem {
@@ -83,7 +83,8 @@ units:
 - **Updates come from the flake** (`nix flake update wuphf`, then rebuild).
   `wuphf-server update` cannot write to the store, so the module turns the
   core's release check off by default.
-- **The binary cache:** CI builds every package for x86_64-linux and pushes
+- **The binary cache:** CI builds every package natively for x86_64-linux and
+  aarch64-linux on every push to `v2` and every tag, and pushes
   them to Cachix. Add the cache as a substituter (its name and public key are
   on its Cachix page) to download instead of build:
 
@@ -94,7 +95,17 @@ units:
   };
   ```
 
-  Without the cache, or on aarch64, the machine builds wuphf itself.
+  The same holds when you deploy from an x86_64 laptop to an aarch64
+  machine (`nixos-rebuild --target-host`, cross-compiled or not): the
+  module asks for the native aarch64 builds, which the laptop downloads and
+  copies over, so nothing of wuphf is built. For a commit CI has not built,
+  or a system on another nixpkgs, build them with that system's own nixpkgs
+  instead (cross-compiled on the laptop for a cross-built system):
+
+  ```nix
+  nixpkgs.overlays = [ wuphf.overlays.default ];
+  services.wuphf.packages = pkgs.wuphf-packages;
+  ```
 
 ## Updates
 
@@ -119,9 +130,8 @@ sudo wuphf-server update --config /etc/wuphf/core.toml --rollback
   it if missing), `--from-source` builds the tag here, `--no-restart` leaves
   the units alone, and `--yes` skips the question. Add
   `--env-file /etc/wuphf/core.env` when a source names a token variable.
-- **While the repository is private** every download needs a GitHub token
-  that can read it: `[updates.wuphf] token_env` names its variable (the
-  core's scheduled check needs it in its environment too).
+- **A GitHub token** is optional: `[updates.wuphf] token_env` names one, for
+  a private fork or past GitHub's 60 unauthenticated API requests an hour.
 - **Your own binaries:** a binary you build yourself is an
   `[[updates.sources]]` entry, published on GitHub, Gitea/Forgejo or GitLab
   ([Configuration](Configuration.md#updates-updates-and-the-release-check)).

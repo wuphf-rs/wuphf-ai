@@ -1,13 +1,12 @@
-# Builds every Nix package and the NixOS module's units, and pushes what it
-# built to the Cachix cache, so machines using the flake (or its module)
-# download wuphf instead of building it.
+# Builds every Nix package and the NixOS module's units, natively for
+# x86_64-linux and aarch64-linux, and pushes what it built to the Cachix
+# cache, so machines using the flake (or its module) download wuphf instead of
+# building it. A laptop deploying to an aarch64 machine (cross or not) fetches
+# these same native builds.
 #
 # Needs the repository variable CACHIX_CACHE (the cache's name) and the secret
 # CACHIX_AUTH_TOKEN (a token that may push to it). Without them it still
 # builds and checks, and pushes nothing.
-#
-# x86_64-linux only: hosted arm runners are for public repositories, and
-# building under emulation would take hours. aarch64 machines build locally.
 name: nix
 
 on:
@@ -25,7 +24,15 @@ concurrency:
 
 jobs:
   build:
-    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - system: x86_64-linux
+            runner: ubuntu-24.04
+          - system: aarch64-linux
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v4
       - uses: cachix/install-nix-action@v31
@@ -35,6 +42,6 @@ jobs:
           name: ${{ vars.CACHIX_CACHE }}
           authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
       - name: Packages
-        run: nix build --print-build-logs .#wuphf
+        run: nix build --print-build-logs .#packages.${{ matrix.system }}.wuphf
       - name: The NixOS module's units
-        run: nix build --print-build-logs .#checks.x86_64-linux.nixos-module
+        run: nix build --print-build-logs .#checks.${{ matrix.system }}.nixos-module

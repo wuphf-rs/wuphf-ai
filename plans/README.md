@@ -1801,7 +1801,8 @@ From the 2026-10-22 remote-functions design:
   `configFile` and `environmentFile`, units as `deploy/systemd`'s, the
   release check off by default. `checks.<system>.nixos-module` builds the
   units of a NixOS system using it. `.github/workflows/nix.yml` builds
-  `.#wuphf` and the check on x86_64-linux and pushes to Cachix
+  `.#wuphf` and the check natively on x86_64-linux and aarch64-linux (the
+  repository is public, so hosted arm runners are free) and pushes to Cachix
   (`CACHIX_CACHE` variable, `CACHIX_AUTH_TOKEN` secret). Verified: all seven
   packages build and report `0.1.0`; the units and the generated config were
   read; `nix flake check --all-systems` passes. Pending on the owner: the
