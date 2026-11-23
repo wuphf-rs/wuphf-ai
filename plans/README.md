@@ -75,6 +75,7 @@ code).
 | 055 | whatsapp-rust: stickers — SDK functions client, media.convert, pure-Rust sticker EXIF | P2 | M–L | 054 | DONE (see notes) |
 | 056 | Runtime settings in the Rust SDK; whatsapp-rust declares the Go connector's settings | P2 | L | botconf 013 (055 soft) | DONE (see notes) |
 | 057 | WhatsApp connectors link again by themselves after a logout (QR or pair code, delivered to the owner) | P1 | L | — | DONE (no migration; see notes) |
+| 058 | Connector commands in the settings panel: WhatsApp "resync app state" and "send a new link code" | P1 | L | botconf 014, 056, 057 | DONE (see notes) |
 
 Status values: TODO | IN PROGRESS | DONE | BLOCKED (with one-line reason) |
 REJECTED (with one-line rationale).
@@ -1570,3 +1571,31 @@ From the 2026-10-22 remote-functions design:
     against fakes. Try one reel, one photo post and one carousel on the real
     account before relying on it (plan STOP condition 2).
 
+
+### 058: connector commands in the settings panel
+
+- **058 done 2026-11-23** (on `v2`, `883548d`..this commit), after botconf
+  014 (`v0.12.0`, `go/v0.12.0`, executed and pushed first, this session:
+  section actions in the panel engine). The proto, the core and the Rust
+  SDK landed as one commit (`883548d`): the new oneof variants do not
+  compile apart. Tests: core +8 (registry 7, an end-to-end panel press over
+  a real session 1), Rust SDK +3, Go coreclient +3, whatsapp-rust 161 → 167
+  (linking 2, commands 4), Go whatsapp +6. clippy, fmt, `go vet` clean; the
+  other Go connectors still vet. Mutations (each failed a test): a session's
+  end detaching a newer one; the gRPC reader not settling `CommandResult`;
+  a fresh pair code not asked for (both connectors).
+  Deviations:
+  - A requested resync runs one at a time in both connectors (a second
+    press says so).
+  - Go stream writes stay single-writer: command results go through the
+    session loop's channel.
+  - A linked session's commands are tested through fakes only (the
+    whatsapp-rust resync needs a live client); the unlinked answers and the
+    linking flag are unit-tested.
+  - `7607b66` gofmt-fixes `stickermeta_test.go`'s imports (from 055).
+  Owner: restart the server and both WhatsApp connectors. Live test: in
+  `/wuphf` → a WhatsApp connector's section, "🔄 Resync app state" (a notice
+  says it started; contact names and chat state arrive as snapshots);
+  while a connector waits to be linked, "🔗 Send a new link code" (the
+  code or QR arrives with the next code rotation, under a minute). With the
+  connector stopped, the buttons are gone.
