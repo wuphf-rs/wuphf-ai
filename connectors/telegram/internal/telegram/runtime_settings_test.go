@@ -4,12 +4,12 @@ import (
 	"context"
 	"testing"
 
-	"github.com/akshettrj/wuphf/connectors/shared/settings"
-	"github.com/akshettrj/wuphf/connectors/telegram/internal/config"
-	"github.com/akshettrj/wuphf/proto/go/connector/v1"
 	"github.com/gotd/td/bin"
 	"github.com/gotd/td/telegram/message"
 	"github.com/gotd/td/tg"
+	"github.com/wuphf-rs/wuphf-ai/connectors/shared/settings"
+	"github.com/wuphf-rs/wuphf-ai/connectors/telegram/internal/config"
+	"github.com/wuphf-rs/wuphf-ai/proto/go/connector/v1"
 )
 
 // A changed edit mode applies to the next edit: the sender reads its runtime

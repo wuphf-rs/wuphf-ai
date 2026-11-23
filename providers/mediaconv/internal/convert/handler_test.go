@@ -10,8 +10,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/akshettrj/wuphf/connectors/shared/functions"
-	wuphfpb "github.com/akshettrj/wuphf/proto/go/connector/v1"
+	"github.com/wuphf-rs/wuphf-ai/connectors/shared/functions"
+	wuphfpb "github.com/wuphf-rs/wuphf-ai/proto/go/connector/v1"
 )
 
 // memoryBroker stores media in memory, recording what was uploaded.

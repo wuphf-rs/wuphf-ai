@@ -16,9 +16,9 @@ import (
 	"os"
 	"strings"
 
-	"github.com/akshettrj/wuphf/connectors/shared/chatdir"
 	"github.com/propheci/botconf/go/describe"
 	"github.com/propheci/botconf/go/tui"
+	"github.com/wuphf-rs/wuphf-ai/connectors/shared/chatdir"
 )
 
 // Requested reports whether a binary's arguments (os.Args[1:]) ask for setup.

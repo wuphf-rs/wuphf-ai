@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/akshettrj/wuphf/connectors/shared/setup"
+	"github.com/wuphf-rs/wuphf-ai/connectors/shared/setup"
 )
 
 func TestLoadAcceptsTheExample(t *testing.T) {

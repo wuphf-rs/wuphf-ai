@@ -1,19 +1,19 @@
-module github.com/akshettrj/wuphf/connectors/whatsapp
+module github.com/wuphf-rs/wuphf-ai/connectors/whatsapp
 
 go 1.26.0
 
-replace github.com/akshettrj/wuphf/proto/go => ../../proto/go
+replace github.com/wuphf-rs/wuphf-ai/proto/go => ../../proto/go
 
-replace github.com/akshettrj/wuphf/connectors/shared => ../shared
+replace github.com/wuphf-rs/wuphf-ai/connectors/shared => ../shared
 
 require (
-	github.com/akshettrj/wuphf/connectors/shared v0.0.0-00010101000000-000000000000
-	github.com/akshettrj/wuphf/proto/go v0.0.0-00010101000000-000000000000
 	github.com/mattn/go-sqlite3 v1.14.53
 	github.com/mdp/qrterminal/v3 v3.2.1
 	github.com/pelletier/go-toml/v2 v2.4.3
 	github.com/propheci/botconf/go v0.16.0
 	github.com/rs/zerolog v1.35.1
+	github.com/wuphf-rs/wuphf-ai/connectors/shared v0.0.0-00010101000000-000000000000
+	github.com/wuphf-rs/wuphf-ai/proto/go v0.0.0-00010101000000-000000000000
 	go.mau.fi/whatsmeow v0.0.0-20261113153213-1956f9683795
 	google.golang.org/protobuf v1.36.12
 	rsc.io/qr v0.2.0

@@ -2,7 +2,7 @@ syntax = "proto3";
 
 package wuphf.connector.v1;
 
-option go_package = "github.com/akshettrj/wuphf/proto/go/connector/v1;wuphfpb";
+option go_package = "github.com/wuphf-rs/wuphf-ai/proto/go/connector/v1;wuphfpb";
 
 import "client.proto";
 import "server.proto";

@@ -6,9 +6,9 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/akshettrj/wuphf/proto/go/connector/v1"
 	"github.com/gotd/td/bin"
 	"github.com/gotd/td/tg"
+	"github.com/wuphf-rs/wuphf-ai/proto/go/connector/v1"
 	"google.golang.org/protobuf/proto"
 )
 

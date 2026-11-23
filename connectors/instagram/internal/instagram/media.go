@@ -10,7 +10,7 @@ import (
 	"regexp"
 	"strings"
 
-	wuphfpb "github.com/akshettrj/wuphf/proto/go/connector/v1"
+	wuphfpb "github.com/wuphf-rs/wuphf-ai/proto/go/connector/v1"
 	"go.mau.fi/mautrix-meta/pkg/instameow/slidetypes"
 	"go.mau.fi/mautrix-meta/pkg/messagix/responses"
 )

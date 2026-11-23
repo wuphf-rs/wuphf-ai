@@ -1167,7 +1167,7 @@ const file_functions_proto_rawDesc = "" +
 	"\x06Invoke\x12!.wuphf.connector.v1.InvokeRequest\x1a\".wuphf.connector.v1.InvokeResponse\x12d\n" +
 	"\rListFunctions\x12(.wuphf.connector.v1.ListFunctionsRequest\x1a).wuphf.connector.v1.ListFunctionsResponse2\x80\x01\n" +
 	"\x11ProviderTransport\x12k\n" +
-	"\x13OpenProviderSession\x12'.wuphf.connector.v1.ProviderClientFrame\x1a'.wuphf.connector.v1.ProviderServerFrame(\x010\x01B:Z8github.com/akshettrj/wuphf/proto/go/connector/v1;wuphfpbb\x06proto3"
+	"\x13OpenProviderSession\x12'.wuphf.connector.v1.ProviderClientFrame\x1a'.wuphf.connector.v1.ProviderServerFrame(\x010\x01B<Z:github.com/wuphf-rs/wuphf-ai/proto/go/connector/v1;wuphfpbb\x06proto3"
 
 var (
 	file_functions_proto_rawDescOnce sync.Once

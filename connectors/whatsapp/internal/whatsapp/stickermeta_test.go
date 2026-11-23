@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/akshettrj/wuphf/connectors/whatsapp/internal/config"
+	"github.com/wuphf-rs/wuphf-ai/connectors/whatsapp/internal/config"
 )
 
 // TestStickerExifContainsPackFields checks the EXIF payload carries the pack

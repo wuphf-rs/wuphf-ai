@@ -3,7 +3,7 @@ package coreclient
 import (
 	"context"
 
-	wuphfpb "github.com/akshettrj/wuphf/proto/go/connector/v1"
+	wuphfpb "github.com/wuphf-rs/wuphf-ai/proto/go/connector/v1"
 )
 
 // Notice builds an owner-notice frame. A connector that loses its session

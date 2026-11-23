@@ -3,8 +3,8 @@ package config
 import (
 	"testing"
 
-	"github.com/akshettrj/wuphf/connectors/shared/setup"
 	"github.com/pelletier/go-toml/v2"
+	"github.com/wuphf-rs/wuphf-ai/connectors/shared/setup"
 )
 
 // The checked-in example is the description's: WUPHF_WRITE_EXAMPLES=1 go

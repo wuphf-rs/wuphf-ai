@@ -1,17 +1,17 @@
-module github.com/akshettrj/wuphf/misc
+module github.com/wuphf-rs/wuphf-ai/misc
 
 go 1.26.0
 
-replace github.com/akshettrj/wuphf/proto/go => ../proto/go
+replace github.com/wuphf-rs/wuphf-ai/proto/go => ../proto/go
 
-replace github.com/akshettrj/wuphf/connectors/shared => ../connectors/shared
+replace github.com/wuphf-rs/wuphf-ai/connectors/shared => ../connectors/shared
 
 require (
-	github.com/akshettrj/wuphf/connectors/shared v0.0.0-00010101000000-000000000000
-	github.com/akshettrj/wuphf/proto/go v0.0.0-00010101000000-000000000000
 	github.com/pelletier/go-toml/v2 v2.4.3
 	github.com/propheci/botconf/go v0.16.0
 	github.com/rs/zerolog v1.35.1
+	github.com/wuphf-rs/wuphf-ai/connectors/shared v0.0.0-00010101000000-000000000000
+	github.com/wuphf-rs/wuphf-ai/proto/go v0.0.0-00010101000000-000000000000
 	google.golang.org/grpc v1.85.0
 )
 

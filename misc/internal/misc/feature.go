@@ -8,7 +8,7 @@ import (
 	"context"
 	"strings"
 
-	wuphfpb "github.com/akshettrj/wuphf/proto/go/connector/v1"
+	wuphfpb "github.com/wuphf-rs/wuphf-ai/proto/go/connector/v1"
 )
 
 // ClientName tags wuphf-misc's sends (SendMessageRequest.client). The core

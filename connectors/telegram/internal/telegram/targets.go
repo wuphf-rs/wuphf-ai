@@ -8,9 +8,9 @@ import (
 	"strings"
 	"sync"
 
-	coreclient "github.com/akshettrj/wuphf/connectors/shared/coreclient"
 	"github.com/gotd/td/tg"
 	"github.com/rs/zerolog"
+	coreclient "github.com/wuphf-rs/wuphf-ai/connectors/shared/coreclient"
 	"golang.org/x/sync/singleflight"
 )
 

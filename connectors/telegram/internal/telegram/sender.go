@@ -10,14 +10,14 @@ import (
 	"strconv"
 	"unicode/utf16"
 
-	coreclient "github.com/akshettrj/wuphf/connectors/shared/coreclient"
-	"github.com/akshettrj/wuphf/connectors/shared/settings"
-	"github.com/akshettrj/wuphf/connectors/telegram/internal/config"
-	"github.com/akshettrj/wuphf/proto/go/connector/v1"
 	"github.com/gotd/td/telegram/message"
 	"github.com/gotd/td/telegram/message/markup"
 	"github.com/gotd/td/telegram/message/styling"
 	"github.com/gotd/td/tg"
+	coreclient "github.com/wuphf-rs/wuphf-ai/connectors/shared/coreclient"
+	"github.com/wuphf-rs/wuphf-ai/connectors/shared/settings"
+	"github.com/wuphf-rs/wuphf-ai/connectors/telegram/internal/config"
+	"github.com/wuphf-rs/wuphf-ai/proto/go/connector/v1"
 )
 
 // StickerConverter converts stored media to another format (in production,

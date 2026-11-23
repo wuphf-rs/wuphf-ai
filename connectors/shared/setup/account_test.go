@@ -8,9 +8,9 @@ import (
 	"sync/atomic"
 	"testing"
 
-	"github.com/akshettrj/wuphf/connectors/shared/chatdir"
-	"github.com/akshettrj/wuphf/connectors/shared/sessionlock"
 	"github.com/propheci/botconf/go/tui"
+	"github.com/wuphf-rs/wuphf-ai/connectors/shared/chatdir"
+	"github.com/wuphf-rs/wuphf-ai/connectors/shared/sessionlock"
 )
 
 // fakeScreen is a setup screen's session: what an action said, and the

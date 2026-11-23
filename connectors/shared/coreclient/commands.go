@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	wuphfpb "github.com/akshettrj/wuphf/proto/go/connector/v1"
+	wuphfpb "github.com/wuphf-rs/wuphf-ai/proto/go/connector/v1"
 )
 
 // Commands are what the owner can run on a connector from the core's settings

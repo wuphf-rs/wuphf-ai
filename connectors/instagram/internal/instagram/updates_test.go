@@ -10,8 +10,8 @@ import (
 	"strings"
 	"testing"
 
-	wuphfpb "github.com/akshettrj/wuphf/proto/go/connector/v1"
 	"github.com/rs/zerolog"
+	wuphfpb "github.com/wuphf-rs/wuphf-ai/proto/go/connector/v1"
 	"go.mau.fi/mautrix-meta/pkg/instameow"
 	"go.mau.fi/mautrix-meta/pkg/instameow/slidetypes"
 	"go.mau.fi/mautrix-meta/pkg/messagix/responses"

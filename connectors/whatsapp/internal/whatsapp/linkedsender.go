@@ -5,7 +5,7 @@ import (
 	"errors"
 	"sync/atomic"
 
-	wuphfpb "github.com/akshettrj/wuphf/proto/go/connector/v1"
+	wuphfpb "github.com/wuphf-rs/wuphf-ai/proto/go/connector/v1"
 )
 
 // errNotLinked fails a dispatch that arrives while no WhatsApp session is

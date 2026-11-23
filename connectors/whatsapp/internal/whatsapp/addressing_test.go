@@ -5,8 +5,8 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/akshettrj/wuphf/connectors/whatsapp/internal/config"
-	wuphfpb "github.com/akshettrj/wuphf/proto/go/connector/v1"
+	"github.com/wuphf-rs/wuphf-ai/connectors/whatsapp/internal/config"
+	wuphfpb "github.com/wuphf-rs/wuphf-ai/proto/go/connector/v1"
 	waE2E "go.mau.fi/whatsmeow/proto/waE2E"
 	"go.mau.fi/whatsmeow/types"
 	"go.mau.fi/whatsmeow/types/events"

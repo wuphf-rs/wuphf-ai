@@ -12,9 +12,9 @@ import (
 	"path"
 	"time"
 
-	"github.com/akshettrj/wuphf/connectors/shared/functions"
-	wuphfpb "github.com/akshettrj/wuphf/proto/go/connector/v1"
-	"github.com/akshettrj/wuphf/providers/mediaconv/internal/mediaconv"
+	"github.com/wuphf-rs/wuphf-ai/connectors/shared/functions"
+	wuphfpb "github.com/wuphf-rs/wuphf-ai/proto/go/connector/v1"
+	"github.com/wuphf-rs/wuphf-ai/providers/mediaconv/internal/mediaconv"
 )
 
 // RequestSchema describes MediaConvertArgs, the args of media.convert@1. It is

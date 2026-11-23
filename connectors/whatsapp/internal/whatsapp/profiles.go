@@ -10,8 +10,8 @@ import (
 	"sync"
 	"time"
 
-	wuphfpb "github.com/akshettrj/wuphf/proto/go/connector/v1"
 	"github.com/rs/zerolog"
+	wuphfpb "github.com/wuphf-rs/wuphf-ai/proto/go/connector/v1"
 	"go.mau.fi/whatsmeow"
 	"go.mau.fi/whatsmeow/types"
 )

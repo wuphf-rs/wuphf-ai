@@ -7,7 +7,6 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/akshettrj/wuphf/proto/go/connector/v1"
 	"github.com/gotd/td/bin"
 	gotd "github.com/gotd/td/telegram"
 	"github.com/gotd/td/tg"
@@ -15,6 +14,7 @@ import (
 	"github.com/propheci/botconf/go/settings/settingstest"
 	"github.com/propheci/botconf/go/settingspb"
 	"github.com/rs/zerolog"
+	"github.com/wuphf-rs/wuphf-ai/proto/go/connector/v1"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )

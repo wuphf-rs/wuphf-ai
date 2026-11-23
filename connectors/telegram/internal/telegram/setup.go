@@ -9,9 +9,6 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/akshettrj/wuphf/connectors/shared/chatdir"
-	"github.com/akshettrj/wuphf/connectors/shared/setup"
-	"github.com/akshettrj/wuphf/connectors/telegram/internal/config"
 	"github.com/gotd/td/session"
 	gotd "github.com/gotd/td/telegram"
 	"github.com/gotd/td/telegram/auth"
@@ -19,6 +16,9 @@ import (
 	"github.com/gotd/td/telegram/query"
 	"github.com/gotd/td/tg"
 	"github.com/propheci/botconf/go/tui"
+	"github.com/wuphf-rs/wuphf-ai/connectors/shared/chatdir"
+	"github.com/wuphf-rs/wuphf-ai/connectors/shared/setup"
+	"github.com/wuphf-rs/wuphf-ai/connectors/telegram/internal/config"
 )
 
 // SetupAccount is the connector's account for its setup's actions (see the

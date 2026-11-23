@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
-	wuphfpb "github.com/akshettrj/wuphf/proto/go/connector/v1"
 	"github.com/rs/zerolog"
+	wuphfpb "github.com/wuphf-rs/wuphf-ai/proto/go/connector/v1"
 	"google.golang.org/grpc"
 	"google.golang.org/protobuf/proto"
 )

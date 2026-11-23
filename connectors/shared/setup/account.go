@@ -6,9 +6,9 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/akshettrj/wuphf/connectors/shared/chatdir"
-	"github.com/akshettrj/wuphf/connectors/shared/sessionlock"
 	"github.com/propheci/botconf/go/tui"
+	"github.com/wuphf-rs/wuphf-ai/connectors/shared/chatdir"
+	"github.com/wuphf-rs/wuphf-ai/connectors/shared/sessionlock"
 )
 
 // Account is a connector's account as its setup's actions use it, opened on

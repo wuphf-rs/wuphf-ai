@@ -7,12 +7,12 @@ import (
 	"os"
 	"os/signal"
 
-	"github.com/akshettrj/wuphf/connectors/shared/chatdir"
-	"github.com/akshettrj/wuphf/connectors/shared/logging"
-	"github.com/akshettrj/wuphf/connectors/shared/setup"
-	"github.com/akshettrj/wuphf/connectors/telegram/internal/config"
-	telegramconnector "github.com/akshettrj/wuphf/connectors/telegram/internal/telegram"
 	"github.com/propheci/botconf/go/tui"
+	"github.com/wuphf-rs/wuphf-ai/connectors/shared/chatdir"
+	"github.com/wuphf-rs/wuphf-ai/connectors/shared/logging"
+	"github.com/wuphf-rs/wuphf-ai/connectors/shared/setup"
+	"github.com/wuphf-rs/wuphf-ai/connectors/telegram/internal/config"
+	telegramconnector "github.com/wuphf-rs/wuphf-ai/connectors/telegram/internal/telegram"
 )
 
 func main() {

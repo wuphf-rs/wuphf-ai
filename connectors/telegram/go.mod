@@ -1,23 +1,23 @@
-module github.com/akshettrj/wuphf/connectors/telegram
+module github.com/wuphf-rs/wuphf-ai/connectors/telegram
 
 go 1.26.0
 
 require (
-	github.com/akshettrj/wuphf/connectors/shared v0.0.0
-	github.com/akshettrj/wuphf/proto/go v0.0.0
 	github.com/gotd/td v0.161.0
 	github.com/pelletier/go-toml/v2 v2.4.3
 	github.com/propheci/botconf/go v0.16.0
 	github.com/rs/zerolog v1.35.1
+	github.com/wuphf-rs/wuphf-ai/connectors/shared v0.0.0
+	github.com/wuphf-rs/wuphf-ai/proto/go v0.0.0
 	golang.org/x/sync v0.25.0
 	golang.org/x/term v0.48.0
 	google.golang.org/grpc v1.85.0
 	google.golang.org/protobuf v1.36.12
 )
 
-replace github.com/akshettrj/wuphf/proto/go => ../../proto/go
+replace github.com/wuphf-rs/wuphf-ai/proto/go => ../../proto/go
 
-replace github.com/akshettrj/wuphf/connectors/shared => ../shared
+replace github.com/wuphf-rs/wuphf-ai/connectors/shared => ../shared
 
 require (
 	github.com/andybalholm/brotli v1.3.0 // indirect

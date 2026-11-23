@@ -7,9 +7,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/akshettrj/wuphf/connectors/shared/logging"
 	"github.com/pelletier/go-toml/v2"
 	"github.com/propheci/botconf/go/describe"
+	"github.com/wuphf-rs/wuphf-ai/connectors/shared/logging"
 )
 
 // File is the connector's config file. Each option is described once, in its

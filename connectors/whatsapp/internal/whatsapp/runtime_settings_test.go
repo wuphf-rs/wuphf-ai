@@ -5,9 +5,9 @@ import (
 	"context"
 	"testing"
 
-	"github.com/akshettrj/wuphf/connectors/shared/settings"
-	"github.com/akshettrj/wuphf/connectors/whatsapp/internal/config"
-	wuphfpb "github.com/akshettrj/wuphf/proto/go/connector/v1"
+	"github.com/wuphf-rs/wuphf-ai/connectors/shared/settings"
+	"github.com/wuphf-rs/wuphf-ai/connectors/whatsapp/internal/config"
+	wuphfpb "github.com/wuphf-rs/wuphf-ai/proto/go/connector/v1"
 	"go.mau.fi/whatsmeow"
 )
 

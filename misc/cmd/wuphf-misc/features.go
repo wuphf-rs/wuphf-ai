@@ -1,12 +1,12 @@
 package main
 
 import (
-	"github.com/akshettrj/wuphf/connectors/shared/coreclient"
-	"github.com/akshettrj/wuphf/connectors/shared/functions"
-	"github.com/akshettrj/wuphf/misc/internal/config"
-	"github.com/akshettrj/wuphf/misc/internal/misc"
-	"github.com/akshettrj/wuphf/misc/internal/misc/instagram"
 	"github.com/rs/zerolog"
+	"github.com/wuphf-rs/wuphf-ai/connectors/shared/coreclient"
+	"github.com/wuphf-rs/wuphf-ai/connectors/shared/functions"
+	"github.com/wuphf-rs/wuphf-ai/misc/internal/config"
+	"github.com/wuphf-rs/wuphf-ai/misc/internal/misc"
+	"github.com/wuphf-rs/wuphf-ai/misc/internal/misc/instagram"
 )
 
 // buildFeatures returns the enabled features and a function that releases

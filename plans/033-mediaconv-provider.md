@@ -41,7 +41,7 @@ contract.
 ## Current state
 
 - `connectors/mediaconv/` — its own Go module
-  (`github.com/akshettrj/wuphf/connectors/mediaconv`, no dependencies) with
+  (`github.com/wuphf-rs/wuphf-ai/connectors/mediaconv`, no dependencies) with
   `mediaconv.go` and `mediaconv_test.go`. Exports
   `AnimatedWebPToWebM(ctx, src []byte) ([]byte, error)`,
   `ToAnimatedWebP(ctx, src []byte, srcExt string) ([]byte, error)` and
@@ -125,17 +125,17 @@ contract.
   `NewSender(client, media, ownJID, c.cfg.StickerMetadata(), c.cfg.Rendering)`.
   `sender_test.go` calls `NewSender(…)` at about 13 sites.
 
-- Both connectors' `go.mod` require `github.com/akshettrj/wuphf/connectors/mediaconv`
+- Both connectors' `go.mod` require `github.com/wuphf-rs/wuphf-ai/connectors/mediaconv`
   through a `replace … => ../mediaconv` directive. WhatsApp also requires
   `github.com/watgbridge/tgsconverter` and indirectly `github.com/Benau/go_rlottie`.
   WhatsApp still needs cgo afterwards for `github.com/mattn/go-sqlite3`; only
   the C++ rlottie build leaves it.
-- `connectors/shared` — Go module `github.com/akshettrj/wuphf/connectors/shared`
+- `connectors/shared` — Go module `github.com/wuphf-rs/wuphf-ai/connectors/shared`
   with packages `coreclient` (session client; `media.go` has
   `DialMedia(address) (*MediaClient, error)`, `Upload(ctx, *wuphfpb.MediaMetadata, []byte) (*wuphfpb.Attachment, error)`,
   `Download(ctx, mediaID string) ([]byte, error)`) and `logging`
   (`logging.New(configured string) zerolog.Logger`). Connectors import it via
-  `replace github.com/akshettrj/wuphf/connectors/shared => ../shared`.
+  `replace github.com/wuphf-rs/wuphf-ai/connectors/shared => ../shared`.
 - Connector configs are TOML (`github.com/pelletier/go-toml/v2`) in
   `internal/config/config.go` with a `File` struct and `Validate()`; each
   connector has `config.example.toml` and `README.md`. Binaries live in
@@ -224,7 +224,7 @@ Record the results.
 ### Step 1: The shared function SDK
 
 Create package `functions` in `connectors/shared/functions/`
-(import path `github.com/akshettrj/wuphf/connectors/shared/functions`).
+(import path `github.com/wuphf-rs/wuphf-ai/connectors/shared/functions`).
 Every file starts with a doc comment in the style of `coreclient`.
 
 `client.go` — calling functions:
@@ -489,13 +489,13 @@ Commit 3.
 Create module `providers/mediaconv/go.mod`:
 
 ```
-module github.com/akshettrj/wuphf/providers/mediaconv
+module github.com/wuphf-rs/wuphf-ai/providers/mediaconv
 
 go 1.25.0
 
-replace github.com/akshettrj/wuphf/proto/go => ../../proto/go
+replace github.com/wuphf-rs/wuphf-ai/proto/go => ../../proto/go
 
-replace github.com/akshettrj/wuphf/connectors/shared => ../../connectors/shared
+replace github.com/wuphf-rs/wuphf-ai/connectors/shared => ../../connectors/shared
 ```
 (requirements are filled by `go mod tidy` below.)
 

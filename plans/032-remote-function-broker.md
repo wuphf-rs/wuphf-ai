@@ -71,7 +71,7 @@ Two consequences the executor must implement exactly:
 
 - `crates/wuphf-proto/` — all `.proto` files share
   `package wuphf.connector.v1;` and
-  `option go_package = "github.com/akshettrj/wuphf/proto/go/connector/v1;wuphfpb";`.
+  `option go_package = "github.com/wuphf-rs/wuphf-ai/proto/go/connector/v1;wuphfpb";`.
   `build.rs` compiles them in one call:
 
   ```rust
@@ -97,8 +97,8 @@ Two consequences the executor must implement exactly:
 
   ```sh
   cd crates/wuphf-proto && protoc \
-    --go_out=../../proto/go --go_opt=module=github.com/akshettrj/wuphf/proto/go \
-    --go-grpc_out=../../proto/go --go-grpc_opt=module=github.com/akshettrj/wuphf/proto/go \
+    --go_out=../../proto/go --go_opt=module=github.com/wuphf-rs/wuphf-ai/proto/go \
+    --go-grpc_out=../../proto/go --go-grpc_opt=module=github.com/wuphf-rs/wuphf-ai/proto/go \
     common.proto media.proto client.proto server.proto connector.proto
   ```
 
@@ -208,7 +208,7 @@ syntax = "proto3";
 
 package wuphf.connector.v1;
 
-option go_package = "github.com/akshettrj/wuphf/proto/go/connector/v1;wuphfpb";
+option go_package = "github.com/wuphf-rs/wuphf-ai/proto/go/connector/v1;wuphfpb";
 
 // Remote functions. A provider process registers named functions over a
 // ProviderTransport session; any client calls them through FunctionTransport.
@@ -367,8 +367,8 @@ existing files too; they must not change:
 
 ```sh
 cd crates/wuphf-proto && protoc \
-  --go_out=../../proto/go --go_opt=module=github.com/akshettrj/wuphf/proto/go \
-  --go-grpc_out=../../proto/go --go-grpc_opt=module=github.com/akshettrj/wuphf/proto/go \
+  --go_out=../../proto/go --go_opt=module=github.com/wuphf-rs/wuphf-ai/proto/go \
+  --go-grpc_out=../../proto/go --go-grpc_opt=module=github.com/wuphf-rs/wuphf-ai/proto/go \
   common.proto media.proto client.proto server.proto connector.proto functions.proto
 ```
 

@@ -58,8 +58,8 @@ that.
   — 35 lines each, byte-identical (`diff` confirms), zerolog console logger +
   `WUPHF_LOG_LEVEL` override.
 - Module layout: each connector is its own Go module
-  (`github.com/akshettrj/wuphf/connectors/<name>`), all `go 1.25.0`, each with
-  `replace github.com/akshettrj/wuphf/proto/go => ../../proto/go`. The proto
+  (`github.com/wuphf-rs/wuphf-ai/connectors/<name>`), all `go 1.25.0`, each with
+  `replace github.com/wuphf-rs/wuphf-ai/proto/go => ../../proto/go`. The proto
   module (`proto/go/go.mod`) depends only on grpc+protobuf — do NOT add
   zerolog to it; create a new module instead.
 - Tests that pin behavior (must pass after the move, relocated):
@@ -82,14 +82,14 @@ that.
 ## Scope
 
 **In scope** (create/modify):
-- `connectors/shared/` (new module `github.com/akshettrj/wuphf/connectors/shared`):
+- `connectors/shared/` (new module `github.com/wuphf-rs/wuphf-ai/connectors/shared`):
   `go.mod`, `coreclient/client.go`, `coreclient/client_test.go`,
   `logging/logging.go`, optionally `coreclient/media.go`
 - `connectors/{telegram,whatsapp,instagram}/go.mod` (+`go.sum`): require +
-  `replace github.com/akshettrj/wuphf/connectors/shared => ../shared`
+  `replace github.com/wuphf-rs/wuphf-ai/connectors/shared => ../shared`
 - Deletion of the three `internal/core/client.go` (+tests) and three
   `internal/logging/` packages, with call sites updated
-  (`grep -rn '"github.com/akshettrj/wuphf/connectors/<name>/internal/core"' connectors/<name>/` to find them; likely `cmd/wuphf-<name>/` and the platform package)
+  (`grep -rn '"github.com/wuphf-rs/wuphf-ai/connectors/<name>/internal/core"' connectors/<name>/` to find them; likely `cmd/wuphf-<name>/` and the platform package)
 
 **Out of scope** (do NOT touch):
 - `proto/go` module (no new deps there).
@@ -112,11 +112,11 @@ that.
 `connectors/shared/go.mod`:
 
 ```
-module github.com/akshettrj/wuphf/connectors/shared
+module github.com/wuphf-rs/wuphf-ai/connectors/shared
 
 go 1.25.0
 
-replace github.com/akshettrj/wuphf/proto/go => ../../proto/go
+replace github.com/wuphf-rs/wuphf-ai/proto/go => ../../proto/go
 ```
 
 (then `require` proto/go, grpc, zerolog — let `go mod tidy` fill versions).
@@ -171,7 +171,7 @@ retrying).
 
 - `go.mod`: add the require + replace for `connectors/shared`.
 - Replace imports of `internal/core` with
-  `github.com/akshettrj/wuphf/connectors/shared/coreclient` and
+  `github.com/wuphf-rs/wuphf-ai/connectors/shared/coreclient` and
   `internal/logging` with `.../shared/logging`; construct
   `coreclient.New(coreclient.Options{..., Platform: wuphfpb.Platform_PLATFORM_TELEGRAM, IsPermanent: telegramPermanent}, logger)`
   where `telegramPermanent` keeps the `tgerr` 400 check (it stays in the

@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	wuphfpb "github.com/akshettrj/wuphf/proto/go/connector/v1"
 	"github.com/rs/zerolog"
+	wuphfpb "github.com/wuphf-rs/wuphf-ai/proto/go/connector/v1"
 	"go.mau.fi/whatsmeow"
 	waE2E "go.mau.fi/whatsmeow/proto/waE2E"
 	waHistorySync "go.mau.fi/whatsmeow/proto/waHistorySync"

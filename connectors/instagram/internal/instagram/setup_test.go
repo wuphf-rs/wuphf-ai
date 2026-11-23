@@ -10,7 +10,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/akshettrj/wuphf/connectors/shared/chatdir"
+	"github.com/wuphf-rs/wuphf-ai/connectors/shared/chatdir"
 	"go.mau.fi/mautrix-meta/pkg/instameow/slidetypes"
 )
 

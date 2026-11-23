@@ -25,12 +25,12 @@ import (
 	"math"
 	"sync/atomic"
 
-	wuphfpb "github.com/akshettrj/wuphf/proto/go/connector/v1"
 	"github.com/invopop/jsonschema"
 	"github.com/pelletier/go-toml/v2"
 	"github.com/propheci/botconf/go/describe"
 	botconf "github.com/propheci/botconf/go/settings"
 	"github.com/propheci/botconf/go/settingspb"
+	wuphfpb "github.com/wuphf-rs/wuphf-ai/proto/go/connector/v1"
 	"google.golang.org/protobuf/proto"
 )
 

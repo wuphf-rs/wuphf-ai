@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"strconv"
 
-	coreclient "github.com/akshettrj/wuphf/connectors/shared/coreclient"
-	wuphfpb "github.com/akshettrj/wuphf/proto/go/connector/v1"
+	coreclient "github.com/wuphf-rs/wuphf-ai/connectors/shared/coreclient"
+	wuphfpb "github.com/wuphf-rs/wuphf-ai/proto/go/connector/v1"
 	"go.mau.fi/mautrix-meta/pkg/instameow/slidetypes"
 	"go.mau.fi/mautrix-meta/pkg/messagix/methods"
 )

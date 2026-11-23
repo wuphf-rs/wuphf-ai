@@ -4,8 +4,8 @@ import (
 	"context"
 	"testing"
 
-	"github.com/akshettrj/wuphf/proto/go/connector/v1"
 	"github.com/gotd/td/tg"
+	"github.com/wuphf-rs/wuphf-ai/proto/go/connector/v1"
 )
 
 type stubMediaBroker struct {

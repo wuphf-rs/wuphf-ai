@@ -149,8 +149,8 @@ cache", so those slices extend the types instead of reshaping them.
   `protoc v7.34.1`; the tools are in the nix dev shell, `flake.nix:35-37`):
   ```sh
   cd crates/wuphf-proto && protoc \
-    --go_out=../../proto/go --go_opt=module=github.com/akshettrj/wuphf/proto/go \
-    --go-grpc_out=../../proto/go --go-grpc_opt=module=github.com/akshettrj/wuphf/proto/go \
+    --go_out=../../proto/go --go_opt=module=github.com/wuphf-rs/wuphf-ai/proto/go \
+    --go-grpc_out=../../proto/go --go-grpc_opt=module=github.com/wuphf-rs/wuphf-ai/proto/go \
     common.proto media.proto client.proto server.proto connector.proto functions.proto
   ```
   (`observer.proto` is deliberately not generated for Go; plan 032.) All Go
@@ -299,8 +299,8 @@ cargo fmt --check
 
 # Go bindings (needs protoc + plugins: run inside `nix develop`)
 (cd crates/wuphf-proto && protoc \
-  --go_out=../../proto/go --go_opt=module=github.com/akshettrj/wuphf/proto/go \
-  --go-grpc_out=../../proto/go --go-grpc_opt=module=github.com/akshettrj/wuphf/proto/go \
+  --go_out=../../proto/go --go_opt=module=github.com/wuphf-rs/wuphf-ai/proto/go \
+  --go-grpc_out=../../proto/go --go-grpc_opt=module=github.com/wuphf-rs/wuphf-ai/proto/go \
   common.proto media.proto client.proto server.proto connector.proto functions.proto)
 ```
 

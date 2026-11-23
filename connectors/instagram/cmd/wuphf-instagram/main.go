@@ -7,12 +7,12 @@ import (
 	"os"
 	"os/signal"
 
-	"github.com/akshettrj/wuphf/connectors/instagram/internal/config"
-	instagramconnector "github.com/akshettrj/wuphf/connectors/instagram/internal/instagram"
-	"github.com/akshettrj/wuphf/connectors/shared/chatdir"
-	"github.com/akshettrj/wuphf/connectors/shared/logging"
-	"github.com/akshettrj/wuphf/connectors/shared/setup"
 	"github.com/propheci/botconf/go/tui"
+	"github.com/wuphf-rs/wuphf-ai/connectors/instagram/internal/config"
+	instagramconnector "github.com/wuphf-rs/wuphf-ai/connectors/instagram/internal/instagram"
+	"github.com/wuphf-rs/wuphf-ai/connectors/shared/chatdir"
+	"github.com/wuphf-rs/wuphf-ai/connectors/shared/logging"
+	"github.com/wuphf-rs/wuphf-ai/connectors/shared/setup"
 )
 
 func main() {

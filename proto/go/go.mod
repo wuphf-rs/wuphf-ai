@@ -1,4 +1,4 @@
-module github.com/akshettrj/wuphf/proto/go
+module github.com/wuphf-rs/wuphf-ai/proto/go
 
 go 1.26.0
 

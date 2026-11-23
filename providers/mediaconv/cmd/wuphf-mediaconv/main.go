@@ -10,13 +10,13 @@ import (
 	"os"
 	"os/signal"
 
-	"github.com/akshettrj/wuphf/connectors/shared/coreclient"
-	"github.com/akshettrj/wuphf/connectors/shared/functions"
-	"github.com/akshettrj/wuphf/connectors/shared/logging"
-	"github.com/akshettrj/wuphf/connectors/shared/setup"
-	"github.com/akshettrj/wuphf/providers/mediaconv/internal/config"
-	"github.com/akshettrj/wuphf/providers/mediaconv/internal/convert"
 	"github.com/propheci/botconf/go/tui"
+	"github.com/wuphf-rs/wuphf-ai/connectors/shared/coreclient"
+	"github.com/wuphf-rs/wuphf-ai/connectors/shared/functions"
+	"github.com/wuphf-rs/wuphf-ai/connectors/shared/logging"
+	"github.com/wuphf-rs/wuphf-ai/connectors/shared/setup"
+	"github.com/wuphf-rs/wuphf-ai/providers/mediaconv/internal/config"
+	"github.com/wuphf-rs/wuphf-ai/providers/mediaconv/internal/convert"
 )
 
 // validate is setup's check of a candidate config: what the provider checks

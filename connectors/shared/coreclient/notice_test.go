@@ -4,7 +4,7 @@ import (
 	"slices"
 	"testing"
 
-	wuphfpb "github.com/akshettrj/wuphf/proto/go/connector/v1"
+	wuphfpb "github.com/wuphf-rs/wuphf-ai/proto/go/connector/v1"
 )
 
 func TestNoticeWithMediaCarriesItsMedia(t *testing.T) {

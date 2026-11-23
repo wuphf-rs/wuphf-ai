@@ -3,9 +3,9 @@ package settings
 import (
 	"context"
 
-	wuphfpb "github.com/akshettrj/wuphf/proto/go/connector/v1"
 	botconf "github.com/propheci/botconf/go/settings"
 	"github.com/rs/zerolog"
+	wuphfpb "github.com/wuphf-rs/wuphf-ai/proto/go/connector/v1"
 )
 
 // Connection is a connector's runtime settings: the declaration to send when

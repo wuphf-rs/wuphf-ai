@@ -11,7 +11,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/akshettrj/wuphf/connectors/whatsapp/internal/config"
+	"github.com/wuphf-rs/wuphf-ai/connectors/whatsapp/internal/config"
 )
 
 // stickerPackID is the stable identifier WhatsApp uses to group bridged stickers

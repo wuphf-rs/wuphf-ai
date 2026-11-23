@@ -8,9 +8,9 @@ import (
 	"os"
 	"time"
 
-	"github.com/akshettrj/wuphf/connectors/shared/logging"
 	"github.com/pelletier/go-toml/v2"
 	"github.com/propheci/botconf/go/describe"
+	"github.com/wuphf-rs/wuphf-ai/connectors/shared/logging"
 )
 
 // File is wuphf-misc's config file. Each option is described once, in its

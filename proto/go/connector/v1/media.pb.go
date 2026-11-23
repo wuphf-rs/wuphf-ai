@@ -207,7 +207,7 @@ const file_media_proto_rawDesc = "" +
 	"\x05chunk\x18\x01 \x01(\fR\x05chunk2\xc4\x01\n" +
 	"\x0eMediaTransport\x12U\n" +
 	"\vUploadMedia\x12$.wuphf.connector.v1.UploadMediaFrame\x1a\x1e.wuphf.connector.v1.Attachment(\x01\x12[\n" +
-	"\rDownloadMedia\x12(.wuphf.connector.v1.DownloadMediaRequest\x1a\x1e.wuphf.connector.v1.MediaChunk0\x01B:Z8github.com/akshettrj/wuphf/proto/go/connector/v1;wuphfpbb\x06proto3"
+	"\rDownloadMedia\x12(.wuphf.connector.v1.DownloadMediaRequest\x1a\x1e.wuphf.connector.v1.MediaChunk0\x01B<Z:github.com/wuphf-rs/wuphf-ai/proto/go/connector/v1;wuphfpbb\x06proto3"
 
 var (
 	file_media_proto_rawDescOnce sync.Once

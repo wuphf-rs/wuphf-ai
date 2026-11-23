@@ -151,8 +151,8 @@ pin / mute / archive.
   (045's Step 1 command, inside `nix develop`):
   ```sh
   cd crates/wuphf-proto && protoc \
-    --go_out=../../proto/go --go_opt=module=github.com/akshettrj/wuphf/proto/go \
-    --go-grpc_out=../../proto/go --go-grpc_opt=module=github.com/akshettrj/wuphf/proto/go \
+    --go_out=../../proto/go --go_opt=module=github.com/wuphf-rs/wuphf-ai/proto/go \
+    --go-grpc_out=../../proto/go --go-grpc_opt=module=github.com/wuphf-rs/wuphf-ai/proto/go \
     common.proto media.proto client.proto server.proto connector.proto functions.proto
   ```
 - **Provisioning.** `Router::route` gives a mirror target with no thread a

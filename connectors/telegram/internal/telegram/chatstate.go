@@ -7,10 +7,10 @@ import (
 	"strconv"
 	"time"
 
-	coreclient "github.com/akshettrj/wuphf/connectors/shared/coreclient"
-	"github.com/akshettrj/wuphf/proto/go/connector/v1"
 	"github.com/gotd/td/tg"
 	"github.com/gotd/td/tgerr"
+	coreclient "github.com/wuphf-rs/wuphf-ai/connectors/shared/coreclient"
+	"github.com/wuphf-rs/wuphf-ai/proto/go/connector/v1"
 )
 
 // telegramMutedForever is the mute_until value clients use for "muted

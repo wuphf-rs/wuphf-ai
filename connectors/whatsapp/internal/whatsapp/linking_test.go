@@ -8,10 +8,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/akshettrj/wuphf/connectors/shared/coreclient"
-	"github.com/akshettrj/wuphf/connectors/whatsapp/internal/config"
-	wuphfpb "github.com/akshettrj/wuphf/proto/go/connector/v1"
 	"github.com/rs/zerolog"
+	"github.com/wuphf-rs/wuphf-ai/connectors/shared/coreclient"
+	"github.com/wuphf-rs/wuphf-ai/connectors/whatsapp/internal/config"
+	wuphfpb "github.com/wuphf-rs/wuphf-ai/proto/go/connector/v1"
 )
 
 func TestLinkCodesAreToldWithGrowingGaps(t *testing.T) {

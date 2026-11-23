@@ -9,11 +9,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/akshettrj/wuphf/proto/go/connector/v1"
 	"github.com/gotd/td/bin"
 	"github.com/gotd/td/tg"
 	"github.com/gotd/td/tgerr"
 	"github.com/rs/zerolog"
+	"github.com/wuphf-rs/wuphf-ai/proto/go/connector/v1"
 )
 
 // lookupInvoker answers a bot's peer lookups with known access hashes, and

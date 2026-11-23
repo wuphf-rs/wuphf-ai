@@ -9,11 +9,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/akshettrj/wuphf/proto/go/connector/v1"
 	"github.com/gotd/td/bin"
 	"github.com/gotd/td/telegram/message"
 	"github.com/gotd/td/tg"
 	"github.com/rs/zerolog"
+	"github.com/wuphf-rs/wuphf-ai/proto/go/connector/v1"
 )
 
 // recordingInvoker answers Telegram API calls with empty successes and records

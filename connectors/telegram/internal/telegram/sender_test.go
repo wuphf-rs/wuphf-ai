@@ -6,8 +6,8 @@ import (
 	"slices"
 	"testing"
 
-	"github.com/akshettrj/wuphf/proto/go/connector/v1"
 	"github.com/gotd/td/tg"
+	"github.com/wuphf-rs/wuphf-ai/proto/go/connector/v1"
 )
 
 func TestAttributedText(t *testing.T) {

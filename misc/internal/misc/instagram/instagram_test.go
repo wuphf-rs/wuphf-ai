@@ -10,10 +10,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/akshettrj/wuphf/connectors/shared/functions"
-	"github.com/akshettrj/wuphf/misc/internal/config"
-	"github.com/akshettrj/wuphf/misc/internal/misc"
 	"github.com/rs/zerolog"
+	"github.com/wuphf-rs/wuphf-ai/connectors/shared/functions"
+	"github.com/wuphf-rs/wuphf-ai/misc/internal/config"
+	"github.com/wuphf-rs/wuphf-ai/misc/internal/misc"
 )
 
 // fakeInvoker answers instagram.fetch_media@1 per URL.

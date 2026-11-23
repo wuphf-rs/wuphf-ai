@@ -26,7 +26,7 @@ const file_connector_proto_rawDesc = "" +
 	"\n" +
 	"\x0fconnector.proto\x12\x12wuphf.connector.v1\x1a\fclient.proto\x1a\fserver.proto2i\n" +
 	"\x12ConnectorTransport\x12S\n" +
-	"\vOpenSession\x12\x1f.wuphf.connector.v1.ClientFrame\x1a\x1f.wuphf.connector.v1.ServerFrame(\x010\x01B:Z8github.com/akshettrj/wuphf/proto/go/connector/v1;wuphfpbb\x06proto3"
+	"\vOpenSession\x12\x1f.wuphf.connector.v1.ClientFrame\x1a\x1f.wuphf.connector.v1.ServerFrame(\x010\x01B<Z:github.com/wuphf-rs/wuphf-ai/proto/go/connector/v1;wuphfpbb\x06proto3"
 
 var file_connector_proto_goTypes = []any{
 	(*ClientFrame)(nil), // 0: wuphf.connector.v1.ClientFrame

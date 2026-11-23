@@ -5,10 +5,10 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/akshettrj/wuphf/connectors/shared/chatdir"
-	"github.com/akshettrj/wuphf/connectors/telegram/internal/config"
 	"github.com/gotd/td/telegram/message/peer"
 	"github.com/gotd/td/tg"
+	"github.com/wuphf-rs/wuphf-ai/connectors/shared/chatdir"
+	"github.com/wuphf-rs/wuphf-ai/connectors/telegram/internal/config"
 )
 
 // fakeScreen answers setup's questions, recording them.

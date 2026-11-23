@@ -6,7 +6,7 @@ import (
 	"os"
 	"testing"
 
-	"github.com/akshettrj/wuphf/connectors/shared/settings"
+	"github.com/wuphf-rs/wuphf-ai/connectors/shared/settings"
 )
 
 // declarationFixture is what this connector declares by default, checked by

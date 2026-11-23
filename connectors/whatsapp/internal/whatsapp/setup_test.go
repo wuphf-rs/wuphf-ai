@@ -8,9 +8,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/akshettrj/wuphf/connectors/shared/chatdir"
-	"github.com/akshettrj/wuphf/connectors/whatsapp/internal/config"
 	"github.com/rs/zerolog"
+	"github.com/wuphf-rs/wuphf-ai/connectors/shared/chatdir"
+	"github.com/wuphf-rs/wuphf-ai/connectors/whatsapp/internal/config"
 	"go.mau.fi/whatsmeow/types"
 )
 

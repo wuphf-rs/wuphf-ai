@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/akshettrj/wuphf/connectors/shared/setup"
 	"github.com/pelletier/go-toml/v2"
+	"github.com/wuphf-rs/wuphf-ai/connectors/shared/setup"
 )
 
 func TestValidateRequiresCoreConnectorAndSession(t *testing.T) {
