@@ -9,6 +9,7 @@ import (
 
 	"github.com/akshettrj/wuphf/connectors/instagram/internal/config"
 	instagramconnector "github.com/akshettrj/wuphf/connectors/instagram/internal/instagram"
+	"github.com/akshettrj/wuphf/connectors/shared/chatdir"
 	"github.com/akshettrj/wuphf/connectors/shared/logging"
 	"github.com/akshettrj/wuphf/connectors/shared/setup"
 	"github.com/propheci/botconf/go/tui"
@@ -16,7 +17,11 @@ import (
 
 func main() {
 	if setup.Requested(os.Args[1:]) {
-		if err := setup.Run(os.Args[2:], tui.Setup{Description: config.Description(), Validate: validate}); err != nil {
+		if err := setup.Run(os.Args[2:], tui.Setup{
+			Description: config.Description(),
+			Validate:    validate,
+			Actions:     setup.AccountActions(chatdir.Dir(), openAccount),
+		}); err != nil {
 			exit(err)
 		}
 		return
@@ -34,6 +39,15 @@ func main() {
 		logger.Error().Err(err).Msg("connector stopped")
 		os.Exit(1)
 	}
+}
+
+// openAccount is setup's account on the saved config.
+func openAccount(candidate tui.Candidate) (*setup.Account, error) {
+	cfg, err := config.Parse([]byte(candidate.Config))
+	if err != nil {
+		return nil, err
+	}
+	return instagramconnector.SetupAccount(cfg), nil
 }
 
 func exit(err error) {

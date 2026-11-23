@@ -12,6 +12,7 @@ import (
 	coreclient "github.com/akshettrj/wuphf/connectors/shared/coreclient"
 	"github.com/akshettrj/wuphf/connectors/shared/functions"
 	"github.com/akshettrj/wuphf/connectors/shared/logging"
+	"github.com/akshettrj/wuphf/connectors/shared/sessionlock"
 	"github.com/akshettrj/wuphf/connectors/shared/settings"
 	wuphfpb "github.com/akshettrj/wuphf/proto/go/connector/v1"
 	"github.com/rs/zerolog"
@@ -31,6 +32,13 @@ func New(cfg config.File, logger zerolog.Logger) Connector {
 }
 
 func (c Connector) Run(ctx context.Context) error {
+	// Held while the connector runs, so setup's actions never use the session
+	// at the same time.
+	lock, err := sessionlock.Acquire(c.cfg.SessionFile)
+	if err != nil {
+		return fmt.Errorf("lock the Instagram session (is another wuphf-instagram, or its setup, using it?): %w", err)
+	}
+	defer lock.Release()
 	jar, err := loadCookies(c.cfg)
 	if err != nil {
 		return err

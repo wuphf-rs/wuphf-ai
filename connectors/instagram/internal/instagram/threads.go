@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"strconv"
 	"sync"
 
@@ -206,6 +207,27 @@ func (d *ThreadDirectory) ChatTitle(threadKey int64) *string {
 	}
 	title := tag + entry.title
 	return &title
+}
+
+// ListedThread is a thread the directory knows, for setup's chat list.
+type ListedThread struct {
+	// ChatID is the connector's chat id (the thread key).
+	ChatID  string
+	Title   string
+	IsGroup bool
+}
+
+// Threads are the threads the directory knows, ordered by chat id; an
+// untitled one has an empty title.
+func (d *ThreadDirectory) Threads() []ListedThread {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	out := make([]ListedThread, 0, len(d.threads))
+	for threadKey, entry := range d.threads {
+		out = append(out, ListedThread{ChatID: formatThreadKey(threadKey), Title: entry.title, IsGroup: entry.isGroup})
+	}
+	slices.SortFunc(out, func(a, b ListedThread) int { return cmp.Compare(a.ChatID, b.ChatID) })
+	return out
 }
 
 // UserName returns the display name recorded for a user, or "" when unknown.
