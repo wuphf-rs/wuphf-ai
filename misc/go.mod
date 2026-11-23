@@ -10,7 +10,7 @@ require (
 	github.com/akshettrj/wuphf/connectors/shared v0.0.0-00010101000000-000000000000
 	github.com/akshettrj/wuphf/proto/go v0.0.0-00010101000000-000000000000
 	github.com/pelletier/go-toml/v2 v2.4.3
-	github.com/propheci/botconf/go v0.14.0
+	github.com/propheci/botconf/go v0.14.1
 	github.com/rs/zerolog v1.35.1
 	google.golang.org/grpc v1.85.0
 )

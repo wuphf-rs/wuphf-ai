@@ -341,8 +341,8 @@ dependencies = [
 
 [[package]]
 name = "botconf"
-version = "0.14.0"
-source = "git+https://github.com/propheci/botconf?tag=v0.14.0#34757c2728cb7ae3bfcf77423cb43f73fdcdd739"
+version = "0.14.1"
+source = "git+https://github.com/propheci/botconf?tag=v0.14.1#53efe28b0b0546aef9c70a319b7784f957963353"
 dependencies = [
  "arc-swap",
  "botconf-derive",
@@ -357,8 +357,8 @@ dependencies = [
 
 [[package]]
 name = "botconf-derive"
-version = "0.14.0"
-source = "git+https://github.com/propheci/botconf?tag=v0.14.0#34757c2728cb7ae3bfcf77423cb43f73fdcdd739"
+version = "0.14.1"
+source = "git+https://github.com/propheci/botconf?tag=v0.14.1#53efe28b0b0546aef9c70a319b7784f957963353"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -367,8 +367,8 @@ dependencies = [
 
 [[package]]
 name = "botconf-proto"
-version = "0.14.0"
-source = "git+https://github.com/propheci/botconf?tag=v0.14.0#34757c2728cb7ae3bfcf77423cb43f73fdcdd739"
+version = "0.14.1"
+source = "git+https://github.com/propheci/botconf?tag=v0.14.1#53efe28b0b0546aef9c70a319b7784f957963353"
 dependencies = [
  "prost",
  "tonic",
@@ -377,8 +377,8 @@ dependencies = [
 
 [[package]]
 name = "botconf-tui"
-version = "0.14.0"
-source = "git+https://github.com/propheci/botconf?tag=v0.14.0#34757c2728cb7ae3bfcf77423cb43f73fdcdd739"
+version = "0.14.1"
+source = "git+https://github.com/propheci/botconf?tag=v0.14.1#53efe28b0b0546aef9c70a319b7784f957963353"
 dependencies = [
  "botconf",
  "crossterm",
