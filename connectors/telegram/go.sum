@@ -94,8 +94,8 @@ github.com/pb33f/ordered-map/v2 v2.3.2 h1:wDyaZ2Pv9QLh64X4utCeD5Zoi9nIv2aW3lwv17
 github.com/pb33f/ordered-map/v2 v2.3.2/go.mod h1:1OhFrXu3OYw3kM+FXF+Ug3ugmmZ9LE8z0JfQMLvtV0w=
 github.com/pelletier/go-toml/v2 v2.4.3 h1:GTRvJQutkOSftxIFD5xw9aepkYNuPWmVJpffdDPYVpY=
 github.com/pelletier/go-toml/v2 v2.4.3/go.mod h1:2gIqNv+qfxSVS7cM2xJQKtLSTLUE9V8t9Stt+h56mCY=
-github.com/propheci/botconf/go v0.13.4 h1:CSR2E2Yt+/g6b0advhkHz6VnfuArhrhG2G7G3q4MBlo=
-github.com/propheci/botconf/go v0.13.4/go.mod h1:rqy9DIeqso5XSiL1dzcipQiEVDpFogMSmo1NypTDIpg=
+github.com/propheci/botconf/go v0.14.0 h1:Xotf9rPEg0Fk31JxcOnEt5hcGEhcCC5Xl+F/9PllvKE=
+github.com/propheci/botconf/go v0.14.0/go.mod h1:W3CHo+o2d5UG2ZG4MEMRlS0o9zBW2ThSCcGs0HvC3Ao=
 github.com/refraction-networking/utls v1.8.2 h1:j4Q1gJj0xngdeH+Ox/qND11aEfhpgoEvV+S9iJ2IdQo=
 github.com/refraction-networking/utls v1.8.2/go.mod h1:jkSOEkLqn+S/jtpEHPOsVv/4V4EVnelwbMQl4vCWXAM=
 github.com/rivo/uniseg v0.2.0/go.mod h1:J6wj4VEh+S6ZtnVlnTBMWIodfgj8LQOQFoIToxlJtxc=

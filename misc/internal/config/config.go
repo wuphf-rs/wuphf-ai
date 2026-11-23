@@ -41,7 +41,7 @@ func Description() *describe.Description {
 // the defaults (see WithDefaults).
 type Instagram struct {
 	Enabled bool     `toml:"enabled" example:"false" doc:"Instagram downloader: when someone posts an Instagram post or reel link in one of chats, reply to it with the post's video or photos (a carousel's every item). Messages you send count too, from your phone or the TUI; wuphf-misc's own replies never do. Edits do not. Links sent while wuphf-misc is down are not answered.\n\nThe fetch runs on the Instagram connector's logged-in account, through the core's function broker: enable the Instagram connector's [functions] section and the core's matching [[functions.providers]] entry. Every fetch is an Instagram request on that account, so keep the limits low."`
-	Chats   []string `toml:"chats" example:"[\"whatsapp-main:120363000000000000@g.us\"]" doc:"Chat references, as in the core's rules: connector:chat, or connector:chat#thread for one thread only. Required when enabled."`
+	Chats   []string `toml:"chats" domain:"wuphf.chat" example:"[\"whatsapp-main:120363000000000000@g.us\"]" doc:"Chat references, as in the core's rules: connector:chat, or connector:chat#thread for one thread only. Required when enabled."`
 	// Nil means true.
 	Caption            *bool  `toml:"caption" default:"true" example:"true" doc:"Add \"@author: \" and up to 200 characters of the post's text to the reply."`
 	ReplyOnFailure     bool   `toml:"reply_on_failure" example:"false" doc:"Reply \"Could not download this post.\" when a fetch fails; else a failure is only logged."`

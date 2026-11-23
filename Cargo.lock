@@ -301,8 +301,8 @@ checksum = "dc0b364ead1874514c8c2855ab558056ebfeb775653e7ae45ff72f28f8f3166c"
 
 [[package]]
 name = "botconf"
-version = "0.13.2"
-source = "git+https://github.com/propheci/botconf?tag=v0.13.2#0c5af0f4e12b31f68117d4e09272a4108c430401"
+version = "0.14.0"
+source = "git+https://github.com/propheci/botconf?tag=v0.14.0#34757c2728cb7ae3bfcf77423cb43f73fdcdd739"
 dependencies = [
  "arc-swap",
  "botconf-derive",
@@ -318,8 +318,8 @@ dependencies = [
 
 [[package]]
 name = "botconf-derive"
-version = "0.13.2"
-source = "git+https://github.com/propheci/botconf?tag=v0.13.2#0c5af0f4e12b31f68117d4e09272a4108c430401"
+version = "0.14.0"
+source = "git+https://github.com/propheci/botconf?tag=v0.14.0#34757c2728cb7ae3bfcf77423cb43f73fdcdd739"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -328,8 +328,8 @@ dependencies = [
 
 [[package]]
 name = "botconf-grpc"
-version = "0.13.2"
-source = "git+https://github.com/propheci/botconf?tag=v0.13.2#0c5af0f4e12b31f68117d4e09272a4108c430401"
+version = "0.14.0"
+source = "git+https://github.com/propheci/botconf?tag=v0.14.0#34757c2728cb7ae3bfcf77423cb43f73fdcdd739"
 dependencies = [
  "botconf",
  "botconf-panel",
@@ -344,8 +344,8 @@ dependencies = [
 
 [[package]]
 name = "botconf-panel"
-version = "0.13.2"
-source = "git+https://github.com/propheci/botconf?tag=v0.13.2#0c5af0f4e12b31f68117d4e09272a4108c430401"
+version = "0.14.0"
+source = "git+https://github.com/propheci/botconf?tag=v0.14.0#34757c2728cb7ae3bfcf77423cb43f73fdcdd739"
 dependencies = [
  "botconf",
  "futures",
@@ -356,8 +356,8 @@ dependencies = [
 
 [[package]]
 name = "botconf-proto"
-version = "0.13.2"
-source = "git+https://github.com/propheci/botconf?tag=v0.13.2#0c5af0f4e12b31f68117d4e09272a4108c430401"
+version = "0.14.0"
+source = "git+https://github.com/propheci/botconf?tag=v0.14.0#34757c2728cb7ae3bfcf77423cb43f73fdcdd739"
 dependencies = [
  "prost",
  "tonic",
@@ -366,12 +366,13 @@ dependencies = [
 
 [[package]]
 name = "botconf-tui"
-version = "0.13.2"
-source = "git+https://github.com/propheci/botconf?tag=v0.13.2#0c5af0f4e12b31f68117d4e09272a4108c430401"
+version = "0.14.0"
+source = "git+https://github.com/propheci/botconf?tag=v0.14.0#34757c2728cb7ae3bfcf77423cb43f73fdcdd739"
 dependencies = [
  "botconf",
  "crossterm",
  "getrandom 0.3.4",
+ "qrcode",
  "ratatui",
  "serde_json",
  "toml",
@@ -2294,6 +2295,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "qrcode"
+version = "0.14.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d68782463e408eb1e668cf6152704bd856c78c5b6417adaee3203d8f4c1fc9ec"
+
+[[package]]
 name = "quote"
 version = "1.0.47"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3934,6 +3941,7 @@ dependencies = [
  "uuid",
  "wuphf-core",
  "wuphf-functions",
+ "wuphf-model",
  "wuphf-proto",
  "wuphf-runtime",
  "wuphf-settings",

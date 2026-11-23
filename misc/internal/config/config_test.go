@@ -53,3 +53,18 @@ func TestValidateRequiresCoreAndObserverToken(t *testing.T) {
 		}
 	}
 }
+
+// [instagram] chats are picked by name in setup: they name the chat domain.
+func TestInstagramChatsNameTheChatDomain(t *testing.T) {
+	for _, entry := range Description().Table.Entries {
+		if entry.Key != "instagram" {
+			continue
+		}
+		for _, field := range entry.Node.Table.Entries {
+			if field.Key == "chats" && field.Domain == setup.ChatDomain {
+				return
+			}
+		}
+	}
+	t.Fatal("instagram.chats has no chat domain")
+}

@@ -8,7 +8,7 @@ require (
 	github.com/akshettrj/wuphf/proto/go v0.0.0-00010101000000-000000000000
 	github.com/invopop/jsonschema v0.14.0
 	github.com/pelletier/go-toml/v2 v2.4.3
-	github.com/propheci/botconf/go v0.13.4
+	github.com/propheci/botconf/go v0.14.0
 	github.com/rs/zerolog v1.35.1
 	google.golang.org/grpc v1.85.0
 	google.golang.org/protobuf v1.36.12
@@ -41,4 +41,5 @@ require (
 	golang.org/x/sys v0.50.0 // indirect
 	golang.org/x/text v0.44.0 // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20261110000943-09e21b237f2c // indirect
+	rsc.io/qr v0.2.0 // indirect
 )

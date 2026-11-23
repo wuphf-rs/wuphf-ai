@@ -109,6 +109,17 @@ Telegram's application credentials (`WUPHF_TELEGRAM_APP_ID`,
 environment without an option naming them, so the setup screen describes them
 but does not edit them: put them in `.env.local` yourself.
 
+Chats are picked by name. The core's chat options (`notify`, the rules'
+chats, chat-state overrides) and misc's `[instagram] chats` suggest chats as
+you type, from the **chat directory**: one file per connector,
+`<connector_id>.chats.json`, in `$WUPHF_CHAT_DIRECTORY`, else
+`$XDG_STATE_HOME/wuphf/chats` (`~/.local/state/wuphf/chats`). A connector's
+setup writes its file when its account is linked there (Link account); the
+core's setup offers the chats of the
+connectors its config lists, misc's those of every file. A typed
+`connector:chat` is still taken, so a chat the directory lacks can be named
+by hand.
+
 The core and the connectors read a connector's token from variables of the
 same name, so a token generated on one side is set for the other too. Each
 component's `config.example.toml` (the core's `config/example.toml`) is

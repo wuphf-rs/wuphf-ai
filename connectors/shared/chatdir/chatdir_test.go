@@ -60,6 +60,23 @@ func TestAFileIsWrittenWholeAndReadBack(t *testing.T) {
 	}
 }
 
+func TestEveryConnectorsFileIsRead(t *testing.T) {
+	dir := t.TempDir()
+	if all, err := ReadAll(filepath.Join(dir, "missing")); all != nil || err != nil {
+		t.Fatalf("no directory: %v %v", all, err)
+	}
+	New("b", "telegram", 1, nil).Write(dir)
+	New("a", "whatsapp", 1, nil).Write(dir)
+	all, err := ReadAll(dir)
+	if err != nil || len(all) != 2 || all[0].ConnectorID != "a" || all[1].ConnectorID != "b" {
+		t.Fatalf("all %+v %v", all, err)
+	}
+	os.WriteFile(Path(dir, "c"), []byte("{"), 0o644)
+	if _, err := ReadAll(dir); err == nil {
+		t.Fatal("a broken file is an error")
+	}
+}
+
 func TestAnotherVersionOrConnectorIsRefused(t *testing.T) {
 	dir := t.TempDir()
 	path := Path(dir, "whatsapp-main")

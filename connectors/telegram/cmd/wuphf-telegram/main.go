@@ -30,7 +30,7 @@ func main() {
 	case "reset":
 		runReset(args)
 	case "setup":
-		if err := setup.Run(args, config.Description(), validate); err != nil {
+		if err := setup.Run(args, tui.Setup{Description: config.Description(), Validate: validate}); err != nil {
 			exit(err)
 		}
 	default:

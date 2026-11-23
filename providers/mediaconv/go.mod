@@ -10,7 +10,7 @@ require (
 	github.com/akshettrj/wuphf/connectors/shared v0.0.0-00010101000000-000000000000
 	github.com/akshettrj/wuphf/proto/go v0.0.0-00010101000000-000000000000
 	github.com/pelletier/go-toml/v2 v2.4.3
-	github.com/propheci/botconf/go v0.13.4
+	github.com/propheci/botconf/go v0.14.0
 	github.com/watgbridge/tgsconverter v0.0.0-20240710075117-d1c05581b842
 )
 
@@ -44,4 +44,5 @@ require (
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20261110000943-09e21b237f2c // indirect
 	google.golang.org/grpc v1.85.0 // indirect
 	google.golang.org/protobuf v1.36.12 // indirect
+	rsc.io/qr v0.2.0 // indirect
 )

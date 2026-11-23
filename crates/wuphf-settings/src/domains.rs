@@ -81,4 +81,60 @@ mod tests {
         assert_eq!((connector.parse)("tele:gram"), None);
         assert_eq!((rule.parse)("a.b"), None);
     }
+
+    /// The config types name domains as literals (`#[botconf(domain =
+    /// "…")]`): each must be one the panel registers, and the chat and
+    /// connector options must name theirs.
+    #[test]
+    fn the_config_names_registered_domains() {
+        use botconf::describe::{Node, Table};
+
+        fn walk(table: &Table, path: &str, out: &mut Vec<(String, String)>) {
+            for entry in &table.entries {
+                let path = format!("{path}{}", entry.key);
+                if let Some(domain) = &entry.domain {
+                    out.push((path.clone(), domain.clone()));
+                }
+                let mut node = &entry.node;
+                while let Node::List(inner) | Node::Map(inner) = node {
+                    node = inner;
+                }
+                match node {
+                    Node::Table(table) => walk(table, &format!("{path}."), out),
+                    Node::Tagged {
+                        common, variants, ..
+                    } => {
+                        walk(common, &format!("{path}."), out);
+                        for variant in variants {
+                            walk(&variant.table, &format!("{path}.{}.", variant.value), out);
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
+        let mut named = Vec::new();
+        walk(&crate::description().table, "", &mut named);
+        let registered = all().map(|domain| domain.name);
+        for (path, domain) in &named {
+            assert!(
+                registered.contains(&domain.as_str()),
+                "{path}: {domain} is not registered"
+            );
+        }
+        let paths: Vec<&str> = named.iter().map(|(path, _)| path.as_str()).collect();
+        assert_eq!(
+            paths,
+            [
+                "rules.one-to-one.source",
+                "rules.one-to-one.destination",
+                "rules.many-to-one.source_connector",
+                "rules.many-to-one.destination",
+                "rules.many-to-one.only_chats",
+                "rules.many-to-one.except_chats",
+                "notify",
+                "chat_state.chats.chat",
+            ]
+        );
+    }
 }

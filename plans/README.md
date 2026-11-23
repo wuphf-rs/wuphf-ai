@@ -78,7 +78,7 @@ code).
 | 058 | Connector commands in the settings panel: WhatsApp "resync app state" and "send a new link code" | P1 | L | botconf 014, 056, 057 | DONE (see notes) |
 | 059 | Offline setup TUIs for the Rust binaries (core, whatsapp-rust), each option described once on its config type | P1 | L | botconf 015 | DONE (see notes) |
 | 060 | Offline setup TUIs for the Go binaries (Telegram, WhatsApp, Instagram, mediaconv, misc) | P1 | L | botconf 015, 059 | DONE (see notes) |
-| 062 | The chat directory (one file per connector, fetched by its setup) and chats picked by name in the core's and misc's setup | P1 | M | botconf 017, 059, 060 | TODO |
+| 062 | The chat directory (one file per connector, fetched by its setup) and chats picked by name in the core's and misc's setup | P1 | M | botconf 017, 059, 060 | DONE |
 | 063 | Link a connector's account from its setup (WhatsApp Go and Rust, Telegram, Instagram) and fetch its chats into the directory | P1 | L | botconf 017, 062 | TODO |
 | 061 | Settings backup: `wuphf-server export` / `import` (config + every stored override, connectors' included; secrets only with a flag), online `wuphf settings export` / `import` | P1 | M | botconf 016, 059; after 062, 063 | TODO |
 
@@ -1670,3 +1670,21 @@ From the 2026-10-22 remote-functions design:
   Owner: `wtg setup`, `wwa setup`, `wig setup`, `wmc setup`, `wmi setup`
   (dev binaries rebuilt). As with the Rust binaries, a save drops your own
   comments from config.local.toml.
+
+- **062 (2026-11-23).** The chat directory: `wuphf_model::ChatDirectory`
+  (path from `$WUPHF_CHAT_DIRECTORY` / `$XDG_STATE_HOME` / `$HOME`, read,
+  written whole, version and connector checked) and Go
+  `connectors/shared/chatdir`, both decoding one fixture
+  (`connectors/shared/chatdir/testdata/directory.json`). The core pins botconf
+  `v0.14.0` and its chat options name `wuphf.chat` (`notify`, the rules'
+  chats, chat-state overrides' `chat`), `source_connector` `wuphf.connector`;
+  `notify`'s hand-written reference kind is derived now, and a test checks
+  every named domain is a registered panel domain. The core's setup suggests
+  the chats of the connectors its config lists, and those connectors; misc's
+  `[instagram] chats` suggests from every file (`setup.SuggestChats`). The Go
+  modules pin `go/v0.14.0`; `setup.Run` takes a `tui.Setup`, so a binary can
+  add suggestions and actions (063). Tests: model +5, cli +3, settings +1,
+  chatdir +6, shared setup +1, misc +1. Rust fmt, clippy and the workspace
+  tests clean; gofmt, `go vet` and the tests clean in every Go module.
+  Owner: `wuphf-server setup` and `wmi setup` show "No chats known yet" in a chat
+  field until 063's Link account writes a file (or one is written by hand).

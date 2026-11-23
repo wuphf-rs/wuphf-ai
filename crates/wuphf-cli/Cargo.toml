@@ -10,6 +10,7 @@ botconf = { workspace = true, features = ["cli"] }
 botconf-grpc.workspace = true
 botconf-tui.workspace = true
 clap.workspace = true
+serde_json.workspace = true
 tokio.workspace = true
 tonic.workspace = true
 tracing.workspace = true
@@ -17,11 +18,11 @@ tracing-subscriber.workspace = true
 uuid.workspace = true
 wuphf-core.workspace = true
 wuphf-functions.workspace = true
+wuphf-model.workspace = true
 wuphf-proto.workspace = true
 wuphf-runtime.workspace = true
 wuphf-settings.workspace = true
 wuphf-storage.workspace = true
 
 [dev-dependencies]
-serde_json.workspace = true
 tokio-stream.workspace = true

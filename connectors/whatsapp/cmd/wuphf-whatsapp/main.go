@@ -16,7 +16,7 @@ import (
 
 func main() {
 	if setup.Requested(os.Args[1:]) {
-		if err := setup.Run(os.Args[2:], config.Description(), validate); err != nil {
+		if err := setup.Run(os.Args[2:], tui.Setup{Description: config.Description(), Validate: validate}); err != nil {
 			exit(err)
 		}
 		return

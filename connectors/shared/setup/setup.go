@@ -5,7 +5,8 @@
 //
 // A binary describes its config file once, in the struct tags of its config
 // type (see botconf's describe package: `toml`, `doc`, `title`, `default`,
-// `example`, `hint`, `required`, `env`, `secret`, `botconf`, `jsonschema`).
+// `example`, `hint`, `required`, `env`, `secret`, `domain`, `botconf`,
+// `jsonschema`).
 package setup
 
 import (
@@ -15,6 +16,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/akshettrj/wuphf/connectors/shared/chatdir"
 	"github.com/propheci/botconf/go/describe"
 	"github.com/propheci/botconf/go/tui"
 )
@@ -24,22 +26,57 @@ func Requested(args []string) bool {
 	return len(args) > 0 && args[0] == "setup"
 }
 
-// Run parses setup's flags (the arguments after `setup`) and opens the setup
-// screen. validate is the binary's own check of a candidate config file (its
-// loader), with the env file's variables as they would be written.
-func Run(args []string, description *describe.Description, validate func(tui.Candidate) error) error {
+// Run parses setup's flags (the arguments after `setup`: the files' paths)
+// and opens the setup screen. screen is the binary's: its description, its
+// own check of a candidate config file (its loader, with the env file's
+// variables as they would be written), and any suggestions and actions.
+func Run(args []string, screen tui.Setup) error {
 	flags := flag.NewFlagSet("setup", flag.ExitOnError)
 	config := flags.String("config", "config.local.toml", "the config file to edit")
 	envFile := flags.String("env-file", ".env.local", "the env file its options' variables are set in")
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
-	return tui.Run(tui.Setup{
-		Description: description,
-		ConfigPath:  *config,
-		EnvPath:     *envFile,
-		Validate:    validate,
-	})
+	screen.ConfigPath, screen.EnvPath = *config, *envFile
+	return tui.Run(screen)
+}
+
+// ChatDomain is the domain of options holding chats (`domain:"wuphf.chat"`),
+// written `connector:chat`, as the core's.
+const ChatDomain = "wuphf.chat"
+
+// SuggestChats suggests chats (ChatDomain) from the chat directory dir:
+// every connector's file there, title first. With none it says how to get
+// one.
+func SuggestChats(dir string) tui.SuggestFunc {
+	return func(query tui.Query) ([]tui.Suggestion, error) {
+		if query.Domain != ChatDomain {
+			return nil, nil
+		}
+		if dir == "" {
+			return nil, fmt.Errorf("No chat directory: set %s (or $XDG_STATE_HOME or $HOME).", chatdir.DirectoryEnv)
+		}
+		directories, err := chatdir.ReadAll(dir)
+		if err != nil {
+			return nil, err
+		}
+		if len(directories) == 0 {
+			return nil, errors.New("No chats known yet: link a connector in its setup " +
+				"(wuphf-<platform> setup, then Link account).")
+		}
+		var found []tui.Suggestion
+		for _, directory := range directories {
+			for _, chat := range directory.Chats {
+				if len(found) < query.Limit && chat.Matches(query.Text) {
+					found = append(found, tui.Suggestion{
+						Value: chat.Chat,
+						Label: fmt.Sprintf("%s (%s, %s)", chat.Title, chat.Kind, chat.Chat),
+					})
+				}
+			}
+		}
+		return found, nil
+	}
 }
 
 // Env reads a variable from a candidate's env file, else from the process

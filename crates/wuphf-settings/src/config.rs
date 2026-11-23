@@ -139,7 +139,7 @@ pub struct Configuration {
     #[botconf(
         runtime,
         title = "Notice targets",
-        panel = Kind::reference(crate::domains::CHAT, true),
+        domain = "wuphf.chat",
         example = ["telegram-main:telegram:user:704338780"],
     )]
     pub notify: Vec<ChatTarget>,
@@ -206,6 +206,7 @@ pub struct ChatStateConfig {
 #[derive(Debug, Clone, Deserialize, Serialize, Describe)]
 pub struct ChatStateOverride {
     /// The source chat or its mirror topic.
+    #[botconf(domain = "wuphf.chat")]
     pub chat: ChatTarget,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pin: Option<ChatStateDirection>,
@@ -263,7 +264,9 @@ pub enum RuleEntryKind {
     /// (optionally a thread within it).
     #[botconf(title = "One chat to one chat")]
     OneToOne {
+        #[botconf(domain = "wuphf.chat")]
         source: ChatTarget,
+        #[botconf(domain = "wuphf.chat")]
         destination: ChatTarget,
     },
     /// Every chat on the source connector, each mirrored into its own topic
@@ -273,13 +276,17 @@ pub enum RuleEntryKind {
     #[botconf(title = "Every chat into one, a thread each")]
     ManyToOne {
         /// The connector whose chats are mirrored.
+        #[botconf(domain = "wuphf.connector")]
         source_connector: ConnectorId,
+        #[botconf(domain = "wuphf.chat")]
         destination: ChatTarget,
         /// Only these source chats are mirrored. Excludes `except_chats`.
         #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[botconf(domain = "wuphf.chat")]
         only_chats: Option<Vec<ChatTarget>>,
         /// Every source chat except these is mirrored. Excludes `only_chats`.
         #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[botconf(domain = "wuphf.chat")]
         except_chats: Option<Vec<ChatTarget>>,
     },
 }

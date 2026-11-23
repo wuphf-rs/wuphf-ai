@@ -128,6 +128,26 @@ func Read(dir, connectorID string) (*Directory, error) {
 	return &directory, nil
 }
 
+// ReadAll is every connector's chats in dir, ordered by connector id; none
+// when dir does not exist.
+func ReadAll(dir string) ([]Directory, error) {
+	paths, err := filepath.Glob(filepath.Join(dir, "*.chats.json"))
+	if err != nil {
+		return nil, err
+	}
+	var out []Directory
+	for _, path := range paths {
+		directory, err := Read(dir, strings.TrimSuffix(filepath.Base(path), ".chats.json"))
+		if err != nil {
+			return nil, err
+		}
+		if directory != nil {
+			out = append(out, *directory)
+		}
+	}
+	return out, nil
+}
+
 // Write writes the file whole (a temporary file, renamed over it), creating
 // dir; it returns the file's path.
 func (d Directory) Write(dir string) (string, error) {

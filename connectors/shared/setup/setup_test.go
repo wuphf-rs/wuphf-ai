@@ -3,9 +3,11 @@ package setup
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
+	"github.com/akshettrj/wuphf/connectors/shared/chatdir"
 	"github.com/propheci/botconf/go/describe"
 	"github.com/propheci/botconf/go/tui"
 )
@@ -50,5 +52,37 @@ func TestRequireToken(t *testing.T) {
 	}
 	if !Requested([]string{"setup", "-config", "x"}) || Requested([]string{"-config", "x"}) {
 		t.Fatal("Requested")
+	}
+}
+
+func TestChatsAreSuggestedFromEveryConnectorsFile(t *testing.T) {
+	dir := t.TempDir()
+	ask := func(suggest tui.SuggestFunc, domain, text string) ([]string, error) {
+		found, err := suggest(tui.Query{Domain: domain, Text: text, Limit: 8})
+		var labels []string
+		for _, suggestion := range found {
+			labels = append(labels, suggestion.Label)
+		}
+		return labels, err
+	}
+	if _, err := ask(SuggestChats(dir), ChatDomain, ""); err == nil || !strings.HasPrefix(err.Error(), "No chats known yet") {
+		t.Fatalf("no files: %v", err)
+	}
+	if _, err := ask(SuggestChats(""), ChatDomain, ""); err == nil || !strings.HasPrefix(err.Error(), "No chat directory") {
+		t.Fatalf("no directory: %v", err)
+	}
+	chatdir.New("whatsapp-main", "whatsapp", 1, []chatdir.Chat{
+		{Chat: chatdir.ChatRef("whatsapp-main", "1@g.us"), Title: "Family", Kind: chatdir.Group},
+	}).Write(dir)
+	chatdir.New("telegram-main", "telegram", 1, []chatdir.Chat{
+		{Chat: chatdir.ChatRef("telegram-main", "telegram:user:7"), Title: "Family bot", Kind: chatdir.Direct},
+	}).Write(dir)
+	got, err := ask(SuggestChats(dir), ChatDomain, "fam")
+	want := []string{"Family bot (direct, telegram-main:telegram:user:7)", "Family (group, whatsapp-main:1@g.us)"}
+	if err != nil || !reflect.DeepEqual(got, want) {
+		t.Fatalf("got %v %v", got, err)
+	}
+	if got, _ := ask(SuggestChats(dir), "other", ""); got != nil {
+		t.Fatalf("another domain: %v", got)
 	}
 }
