@@ -4,8 +4,8 @@ import (
 	"bytes"
 	"context"
 	"os"
-	"path/filepath"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 
