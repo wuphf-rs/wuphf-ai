@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/akshettrj/wuphf/connectors/shared/settings"
+	"github.com/akshettrj/wuphf/connectors/shared/setup"
 	"github.com/pelletier/go-toml/v2"
 )
 
@@ -262,5 +263,13 @@ func TestRuntimeDeclarationMatchesTheSharedFixture(t *testing.T) {
 	}
 	if !bytes.Equal(got, want) {
 		t.Fatalf("%s differs from what this connector declares (regenerate with WUPHF_UPDATE_FIXTURES=1)", path)
+	}
+}
+
+// The checked-in example is the description's: WUPHF_WRITE_EXAMPLES=1 go
+// test ./... rewrites it.
+func TestTheExampleIsGeneratedFromTheConfigType(t *testing.T) {
+	if err := setup.CheckExample(Description(), "../../config.example.toml"); err != nil {
+		t.Fatal(err)
 	}
 }

@@ -9,81 +9,74 @@ import (
 
 	"github.com/akshettrj/wuphf/connectors/shared/logging"
 	"github.com/pelletier/go-toml/v2"
+	"github.com/propheci/botconf/go/describe"
 )
 
+// File is the connector's config file. Each option is described once, in its
+// tags (see the shared setup package); config.example.toml is generated from
+// them.
 type File struct {
-	CoreAddress string `toml:"core_address"`
-	ConnectorID string `toml:"connector_id"`
-	// CoreTokenEnv names the environment variable holding this connector's core
-	// token; it must match the core's [[connectors]].token_env for this
-	// connector id. Required.
-	CoreTokenEnv    string `toml:"core_token_env"`
-	SessionDatabase string `toml:"session_database"`
+	CoreAddress string `toml:"core_address" required:"true" example:"127.0.0.1:50051" doc:"The core's gRPC address."`
+	ConnectorID string `toml:"connector_id" required:"true" example:"whatsapp-main" doc:"Must match a [[connectors]] entry in the core's configuration."`
+	// CoreTokenEnv names the variable; the token itself is read from the
+	// environment at startup.
+	CoreTokenEnv    string `toml:"core_token_env" required:"true" env:"token" example:"WUPHF_CONNECTOR_WHATSAPP_MAIN_TOKEN" doc:"Environment variable holding this connector's core token; must match the core's [[connectors]].token_env for this connector id."`
+	SessionDatabase string `toml:"session_database" required:"true" example:"file:whatsapp.session.db?_foreign_keys=on" doc:"The SQLite database (a URI) holding the WhatsApp device session. Reusing it restores the paired session; after a logout, delete it and restart the connector to pair again."`
 	// WhatsApp has no topics; these stay false but are surfaced so the core's
 	// capability gate is configured from one place.
-	SupportsThreads     bool `toml:"supports_threads"`
-	SupportsTopicCreate bool `toml:"supports_topic_create"`
-	// SupportsDisappearingTimers stamps each chat's disappearing-messages timer
-	// on what the connector sends, looks a group's timer up when the core does
-	// not know it, and warns the owner when a DM's timer is unknown. Part of the
-	// registration, so it must match supports_disappearing_timers in the core's
-	// [[connectors]] entry for this connector, or the core refuses it.
-	SupportsDisappearingTimers bool `toml:"supports_disappearing_timers"`
-	// ClientMode selects which WhatsApp client identity the session registers
-	// as. Empty defaults to ClientModeAndroid; see ClientMode for the choices.
-	ClientMode string `toml:"client_mode"`
-	// LoginMethod is how the session is linked, at the first start and again
-	// after a logout: LoginMethodQR or LoginMethodPairCode. Empty: pair code
-	// when PhoneNumber is set, else QR.
-	LoginMethod string `toml:"login_method"`
-	// PhoneNumber is the account's number, country code first, digits only:
-	// the number a pair code is issued for. Required by LoginMethodPairCode.
-	PhoneNumber string `toml:"phone_number"`
-	// FunctionsTokenEnv names the environment variable holding the core's
-	// invoke token, when the core requires one.
-	FunctionsTokenEnv string `toml:"functions_token_env"`
+	SupportsThreads            bool   `toml:"supports_threads" doc:"WhatsApp has no threads: leave false."`
+	SupportsTopicCreate        bool   `toml:"supports_topic_create" doc:"WhatsApp has no threads: leave false."`
+	SupportsDisappearingTimers bool   `toml:"supports_disappearing_timers" example:"true" doc:"Stamp each chat's disappearing-messages timer on what the connector sends, so contacts do not see \"sent from an older version of WhatsApp, will not disappear\"; look a group's timer up when the core does not know it, and warn the owner when a DM's timer is unknown.\n\nPart of the registration, so it must match supports_disappearing_timers in the core's [[connectors]] entry for this connector: when only one side sets it, the core refuses the connector."`
+	ClientMode                 string `toml:"client_mode" default:"android" example:"android_business" jsonschema:"enum=android,enum=android_business" doc:"Which WhatsApp client the session registers as. Both pair as an Android client, so WhatsApp delivers view-once media, which it withholds from a web companion; they differ only in the account type they match: android for a personal account, android_business for a WhatsApp Business (SMB) account.\n\nExperimental, and applied only at the next fresh pairing: after a change, unlink the device on the phone, move the session database aside and pair again."`
+	LoginMethod                string `toml:"login_method" hint:"qr" jsonschema:"enum=qr,enum=pair_code" doc:"How the session is linked, at the first start and again by itself after WhatsApp logs it out: qr (scan a QR code in WhatsApp → Linked devices → Link a device) or pair_code (type an 8-character code after \"Link with phone number instead\"; needs phone_number).\n\nEither way the code is printed in the connector's log and sent to the owner through the core's notice chats (the QR code as a picture): the first at once, later ones at growing gaps until it is linked. Unset: pair_code when phone_number is set, else qr."`
+	PhoneNumber                string `toml:"phone_number" hint:"15551234567" doc:"The account's number, country code first, digits only (no +): the number a pair code is issued for. Required by login_method = \"pair_code\"."`
+	FunctionsTokenEnv          string `toml:"functions_token_env" env:"token" hint:"WUPHF_INVOKE_TOKEN" doc:"Environment variable holding the core's invoke token, when the core sets [functions] invoke_token_env.\n\nAnimated stickers from other platforms (Telegram video and Lottie stickers) are converted to WebP by the core's media.convert provider (providers/mediaconv); without one they arrive as files."`
 	// Runtime holds the settings that may change while the connector runs.
 	// Embedded, so the file keeps its layout (`log_level`, `[rendering]`).
 	Runtime
 }
 
+// Description is the config file's description, from File's tags.
+func Description() *describe.Description {
+	return describe.MustOf("wuphf WhatsApp connector", fileDescription, File{})
+}
+
+const fileDescription = "Runtime settings (log_level, media_convert_timeout_ms, [sticker_metadata], " +
+	"[rendering]) can also change while the connector runs: the connector declares them to the core, " +
+	"which keeps any change (made from its settings panel or `wuphf-server settings`, under " +
+	"`connector_settings.<connector id>`) and pushes it back here. The values in this file are the " +
+	"base; unsetting a change returns to them.\n\n" +
+	"Routing is owned entirely by the core: configure [rules.<id>] entries there, using WhatsApp JIDs " +
+	"such as 12345@s.whatsapp.net or 12345@g.us as chat ids."
+
 // Runtime holds the settings that can change while the connector runs. The
 // connector declares them to the core (the `botconf` tags, see the shared
 // settings package), which stores, validates and pushes every change; the
 // values in the file are the base. Everything else in File is read once.
+//
+// Each doc tag's first paragraph is what the settings panel shows; the Rust
+// connector declares the same words (the shared fixture test checks both).
 type Runtime struct {
-	// LogLevel sets log verbosity (trace, debug, info, warn, error). Empty
-	// means info; the WUPHF_LOG_LEVEL environment variable overrides it.
-	LogLevel string `toml:"log_level" botconf:"Log level" doc:"How much the connector logs (WUPHF_LOG_LEVEL wins)" jsonschema:"enum=trace,enum=debug,enum=info,enum=warn,enum=error"`
-	// MediaConvertTimeoutMs bounds a sticker conversion, including waiting for
-	// the converter; deliveries on this connector wait behind it. 0 = 20000.
-	MediaConvertTimeoutMs uint32 `toml:"media_convert_timeout_ms" botconf:"Sticker conversion timeout (ms)" doc:"How long converting a sticker may take, waiting for the converter included; 0 means 20000"`
-	// Stickers carries the pack metadata embedded in stickers bridged to
-	// WhatsApp; empty fields fall back to defaults (see StickerMetadata).
-	Stickers StickerMetadata `toml:"sticker_metadata"`
-	// Rendering governs how replicated copies are rendered on WhatsApp. It is
-	// this connector's own policy; the core dispatches content only.
-	Rendering RenderingOptions `toml:"rendering"`
+	LogLevel              string           `toml:"log_level" botconf:"Log level" example:"info" doc:"How much the connector logs (WUPHF_LOG_LEVEL wins)\n\nAny case; anything else is refused. Empty means info." jsonschema:"enum=trace,enum=debug,enum=info,enum=warn,enum=error"`
+	MediaConvertTimeoutMs uint32           `toml:"media_convert_timeout_ms" botconf:"Sticker conversion timeout (ms)" doc:"How long converting a sticker may take, waiting for the converter included; 0 means 20000\n\nThis connector delivers in order, so later messages wait behind a conversion."`
+	Stickers              StickerMetadata  `toml:"sticker_metadata" doc:"Sticker-pack metadata embedded in stickers bridged to WhatsApp, shown in WhatsApp's sticker info. A field left blank falls back to the default shown. WhatsApp has no link field for received stickers, so the link is appended to the publisher text (visible, not clickable)."`
+	Rendering             RenderingOptions `toml:"rendering" doc:"How replicated copies are rendered on WhatsApp: this connector's own policy; the core dispatches content only."`
 }
 
 // RenderingOptions are the connector-owned knobs for how mirrored copies are
 // rendered on the platform.
 type RenderingOptions struct {
-	// Send every attachment using the generic file/document method, regardless
-	// of its origin kind (image/video/audio/sticker).
-	AttachmentsAsFiles bool `toml:"attachments_as_files" botconf:"Attachments as files" doc:"Send every attachment as a file, whatever its kind"`
-	// Maximum text length, in characters, to carry inline in one message; text
-	// over the limit is sent as a plain-text file instead. Zero is unbounded.
-	MaxMessageLength uint32 `toml:"max_message_length" botconf:"Longest inline message" doc:"Longer text is sent as a file; 0 means no limit"`
+	AttachmentsAsFiles bool   `toml:"attachments_as_files" botconf:"Attachments as files" doc:"Send every attachment as a file, whatever its kind"`
+	MaxMessageLength   uint32 `toml:"max_message_length" botconf:"Longest inline message" hint:"4096" doc:"Longer text is sent as a file; 0 means no limit\n\nCounted in characters; the file is plain text."`
 }
 
 // StickerMetadata is the sticker-pack information WhatsApp displays for a bridged
 // sticker: the pack name, its author, and a link surfaced as the pack's store
 // link so a recipient can find the project.
 type StickerMetadata struct {
-	PackName   string `toml:"pack_name" botconf:"Sticker pack name" doc:"The pack name WhatsApp shows for bridged stickers"`
-	AuthorName string `toml:"author_name" botconf:"Sticker author" doc:"The author WhatsApp shows for bridged stickers"`
-	Link       string `toml:"link" botconf:"Sticker link" doc:"A link folded into the sticker's publisher"`
+	PackName   string `toml:"pack_name" botconf:"Sticker pack name" hint:"wuphf" doc:"The pack name WhatsApp shows for bridged stickers"`
+	AuthorName string `toml:"author_name" botconf:"Sticker author" hint:"wuphf-ai" doc:"The author WhatsApp shows for bridged stickers"`
+	Link       string `toml:"link" botconf:"Sticker link" hint:"https://github.com/wuphf/wuphf-ai" doc:"A link folded into the sticker's publisher"`
 }
 
 // Default sticker-pack metadata, used for any field the configuration leaves
@@ -178,6 +171,11 @@ func Load(path string) (File, error) {
 	if err != nil {
 		return File{}, fmt.Errorf("read configuration: %w", err)
 	}
+	return Parse(data)
+}
+
+// Parse reads and checks a configuration's text.
+func Parse(data []byte) (File, error) {
 	var cfg File
 	if err := toml.Unmarshal(data, &cfg); err != nil {
 		return File{}, fmt.Errorf("decode configuration: %w", err)

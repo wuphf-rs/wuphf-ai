@@ -9,15 +9,13 @@
 // the connector's section through the core's settings service and swaps each
 // new value into a Live, which the connector reads once per use.
 //
-// Field names come from the `toml` tags, so the core's keys are the file's
-// (`rendering.edit_mode`). Tags read by Declare:
-//
-//   - `botconf:"Edit mode"`: declare the field, with this title; untagged
-//     fields are not runtime settings (a struct field is declared through its
-//     tagged fields).
-//   - `doc:"…"`: the setting's description.
-//   - `jsonschema:"enum=a,enum=b"`: the allowed values, offered as choices;
-//     `minimum=` and `maximum=` bound a number.
+// The settings are the struct's options botconf's describe package marks
+// runtime: field names come from the `toml` tags, so the core's keys are the
+// file's (`rendering.edit_mode`); `botconf:"Edit mode"` declares a field with
+// this title, `doc:"…"` describes it (its first paragraph is the panel's
+// description), and `jsonschema:"enum=a,enum=b"` offers choices (`minimum=`
+// and `maximum=` bound a number). The same tags describe the whole config
+// file (see the setup package).
 package settings
 
 import (
@@ -25,14 +23,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
-	"reflect"
-	"strconv"
-	"strings"
 	"sync/atomic"
 
 	wuphfpb "github.com/akshettrj/wuphf/proto/go/connector/v1"
 	"github.com/invopop/jsonschema"
 	"github.com/pelletier/go-toml/v2"
+	"github.com/propheci/botconf/go/describe"
 	botconf "github.com/propheci/botconf/go/settings"
 	"github.com/propheci/botconf/go/settingspb"
 	"google.golang.org/protobuf/proto"
@@ -76,11 +72,11 @@ func (l *Live[T]) Set(value T) (old T) {
 // declare (the `botconf`-tagged fields), a JSON Schema of the whole type, and
 // base as the section's values.
 func Declare[T any](base T) (*wuphfpb.ConnectorSettingsDeclaration, error) {
-	settings, err := describe(reflect.TypeOf(base), "")
+	described, err := describe.Of("", "", base)
 	if err != nil {
 		return nil, err
 	}
-	descriptor, err := proto.Marshal(&settingspb.DescribeResponse{Settings: settings})
+	descriptor, err := proto.Marshal(&settingspb.DescribeResponse{Settings: described.RuntimeSettings()})
 	if err != nil {
 		return nil, fmt.Errorf("encode the settings descriptor: %w", err)
 	}
@@ -109,142 +105,6 @@ func Declare[T any](base T) (*wuphfpb.ConnectorSettingsDeclaration, error) {
 		JsonSchema:  string(schema),
 		BaseJson:    string(baseJSON),
 	}, nil
-}
-
-// describe lists the botconf-tagged fields of a struct type, their keys below
-// prefix.
-func describe(kind reflect.Type, prefix string) ([]*settingspb.SettingDescriptor, error) {
-	if kind.Kind() != reflect.Struct {
-		return nil, fmt.Errorf("settings must be a struct, not %s", kind)
-	}
-	var settings []*settingspb.SettingDescriptor
-	for index := range kind.NumField() {
-		field := kind.Field(index)
-		name := tomlName(field)
-		if name == "" || !field.IsExported() {
-			continue
-		}
-		key := name
-		if prefix != "" {
-			key = prefix + "." + name
-		}
-		if field.Type.Kind() == reflect.Struct {
-			nested, err := describe(field.Type, key)
-			if err != nil {
-				return nil, err
-			}
-			settings = append(settings, nested...)
-			continue
-		}
-		title, ok := field.Tag.Lookup("botconf")
-		if !ok {
-			continue
-		}
-		settingKind, err := kindOf(field)
-		if err != nil {
-			return nil, fmt.Errorf("setting %s: %w", key, err)
-		}
-		settings = append(settings, &settingspb.SettingDescriptor{
-			Key:         key,
-			Title:       title,
-			Description: field.Tag.Get("doc"),
-			Kind:        settingKind,
-		})
-	}
-	return settings, nil
-}
-
-// tomlName is the field's name in the file, or "" for a skipped field.
-func tomlName(field reflect.StructField) string {
-	name, _, _ := strings.Cut(field.Tag.Get("toml"), ",")
-	if name == "-" {
-		return ""
-	}
-	if name == "" {
-		return field.Name
-	}
-	return name
-}
-
-// schemaTags reads the `jsonschema` tag's enum, minimum and maximum.
-func schemaTags(field reflect.StructField) (enum []string, minimum, maximum *int64) {
-	for _, part := range strings.Split(field.Tag.Get("jsonschema"), ",") {
-		name, value, _ := strings.Cut(part, "=")
-		switch name {
-		case "enum":
-			enum = append(enum, value)
-		case "minimum", "maximum":
-			number, err := strconv.ParseInt(value, 10, 64)
-			if err != nil {
-				continue
-			}
-			if name == "minimum" {
-				minimum = &number
-			} else {
-				maximum = &number
-			}
-		}
-	}
-	return enum, minimum, maximum
-}
-
-func choices(values ...string) []*settingspb.Choice {
-	out := make([]*settingspb.Choice, 0, len(values))
-	for _, value := range values {
-		out = append(out, &settingspb.Choice{Value: value, Label: value})
-	}
-	return out
-}
-
-// kindOf picks the editor for a field from its Go type and tags.
-func kindOf(field reflect.StructField) (*settingspb.Kind, error) {
-	enum, minimum, maximum := schemaTags(field)
-	switch field.Type.Kind() {
-	case reflect.String:
-		if len(enum) > 0 {
-			return &settingspb.Kind{Kind: &settingspb.Kind_OneOf{OneOf: &settingspb.OneOfKind{
-				Choices: choices(enum...),
-			}}}, nil
-		}
-		return &settingspb.Kind{Kind: &settingspb.Kind_Text{Text: &settingspb.TextKind{}}}, nil
-	case reflect.Bool:
-		return &settingspb.Kind{Kind: &settingspb.Kind_OneOf{OneOf: &settingspb.OneOfKind{
-			Choices: []*settingspb.Choice{
-				{Value: "true", Label: "✅ Yes"},
-				{Value: "false", Label: "❌ No"},
-			},
-		}}}, nil
-	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64,
-		reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
-		low, high := bounds(field.Type)
-		if minimum != nil {
-			low = *minimum
-		}
-		if maximum != nil {
-			high = *maximum
-		}
-		return &settingspb.Kind{Kind: &settingspb.Kind_Number{Number: &settingspb.NumberKind{
-			Min: low,
-			Max: high,
-		}}}, nil
-	default:
-		return nil, fmt.Errorf("no settings editor for %s", field.Type)
-	}
-}
-
-// bounds is the range an integer type holds, capped to int64.
-func bounds(kind reflect.Type) (int64, int64) {
-	switch kind.Kind() {
-	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
-		bits := kind.Bits()
-		if bits >= 64 {
-			return 0, math.MaxInt64
-		}
-		return 0, int64(1)<<bits - 1
-	default:
-		bits := kind.Bits()
-		return -(int64(1) << (bits - 1)), int64(1)<<(bits-1) - 1
-	}
 }
 
 // toMap is value as a map keyed by its TOML names.
