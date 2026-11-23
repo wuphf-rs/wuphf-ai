@@ -10,9 +10,25 @@
 name: nix
 
 on:
-  # A release is tagged on a v2 commit, which this has built already.
+  # A release is tagged on a v2 commit, which this has built already. Only
+  # what the packages or the module are built from starts a run: a docs-only
+  # push builds nothing new.
   push:
     branches: [v2]
+    paths:
+      - "flake.nix"
+      - "flake.lock"
+      - "nix/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - "crates/**"
+      - "migrations/**"
+      - "release/minisign.pub"
+      - "connectors/**"
+      - "providers/**"
+      - "misc/**"
+      - "proto/go/**"
+      - ".github/workflows/nix.yml"
   workflow_dispatch:
 
 permissions:
