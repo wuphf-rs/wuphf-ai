@@ -10,12 +10,17 @@ which platform messages are the same message. That is what makes replies,
 edits and deletes land on the right copy, and what stops a bridged message
 from echoing back forever.
 
-```text
- WhatsApp ─┐                         ┌─ Telegram forum group
- Instagram ┼─ connectors ── core ── connectors ─┤   (one topic per chat)
- …         ┘   (thin pipes)  (routing,           └─ …
-                             identity, storage)
+```mermaid
+flowchart LR
+    wa[WhatsApp] <--> cwa[WhatsApp connector]
+    ig[Instagram] <--> cig[Instagram connector]
+    cwa <--> core["wuphf core<br/>routing · identity · storage"]
+    cig <--> core
+    core <--> ctg[Telegram connector]
+    ctg <--> tg["Telegram forum group<br/>one topic per chat"]
 ```
+
+Connectors are thin pipes, one per account. The core decides everything.
 
 ## Pages
 
