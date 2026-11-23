@@ -106,7 +106,7 @@ log_level = "info"
 # author_name = "wuphf-ai"
 
 # A link folded into the sticker's publisher
-# link = "https://github.com/wuphf/wuphf-ai"
+# link = "https://github.com/wuphf-rs/wuphf-ai"
 
 # How replicated copies are rendered on WhatsApp: this connector's own policy;
 # the core dispatches content only.

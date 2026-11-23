@@ -20,14 +20,14 @@ func TestStickerExifContainsPackFields(t *testing.T) {
 	exif, err := stickerExif(config.StickerMetadata{
 		PackName:   "wuphf",
 		AuthorName: "wuphf-ai",
-		Link:       "https://github.com/wuphf/wuphf-ai",
+		Link:       "https://github.com/wuphf-rs/wuphf-ai",
 	})
 	if err != nil {
 		t.Fatalf("stickerExif() error = %v", err)
 	}
 	for _, want := range []string{
 		`"sticker-pack-name":"wuphf"`,
-		`"sticker-pack-publisher":"wuphf-ai · https://github.com/wuphf/wuphf-ai"`,
+		`"sticker-pack-publisher":"wuphf-ai · https://github.com/wuphf-rs/wuphf-ai"`,
 	} {
 		if !bytes.Contains(exif, []byte(want)) {
 			t.Fatalf("exif missing %s\ngot: %s", want, exif)
@@ -73,7 +73,7 @@ func TestWriteStickerMetadataRoundTrips(t *testing.T) {
 	out, err := writeStickerMetadata(ctx, sampleWebP(t), config.StickerMetadata{
 		PackName:   "wuphf",
 		AuthorName: "wuphf-ai",
-		Link:       "https://github.com/wuphf/wuphf-ai",
+		Link:       "https://github.com/wuphf-rs/wuphf-ai",
 	})
 	if err != nil {
 		t.Fatalf("writeStickerMetadata() error = %v", err)
@@ -92,7 +92,7 @@ func TestWriteStickerMetadataRoundTrips(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !bytes.Contains(data, []byte("https://github.com/wuphf/wuphf-ai")) {
+	if !bytes.Contains(data, []byte("https://github.com/wuphf-rs/wuphf-ai")) {
 		t.Fatalf("read-back exif missing link: %s", data)
 	}
 }
@@ -150,7 +150,7 @@ func defaultStickerMetadata() config.StickerMetadata {
 	return config.StickerMetadata{
 		PackName:   "wuphf",
 		AuthorName: "wuphf-ai",
-		Link:       "https://github.com/wuphf/wuphf-ai",
+		Link:       "https://github.com/wuphf-rs/wuphf-ai",
 	}
 }
 

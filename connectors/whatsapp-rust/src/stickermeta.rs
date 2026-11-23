@@ -235,7 +235,7 @@ mod tests {
         StickerMetadata {
             pack_name: "wuphf".into(),
             author_name: "wuphf-ai".into(),
-            link: "https://github.com/wuphf/wuphf-ai".into(),
+            link: "https://github.com/wuphf-rs/wuphf-ai".into(),
         }
     }
 

@@ -139,7 +139,7 @@ const DEFAULT_MEDIA_CONVERT_TIMEOUT: Duration = Duration::from_secs(20);
 /// blank, so bridged stickers are always attributed.
 const DEFAULT_STICKER_PACK_NAME: &str = "wuphf";
 const DEFAULT_STICKER_AUTHOR: &str = "wuphf-ai";
-const DEFAULT_STICKER_LINK: &str = "https://github.com/wuphf/wuphf-ai";
+const DEFAULT_STICKER_LINK: &str = "https://github.com/wuphf-rs/wuphf-ai";
 
 impl Runtime {
     /// The sticker conversion bound (Go `MediaConvertTimeout`).
@@ -220,7 +220,7 @@ pub struct StickerMetadata {
     #[botconf(
         runtime,
         title = "Sticker link",
-        hint = "https://github.com/wuphf/wuphf-ai"
+        hint = "https://github.com/wuphf-rs/wuphf-ai"
     )]
     pub link: String,
 }
@@ -357,7 +357,7 @@ mod tests {
             StickerMetadata {
                 pack_name: "wuphf".into(),
                 author_name: "wuphf-ai".into(),
-                link: "https://github.com/wuphf/wuphf-ai".into(),
+                link: "https://github.com/wuphf-rs/wuphf-ai".into(),
             }
         );
         assert_eq!(

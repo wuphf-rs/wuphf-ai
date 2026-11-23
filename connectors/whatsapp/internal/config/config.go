@@ -76,7 +76,7 @@ type RenderingOptions struct {
 type StickerMetadata struct {
 	PackName   string `toml:"pack_name" botconf:"Sticker pack name" hint:"wuphf" doc:"The pack name WhatsApp shows for bridged stickers"`
 	AuthorName string `toml:"author_name" botconf:"Sticker author" hint:"wuphf-ai" doc:"The author WhatsApp shows for bridged stickers"`
-	Link       string `toml:"link" botconf:"Sticker link" hint:"https://github.com/wuphf/wuphf-ai" doc:"A link folded into the sticker's publisher"`
+	Link       string `toml:"link" botconf:"Sticker link" hint:"https://github.com/wuphf-rs/wuphf-ai" doc:"A link folded into the sticker's publisher"`
 }
 
 // Default sticker-pack metadata, used for any field the configuration leaves
@@ -84,7 +84,7 @@ type StickerMetadata struct {
 const (
 	defaultStickerPackName = "wuphf"
 	defaultStickerAuthor   = "wuphf-ai"
-	defaultStickerLink     = "https://github.com/wuphf/wuphf-ai"
+	defaultStickerLink     = "https://github.com/wuphf-rs/wuphf-ai"
 )
 
 // defaultMediaConvertTimeout bounds a sticker conversion when the

@@ -63,7 +63,7 @@
 >   the publisher as `author · link`, the TIFF header); `config.go:37`
 >   `functions_token_env`, `:53` `media_convert_timeout_ms` (0 = 20000),
 >   `:76-88` `[sticker_metadata]` and its defaults (`wuphf`, `wuphf-ai`,
->   `https://github.com/wuphf/wuphf-ai`), `:96-117`; `connector.go:62-70,
+>   `https://github.com/wuphf-rs/wuphf-ai`), `:96-117`; `connector.go:62-70,
 >   83-85` (functions client with the connector id as caller; converter with
 >   a timeout read per call).
 > - whatsapp-rust library (`~/.cargo/git/checkouts/whatsapp-rust-6e26428647c827f3/5ca80c5`):
@@ -349,7 +349,7 @@ Commit: `feat(connector-sdk): call remote functions and media.convert`.
 2. `stickermeta_test.go`, two new tests (the module's existing helpers
    `requireTool` and `writeStickerMetadata`):
    - `TestStickerExifMatchesTheSharedFixture`: `stickerExif` of the default
-     metadata (`wuphf`, `wuphf-ai`, `https://github.com/wuphf/wuphf-ai`) and
+     metadata (`wuphf`, `wuphf-ai`, `https://github.com/wuphf-rs/wuphf-ai`) and
      of `{PackName: "Tom & Jerry <3", AuthorName: "wuphf-ai", Link: ""}`;
      with `WUPHF_UPDATE_FIXTURES=1` write them to `testdata/sticker-meta.exif`
      and `testdata/sticker-meta-escaped.exif`, otherwise compare byte for
@@ -548,10 +548,10 @@ Commit: `docs(whatsapp-rust): stickers`.
   core sets `[functions] invoke_token_env`; the same variable must be
   exported for the connector), `media_convert_timeout_ms` (default 20000),
   `[sticker_metadata]` `pack_name` / `author_name` / `link` (defaults
-  `wuphf` / `wuphf-ai` / `https://github.com/wuphf/wuphf-ai`).
+  `wuphf` / `wuphf-ai` / `https://github.com/wuphf-rs/wuphf-ai`).
 - **Live test** (from Telegram into a chat mirrored to this connector):
   1. Send a static sticker → a WhatsApp sticker. Long-press it → sticker
-     info shows pack `wuphf`, publisher `wuphf-ai · https://github.com/wuphf/wuphf-ai`.
+     info shows pack `wuphf`, publisher `wuphf-ai · https://github.com/wuphf-rs/wuphf-ai`.
   2. Send an animated (video) sticker and an animated Lottie (`.tgs`)
      sticker → animated WhatsApp stickers.
   3. Stop `wmc`, set `media_convert_timeout_ms = 5000`, restart `wwr`, send
