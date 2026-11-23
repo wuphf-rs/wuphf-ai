@@ -76,7 +76,7 @@ code).
 | 056 | Runtime settings in the Rust SDK; whatsapp-rust declares the Go connector's settings | P2 | L | botconf 013 (055 soft) | DONE (see notes) |
 | 057 | WhatsApp connectors link again by themselves after a logout (QR or pair code, delivered to the owner) | P1 | L | — | DONE (no migration; see notes) |
 | 058 | Connector commands in the settings panel: WhatsApp "resync app state" and "send a new link code" | P1 | L | botconf 014, 056, 057 | DONE (see notes) |
-| 059 | Offline setup TUIs for the Rust binaries (core, whatsapp-rust), each option described once on its config type | P1 | L | botconf 015 | TODO |
+| 059 | Offline setup TUIs for the Rust binaries (core, whatsapp-rust), each option described once on its config type | P1 | L | botconf 015 | DONE (see notes) |
 | 060 | Offline setup TUIs for the Go binaries (Telegram, WhatsApp, Instagram, mediaconv, misc) | P1 | L | botconf 015, 059 | TODO |
 | 061 | Settings backup: `wuphf-server export` / `import` (config + every stored override, connectors' included; secrets only with a flag), online `wuphf settings export` / `import` | P1 | M | botconf 016, 059 | TODO |
 
@@ -1602,3 +1602,37 @@ From the 2026-10-22 remote-functions design:
   while a connector waits to be linked, "🔗 Send a new link code" (the
   code or QR arrives with the next code rotation, under a minute). With the
   connector stopped, the buttons are gone.
+
+### 059: offline setup for the Rust binaries
+
+- **059 done 2026-11-23** (on `v2`, `45afcf2`, `e174c81` and this commit),
+  after botconf 015 (`v0.13.0`) and two botconf fixes it needed (`v0.13.1`:
+  per-entry runtime maps, runtime descriptions from the doc's first
+  paragraph; `v0.13.2`: a per-entry setting's kind is the map of its
+  entries), all pushed. The core's `Configuration` and whatsapp-rust's
+  `Config` derive `botconf::Describe`; both examples are generated, with a
+  drift test each (`WUPHF_WRITE_EXAMPLES=1` rewrites them); the core's
+  runtime settings and whatsapp-rust's runtime section come from the
+  descriptions (the SDK's `settings_of`, its `describe` feature), and
+  `wuphf-server setup` / `wuphf-connector-whatsapp setup` edit the config
+  and the env file, checked by each binary's own startup checks
+  (`wuphf_settings::check`). Tests: core +3 (drift, the runtime settings as
+  declared by hand before, `check`), SDK +1, whatsapp-rust 167 → 168 (drift);
+  the shared Go fixture still passes. Workspace gate: 407 tests, clippy, fmt
+  clean; whatsapp-rust clippy and fmt clean. Both setup screens driven in a
+  pty: a save without the token is refused with the binary's own error; with
+  a generated token it writes the env file (0600).
+  Deviations:
+  - `ChatStateDirection`, `ConnectorId` (wuphf-model) and the functions
+    config (wuphf-functions) describe themselves behind a `describe`
+    feature, so neither crate always depends on botconf.
+  - The SDK's `Setting` owns its strings (`Setting::new`), as a list built
+    from a description cannot be `'static`.
+  - The generated core example no longer carries the commented-out
+    whatsapp-rust `[[connectors]]` entry: add it with `wuphf-server setup`
+    (README and `wuphf-help` say so).
+  - The panel shows each runtime setting's doc summary, so some core panel
+    descriptions changed wording (keys, titles and kinds did not).
+  Owner: `ws setup` and `wwr setup` (dev binaries rebuilt). A save rewrites
+  the config file in the example's layout, so comments of your own in
+  config.local.toml are dropped (unknown keys are kept, commented out).

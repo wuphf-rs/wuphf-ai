@@ -51,8 +51,11 @@ refuses to start until all of them are set. Put them in the git-ignored
 (elsewhere: set -a; . ./.env.local; set +a):
   WUPHF_CONNECTOR_TELEGRAM_MAIN_TOKEN, WUPHF_CONNECTOR_WHATSAPP_MAIN_TOKEN,
   WUPHF_CONNECTOR_INSTAGRAM_MAIN_TOKEN. wwr also needs
-  WUPHF_CONNECTOR_WHATSAPP_RUST_TOKEN, and its [[connectors]] entry uncommented
-  in the server config.
+  WUPHF_CONNECTOR_WHATSAPP_RUST_TOKEN, and a [[connectors]] entry for it in
+  the server config.
+
+`ws setup` and `wwr setup` edit a config and .env.local on a setup screen
+(every option described; g generates a token), checked before they write.
 
 wmc needs WUPHF_PROVIDER_MEDIACONV_TOKEN set, and the server config needs the
 matching [[functions.providers]] entry (see providers/mediaconv/README.md).

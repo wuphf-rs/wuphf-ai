@@ -80,6 +80,34 @@ scripts/           Dev session launcher, zellij layout, per-component runners
 
 ## Run
 
+### First-time setup
+
+`setup` opens a setup screen over a component's config file and the env file
+its options name, without anything running: every option with its
+description, default and kind, tables and lists opened as screens, and values
+checked as they are typed. An option that names an environment variable (a
+token) sets that variable's value in the env file, and `g` generates a token.
+A save is checked by the component's own loader first (the core refuses a
+config whose connector tokens are unset, as it would at startup), then written
+whole, laid out like the example: comments of your own in the config file are
+not kept, and keys the component does not know are kept commented out at the
+end. The env file keeps its other lines, and a new one is readable by its
+owner only.
+
+```sh
+wuphf-server setup                  # config.local.toml and .env.local at the repo root
+wuphf-whatsapp-rust setup           # its config.local.toml, the repo's .env.local
+```
+
+The core and the connectors read a connector's token from variables of the
+same name, so a token generated on one side is set for the other too. Each
+component's `config.example.toml` (the core's `config/example.toml`) is
+generated from its config type, which describes every option once; a test
+fails when they differ (`WUPHF_WRITE_EXAMPLES=1 cargo test -p wuphf-settings
+example` rewrites the core's).
+
+### Tokens and settings
+
 Every connector authenticates to the core with a token. The core reads each
 connector's token from the variable its `[[connectors]].token_env` names and
 refuses to start while one is unset, and each connector reads the same value
@@ -143,7 +171,9 @@ The Rust connector lives in a separate Cargo workspace because
 `whatsapp-rust` and the core require incompatible `libsqlite3-sys` versions:
 
 ```sh
-# First uncomment the whatsapp-rust [[connectors]] entry in the core config.
+# First add a whatsapp-rust [[connectors]] entry to the core config
+# (`wuphf-server setup`: Connectors, a; token_env
+# WUPHF_CONNECTOR_WHATSAPP_RUST_TOKEN, platform whatsapp).
 cd connectors/whatsapp-rust
 cargo build --release
 export WUPHF_CONNECTOR_WHATSAPP_RUST_TOKEN=replace-me   # core_token_env
