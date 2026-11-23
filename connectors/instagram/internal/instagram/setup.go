@@ -116,7 +116,7 @@ func (a *setupAccount) load(ctx context.Context, jar *cookies.Cookies) error {
 	return nil
 }
 
-func (a *setupAccount) chats(ctx context.Context, _ tui.Session) ([]chatdir.Chat, error) {
+func (a *setupAccount) chats(ctx context.Context, screen tui.Session) ([]chatdir.Chat, error) {
 	if a.client == nil {
 		jar, err := loadCookies(a.cfg)
 		if err != nil || !jar.IsLoggedIn() {
@@ -128,7 +128,50 @@ func (a *setupAccount) chats(ctx context.Context, _ tui.Session) ([]chatdir.Chat
 	}
 	threads := NewThreadDirectory(a.client, a.client.GetOwnFBID())
 	threads.RecordMailbox(a.mailbox)
+	if err := recordInbox(ctx, screen, a.client, a.client.GetOwnFBID(), a.mailbox, threads); err != nil {
+		// The first page is still worth saving.
+		screen.Say("Only the inbox's first threads were fetched: " + err.Error())
+	}
 	return directoryChats(a.cfg.ConnectorID, threads.Threads()), nil
+}
+
+// inboxPages and inboxPageSize bound the inbox listing: a large inbox ends at
+// about inboxPages × inboxPageSize threads.
+const (
+	inboxPages    = 40
+	inboxPageSize = 50
+)
+
+// mailboxPager is the inbox listing's next pages; *instameow.Client is one.
+type mailboxPager interface {
+	PaginateMailbox(context.Context, *slidetypes.PaginateMailboxRequest) (*slidetypes.PaginateMailboxResponse, error)
+}
+
+// recordInbox records the inbox's threads past the first page (mailbox's),
+// page after page, until the last or inboxPages.
+func recordInbox(ctx context.Context, screen tui.Session, pager mailboxPager, viewer int64,
+	mailbox *slidetypes.Mailbox, threads *ThreadDirectory) error {
+	if mailbox == nil {
+		return nil
+	}
+	page := mailbox.ThreadsByFolder.PageInfo
+	for fetched := 0; page.HasNextPage && page.EndCursor != "" && fetched < inboxPages; fetched++ {
+		screen.Progress(fmt.Sprintf("Fetching the inbox… %d threads", len(threads.Threads())))
+		request := slidetypes.MakePaginateMailboxRequest(viewer, page.EndCursor, "INBOX", nil)
+		request.Count = inboxPageSize
+		response, err := pager.PaginateMailbox(ctx, request)
+		if err != nil {
+			return err
+		}
+		if response == nil || response.Mailbox == nil {
+			return nil
+		}
+		for _, edge := range response.Mailbox.ThreadsByFolder.Edges {
+			threads.RecordThread(edge.Node.AsIGDirectThread)
+		}
+		page = response.Mailbox.ThreadsByFolder.PageInfo
+	}
+	return nil
 }
 
 // directoryChats are the inbox's threads as the directory holds them, by

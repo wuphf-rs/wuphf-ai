@@ -1,6 +1,9 @@
 package instagramconnector
 
 import (
+	"context"
+	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -48,3 +51,61 @@ func TestCookiesArePastedOrNamed(t *testing.T) {
 		t.Fatal("a missing file read")
 	}
 }
+
+// pages answers PaginateMailbox with its pages in turn, by cursor.
+type pages struct {
+	byCursor map[string]*slidetypes.MailboxPage
+	asked    []string
+}
+
+func (p *pages) PaginateMailbox(_ context.Context, request *slidetypes.PaginateMailboxRequest) (*slidetypes.PaginateMailboxResponse, error) {
+	p.asked = append(p.asked, request.Cursor)
+	page, ok := p.byCursor[request.Cursor]
+	if !ok {
+		return nil, errors.New("no such page")
+	}
+	return &slidetypes.PaginateMailboxResponse{Mailbox: page}, nil
+}
+
+func threadPage(next string, keys ...int64) slidetypes.Edged[slidetypes.Node[slidetypes.WrappedThreadInfo]] {
+	var page slidetypes.Edged[slidetypes.Node[slidetypes.WrappedThreadInfo]]
+	for _, key := range keys {
+		page.Edges = append(page.Edges, slidetypes.Node[slidetypes.WrappedThreadInfo]{
+			Node: slidetypes.WrappedThreadInfo{AsIGDirectThread: &slidetypes.ThreadInfo{ThreadKey: key, ThreadTitle: fmt.Sprint("T", key)}},
+		})
+	}
+	page.PageInfo = slidetypes.PageInfo{EndCursor: next, HasNextPage: next != ""}
+	return page
+}
+
+func TestTheWholeInboxIsListed(t *testing.T) {
+	first := &slidetypes.Mailbox{ThreadsByFolder: threadPage("c1", 1, 2)}
+	pager := &pages{byCursor: map[string]*slidetypes.MailboxPage{
+		"c1": {ThreadsByFolder: threadPage("c2", 3)},
+		"c2": {ThreadsByFolder: threadPage("", 4)},
+	}}
+	threads := NewThreadDirectory(nil, 1)
+	threads.RecordMailbox(first)
+	if err := recordInbox(context.Background(), &nopScreen{}, pager, 1, first, threads); err != nil {
+		t.Fatal(err)
+	}
+	if got := len(threads.Threads()); got != 4 {
+		t.Fatalf("threads %d, asked %v", got, pager.asked)
+	}
+	// A failed page keeps what came before it.
+	broken := &pages{byCursor: map[string]*slidetypes.MailboxPage{}}
+	partial := NewThreadDirectory(nil, 1)
+	partial.RecordMailbox(first)
+	if err := recordInbox(context.Background(), &nopScreen{}, broken, 1, first, partial); err == nil || len(partial.Threads()) != 2 {
+		t.Fatalf("broken: %v, %d threads", err, len(partial.Threads()))
+	}
+}
+
+type nopScreen struct{}
+
+func (nopScreen) Say(string)                      {}
+func (nopScreen) QR(string)                       {}
+func (nopScreen) Progress(string)                 {}
+func (nopScreen) Ask(string) (string, bool)       { return "", false }
+func (nopScreen) AskSecret(string) (string, bool) { return "", false }
+func (nopScreen) Cancelled() bool                 { return false }
