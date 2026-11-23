@@ -12,7 +12,7 @@
 use std::collections::HashMap;
 use tonic::metadata::MetadataMap;
 use tonic::{Request, Status};
-use wuphf_model::ConnectorId;
+use wuphf_model::{ConnectorId, matching_token, tokens_match};
 
 /// The bearer token a request presents, if any.
 pub fn bearer_token(metadata: &MetadataMap) -> Option<&str> {
@@ -37,14 +37,17 @@ impl ConnectorTokens {
     pub fn authenticates(&self, id: &ConnectorId, token: Option<&str>) -> bool {
         self.tokens
             .get(id)
-            .is_some_and(|expected| token == Some(expected.as_str()))
+            .is_some_and(|expected| token.is_some_and(|token| tokens_match(token, expected)))
     }
 
     /// The connector whose token `token` is, if any.
     pub fn connector_for(&self, token: &str) -> Option<&ConnectorId> {
-        self.tokens
-            .iter()
-            .find_map(|(id, expected)| (expected == token).then_some(id))
+        matching_token(
+            token,
+            self.tokens
+                .iter()
+                .map(|(id, expected)| (id, expected.as_str())),
+        )
     }
 
     /// Every connector's token, for services any connector may use.
@@ -62,7 +65,12 @@ impl ConnectorTokens {
 pub fn any_token_auth(tokens: Vec<String>) -> impl tonic::service::Interceptor + Clone {
     move |request: Request<()>| -> Result<Request<()>, Status> {
         match bearer_token(request.metadata()) {
-            Some(presented) if tokens.iter().any(|token| token == presented) => Ok(request),
+            Some(presented)
+                if matching_token(presented, tokens.iter().map(|token| ((), token.as_str())))
+                    .is_some() =>
+            {
+                Ok(request)
+            }
             _ => Err(Status::unauthenticated("valid bearer token required")),
         }
     }

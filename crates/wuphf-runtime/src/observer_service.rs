@@ -293,7 +293,7 @@ pub fn bearer_auth(token: Option<String>) -> impl tonic::service::Interceptor + 
             return Ok(request);
         };
         match crate::auth::bearer_token(request.metadata()) {
-            Some(value) if value == expected => Ok(request),
+            Some(value) if wuphf_model::tokens_match(value, expected) => Ok(request),
             _ => Err(Status::unauthenticated("valid bearer token required")),
         }
     }

@@ -19,6 +19,7 @@ tokio-stream.workspace = true
 tonic.workspace = true
 tracing.workspace = true
 uuid.workspace = true
+wuphf-model.workspace = true
 wuphf-proto.workspace = true
 
 [dev-dependencies]

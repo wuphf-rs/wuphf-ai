@@ -32,6 +32,7 @@ mod ids;
 mod message;
 mod observation;
 mod routing;
+mod token;
 
 pub use chat::*;
 pub use chat_directory::*;
@@ -41,3 +42,4 @@ pub use ids::*;
 pub use message::*;
 pub use observation::*;
 pub use routing::*;
+pub use token::*;

@@ -140,7 +140,11 @@ impl Authorizer for WuphfAuthorizer {
         let Some(token) = bearer_token(metadata).filter(|token| !token.is_empty()) else {
             return Err(Status::unauthenticated("valid bearer token required"));
         };
-        if self.observer_token.as_deref() == Some(token) {
+        if self
+            .observer_token
+            .as_deref()
+            .is_some_and(|expected| wuphf_model::tokens_match(token, expected))
+        {
             return Ok(Principal {
                 actor: Some(OBSERVER.to_owned()),
             });

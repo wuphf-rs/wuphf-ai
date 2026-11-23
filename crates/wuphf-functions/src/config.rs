@@ -377,8 +377,9 @@ impl Functions {
 
     /// True only for a configured provider presenting its own token.
     pub(crate) fn authenticate(&self, provider_id: &str, token: Option<&str>) -> bool {
-        self.provider(provider_id)
-            .is_some_and(|provider| token == Some(provider.token.as_str()))
+        self.provider(provider_id).is_some_and(|provider| {
+            token.is_some_and(|token| wuphf_model::tokens_match(token, &provider.token))
+        })
     }
 
     pub(crate) fn may_register(&self, provider_id: &str, name: &str) -> bool {
