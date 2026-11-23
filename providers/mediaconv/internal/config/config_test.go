@@ -6,6 +6,8 @@ import (
 	"runtime"
 	"testing"
 	"time"
+
+	"github.com/akshettrj/wuphf/connectors/shared/setup"
 )
 
 func TestLoadAcceptsTheExample(t *testing.T) {
@@ -61,5 +63,13 @@ func TestValidateRequiresEachKey(t *testing.T) {
 		if err := cfg.Validate(); err == nil {
 			t.Errorf("Validate() succeeded without %s", name)
 		}
+	}
+}
+
+// The checked-in example is the description's: WUPHF_WRITE_EXAMPLES=1 go
+// test ./... rewrites it.
+func TestTheExampleIsGeneratedFromTheConfigType(t *testing.T) {
+	if err := setup.CheckExample(Description(), "../../config.example.toml"); err != nil {
+		t.Fatal(err)
 	}
 }

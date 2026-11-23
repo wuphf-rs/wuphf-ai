@@ -1,12 +1,29 @@
+# wuphf media converter (media.convert@1 provider)
+
+# The core's gRPC address.
+# Required.
 core_address = "127.0.0.1:50051"
-# Must match an [[functions.providers]] id in the core configuration, whose
-# `functions` list must allow "media.convert".
+
+# Must match a [[functions.providers]] id in the core configuration, whose
+# functions list must allow "media.convert".
+# Required.
 provider_id = "mediaconv"
-# The token is read from this environment variable; the core reads the same
-# token from the variable named by its own token_env.
+
+# Environment variable holding this provider's token; the core reads the same
+# token from the variable named by its own [[functions.providers]] token_env.
+# Required.
 token_env = "WUPHF_PROVIDER_MEDIACONV_TOKEN"
-# Log verbosity: trace, debug, info, warn, error (WUPHF_LOG_LEVEL overrides).
+
+# How much the provider logs (WUPHF_LOG_LEVEL wins). Empty means info.
+# One of: trace, debug, info, warn, error.
 log_level = "info"
-# max_concurrency = 0        # 0 = number of CPUs
-# default_deadline_ms = 0    # 0 = the core's default
+
+# Conversions that run at once; 0 means the number of CPUs.
+# max_concurrency = 0
+
+# The deadline suggested to the core for a conversion, in milliseconds; 0 leaves
+# it to the core.
+# default_deadline_ms = 0
+
+# The pause before reconnecting to the core, in milliseconds; 0 means 2000.
 # reconnect_delay_ms = 2000

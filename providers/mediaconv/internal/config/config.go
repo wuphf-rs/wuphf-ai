@@ -9,23 +9,28 @@ import (
 	"time"
 
 	"github.com/pelletier/go-toml/v2"
+	"github.com/propheci/botconf/go/describe"
 )
 
+// File is the provider's config file. Each option is described once, in its
+// tags (see the shared setup package); config.example.toml is generated from
+// them.
 type File struct {
-	CoreAddress string `toml:"core_address"`
-	ProviderID  string `toml:"provider_id"`
-	// TokenEnv names the environment variable holding this provider's token;
-	// it must match the core's [[functions.providers]] entry.
-	TokenEnv string `toml:"token_env"`
-	// LogLevel sets log verbosity (trace, debug, info, warn, error). Empty
-	// means info; the WUPHF_LOG_LEVEL environment variable overrides it.
-	LogLevel string `toml:"log_level"`
-	// MaxConcurrency bounds simultaneous conversions; 0 = runtime.NumCPU().
-	MaxConcurrency uint32 `toml:"max_concurrency"`
-	// DefaultDeadlineMs is the deadline suggested to the core; 0 = core default.
-	DefaultDeadlineMs uint32 `toml:"default_deadline_ms"`
-	// ReconnectDelayMs is the pause before reconnecting to the core; 0 = 2000.
-	ReconnectDelayMs uint32 `toml:"reconnect_delay_ms"`
+	CoreAddress string `toml:"core_address" required:"true" example:"127.0.0.1:50051" doc:"The core's gRPC address."`
+	ProviderID  string `toml:"provider_id" required:"true" example:"mediaconv" doc:"Must match a [[functions.providers]] id in the core configuration, whose functions list must allow \"media.convert\"."`
+	// TokenEnv names the variable; the token itself is read from the
+	// environment at startup.
+	TokenEnv string `toml:"token_env" required:"true" env:"token" example:"WUPHF_PROVIDER_MEDIACONV_TOKEN" doc:"Environment variable holding this provider's token; the core reads the same token from the variable named by its own [[functions.providers]] token_env."`
+	LogLevel string `toml:"log_level" example:"info" jsonschema:"enum=trace,enum=debug,enum=info,enum=warn,enum=error" doc:"How much the provider logs (WUPHF_LOG_LEVEL wins). Empty means info."`
+	// 0 means runtime.NumCPU().
+	MaxConcurrency    uint32 `toml:"max_concurrency" doc:"Conversions that run at once; 0 means the number of CPUs."`
+	DefaultDeadlineMs uint32 `toml:"default_deadline_ms" doc:"The deadline suggested to the core for a conversion, in milliseconds; 0 leaves it to the core."`
+	ReconnectDelayMs  uint32 `toml:"reconnect_delay_ms" hint:"2000" doc:"The pause before reconnecting to the core, in milliseconds; 0 means 2000."`
+}
+
+// Description is the config file's description, from File's tags.
+func Description() *describe.Description {
+	return describe.MustOf("wuphf media converter (media.convert@1 provider)", "", File{})
 }
 
 func Load(path string) (File, error) {
@@ -33,6 +38,11 @@ func Load(path string) (File, error) {
 	if err != nil {
 		return File{}, fmt.Errorf("read configuration: %w", err)
 	}
+	return Parse(data)
+}
+
+// Parse reads and checks a configuration's text.
+func Parse(data []byte) (File, error) {
 	var cfg File
 	if err := toml.Unmarshal(data, &cfg); err != nil {
 		return File{}, fmt.Errorf("decode configuration: %w", err)

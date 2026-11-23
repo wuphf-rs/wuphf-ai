@@ -13,11 +13,29 @@ import (
 	"github.com/akshettrj/wuphf/connectors/shared/coreclient"
 	"github.com/akshettrj/wuphf/connectors/shared/functions"
 	"github.com/akshettrj/wuphf/connectors/shared/logging"
+	"github.com/akshettrj/wuphf/connectors/shared/setup"
 	"github.com/akshettrj/wuphf/providers/mediaconv/internal/config"
 	"github.com/akshettrj/wuphf/providers/mediaconv/internal/convert"
+	"github.com/propheci/botconf/go/tui"
 )
 
+// validate is setup's check of a candidate config: what the provider checks
+// at startup (the file, then its token).
+func validate(candidate tui.Candidate) error {
+	cfg, err := config.Parse([]byte(candidate.Config))
+	if err != nil {
+		return err
+	}
+	return setup.RequireToken(candidate, "token_env", cfg.TokenEnv)
+}
+
 func main() {
+	if setup.Requested(os.Args[1:]) {
+		if err := setup.Run(os.Args[2:], config.Description(), validate); err != nil {
+			exit(err)
+		}
+		return
+	}
 	configPath := flag.String("config", "config.example.toml", "path to provider TOML configuration")
 	flag.Parse()
 
