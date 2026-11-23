@@ -78,7 +78,9 @@ code).
 | 058 | Connector commands in the settings panel: WhatsApp "resync app state" and "send a new link code" | P1 | L | botconf 014, 056, 057 | DONE (see notes) |
 | 059 | Offline setup TUIs for the Rust binaries (core, whatsapp-rust), each option described once on its config type | P1 | L | botconf 015 | DONE (see notes) |
 | 060 | Offline setup TUIs for the Go binaries (Telegram, WhatsApp, Instagram, mediaconv, misc) | P1 | L | botconf 015, 059 | DONE (see notes) |
-| 061 | Settings backup: `wuphf-server export` / `import` (config + every stored override, connectors' included; secrets only with a flag), online `wuphf settings export` / `import` | P1 | M | botconf 016, 059 | TODO |
+| 062 | The chat directory (one file per connector, fetched by its setup) and chats picked by name in the core's and misc's setup | P1 | M | botconf 017, 059, 060 | TODO |
+| 063 | Link a connector's account from its setup (WhatsApp Go and Rust, Telegram, Instagram) and fetch its chats into the directory | P1 | L | botconf 017, 062 | TODO |
+| 061 | Settings backup: `wuphf-server export` / `import` (config + every stored override, connectors' included; secrets only with a flag), online `wuphf settings export` / `import` | P1 | M | botconf 016, 059; after 062, 063 | TODO |
 
 Status values: TODO | IN PROGRESS | DONE | BLOCKED (with one-line reason) |
 REJECTED (with one-line rationale).
