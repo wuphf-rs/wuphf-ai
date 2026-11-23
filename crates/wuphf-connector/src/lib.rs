@@ -15,6 +15,7 @@ pub mod logging;
 mod media;
 mod notice;
 mod sender;
+pub mod session_lock;
 pub mod settings;
 
 pub use client::{Client, Options, PermanentFailureClassifier, SessionError};

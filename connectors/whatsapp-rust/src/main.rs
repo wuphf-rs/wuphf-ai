@@ -15,6 +15,7 @@ mod disappearing;
 mod groups;
 mod health;
 mod identity;
+mod link;
 mod linking;
 mod media;
 mod names;
@@ -94,6 +95,14 @@ async fn main() -> anyhow::Result<()> {
         return setup::run(config, env_file);
     }
     let config = Config::load(&cli.config)?;
+    // Held while the connector runs, so setup's actions never use the session
+    // at the same time.
+    let _session_lock = wuphf_connector::session_lock::SessionLock::acquire(std::path::Path::new(
+        &config.session_database,
+    ))
+    .context(
+        "lock the WhatsApp session (is another wuphf-whatsapp-rust, or its setup, using it?)",
+    )?;
     let log = wuphf_connector::logging::init(&config.runtime.log_level);
 
     // The token comes from the environment only, so it stays out of the config

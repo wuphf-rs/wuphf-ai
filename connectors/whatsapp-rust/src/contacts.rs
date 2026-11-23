@@ -169,6 +169,23 @@ fn select(conn: &mut SqliteConnection, jid: &str) -> QueryResult<Option<ContactN
         .optional()
 }
 
+/// A saved contact: a row with an address-book name.
+#[derive(Clone, Debug, PartialEq, Eq, QueryableByName)]
+pub struct SavedContact {
+    #[diesel(sql_type = Text)]
+    pub jid: String,
+    #[diesel(sql_type = Text)]
+    pub full_name: String,
+}
+
+/// Every saved contact, by JID (each form a sync named is a row).
+pub fn saved(conn: &mut SqliteConnection) -> QueryResult<Vec<SavedContact>> {
+    diesel::sql_query(
+        "SELECT jid, full_name FROM wuphf_contacts WHERE full_name IS NOT NULL ORDER BY jid",
+    )
+    .load::<SavedContact>(conn)
+}
+
 /// The names under any of `forms`, merged in order.
 pub fn lookup(conn: &mut SqliteConnection, forms: &[String]) -> QueryResult<ContactNames> {
     let mut names = ContactNames::default();
@@ -265,6 +282,20 @@ pub mod tests {
         // Created twice: startup runs it on every start.
         create_table(&mut conn).unwrap();
         conn
+    }
+
+    #[test]
+    fn saved_contacts_are_the_rows_with_an_address_book_name() {
+        let mut conn = memory();
+        upsert_contact_name(&mut conn, "2@s.whatsapp.net", Some("Bob"), None, 1).unwrap();
+        upsert_push_name(&mut conn, "3@s.whatsapp.net", "Someone", 1).unwrap();
+        upsert_contact_name(&mut conn, "1@lid", Some("Alice"), Some("Al"), 1).unwrap();
+        let saved = saved(&mut conn).unwrap();
+        let names: Vec<_> = saved
+            .iter()
+            .map(|contact| (contact.jid.as_str(), contact.full_name.as_str()))
+            .collect();
+        assert_eq!(names, [("1@lid", "Alice"), ("2@s.whatsapp.net", "Bob")]);
     }
 
     fn updated_at(conn: &mut SqliteConnection, jid: &str) -> i64 {

@@ -242,7 +242,10 @@ fn user_jid(id: &str) -> Option<Jid> {
 
 /// The forms a contact sync names a person by: its JID, and the phone and LID
 /// forms the action carries.
-fn contact_forms(jid: &Jid, action: &wa::sync_action_value::ContactAction) -> Vec<String> {
+pub(crate) fn contact_forms(
+    jid: &Jid,
+    action: &wa::sync_action_value::ContactAction,
+) -> Vec<String> {
     let mut forms = vec![bare_id(jid)];
     for other in [&action.pn_jid, &action.lid_jid].into_iter().flatten() {
         if let Some(other) = user_jid(other).map(|jid| bare_id(&jid))

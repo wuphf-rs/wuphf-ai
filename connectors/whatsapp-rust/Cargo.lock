@@ -341,8 +341,8 @@ dependencies = [
 
 [[package]]
 name = "botconf"
-version = "0.13.2"
-source = "git+https://github.com/propheci/botconf?tag=v0.13.2#0c5af0f4e12b31f68117d4e09272a4108c430401"
+version = "0.14.0"
+source = "git+https://github.com/propheci/botconf?tag=v0.14.0#34757c2728cb7ae3bfcf77423cb43f73fdcdd739"
 dependencies = [
  "arc-swap",
  "botconf-derive",
@@ -357,8 +357,8 @@ dependencies = [
 
 [[package]]
 name = "botconf-derive"
-version = "0.13.2"
-source = "git+https://github.com/propheci/botconf?tag=v0.13.2#0c5af0f4e12b31f68117d4e09272a4108c430401"
+version = "0.14.0"
+source = "git+https://github.com/propheci/botconf?tag=v0.14.0#34757c2728cb7ae3bfcf77423cb43f73fdcdd739"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -367,8 +367,8 @@ dependencies = [
 
 [[package]]
 name = "botconf-proto"
-version = "0.13.2"
-source = "git+https://github.com/propheci/botconf?tag=v0.13.2#0c5af0f4e12b31f68117d4e09272a4108c430401"
+version = "0.14.0"
+source = "git+https://github.com/propheci/botconf?tag=v0.14.0#34757c2728cb7ae3bfcf77423cb43f73fdcdd739"
 dependencies = [
  "prost",
  "tonic",
@@ -377,12 +377,13 @@ dependencies = [
 
 [[package]]
 name = "botconf-tui"
-version = "0.13.2"
-source = "git+https://github.com/propheci/botconf?tag=v0.13.2#0c5af0f4e12b31f68117d4e09272a4108c430401"
+version = "0.14.0"
+source = "git+https://github.com/propheci/botconf?tag=v0.14.0#34757c2728cb7ae3bfcf77423cb43f73fdcdd739"
 dependencies = [
  "botconf",
  "crossterm",
  "getrandom 0.3.4",
+ "qrcode",
  "ratatui",
  "serde_json",
  "toml 0.8.23",
@@ -3561,6 +3562,7 @@ dependencies = [
  "atomic",
  "getrandom 0.4.3",
  "js-sys",
+ "serde_core",
  "wasm-bindgen",
 ]
 
@@ -4213,7 +4215,18 @@ dependencies = [
  "whatsapp-rust",
  "whatsapp-rust-sqlite-storage",
  "wuphf-connector",
+ "wuphf-model",
  "wuphf-proto",
+]
+
+[[package]]
+name = "wuphf-model"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "thiserror 2.0.21",
+ "uuid",
 ]
 
 [[package]]
