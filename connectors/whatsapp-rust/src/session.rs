@@ -12,7 +12,7 @@
 
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, RwLock};
+use std::sync::{Arc, Mutex, RwLock};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use anyhow::Context as _;
@@ -62,6 +62,21 @@ impl LinkedClient {
     }
 }
 
+/// The current session's [`Resync`], replaced by each new session. Cheap to
+/// clone.
+#[derive(Clone, Default)]
+pub struct CurrentResync(Arc<Mutex<Option<Resync>>>);
+
+impl CurrentResync {
+    fn set(&self, resync: Resync) {
+        *self.0.lock().unwrap() = Some(resync);
+    }
+
+    pub fn get(&self) -> Option<Resync> {
+        self.0.lock().unwrap().clone()
+    }
+}
+
 /// What every session of the process shares.
 pub struct Shared {
     pub config: Config,
@@ -78,6 +93,8 @@ pub struct Shared {
     /// `--resync-app-state`: the first session resyncs every app-state
     /// collection, then this is cleared.
     pub resync_all: AtomicBool,
+    /// The current session's resyncs, for the panel's "resync app state".
+    pub resync: CurrentResync,
     /// Canonical ids for every frame the sessions send, and the identity
     /// migrations already reported; process-wide, as a mapping outlives a
     /// session.
@@ -159,6 +176,7 @@ async fn run_once(shared: &Shared, cancel: &CancellationToken) -> anyhow::Result
     )
     .await
     .context("prepare the WhatsApp app-state seeds table")?;
+    shared.resync.set(resync.clone());
     let paired = resync.clone();
     let logged_out = Arc::new(Notify::new());
 

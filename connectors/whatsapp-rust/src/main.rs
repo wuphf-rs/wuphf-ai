@@ -7,6 +7,7 @@ mod addressing;
 mod avatars;
 mod chat_state;
 mod chats;
+mod commands;
 mod config;
 mod contacts;
 mod device;
@@ -43,13 +44,14 @@ use wuphf_connector::settings::Connection;
 
 use crate::addressing::AddressBook;
 use crate::avatars::Avatars;
+use crate::commands::WhatsAppCommands;
 use crate::config::{Config, Runtime};
 use crate::disappearing::TimerFallback;
 use crate::groups::GroupDirectory;
 use crate::identity::Identity;
 use crate::linking::Linking;
 use crate::sender::WhatsAppSender;
-use crate::session::{LinkedClient, Shared};
+use crate::session::{CurrentResync, LinkedClient, Shared};
 use crate::supervise::{Stop, supervise};
 use crate::wa_client::LiveClient;
 
@@ -132,6 +134,12 @@ async fn main() -> anyhow::Result<()> {
     // back into that form.
     let identity = Arc::new(Identity::default());
     let addresses = Arc::new(AddressBook::default());
+    let linking = Arc::new(Linking::new(
+        inputs_tx.clone(),
+        media.clone(),
+        config.login_method(),
+    ));
+    let resync = CurrentResync::default();
 
     let core_client = wuphf_connector::Client::new(wuphf_connector::Options {
         core_address: config.core_address.clone(),
@@ -145,6 +153,12 @@ async fn main() -> anyhow::Result<()> {
         token: core_token,
         is_permanent: None,
         settings: Some(settings.declaration.clone()),
+        // The panel's buttons on this connector's section.
+        commands: Some(Arc::new(WhatsAppCommands::new(
+            Arc::clone(&linking),
+            linked.clone(),
+            resync.clone(),
+        ))),
     });
     // With the flag off the sender stamps only what the core sends: no group
     // lookups, no owner notices.
@@ -185,11 +199,7 @@ async fn main() -> anyhow::Result<()> {
 
     let whatsapp_cancel = CancellationToken::new();
     let shared = Shared {
-        linking: Arc::new(Linking::new(
-            inputs_tx.clone(),
-            media.clone(),
-            config.login_method(),
-        )),
+        linking,
         avatars: Arc::new(Avatars::new(media.clone())),
         config,
         inputs: inputs_tx,
@@ -197,6 +207,7 @@ async fn main() -> anyhow::Result<()> {
         groups,
         linked,
         resync_all: AtomicBool::new(cli.resync_app_state),
+        resync,
         identity,
         addresses,
         migrations: Arc::default(),

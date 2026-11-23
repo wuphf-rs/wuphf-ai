@@ -60,11 +60,13 @@ pub struct Linking {
     state: Mutex<State>,
 }
 
-/// What the owner was told, and when a pair code was last asked for.
+/// What the owner was told, when a pair code was last asked for, and whether
+/// the owner asked for a code now.
 #[derive(Debug, Default)]
 struct State {
     schedule: Schedule,
     asked: Option<Instant>,
+    fresh: bool,
 }
 
 impl Linking {
@@ -103,7 +105,7 @@ impl Linking {
             // The raw payload still pairs when pasted into a QR tool.
             Err(_) => println!("QR payload: {code}"),
         }
-        let Some(next) = self.state.lock().unwrap().schedule.due(Instant::now()) else {
+        let Some(next) = self.state.lock().unwrap().tell_qr(Instant::now()) else {
             return;
         };
         let media_ids = match self.upload_qr(&code).await {
@@ -153,6 +155,14 @@ impl Linking {
         }
     }
 
+    /// The owner asked for a code now (the panel's "send a new link code"):
+    /// the next one — the next QR code, or a pair code asked for at the next
+    /// QR code — is told at once whatever the gap, and a pair code prompts the
+    /// phone.
+    pub fn fresh_code(&self) {
+        self.state.lock().unwrap().fresh = true;
+    }
+
     /// The session is linked: the next logout starts afresh.
     pub fn linked(&self) {
         *self.state.lock().unwrap() = State::default();
@@ -185,6 +195,9 @@ impl State {
     /// The pair code a round opening at `now` asks for, unless the last one
     /// asked for is still valid.
     fn ask(&mut self, now: Instant) -> Option<PairCodeAsk> {
+        if std::mem::take(&mut self.fresh) {
+            return Some(self.refresh(now));
+        }
         if self
             .asked
             .is_some_and(|asked| now.duration_since(asked) < PAIR_CODE_VALIDITY)
@@ -197,6 +210,15 @@ impl State {
             prompt_phone: tell.is_some(),
             tell,
         })
+    }
+
+    /// Whether a QR code issued at `now` is told, and if so the gap before the
+    /// next told one: at once when the owner asked for one.
+    fn tell_qr(&mut self, now: Instant) -> Option<Duration> {
+        if std::mem::take(&mut self.fresh) {
+            return Some(self.schedule.told(now));
+        }
+        self.schedule.due(now)
     }
 
     /// The pair code to ask for at `now` because WhatsApp asked for a new one:
@@ -298,6 +320,39 @@ mod tests {
         assert_eq!(schedule.due(at(3000 + 3600)), Some(GAPS[3]));
         assert_eq!(schedule.due(at(6600 + 3599)), None);
         assert_eq!(schedule.due(at(6600 + 3600)), Some(GAPS[3]));
+    }
+
+    #[test]
+    fn a_fresh_qr_code_is_told_at_once_then_the_gaps_resume() {
+        let start = Instant::now();
+        let at = |seconds: u64| start + Duration::from_secs(seconds);
+        let mut state = State::default();
+        assert_eq!(state.tell_qr(at(0)), Some(GAPS[0]));
+        assert_eq!(state.tell_qr(at(20)), None);
+        state.fresh = true;
+        assert_eq!(state.tell_qr(at(40)), Some(GAPS[1]));
+        // Once: the next one waits for the gap again.
+        assert_eq!(state.tell_qr(at(60)), None);
+    }
+
+    #[test]
+    fn a_fresh_pair_code_is_asked_prompted_and_told_at_once() {
+        let start = Instant::now();
+        let at = |seconds: u64| start + Duration::from_secs(seconds);
+        let mut state = State::default();
+        assert!(state.ask(at(0)).is_some());
+        // The code holds, so the round's next QR code asks for nothing...
+        assert_eq!(state.ask(at(20)), None);
+        // ...unless the owner asked for one.
+        state.fresh = true;
+        assert_eq!(
+            state.ask(at(40)),
+            Some(PairCodeAsk {
+                prompt_phone: true,
+                tell: Some(GAPS[1]),
+            })
+        );
+        assert_eq!(state.ask(at(60)), None);
     }
 
     #[test]

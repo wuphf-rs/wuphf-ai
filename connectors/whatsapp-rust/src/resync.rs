@@ -8,7 +8,8 @@
 //! table, which collections it has seen whole at which [`SEEDS`] epoch. A link
 //! made by this connector seeds them all (its first sync is a full one). On the
 //! first connect of a session, any collection not seeded at its epoch is
-//! resynced; `--resync-app-state` resyncs every collection once.
+//! resynced; `--resync-app-state` resyncs every collection once, and so does the
+//! settings panel's "resync app state" ([`Resync::all`]).
 //!
 //! A snapshot's events are reported as snapshots, so the core takes them as
 //! current state: titles rename threads, but no notes are posted and no chat
@@ -70,6 +71,8 @@ pub struct Resync {
     force_all: bool,
     /// Set on the session's first connect: later reconnects resync nothing.
     started: Arc<AtomicBool>,
+    /// Set while a requested resync runs, so a second press starts none.
+    busy: Arc<AtomicBool>,
 }
 
 impl Resync {
@@ -82,6 +85,7 @@ impl Resync {
             shared,
             force_all,
             started: Arc::new(AtomicBool::new(false)),
+            busy: Arc::new(AtomicBool::new(false)),
         })
     }
 
@@ -124,7 +128,31 @@ impl Resync {
                 return;
             }
         };
-        for collection in due(&seeded, self.force_all) {
+        self.resync_each(client, due(&seeded, self.force_all)).await;
+    }
+
+    /// Resync every collection now, in the background (the panel's "resync
+    /// app state", plan 058); `false` when a requested one is still running.
+    pub fn all(&self, client: Arc<Client>) -> bool {
+        if self.busy.swap(true, Ordering::SeqCst) {
+            return false;
+        }
+        let resync = self.clone();
+        tokio::spawn(async move {
+            resync.resync_each(&client, ALL).await;
+            resync.busy.store(false, Ordering::SeqCst);
+            info!("resynced every WhatsApp app-state collection on request");
+        });
+        true
+    }
+
+    /// Resync `collections` one by one, recording the seeds of those applied.
+    async fn resync_each(
+        &self,
+        client: &Arc<Client>,
+        collections: impl IntoIterator<Item = WAPatchName>,
+    ) {
+        for collection in collections {
             if !resync(client, collection).await {
                 continue;
             }
