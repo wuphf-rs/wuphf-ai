@@ -84,7 +84,7 @@ units:
   `wuphf-server update` cannot write to the store, so the module turns the
   core's release check off by default.
 - **The binary cache:** CI builds every package natively for x86_64-linux and
-  aarch64-linux on every push to `v2` and every tag, and pushes
+  aarch64-linux on every push to `v2` (a release tag is a `v2` commit), and pushes
   them to Cachix. Add the cache as a substituter (its name and public key are
   on its Cachix page) to download instead of build:
 
