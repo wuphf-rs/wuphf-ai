@@ -436,6 +436,7 @@ async fn serve_settings_from(url: &str, path: &Path) -> Served {
         Arc::clone(&sqlite),
         Arc::new(tokens),
         Some(OBSERVER_TOKEN.into()),
+        Arc::default(),
     );
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let address = listener.local_addr().unwrap();

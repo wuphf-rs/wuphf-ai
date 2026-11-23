@@ -13,6 +13,7 @@ use wuphf_storage::Storage;
 
 pub mod auth;
 pub mod connector;
+pub mod connector_commands;
 pub mod connector_settings;
 pub mod grpc;
 pub mod media;

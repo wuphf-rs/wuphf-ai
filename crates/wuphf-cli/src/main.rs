@@ -15,6 +15,7 @@ use wuphf_runtime::{
     Runtime,
     auth::{ConnectorTokens, any_token_auth},
     connector::ConnectorHub,
+    connector_commands::ConnectorCommands,
     connector_settings::ConnectorSettings,
     grpc::GrpcConnectorService,
     media::GrpcMediaService,
@@ -112,11 +113,15 @@ async fn serve(path: PathBuf) -> Result<()> {
         .map(|token| token.expose().to_owned());
     // Settings go through the core's settings service: connectors acting for
     // their owners, and the observer token as the owner.
+    // The commands live connector sessions declare, offered on their sections
+    // in the settings panel and run on their sessions.
+    let commands = Arc::new(ConnectorCommands::default());
     let settings_service = settings_server(
         Arc::clone(&settings),
         Arc::clone(&storage),
         Arc::clone(&connector_tokens),
         observer_token.clone(),
+        Arc::clone(&commands),
     );
     let (runtime, channels, observer) = Runtime::channelled(
         Arc::new(Core::new(storage, LiveRouting::new(Arc::clone(&settings)))),
@@ -154,7 +159,9 @@ async fn serve(path: PathBuf) -> Result<()> {
         .http2_keepalive_interval(Some(functions.keepalive_interval()))
         .http2_keepalive_timeout(Some(functions.keepalive_timeout()))
         .add_service(ConnectorTransportServer::new(
-            GrpcConnectorService::new(handle, connector_tokens).with_settings(connector_settings),
+            GrpcConnectorService::new(handle, connector_tokens)
+                .with_settings(connector_settings)
+                .with_commands(commands),
         ))
         .add_service(MediaTransportServer::with_interceptor(
             media_service,

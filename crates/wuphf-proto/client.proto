@@ -248,5 +248,14 @@ message ClientFrame {
     ReceiptEvent receipt = 9;
     OwnerNotice owner_notice = 10;
     ChatUpdateEvent chat_update = 11;
+    CommandResult command_result = 12;
   }
+}
+
+// The answer to a RunCommand: `message` is shown to the owner (as an error
+// when not `ok`, e.g. an unknown command).
+message CommandResult {
+  string request_id = 1;
+  bool ok = 2;
+  string message = 3;
 }

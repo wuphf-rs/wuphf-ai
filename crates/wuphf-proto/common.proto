@@ -41,6 +41,16 @@ message Registration {
   // pushes back through its botconf.v1.Settings service. Absent means the
   // connector declares none; a section declared earlier is kept.
   optional ConnectorSettingsDeclaration settings = 4;
+  // What the owner can run on the connector from the settings panel (buttons on
+  // its section), offered while this session is live.
+  repeated ConnectorCommand commands = 5;
+}
+
+// A command a connector declares: `id` names it in a RunCommand, `title` is
+// the panel button's label (e.g. "🔄 Resync app state").
+message ConnectorCommand {
+  string id = 1;
+  string title = 2;
 }
 
 // What a connector declares about its runtime settings at registration.

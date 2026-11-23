@@ -406,6 +406,7 @@ async fn the_registration_carries_the_declaration() {
         token: TOKEN.into(),
         is_permanent: None,
         settings: Some(declaration.clone()),
+        commands: None,
     });
     let (_inputs, inputs_rx) = mpsc::channel(1);
     let cancel = CancellationToken::new();

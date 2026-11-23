@@ -5,9 +5,11 @@
 //! downloads it from the core's media store through [`MediaClient`], calls
 //! the core's remote functions through [`FunctionsClient`], queues owner
 //! notices with [`send_notice`], installs the log subscriber with a live level
-//! ([`logging`]), and declares and follows runtime settings ([`settings`]).
+//! ([`logging`]), declares and follows runtime settings ([`settings`]), and runs
+//! the owner's commands ([`commands`]).
 
 mod client;
+pub mod commands;
 mod functions;
 pub mod logging;
 mod media;
@@ -16,6 +18,7 @@ mod sender;
 pub mod settings;
 
 pub use client::{Client, Options, PermanentFailureClassifier, SessionError};
+pub use commands::Commands;
 pub use functions::{
     FunctionError, FunctionsClient, MEDIA_CONVERT, MEDIA_CONVERT_MAJOR, MediaConvertArgs,
     MediaConvertResult, MediaConverter,

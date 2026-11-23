@@ -40,7 +40,14 @@ pub fn section_path(connector: &ConnectorId) -> String {
 
 /// The id of a connector's section in the settings store.
 fn section_id(connector: &ConnectorId) -> String {
-    format!("connector:{}", connector.0)
+    format!("{SECTION_PREFIX}{}", connector.0)
+}
+
+const SECTION_PREFIX: &str = "connector:";
+
+/// The connector whose section `section` is, if it is one.
+pub(crate) fn section_connector(section: &str) -> Option<&str> {
+    section.strip_prefix(SECTION_PREFIX)
 }
 
 /// Registers connectors' settings sections in the core's settings store and

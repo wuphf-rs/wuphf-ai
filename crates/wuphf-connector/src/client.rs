@@ -18,6 +18,7 @@ use tracing::{debug, error, info, warn};
 use wuphf_proto::connector as pb;
 use wuphf_proto::connector::connector_transport_client::ConnectorTransportClient;
 
+use crate::commands::{self, Commands};
 use crate::sender::{Delivery, Failure, Sender};
 
 const INITIAL_BACKOFF: Duration = Duration::from_secs(1);
@@ -58,6 +59,10 @@ pub struct Options {
     /// every change back. `None` declares none; a section declared earlier is
     /// kept.
     pub settings: Option<pb::ConnectorSettingsDeclaration>,
+    /// What the owner can run on the connector from the settings panel (see
+    /// [`crate::commands`]): declared at registration, run on the core's
+    /// `RunCommand`. `None` declares none.
+    pub commands: Option<Arc<dyn Commands>>,
 }
 
 #[derive(Debug, Error)]
@@ -157,6 +162,12 @@ impl Client {
                         supports_disappearing_timers: self.opts.supports_disappearing_timers,
                     }),
                     settings: self.opts.settings.clone(),
+                    commands: self
+                        .opts
+                        .commands
+                        .as_ref()
+                        .map(|commands| commands.declarations())
+                        .unwrap_or_default(),
                 })),
             })
             .map_err(|_| SessionError::StreamClosed)?;
@@ -274,6 +285,18 @@ impl Client {
                     async move { Ok((sender.apply_chat_state(dispatch).await?, None)) }
                 })
                 .await
+            }
+            // Answered in a task, so a slow command never holds up dispatches.
+            Some(pb::server_frame::Body::RunCommand(command)) => {
+                let commands = self.opts.commands.clone();
+                let outbound = outbound.clone();
+                tokio::spawn(async move {
+                    let frame = commands::answer(commands.as_ref(), command).await;
+                    if outbound.send(frame).await.is_err() {
+                        warn!("the session ended before a command's result was sent");
+                    }
+                });
+                Ok(())
             }
             Some(pb::server_frame::Body::Rejected(rejected)) => {
                 Err(SessionError::Rejected(rejected.reason))

@@ -18,10 +18,12 @@
 //! titles the core has stored), connectors and rules.
 
 use crate::auth::{ConnectorTokens, bearer_token};
+use crate::connector_commands::{COMMAND_TIMEOUT, ConnectorCommands};
+use crate::connector_settings::section_connector;
 use botconf_grpc::proto::Actor;
 use botconf_grpc::proto::settings_server::SettingsServer;
 use botconf_grpc::{Authorizer, Operation, Principal, SettingsService};
-use botconf_panel::{Name, Names, Panel};
+use botconf_panel::{Name, Names, Panel, SectionAction};
 use serde_json::Value;
 use std::future::Future;
 use std::pin::Pin;
@@ -46,12 +48,14 @@ pub const PANEL_COMMAND: &str = "wuphf";
 /// The core's `botconf.v1.Settings` service: the settings store and its
 /// panel, whose long buttons' handles are kept in `storage` so they survive a
 /// restart, behind [`WuphfAuthorizer`], with [`WuphfNames`] naming the
-/// references.
+/// references. A connector's section also offers the commands its live
+/// session declared (`commands`, plan 058).
 pub fn settings_server<S>(
     settings: Arc<SettingsStore>,
     storage: Arc<S>,
     connectors: Arc<ConnectorTokens>,
     observer_token: Option<String>,
+    commands: Arc<ConnectorCommands>,
 ) -> SettingsServer<SettingsService<WuphfSchema>>
 where
     S: ObservationStore + TopologyStore + PanelTokens,
@@ -62,12 +66,42 @@ where
             .command(PANEL_COMMAND),
         Panel::domain,
     );
+    let panel = with_commands(panel, commands);
     SettingsService::new(
         Arc::new(panel),
         WuphfAuthorizer::new(Arc::clone(&settings), connectors, observer_token),
     )
     .names(WuphfNames::new(storage, settings))
     .into_server()
+}
+
+/// Buttons on each connector's section for the commands its live session
+/// declared, run on that session.
+pub(crate) fn with_commands(
+    panel: Panel<WuphfSchema>,
+    commands: Arc<ConnectorCommands>,
+) -> Panel<WuphfSchema> {
+    let offered = Arc::clone(&commands);
+    panel
+        .section_actions(move |_, section| {
+            section_connector(section)
+                .map(|connector| offered.offered(connector))
+                .unwrap_or_default()
+                .into_iter()
+                .map(|command| SectionAction {
+                    id: command.id,
+                    title: command.title,
+                })
+                .collect()
+        })
+        .on_action(move |call| {
+            let commands = Arc::clone(&commands);
+            Box::pin(async move {
+                let connector = section_connector(&call.section)
+                    .ok_or_else(|| format!("{} is not a connector's section", call.section))?;
+                commands.run(connector, &call.action, COMMAND_TIMEOUT).await
+            })
+        })
 }
 
 /// Decides every settings request (see the module docs).

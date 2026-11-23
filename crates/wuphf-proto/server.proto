@@ -141,7 +141,17 @@ message ServerFrame {
     DeliveryAckDispatch delivery_ack = 7;
     SeenReceiptDispatch seen_receipt = 8;
     ChatStateDispatch chat_state = 9;
+    RunCommand run_command = 10;
   }
+}
+
+// Run one of the commands the connector declared (Registration.commands),
+// pressed by the owner in the settings panel. Not a dispatch: never stored or
+// redelivered. Answer with a CommandResult carrying the same request_id, at
+// once; do slow work in the background.
+message RunCommand {
+  string request_id = 1;
+  string command_id = 2;
 }
 
 // Bring a chat (or a thread) to this pin / mute / archive state. Absent fields

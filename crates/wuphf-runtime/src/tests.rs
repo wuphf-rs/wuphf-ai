@@ -716,6 +716,7 @@ fn registration_frame(
             platform: platform.into(),
             capabilities,
             settings: None,
+            commands: Vec::new(),
         })),
     }
 }

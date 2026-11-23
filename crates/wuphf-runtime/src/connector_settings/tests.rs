@@ -2,8 +2,10 @@ use super::*;
 use crate::RuntimeChannels;
 use crate::auth::ConnectorTokens;
 use crate::connector::ConnectorHub;
+use crate::connector_commands::ConnectorCommands;
 use crate::grpc::GrpcConnectorService;
 use botconf::SettingsError;
+use botconf_panel::{Limits, Page, Panel, Viewer};
 use serde_json::json;
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -358,6 +360,11 @@ impl Drop for Served {
 /// The connector transport over a hub allowing the configured connectors,
 /// accepting settings declarations.
 async fn serve() -> Served {
+    serve_with(None).await
+}
+
+/// As [`serve`], offering live sessions' commands through `commands`.
+async fn serve_with(commands: Option<Arc<ConnectorCommands>>) -> Served {
     let store = store().await;
     let declarations = Arc::new(InMemoryStorage::default());
     let settings = Arc::new(ConnectorSettings::new(
@@ -391,9 +398,12 @@ async fn serve() -> Served {
     let address = listener.local_addr().unwrap();
     let server = tokio::spawn(async move {
         Server::builder()
-            .add_service(ConnectorTransportServer::new(
-                GrpcConnectorService::new(handle, tokens).with_settings(settings),
-            ))
+            .add_service(ConnectorTransportServer::new(match commands {
+                Some(commands) => GrpcConnectorService::new(handle, tokens)
+                    .with_settings(settings)
+                    .with_commands(commands),
+                None => GrpcConnectorService::new(handle, tokens).with_settings(settings),
+            }))
             .serve_with_incoming(TcpListenerStream::new(listener))
             .await
             .unwrap();
@@ -412,6 +422,23 @@ async fn open(
     uri: &str,
     settings: Option<pb::ConnectorSettingsDeclaration>,
 ) -> Result<mpsc::Sender<pb::ClientFrame>, tonic::Status> {
+    open_declaring(uri, settings, Vec::new())
+        .await
+        .map(|(frames, _)| frames)
+}
+
+/// As [`open`], declaring `commands` too, with the core's frames.
+async fn open_declaring(
+    uri: &str,
+    settings: Option<pb::ConnectorSettingsDeclaration>,
+    commands: Vec<pb::ConnectorCommand>,
+) -> Result<
+    (
+        mpsc::Sender<pb::ClientFrame>,
+        tonic::Streaming<pb::ServerFrame>,
+    ),
+    tonic::Status,
+> {
     let mut client = ConnectorTransportClient::connect(uri.to_owned())
         .await
         .unwrap();
@@ -423,6 +450,7 @@ async fn open(
                 platform: pb::Platform::Telegram.into(),
                 capabilities: Some(pb::Capabilities::default()),
                 settings,
+                commands,
             })),
         })
         .await
@@ -432,8 +460,8 @@ async fn open(
         "authorization",
         format!("Bearer {TG_TOKEN}").parse().unwrap(),
     );
-    client.open_session(request).await?;
-    Ok(frames)
+    let server_frames = client.open_session(request).await?.into_inner();
+    Ok((frames, server_frames))
 }
 
 fn on_wire(declaration: SettingsDeclaration) -> pb::ConnectorSettingsDeclaration {
@@ -461,6 +489,91 @@ async fn registration_with_a_declaration_registers_the_section() {
     assert_eq!(
         served.declarations.settings_declarations().await.unwrap(),
         [declaration()]
+    );
+}
+
+#[tokio::test]
+async fn a_live_session_s_commands_run_from_its_section() {
+    let commands = Arc::new(ConnectorCommands::default());
+    let served = serve_with(Some(Arc::clone(&commands))).await;
+    let resync = pb::ConnectorCommand {
+        id: "resync".into(),
+        title: "🔄 Resync".into(),
+    };
+    let (frames, mut server_frames) =
+        open_declaring(&served.uri, Some(on_wire(declaration())), vec![resync])
+            .await
+            .unwrap();
+    tokio::time::timeout(std::time::Duration::from_secs(5), async {
+        while served.store.catalog().resolve(&edit_mode()).is_err()
+            || commands.offered(TG).is_empty()
+        {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("the section and its command are offered");
+
+    let panel = crate::settings_auth::with_commands(
+        Panel::new(Arc::clone(&served.store)),
+        Arc::clone(&commands),
+    );
+    let limits = Limits {
+        token_bytes: 64,
+        text_chars: 4096,
+        max_rows: None,
+        max_per_row: 8,
+    };
+    let viewer = Viewer::new(&limits);
+    let section = Page::Section(format!("connector:{TG}"));
+    let screen = panel.render(&section, &viewer).await;
+    let token = screen
+        .rows
+        .iter()
+        .flatten()
+        .find(|button| button.label == "🔄 Resync")
+        .expect("the command's button")
+        .token
+        .clone();
+
+    // The connector answers the press it is sent.
+    let answering = tokio::spawn(async move {
+        let frame = server_frames.message().await.unwrap().unwrap();
+        let Some(pb::server_frame::Body::RunCommand(command)) = frame.body else {
+            panic!("a RunCommand, not {frame:?}");
+        };
+        assert_eq!(command.command_id, "resync");
+        frames
+            .send(pb::ClientFrame {
+                body: Some(pb::client_frame::Body::CommandResult(pb::CommandResult {
+                    request_id: command.request_id,
+                    ok: true,
+                    message: "resyncing".into(),
+                })),
+            })
+            .await
+            .unwrap();
+        (frames, server_frames)
+    });
+    let reaction = panel.press(&token, &viewer).await.unwrap();
+    assert_eq!(reaction.notice.as_deref(), Some("resyncing"));
+
+    // When the session ends, the button goes.
+    drop(answering.await.unwrap());
+    tokio::time::timeout(std::time::Duration::from_secs(5), async {
+        while !commands.offered(TG).is_empty() {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("the command is withdrawn with its session");
+    let screen = panel.render(&section, &viewer).await;
+    assert!(
+        !screen
+            .rows
+            .iter()
+            .flatten()
+            .any(|button| button.label == "🔄 Resync")
     );
 }
 

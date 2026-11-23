@@ -1286,6 +1286,7 @@ type ClientFrame struct {
 	//	*ClientFrame_Receipt
 	//	*ClientFrame_OwnerNotice
 	//	*ClientFrame_ChatUpdate
+	//	*ClientFrame_CommandResult
 	Body          isClientFrame_Body `protobuf_oneof:"body"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -1427,6 +1428,15 @@ func (x *ClientFrame) GetChatUpdate() *ChatUpdateEvent {
 	return nil
 }
 
+func (x *ClientFrame) GetCommandResult() *CommandResult {
+	if x != nil {
+		if x, ok := x.Body.(*ClientFrame_CommandResult); ok {
+			return x.CommandResult
+		}
+	}
+	return nil
+}
+
 type isClientFrame_Body interface {
 	isClientFrame_Body()
 }
@@ -1475,6 +1485,10 @@ type ClientFrame_ChatUpdate struct {
 	ChatUpdate *ChatUpdateEvent `protobuf:"bytes,11,opt,name=chat_update,json=chatUpdate,proto3,oneof"`
 }
 
+type ClientFrame_CommandResult struct {
+	CommandResult *CommandResult `protobuf:"bytes,12,opt,name=command_result,json=commandResult,proto3,oneof"`
+}
+
 func (*ClientFrame_Registration) isClientFrame_Body() {}
 
 func (*ClientFrame_MessageCreate) isClientFrame_Body() {}
@@ -1496,6 +1510,70 @@ func (*ClientFrame_Receipt) isClientFrame_Body() {}
 func (*ClientFrame_OwnerNotice) isClientFrame_Body() {}
 
 func (*ClientFrame_ChatUpdate) isClientFrame_Body() {}
+
+func (*ClientFrame_CommandResult) isClientFrame_Body() {}
+
+// The answer to a RunCommand: `message` is shown to the owner (as an error
+// when not `ok`, e.g. an unknown command).
+type CommandResult struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	RequestId     string                 `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	Ok            bool                   `protobuf:"varint,2,opt,name=ok,proto3" json:"ok,omitempty"`
+	Message       string                 `protobuf:"bytes,3,opt,name=message,proto3" json:"message,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *CommandResult) Reset() {
+	*x = CommandResult{}
+	mi := &file_client_proto_msgTypes[14]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *CommandResult) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*CommandResult) ProtoMessage() {}
+
+func (x *CommandResult) ProtoReflect() protoreflect.Message {
+	mi := &file_client_proto_msgTypes[14]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use CommandResult.ProtoReflect.Descriptor instead.
+func (*CommandResult) Descriptor() ([]byte, []int) {
+	return file_client_proto_rawDescGZIP(), []int{14}
+}
+
+func (x *CommandResult) GetRequestId() string {
+	if x != nil {
+		return x.RequestId
+	}
+	return ""
+}
+
+func (x *CommandResult) GetOk() bool {
+	if x != nil {
+		return x.Ok
+	}
+	return false
+}
+
+func (x *CommandResult) GetMessage() string {
+	if x != nil {
+		return x.Message
+	}
+	return ""
+}
 
 var File_client_proto protoreflect.FileDescriptor
 
@@ -1630,7 +1708,7 @@ const file_client_proto_rawDesc = "" +
 	"\vOwnerNotice\x122\n" +
 	"\x04kind\x18\x01 \x01(\x0e2\x1e.wuphf.connector.v1.NoticeKindR\x04kind\x12\x16\n" +
 	"\x06detail\x18\x02 \x01(\tR\x06detail\x12\x1b\n" +
-	"\tmedia_ids\x18\x03 \x03(\tR\bmediaIds\"\xcc\x06\n" +
+	"\tmedia_ids\x18\x03 \x03(\tR\bmediaIds\"\x98\a\n" +
 	"\vClientFrame\x12F\n" +
 	"\fregistration\x18\x01 \x01(\v2 .wuphf.connector.v1.RegistrationH\x00R\fregistration\x12O\n" +
 	"\x0emessage_create\x18\x02 \x01(\v2&.wuphf.connector.v1.MessageCreateEventH\x00R\rmessageCreate\x12O\n" +
@@ -1644,8 +1722,14 @@ const file_client_proto_rawDesc = "" +
 	"\fowner_notice\x18\n" +
 	" \x01(\v2\x1f.wuphf.connector.v1.OwnerNoticeH\x00R\vownerNotice\x12F\n" +
 	"\vchat_update\x18\v \x01(\v2#.wuphf.connector.v1.ChatUpdateEventH\x00R\n" +
-	"chatUpdateB\x06\n" +
-	"\x04body*^\n" +
+	"chatUpdate\x12J\n" +
+	"\x0ecommand_result\x18\f \x01(\v2!.wuphf.connector.v1.CommandResultH\x00R\rcommandResultB\x06\n" +
+	"\x04body\"X\n" +
+	"\rCommandResult\x12\x1d\n" +
+	"\n" +
+	"request_id\x18\x01 \x01(\tR\trequestId\x12\x0e\n" +
+	"\x02ok\x18\x02 \x01(\bR\x02ok\x12\x18\n" +
+	"\amessage\x18\x03 \x01(\tR\amessage*^\n" +
 	"\vReceiptKind\x12\x1c\n" +
 	"\x18RECEIPT_KIND_UNSPECIFIED\x10\x00\x12\x1a\n" +
 	"\x16RECEIPT_KIND_DELIVERED\x10\x01\x12\x15\n" +
@@ -1674,7 +1758,7 @@ func file_client_proto_rawDescGZIP() []byte {
 }
 
 var file_client_proto_enumTypes = make([]protoimpl.EnumInfo, 3)
-var file_client_proto_msgTypes = make([]protoimpl.MessageInfo, 14)
+var file_client_proto_msgTypes = make([]protoimpl.MessageInfo, 15)
 var file_client_proto_goTypes = []any{
 	(ReceiptKind)(0),            // 0: wuphf.connector.v1.ReceiptKind
 	(NoticeKind)(0),             // 1: wuphf.connector.v1.NoticeKind
@@ -1693,23 +1777,24 @@ var file_client_proto_goTypes = []any{
 	(*ReceiptEvent)(nil),        // 14: wuphf.connector.v1.ReceiptEvent
 	(*OwnerNotice)(nil),         // 15: wuphf.connector.v1.OwnerNotice
 	(*ClientFrame)(nil),         // 16: wuphf.connector.v1.ClientFrame
-	(*Attachment)(nil),          // 17: wuphf.connector.v1.Attachment
-	(*DisappearingTimer)(nil),   // 18: wuphf.connector.v1.DisappearingTimer
-	(*MuteState)(nil),           // 19: wuphf.connector.v1.MuteState
-	(*Registration)(nil),        // 20: wuphf.connector.v1.Registration
+	(*CommandResult)(nil),       // 17: wuphf.connector.v1.CommandResult
+	(*Attachment)(nil),          // 18: wuphf.connector.v1.Attachment
+	(*DisappearingTimer)(nil),   // 19: wuphf.connector.v1.DisappearingTimer
+	(*MuteState)(nil),           // 20: wuphf.connector.v1.MuteState
+	(*Registration)(nil),        // 21: wuphf.connector.v1.Registration
 }
 var file_client_proto_depIdxs = []int32{
-	17, // 0: wuphf.connector.v1.MessageCreateEvent.attachments:type_name -> wuphf.connector.v1.Attachment
-	18, // 1: wuphf.connector.v1.MessageCreateEvent.disappearing:type_name -> wuphf.connector.v1.DisappearingTimer
-	18, // 2: wuphf.connector.v1.ChatUpdate.disappearing:type_name -> wuphf.connector.v1.DisappearingTimer
+	18, // 0: wuphf.connector.v1.MessageCreateEvent.attachments:type_name -> wuphf.connector.v1.Attachment
+	19, // 1: wuphf.connector.v1.MessageCreateEvent.disappearing:type_name -> wuphf.connector.v1.DisappearingTimer
+	19, // 2: wuphf.connector.v1.ChatUpdate.disappearing:type_name -> wuphf.connector.v1.DisappearingTimer
 	5,  // 3: wuphf.connector.v1.ChatUpdate.avatar:type_name -> wuphf.connector.v1.ChatAvatar
 	6,  // 4: wuphf.connector.v1.ChatUpdate.participant_changes:type_name -> wuphf.connector.v1.ParticipantChange
-	19, // 5: wuphf.connector.v1.ChatUpdate.mute:type_name -> wuphf.connector.v1.MuteState
+	20, // 5: wuphf.connector.v1.ChatUpdate.mute:type_name -> wuphf.connector.v1.MuteState
 	2,  // 6: wuphf.connector.v1.ParticipantChange.kind:type_name -> wuphf.connector.v1.ParticipantChange.Kind
 	4,  // 7: wuphf.connector.v1.ChatUpdateEvent.updates:type_name -> wuphf.connector.v1.ChatUpdate
 	0,  // 8: wuphf.connector.v1.ReceiptEvent.kind:type_name -> wuphf.connector.v1.ReceiptKind
 	1,  // 9: wuphf.connector.v1.OwnerNotice.kind:type_name -> wuphf.connector.v1.NoticeKind
-	20, // 10: wuphf.connector.v1.ClientFrame.registration:type_name -> wuphf.connector.v1.Registration
+	21, // 10: wuphf.connector.v1.ClientFrame.registration:type_name -> wuphf.connector.v1.Registration
 	3,  // 11: wuphf.connector.v1.ClientFrame.message_create:type_name -> wuphf.connector.v1.MessageCreateEvent
 	11, // 12: wuphf.connector.v1.ClientFrame.acknowledgement:type_name -> wuphf.connector.v1.Acknowledgement
 	10, // 13: wuphf.connector.v1.ClientFrame.identity_migrated:type_name -> wuphf.connector.v1.IdentityMigrated
@@ -1720,11 +1805,12 @@ var file_client_proto_depIdxs = []int32{
 	14, // 18: wuphf.connector.v1.ClientFrame.receipt:type_name -> wuphf.connector.v1.ReceiptEvent
 	15, // 19: wuphf.connector.v1.ClientFrame.owner_notice:type_name -> wuphf.connector.v1.OwnerNotice
 	7,  // 20: wuphf.connector.v1.ClientFrame.chat_update:type_name -> wuphf.connector.v1.ChatUpdateEvent
-	21, // [21:21] is the sub-list for method output_type
-	21, // [21:21] is the sub-list for method input_type
-	21, // [21:21] is the sub-list for extension type_name
-	21, // [21:21] is the sub-list for extension extendee
-	0,  // [0:21] is the sub-list for field type_name
+	17, // 21: wuphf.connector.v1.ClientFrame.command_result:type_name -> wuphf.connector.v1.CommandResult
+	22, // [22:22] is the sub-list for method output_type
+	22, // [22:22] is the sub-list for method input_type
+	22, // [22:22] is the sub-list for extension type_name
+	22, // [22:22] is the sub-list for extension extendee
+	0,  // [0:22] is the sub-list for field type_name
 }
 
 func init() { file_client_proto_init() }
@@ -1755,6 +1841,7 @@ func file_client_proto_init() {
 		(*ClientFrame_Receipt)(nil),
 		(*ClientFrame_OwnerNotice)(nil),
 		(*ClientFrame_ChatUpdate)(nil),
+		(*ClientFrame_CommandResult)(nil),
 	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
@@ -1762,7 +1849,7 @@ func file_client_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_client_proto_rawDesc), len(file_client_proto_rawDesc)),
 			NumEnums:      3,
-			NumMessages:   14,
+			NumMessages:   15,
 			NumExtensions: 0,
 			NumServices:   0,
 		},
