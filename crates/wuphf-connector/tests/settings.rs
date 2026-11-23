@@ -170,6 +170,20 @@ impl Settings for FakeSettings {
     async fn act(&self, _: Request<bc::ActRequest>) -> Result<Response<bc::ActResponse>, Status> {
         Err(unimplemented())
     }
+
+    async fn export(
+        &self,
+        _: Request<bc::ExportRequest>,
+    ) -> Result<Response<bc::ExportResponse>, Status> {
+        Err(unimplemented())
+    }
+
+    async fn import(
+        &self,
+        _: Request<bc::ImportRequest>,
+    ) -> Result<Response<bc::ImportResponse>, Status> {
+        Err(unimplemented())
+    }
 }
 
 async fn serve(settings: FakeSettings) -> (String, tokio::task::JoinHandle<()>) {

@@ -173,3 +173,44 @@ async fn settings_reload_without_token_is_refused() {
     }
     server.abort();
 }
+
+#[tokio::test]
+async fn a_running_core_exports_and_imports_its_settings() {
+    let config = config_file();
+    let (address, core, server) = serve_settings(&config).await;
+    core.set("notify", serde_json::from_str(NOTIFY).unwrap(), None)
+        .await
+        .unwrap();
+    let backup = export_online(&address, Some(OBSERVER_TOKEN)).await.unwrap();
+    assert!(backup.contains("telegram-main:telegram:user:1") && backup.contains("[backup]"));
+    assert!(
+        !backup.contains("[backup.env_file]"),
+        "never secrets over the wire"
+    );
+
+    core.set("notify", serde_json::json!([]), None)
+        .await
+        .unwrap();
+    let edited = backup.replace("127.0.0.1:50051", "127.0.0.1:50099");
+    let dry = import_online(&address, Some(OBSERVER_TOKEN), edited.clone(), true)
+        .await
+        .unwrap();
+    assert!(dry.starts_with("would set: notify"), "{dry}");
+    assert_eq!(core.current().value("notify"), Some(serde_json::json!([])));
+    let done = import_online(&address, Some(OBSERVER_TOKEN), edited, false)
+        .await
+        .unwrap();
+    assert!(done.starts_with("set: notify"), "{done}");
+    assert!(
+        done.contains("only `wuphf-server import` (offline) restores them: listen"),
+        "{done}"
+    );
+    assert_eq!(
+        core.current().value("notify"),
+        Some(serde_json::from_str(NOTIFY).unwrap())
+    );
+
+    let refused = export_online(&address, None).await.unwrap_err();
+    assert!(format!("{refused:#}").contains("valid bearer token required"));
+    server.abort();
+}

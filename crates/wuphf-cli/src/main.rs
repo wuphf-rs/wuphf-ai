@@ -24,6 +24,7 @@ use wuphf_runtime::{
 };
 use wuphf_settings::{LiveRouting, WuphfSchema};
 
+mod backup;
 mod settings;
 mod setup;
 
@@ -62,6 +63,36 @@ enum Command {
         #[arg(long, default_value = ".env.local")]
         env_file: PathBuf,
     },
+    /// Back up the settings as one TOML file: the config file with every
+    /// stored override applied, and every connector's stored settings.
+    /// Without --with-secrets it names the token variables but holds no
+    /// values. Works while the core is down.
+    Export {
+        #[arg(long, default_value = "config.local.toml")]
+        config: PathBuf,
+        /// Where the token variables' values come from (--with-secrets).
+        #[arg(long, default_value = ".env.local")]
+        env_file: PathBuf,
+        /// Write the backup here (readable by its owner only) instead of
+        /// printing it.
+        #[arg(short, long)]
+        output: Option<PathBuf>,
+        /// Include the values of the variables the options name.
+        #[arg(long)]
+        with_secrets: bool,
+    },
+    /// Restore a backup: the config file (the previous one kept as .bak), the
+    /// env file's variables when the backup has them, and every stored
+    /// override. Checked as the core would load it first; refused while a
+    /// core runs.
+    Import {
+        /// The backup, as `export` writes it.
+        file: PathBuf,
+        #[arg(long, default_value = "config.local.toml")]
+        config: PathBuf,
+        #[arg(long, default_value = ".env.local")]
+        env_file: PathBuf,
+    },
 }
 
 #[derive(Subcommand)]
@@ -76,14 +107,42 @@ enum FunctionsCommand {
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    init_logging();
-    match Arguments::parse().command {
+    let command = Arguments::parse().command;
+    // The setup screen is the terminal: a log line would draw over it.
+    if !matches!(command, Command::Setup { .. }) {
+        init_logging();
+    }
+    match command {
         Command::Serve { config } => serve(config).await,
         Command::Functions {
             command: FunctionsCommand::List { address },
         } => list_functions(address).await,
         Command::Settings { config, action } => settings::run(&config, action).await,
         Command::Setup { config, env_file } => setup::run(config, env_file),
+        Command::Export {
+            config,
+            env_file,
+            output,
+            with_secrets,
+        } => {
+            let backup = backup::export_offline(&config, &env_file, with_secrets).await?;
+            backup::write_backup(output.as_ref(), &backup)?;
+            if let Some(output) = &output {
+                eprintln!("wrote {}", output.display());
+            }
+            Ok(())
+        }
+        Command::Import {
+            file,
+            config,
+            env_file,
+        } => {
+            let text = std::fs::read_to_string(&file)
+                .with_context(|| format!("failed to read {}", file.display()))?;
+            let imported = backup::import_offline(&config, &env_file, &text).await?;
+            println!("{}", backup::imported_summary(&config, &imported));
+            Ok(())
+        }
     }
 }
 
@@ -100,6 +159,9 @@ fn init_logging() {
 }
 
 async fn serve(path: PathBuf) -> Result<()> {
+    // Held while the core runs, so an offline import never writes under it.
+    let _database_lock = backup::lock_database(&backup::database_url(&path)?)
+        .context("lock the core's database (is another core, or an import, using it?)")?;
     let (storage, settings) = settings::open(&path, WuphfSchema::new()).await?;
     // Connectors declaring their own settings get a section in the store
     // (stored declarations were restored by `open`).

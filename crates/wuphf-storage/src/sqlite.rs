@@ -36,6 +36,19 @@ impl SqliteStorage {
         MIGRATOR.run(&pool).await?;
         Ok(Self { pool })
     }
+
+    /// The file a database URL names (`sqlite://wuphf.sqlite` is
+    /// `wuphf.sqlite`); `None` for an in-memory database or a URL that does
+    /// not parse.
+    pub fn database_file(database_url: &str) -> Option<std::path::PathBuf> {
+        // sqlx names an in-memory database after a placeholder file.
+        if database_url.contains(":memory:") || database_url.contains("mode=memory") {
+            return None;
+        }
+        let options = SqliteConnectOptions::from_str(database_url).ok()?;
+        let file = options.get_filename();
+        (!file.as_os_str().is_empty()).then(|| file.to_owned())
+    }
 }
 
 #[async_trait]

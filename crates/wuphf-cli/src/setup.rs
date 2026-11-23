@@ -10,8 +10,24 @@ use std::path::{Path, PathBuf};
 use wuphf_model::{ChatDirectory, ConnectorId, chat_directory};
 use wuphf_settings::domains;
 
+const EXPORT: &str = "Back up the settings to a file: this config file with every stored \
+     override applied, and every connector's stored settings (see `wuphf-server export`). Asks \
+     for the file and whether to include the env file's tokens.";
+const IMPORT: &str = "Restore a backup over this config file (kept as .bak), the env file's \
+     tokens when the backup has them, and every stored override (see `wuphf-server import`). \
+     The core must be down. Quit and reopen setup after it: this screen still shows the file \
+     as it was.";
+
+/// Runs the setup screen. Called from the core's runtime: the backup actions
+/// block on it from setup's worker thread.
 pub fn run(config: PathBuf, env_file: PathBuf) -> Result<()> {
     let directory = chat_directory();
+    let runtime = tokio::runtime::Handle::current();
+    let (export_paths, import_paths) = (
+        (config.clone(), env_file.clone()),
+        (config.clone(), env_file.clone()),
+    );
+    let import_runtime = runtime.clone();
     let setup = botconf_tui::Setup::new(
         wuphf_settings::description(),
         config,
@@ -25,7 +41,61 @@ pub fn run(config: PathBuf, env_file: PathBuf) -> Result<()> {
             })
         }),
     )
-    .suggest(move |query| suggest(directory.as_deref(), query));
+    .suggest(move |query| suggest(directory.as_deref(), query))
+    .action("Export settings", EXPORT, move |screen, _candidate| {
+        let (config, env_file) = &export_paths;
+        let output = screen
+            .ask("Write the backup to (enter: wuphf-backup.toml):")
+            .ok_or("Stopped.")?;
+        let output = PathBuf::from(match output.trim() {
+            "" => "wuphf-backup.toml",
+            output => output,
+        });
+        let secrets = screen
+            .ask("Include the env file's tokens (anyone with the file can then act as the core)? y/N:")
+            .ok_or("Stopped.")?;
+        let secrets = matches!(secrets.trim(), "y" | "Y" | "yes");
+        screen.progress("Exporting…");
+        let backup = runtime
+            .block_on(crate::backup::export_offline(config, env_file, secrets))
+            .map_err(|error| format!("{error:#}"))?;
+        crate::backup::write_backup(Some(&output), &backup).map_err(|error| format!("{error:#}"))?;
+        Ok(format!(
+            "Backed up to {}{}",
+            output.display(),
+            if secrets { ", tokens included" } else { "" }
+        ))
+    })
+    .action("Import settings", IMPORT, move |screen, _candidate| {
+        let (config, env_file) = &import_paths;
+        let file = screen.ask("The backup to restore:").ok_or("Stopped.")?;
+        let file = PathBuf::from(file.trim());
+        let text = std::fs::read_to_string(&file)
+            .map_err(|error| format!("{}: {error}", file.display()))?;
+        let backup = botconf::export::Backup::parse(&text).map_err(|error| error.to_string())?;
+        screen.say(&format!(
+            "It replaces {} (kept as .bak) and every stored override, with {} connector settings{}.",
+            config.display(),
+            backup.overrides.len(),
+            if backup.env.is_empty() {
+                String::new()
+            } else {
+                format!(" and {} env file variables", backup.env.len())
+            }
+        ));
+        let sure = screen.ask("Type yes to restore it:").ok_or("Stopped.")?;
+        if sure.trim() != "yes" {
+            return Err("Not restored.".into());
+        }
+        screen.progress("Restoring…");
+        let imported = import_runtime
+            .block_on(crate::backup::import_offline(config, env_file, &text))
+            .map_err(|error| format!("{error:#}"))?;
+        Ok(format!(
+            "{} Quit and reopen setup to see it.",
+            crate::backup::imported_summary(config, &imported).replace('\n', "; ")
+        ))
+    });
     botconf_tui::run(setup)?;
     Ok(())
 }

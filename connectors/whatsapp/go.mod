@@ -12,7 +12,7 @@ require (
 	github.com/mattn/go-sqlite3 v1.14.53
 	github.com/mdp/qrterminal/v3 v3.2.1
 	github.com/pelletier/go-toml/v2 v2.4.3
-	github.com/propheci/botconf/go v0.14.1
+	github.com/propheci/botconf/go v0.15.1
 	github.com/rs/zerolog v1.35.1
 	go.mau.fi/whatsmeow v0.0.0-20261113153213-1956f9683795
 	google.golang.org/protobuf v1.36.12

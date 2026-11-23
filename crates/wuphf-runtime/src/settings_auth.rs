@@ -72,6 +72,8 @@ where
         WuphfAuthorizer::new(Arc::clone(&settings), connectors, observer_token),
     )
     .names(WuphfNames::new(storage, settings))
+    // Export writes the backup from the config file's description.
+    .description(wuphf_settings::description())
     .into_server()
 }
 

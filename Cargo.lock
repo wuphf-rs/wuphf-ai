@@ -301,8 +301,8 @@ checksum = "dc0b364ead1874514c8c2855ab558056ebfeb775653e7ae45ff72f28f8f3166c"
 
 [[package]]
 name = "botconf"
-version = "0.14.1"
-source = "git+https://github.com/propheci/botconf?tag=v0.14.1#53efe28b0b0546aef9c70a319b7784f957963353"
+version = "0.15.1"
+source = "git+https://github.com/propheci/botconf?tag=v0.15.1#b1bcb156ec38e852e2862c7c164689055c7e81cf"
 dependencies = [
  "arc-swap",
  "botconf-derive",
@@ -313,13 +313,14 @@ dependencies = [
  "serde_json",
  "thiserror 2.0.21",
  "tokio",
+ "toml",
  "tracing",
 ]
 
 [[package]]
 name = "botconf-derive"
-version = "0.14.1"
-source = "git+https://github.com/propheci/botconf?tag=v0.14.1#53efe28b0b0546aef9c70a319b7784f957963353"
+version = "0.15.1"
+source = "git+https://github.com/propheci/botconf?tag=v0.15.1#b1bcb156ec38e852e2862c7c164689055c7e81cf"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -328,8 +329,8 @@ dependencies = [
 
 [[package]]
 name = "botconf-grpc"
-version = "0.14.1"
-source = "git+https://github.com/propheci/botconf?tag=v0.14.1#53efe28b0b0546aef9c70a319b7784f957963353"
+version = "0.15.1"
+source = "git+https://github.com/propheci/botconf?tag=v0.15.1#b1bcb156ec38e852e2862c7c164689055c7e81cf"
 dependencies = [
  "botconf",
  "botconf-panel",
@@ -344,8 +345,8 @@ dependencies = [
 
 [[package]]
 name = "botconf-panel"
-version = "0.14.1"
-source = "git+https://github.com/propheci/botconf?tag=v0.14.1#53efe28b0b0546aef9c70a319b7784f957963353"
+version = "0.15.1"
+source = "git+https://github.com/propheci/botconf?tag=v0.15.1#b1bcb156ec38e852e2862c7c164689055c7e81cf"
 dependencies = [
  "botconf",
  "futures",
@@ -356,8 +357,8 @@ dependencies = [
 
 [[package]]
 name = "botconf-proto"
-version = "0.14.1"
-source = "git+https://github.com/propheci/botconf?tag=v0.14.1#53efe28b0b0546aef9c70a319b7784f957963353"
+version = "0.15.1"
+source = "git+https://github.com/propheci/botconf?tag=v0.15.1#b1bcb156ec38e852e2862c7c164689055c7e81cf"
 dependencies = [
  "prost",
  "tonic",
@@ -366,8 +367,8 @@ dependencies = [
 
 [[package]]
 name = "botconf-tui"
-version = "0.14.1"
-source = "git+https://github.com/propheci/botconf?tag=v0.14.1#53efe28b0b0546aef9c70a319b7784f957963353"
+version = "0.15.1"
+source = "git+https://github.com/propheci/botconf?tag=v0.15.1#b1bcb156ec38e852e2862c7c164689055c7e81cf"
 dependencies = [
  "botconf",
  "crossterm",
@@ -3939,6 +3940,7 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "uuid",
+ "wuphf-connector",
  "wuphf-core",
  "wuphf-functions",
  "wuphf-model",

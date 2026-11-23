@@ -80,7 +80,7 @@ code).
 | 060 | Offline setup TUIs for the Go binaries (Telegram, WhatsApp, Instagram, mediaconv, misc) | P1 | L | botconf 015, 059 | DONE (see notes) |
 | 062 | The chat directory (one file per connector, fetched by its setup) and chats picked by name in the core's and misc's setup | P1 | M | botconf 017, 059, 060 | DONE |
 | 063 | Link a connector's account from its setup (WhatsApp Go and Rust, Telegram, Instagram) and fetch its chats into the directory | P1 | L | botconf 017, 062 | DONE |
-| 061 | Settings backup: `wuphf-server export` / `import` (config + every stored override, connectors' included; secrets only with a flag), online `wuphf settings export` / `import` | P1 | M | botconf 016, 059; after 062, 063 | TODO |
+| 061 | Settings backup: `wuphf-server export` / `import` (config + every stored override, connectors' included; secrets only with a flag), online `wuphf settings export` / `import` | P1 | M | botconf 016, 059; after 062, 063 | DONE |
 
 Status values: TODO | IN PROGRESS | DONE | BLOCKED (with one-line reason) |
 REJECTED (with one-line rationale).
@@ -1727,3 +1727,28 @@ From the 2026-10-22 remote-functions design:
   (`wwa setup`, `wtg setup`, `wig setup`, whatsapp-rust's), then pick chats
   in `wuphf-server setup`; check a QR code scans (botconf 017's open STOP
   condition).
+
+- **061 (2026-11-23).** Backups of the core's settings on botconf `v0.15.1`
+  (plan 016): `wuphf-server export [-o FILE] [--with-secrets]` (the config
+  file with every stored override applied, then every connector's stored
+  settings in `[backup.overrides]`; with secrets, `.env.local`'s token
+  values in `[backup.env_file]`; `-o` writes it 0600) and `wuphf-server
+  import FILE` (checked with the core's own loader, `.bak` copies, the
+  config file, the env file's variables, the stored overrides), both with
+  `--config` / `--env-file`. `serve` holds its database's lock
+  (`<database>.lock`, the SDK's session lock) and `import` refuses while it
+  is held. Online, `wuphf-server settings export` / `import [--dry-run]`
+  through botconf's `Export` / `Import` (the core serves its description;
+  the observer token, or a connector acting for an owner); the import lists
+  what needs the offline one. `wuphf-server setup` has Export settings and
+  Import settings (a path, the secrets question; a summary and "yes" before
+  a restore), and the setup screen no longer starts the logger (a log line
+  would draw over it). Tests: cli +4 (offline round trip, secrets, refused
+  while locked or invalid, online export/import), storage +1. The online
+  test caught botconf `v0.15.0` re-setting unchanged rules (typed defaults
+  compared with the raw file): fixed in `v0.15.1`.
+  - Deviations: export reads the tokens from the env file, then the
+    environment (like setup), so `.env.local` need not be exported to the
+    shell; import opens the database the backup's file names. After an
+    Import settings the setup screen still shows the old file: it says to
+    quit and reopen (a save would write the old values back).

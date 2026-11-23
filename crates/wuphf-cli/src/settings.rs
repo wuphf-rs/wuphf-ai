@@ -8,9 +8,11 @@
 
 use anyhow::{Context, Result};
 use botconf::cli::SettingsAction;
-use botconf_grpc::proto::{ReloadRequest, settings_client::SettingsClient};
+use botconf_grpc::proto::{
+    ExportRequest, ImportRequest, ReloadRequest, settings_client::SettingsClient,
+};
 use clap::Subcommand;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use wuphf_runtime::connector_settings::ConnectorSettings;
 use wuphf_settings::{Configuration, SettingsStorage, SettingsStore, WuphfSchema};
@@ -30,6 +32,27 @@ pub(crate) enum SettingsSubcommand {
     Reload {
         #[arg(long, default_value = "http://127.0.0.1:50051")]
         address: String,
+    },
+    /// A backup of a running core's settings, never with secrets (see
+    /// `wuphf-server export`). Reads the token from WUPHF_OBSERVER_TOKEN.
+    Export {
+        #[arg(long, default_value = "http://127.0.0.1:50051")]
+        address: String,
+        /// Write the backup here instead of printing it.
+        #[arg(short, long)]
+        output: Option<PathBuf>,
+    },
+    /// Restore into a running core what of a backup can change at runtime;
+    /// lists what needs `wuphf-server import` (offline). Reads the token from
+    /// WUPHF_OBSERVER_TOKEN.
+    Import {
+        /// The backup, as `export` writes it.
+        file: PathBuf,
+        #[arg(long, default_value = "http://127.0.0.1:50051")]
+        address: String,
+        /// Only check it: change nothing.
+        #[arg(long)]
+        dry_run: bool,
     },
 }
 
@@ -79,13 +102,16 @@ pub(crate) async fn run_local(
     })
 }
 
-/// Asks the core at `address` to reload its settings, as the observer when
-/// `token` is set.
-pub(crate) async fn reload(address: String, token: Option<String>) -> Result<String> {
-    let mut client = SettingsClient::connect(address.clone())
+/// The settings service at `address`.
+async fn connect(address: &str) -> Result<SettingsClient<tonic::transport::Channel>> {
+    SettingsClient::connect(address.to_owned())
         .await
-        .with_context(|| format!("failed to connect to {address}"))?;
-    let mut request = tonic::Request::new(ReloadRequest { actor: None });
+        .with_context(|| format!("failed to connect to {address}"))
+}
+
+/// `message` as a request of the observer, when `token` is set.
+fn request<T>(message: T, token: Option<&str>) -> Result<tonic::Request<T>> {
+    let mut request = tonic::Request::new(message);
     if let Some(token) = token {
         request.metadata_mut().insert(
             "authorization",
@@ -94,6 +120,63 @@ pub(crate) async fn reload(address: String, token: Option<String>) -> Result<Str
                 .context("WUPHF_OBSERVER_TOKEN is not a valid header value")?,
         );
     }
+    Ok(request)
+}
+
+/// A backup of the core at `address`'s settings.
+pub(crate) async fn export_online(address: &str, token: Option<&str>) -> Result<String> {
+    let response = connect(address)
+        .await?
+        .export(request(ExportRequest { actor: None }, token)?)
+        .await
+        .map_err(|status| anyhow::anyhow!("Export failed: {}", status.message()))?;
+    Ok(response.into_inner().backup)
+}
+
+/// Restores into the core at `address` what of `backup` can change at
+/// runtime, reporting what it set and what needs the offline import.
+pub(crate) async fn import_online(
+    address: &str,
+    token: Option<&str>,
+    backup: String,
+    dry_run: bool,
+) -> Result<String> {
+    let response = connect(address)
+        .await?
+        .import(request(
+            ImportRequest {
+                actor: None,
+                backup,
+                dry_run,
+            },
+            token,
+        )?)
+        .await
+        .map_err(|status| anyhow::anyhow!("Import failed: {}", status.message()))?
+        .into_inner();
+    let mut lines = Vec::new();
+    let verb = if dry_run { "would set" } else { "set" };
+    match response.applied.as_slice() {
+        [] => lines.push("nothing to set: the runtime settings match the backup".to_owned()),
+        keys => lines.push(format!("{verb}: {}", keys.join(", "))),
+    }
+    for refused in &response.rejected {
+        lines.push(format!("refused {}: {}", refused.key, refused.reason));
+    }
+    if !response.offline.is_empty() {
+        lines.push(format!(
+            "differ, but only `wuphf-server import` (offline) restores them: {}",
+            response.offline.join(", ")
+        ));
+    }
+    Ok(lines.join("\n"))
+}
+
+/// Asks the core at `address` to reload its settings, as the observer when
+/// `token` is set.
+pub(crate) async fn reload(address: String, token: Option<String>) -> Result<String> {
+    let mut client = connect(&address).await?;
+    let request = request(ReloadRequest { actor: None }, token.as_deref())?;
     let response = client
         .reload(request)
         .await
@@ -121,6 +204,27 @@ pub(crate) async fn run(config: &Path, command: SettingsSubcommand) -> Result<()
             // out of `ps`.
             let token = std::env::var("WUPHF_OBSERVER_TOKEN").ok();
             println!("{}", reload(address, token).await?);
+        }
+        SettingsSubcommand::Export { address, output } => {
+            let token = std::env::var("WUPHF_OBSERVER_TOKEN").ok();
+            let backup = export_online(&address, token.as_deref()).await?;
+            crate::backup::write_backup(output.as_ref(), &backup)?;
+            if let Some(output) = &output {
+                eprintln!("wrote {}", output.display());
+            }
+        }
+        SettingsSubcommand::Import {
+            file,
+            address,
+            dry_run,
+        } => {
+            let token = std::env::var("WUPHF_OBSERVER_TOKEN").ok();
+            let backup = std::fs::read_to_string(&file)
+                .with_context(|| format!("failed to read {}", file.display()))?;
+            println!(
+                "{}",
+                import_online(&address, token.as_deref(), backup, dry_run).await?
+            );
         }
     }
     Ok(())

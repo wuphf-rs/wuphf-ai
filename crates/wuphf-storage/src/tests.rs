@@ -1535,3 +1535,16 @@ async fn canonical_chat_id_follows_the_last_canonical_alias<S: Storage>(storage:
         Some("9@lid")
     );
 }
+
+#[test]
+fn a_database_url_names_its_file() {
+    assert_eq!(
+        SqliteStorage::database_file("sqlite://wuphf.sqlite"),
+        Some("wuphf.sqlite".into())
+    );
+    assert_eq!(
+        SqliteStorage::database_file("sqlite:///var/lib/wuphf/core.sqlite?mode=rwc"),
+        Some("/var/lib/wuphf/core.sqlite".into())
+    );
+    assert_eq!(SqliteStorage::database_file("sqlite::memory:"), None);
+}

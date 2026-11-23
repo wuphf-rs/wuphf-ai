@@ -139,6 +139,44 @@ generated from its config type, which describes every option once; a test
 fails when they differ (`WUPHF_WRITE_EXAMPLES=1 cargo test -p wuphf-settings
 example` rewrites the core's).
 
+### Backups
+
+The core's settings live in two places: its config file and the overrides in
+its database (changed from a settings panel or `wuphf-server settings`),
+every connector's included (`connector_settings.<id>`). One backup holds
+both:
+
+```sh
+wuphf-server export -o wuphf-backup.toml                 # no token values
+wuphf-server export -o wuphf-backup.toml --with-secrets  # with .env.local's tokens
+wuphf-server import wuphf-backup.toml                    # the core must be down
+```
+
+A backup reads as the config file, every override applied, then a
+`[backup]` table with the connectors' settings (and with `--with-secrets`
+the values of the token variables the options name, in `[backup.env_file]`;
+the file is written readable by its owner only). `import` checks the
+restored file as the core would load it, keeps the previous config file
+and env file as `.bak`, writes them, and replaces the stored overrides; a
+backup without secrets leaves the env file and the file's secret options as
+they are. It refuses while a core runs: `serve` holds its database's lock
+(`<database>.lock`). Both commands take `--config` (default
+`config.local.toml`) and `--env-file` (default `.env.local`).
+
+Through a running core, never with secrets (`WUPHF_OBSERVER_TOKEN` is the
+token):
+
+```sh
+wuphf-server settings export -o wuphf-backup.toml
+wuphf-server settings import wuphf-backup.toml --dry-run  # what it would set
+wuphf-server settings import wuphf-backup.toml
+```
+
+The online import sets every runtime setting and connector setting whose
+value differs, and lists what differs but only the offline import restores
+(the listen address, the connectors, …). `wuphf-server setup` has the same
+as Export settings and Import settings at the end of its screen.
+
 ### Tokens and settings
 
 Every connector authenticates to the core with a token. The core reads each
