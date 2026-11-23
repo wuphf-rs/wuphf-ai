@@ -1,4 +1,9 @@
-# wuphf
+<h1>
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="assets/logo/logo-on-dark.svg">
+    <img alt="wuphf" src="assets/logo/logo-on-light.svg" height="72">
+  </picture>
+</h1>
 
 `wuphf` is a multi-platform messaging replication engine. It models **one
 platform-independent logical message and its copies** at platform endpoints,

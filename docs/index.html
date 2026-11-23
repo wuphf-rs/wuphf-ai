@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>wuphf — multi-platform message replication</title>
+<link rel="icon" href="../assets/logo/icon.svg" type="image/svg+xml">
 <style>
   :root {
     --bg: #0c0e14;
@@ -57,7 +58,9 @@
     letter-spacing: -0.04em; font-weight: 800;
     background: linear-gradient(180deg, #fff 0%, #aeb8d6 120%);
     -webkit-background-clip: text; background-clip: text; color: transparent;
+    display: flex; align-items: center; gap: .18em;
   }
+  .hero h1 .mark { height: 1.1em; width: auto; }
   .hero .tag { font-size: clamp(1.05rem, 2.4vw, 1.35rem); color: var(--muted); max-width: 60ch; margin-top: 18px; }
   .hero .tag b { color: var(--text); font-weight: 600; }
   .cta { margin-top: 32px; display: flex; gap: 12px; flex-wrap: wrap; }
@@ -150,7 +153,7 @@
 <header class="hero">
   <div class="wrap">
     <span class="badge"><span class="dot"></span> Rust core · Go connectors</span>
-    <h1>wuphf</h1>
+    <h1><img class="mark" src="../assets/logo/mark-on-dark.svg" alt="">wuphf</h1>
     <p class="tag">A multi-platform messaging replication engine. It models
       <b>one logical message and its copies</b> across platforms — so edits,
       deletes, replies, and identity migrations stay coherent instead of

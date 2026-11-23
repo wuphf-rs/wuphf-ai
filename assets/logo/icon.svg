@@ -1,0 +1,27 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="128" height="128">
+  <title>wuphf</title>
+  <rect width="128" height="128" rx="28" fill="#0c0e14"/>
+  <g transform="translate(64 64) scale(.8) translate(-64 -63)">
+  <defs>
+    <path id="bubble" d="M32 40H68A18 18 0 0 1 86 58V78A18 18 0 0 1 68 96H44L20 110C22 105 14 99 14 84V58A18 18 0 0 1 32 40Z"/>
+    <mask id="gap-far" maskUnits="userSpaceOnUse" x="0" y="0" width="128" height="128">
+      <rect width="128" height="128" fill="#fff"/>
+      <use href="#bubble" transform="translate(13 -13)" stroke="#000" stroke-width="9" stroke-linejoin="round"/>
+    </mask>
+    <mask id="gap-near" maskUnits="userSpaceOnUse" x="0" y="0" width="128" height="128">
+      <rect width="128" height="128" fill="#fff"/>
+      <use href="#bubble" stroke="#000" stroke-width="9" stroke-linejoin="round"/>
+    </mask>
+    <mask id="initial" maskUnits="userSpaceOnUse" x="0" y="0" width="128" height="128">
+      <rect width="128" height="128" fill="#fff"/>
+      <path d="M0 40V68a12 12 0 0 0 24 0a12 12 0 0 0 24 0V40M24 52V68" transform="translate(34 29) scale(.66)" fill="none" stroke="#000" stroke-width="10" stroke-linecap="round" stroke-linejoin="round"/>
+    </mask>
+  </defs>
+  <g transform="translate(2 0)">
+    <!-- Masks sit on wrapping groups: on a transformed <use> they would move with it. -->
+    <g mask="url(#gap-far)"><use href="#bubble" transform="translate(26 -26)" fill="none" stroke="#57d9b3" stroke-opacity=".45" stroke-width="6" stroke-linejoin="round"/></g>
+    <g mask="url(#gap-near)"><use href="#bubble" transform="translate(13 -13)" fill="none" stroke="#57d9b3" stroke-width="6" stroke-linejoin="round"/></g>
+    <use href="#bubble" mask="url(#initial)" fill="#7c9cff"/>
+  </g>
+  </g>
+</svg>
