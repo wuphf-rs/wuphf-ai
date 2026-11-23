@@ -3,8 +3,17 @@ package config
 import (
 	"testing"
 
+	"github.com/akshettrj/wuphf/connectors/shared/setup"
 	"github.com/pelletier/go-toml/v2"
 )
+
+// The checked-in example is the description's: WUPHF_WRITE_EXAMPLES=1 go
+// test ./... rewrites it.
+func TestTheExampleIsGeneratedFromTheConfigType(t *testing.T) {
+	if err := setup.CheckExample(Description(), "../../config.example.toml"); err != nil {
+		t.Fatal(err)
+	}
+}
 
 func TestShouldBackfillDefaultsToEnabled(t *testing.T) {
 	t.Parallel()

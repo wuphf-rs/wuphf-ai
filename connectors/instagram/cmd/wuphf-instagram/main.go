@@ -10,9 +10,17 @@ import (
 	"github.com/akshettrj/wuphf/connectors/instagram/internal/config"
 	instagramconnector "github.com/akshettrj/wuphf/connectors/instagram/internal/instagram"
 	"github.com/akshettrj/wuphf/connectors/shared/logging"
+	"github.com/akshettrj/wuphf/connectors/shared/setup"
+	"github.com/propheci/botconf/go/tui"
 )
 
 func main() {
+	if setup.Requested(os.Args[1:]) {
+		if err := setup.Run(os.Args[2:], config.Description(), validate); err != nil {
+			exit(err)
+		}
+		return
+	}
 	configPath := flag.String("config", "config.example.toml", "path to connector TOML configuration")
 	flag.Parse()
 	cfg, err := config.Load(*configPath)
@@ -31,4 +39,21 @@ func main() {
 func exit(err error) {
 	fmt.Fprintf(os.Stderr, "wuphf-instagram: %v\n", err)
 	os.Exit(1)
+}
+
+// validate is setup's check of a candidate config: what the connector checks
+// at startup (the file, then its core token and, serving functions, its
+// provider token).
+func validate(candidate tui.Candidate) error {
+	cfg, err := config.Parse([]byte(candidate.Config))
+	if err != nil {
+		return err
+	}
+	if err := setup.RequireToken(candidate, "core_token_env", cfg.CoreTokenEnv); err != nil {
+		return err
+	}
+	if cfg.Functions != nil {
+		return setup.RequireToken(candidate, "functions.token_env", cfg.Functions.TokenEnv)
+	}
+	return nil
 }

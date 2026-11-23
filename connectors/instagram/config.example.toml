@@ -1,48 +1,64 @@
-# Keys marked "Runtime." can also change while the connector runs: the
+# wuphf Instagram connector
+#
+# Runtime settings (log_level) can also change while the connector runs: the
 # connector declares them to the core, which keeps any change (made from its
-# settings panel or `wuphf settings`, under
+# settings panel or `wuphf-server settings`, under
 # `connector_settings.<connector id>`) and pushes it back here. The values in
 # this file are the base; unsetting a change returns to them.
+#
+# Routing is owned entirely by the core: configure [rules.<id>] entries there,
+# using Instagram thread keys (decimal numbers) as chat ids.
 
+# The core's gRPC address.
+# Required.
 core_address = "127.0.0.1:50051"
+
+# Must match a [[connectors]] entry in the core's configuration.
+# Required.
 connector_id = "instagram-main"
+
 # Environment variable holding this connector's core token; must match the
-# core's `[[connectors]].token_env` value for this connector id.
+# core's [[connectors]].token_env for this connector id.
+# Required.
 core_token_env = "WUPHF_CONNECTOR_INSTAGRAM_MAIN_TOKEN"
 
 # JSON map of Instagram session cookies, exported from a logged-in browser
 # session, e.g. {"sessionid": "...", "csrftoken": "...", "ds_user_id": "...",
 # "mid": "...", "ig_did": "..."}. Used only until a session file is written.
+# Required.
 cookies_file = "instagram.cookies.json"
 
 # Where the connector stores the latest (refreshed) cookies on shutdown and
 # reloads them on the next start, so a restart does not need a fresh export.
+# Falls back to cookies_file when it does not exist yet.
+# Required.
 session_file = "instagram.session.json"
 
-# Instagram has no threads/topics, so leave both capabilities false. The core
-# may only use this connector as a single target or an identity source, never
-# as a threaded mirror.
-supports_threads = false
-supports_topic_create = false
-
-# Routing is owned entirely by the core. Configure which conversations map
-# where through the core's [rules.<id>] entries using Instagram thread keys
-# (decimal numbers) as chat IDs.
-
-# Runtime. Log verbosity: trace, debug, info, warn, error (WUPHF_LOG_LEVEL
-# overrides).
-log_level = "info"
-
-# Where the connector records its position in Instagram's delta stream.
-# Optional; defaults to "instagram.state.json".
+# Where the connector records its position in Instagram's delta stream, so a
+# restart replays what arrived while it was down.
+# Default: "instagram.state.json".
 state_file = "instagram.state.json"
 
-# Resume the delta stream from the position in state_file, so messages
-# exchanged while the connector was down are bridged (the Instagram counterpart
-# to WhatsApp's offline history sync). The core dedups by native id, so nothing
+# Instagram has no threads: leave false. The core may only use this connector as
+# a single target or an identity source, never as a threaded mirror.
+# supports_threads = false
+
+# Instagram has no threads: leave false.
+# supports_topic_create = false
+
+# How much the connector logs (WUPHF_LOG_LEVEL wins)
+#
+# Any case; anything else is refused. Empty means info.
+# One of: trace, debug, info, warn, error.
+log_level = "info"
+
+# Resume the delta stream from the position in state_file, so messages exchanged
+# while the connector was down are bridged (the Instagram counterpart to
+# WhatsApp's offline history sync). The core dedups by native id, so nothing
 # already bridged is repeated. If the saved position is too old, Instagram
-# forces a fresh start and that gap is not replayed. Defaults to true when
-# unset; set to false to bridge only what arrives from now on.
+# forces a fresh start and that gap is not replayed. Set it to false to bridge
+# only what arrives from now on.
+# Default: true.
 backfill_on_start = true
 
 # Serve instagram.fetch_media@1 (download a post's or reel's media by link, used
@@ -50,6 +66,16 @@ backfill_on_start = true
 # logged-in session. Needs a matching [[functions.providers]] entry in the
 # core's config. Every fetch is an Instagram request on this account.
 # [functions]
+
+# The core's [[functions.providers]] id for this connector.
+# Required.
 # provider_id = "instagram-main"
+
+# Environment variable holding the provider token; must match that provider
+# entry's token_env.
+# Required.
 # token_env = "WUPHF_PROVIDER_INSTAGRAM_TOKEN"
+
+# Caps the fetches that run at once.
+# Default: 2.
 # max_concurrency = 2

@@ -7,7 +7,7 @@ require (
 	github.com/akshettrj/wuphf/proto/go v0.0.0
 	github.com/gotd/td v0.161.0
 	github.com/pelletier/go-toml/v2 v2.4.3
-	github.com/propheci/botconf/go v0.13.2
+	github.com/propheci/botconf/go v0.13.3
 	github.com/rs/zerolog v1.35.1
 	golang.org/x/sync v0.25.0
 	golang.org/x/term v0.48.0
