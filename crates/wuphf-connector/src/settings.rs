@@ -5,8 +5,9 @@
 //! change and pushes it back through its settings service, and the connector
 //! reads the live value once per use.
 //!
-//! Go reflects the declaration from struct tags; Rust has no reflection, so a
-//! connector lists its settings ([`RuntimeSettings::settings`]) and the
+//! Go reflects the declaration from struct tags; in Rust a connector lists its
+//! settings ([`RuntimeSettings::settings`]), by hand or from the section's
+//! botconf description (`settings_of`, the `describe` feature), and the
 //! descriptor, the JSON Schema and the base are all derived from that list and
 //! the base value. Every field of the section must be listed.
 
@@ -46,10 +47,26 @@ pub fn prefix(connector_id: &str) -> String {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Setting {
     /// Dotted, relative to the section: `rendering.max_message_length`.
-    pub key: &'static str,
-    pub title: &'static str,
-    pub description: &'static str,
+    pub key: String,
+    pub title: String,
+    pub description: String,
     pub kind: SettingKind,
+}
+
+impl Setting {
+    pub fn new(
+        key: impl Into<String>,
+        title: impl Into<String>,
+        description: impl Into<String>,
+        kind: SettingKind,
+    ) -> Self {
+        Self {
+            key: key.into(),
+            title: title.into(),
+            description: description.into(),
+            kind,
+        }
+    }
 }
 
 /// How a setting is edited, and its JSON type.
@@ -57,7 +74,7 @@ pub struct Setting {
 pub enum SettingKind {
     Text,
     /// One of these values, each its own label.
-    Choice(&'static [&'static str]),
+    Choice(Vec<String>),
     /// Offered as `✅ Yes` / `❌ No`.
     Bool,
     /// An integer within these bounds.
@@ -71,6 +88,48 @@ pub enum SettingKind {
 pub trait RuntimeSettings: Serialize + DeserializeOwned + Clone + Send + Sync + 'static {
     /// Every setting of the section, in the order the panel lists them.
     fn settings() -> Vec<Setting>;
+}
+
+/// The settings a section's botconf description marks runtime
+/// (`#[botconf(runtime)]` on a type deriving `botconf::Describe`), so the
+/// section is described once, on its type: keys below the section, titles,
+/// and each doc comment's first paragraph as the description, as botconf
+/// derives them. Panics on a runtime option that is not a single text, bool,
+/// integer or one-of value, which a connector's section cannot declare.
+#[cfg(feature = "describe")]
+pub fn settings_of(description: &botconf::describe::Description) -> Vec<Setting> {
+    use botconf::describe::{Node, Table, ValueKind};
+
+    fn value_at<'a>(table: &'a Table, key: &str) -> Option<&'a ValueKind> {
+        let (first, rest) = key
+            .split_once('.')
+            .map_or((key, None), |(a, b)| (a, Some(b)));
+        let entry = table.entries.iter().find(|entry| entry.key == first)?;
+        match (&entry.node, rest) {
+            (Node::Value(kind), None) => Some(kind),
+            (Node::Table(inner), Some(rest)) => value_at(inner, rest),
+            _ => None,
+        }
+    }
+
+    description
+        .runtime_settings()
+        .into_iter()
+        .map(|setting| {
+            let key = setting.key.to_string();
+            let kind = match value_at(&description.table, &key) {
+                Some(ValueKind::Text | ValueKind::Secret | ValueKind::EnvVar(_)) => {
+                    SettingKind::Text
+                }
+                Some(ValueKind::Bool) => SettingKind::Bool,
+                Some(&ValueKind::Int { min, max }) => SettingKind::Number { min, max },
+                Some(ValueKind::OneOf(values)) => SettingKind::Choice(values.clone()),
+                other => panic!("runtime setting {key}: no connector setting for {other:?}"),
+            };
+            let title = setting.title.as_deref().unwrap_or(&key).to_owned();
+            Setting::new(key, title, setting.description.to_string(), kind)
+        })
+        .collect()
 }
 
 #[derive(Debug, Error)]
@@ -122,7 +181,7 @@ fn check_listed(settings: &[Setting], values: &Value) -> Result<(), SettingsErro
     };
     let mut leaves = BTreeSet::new();
     collect_leaves(object, "", &mut leaves);
-    let listed: BTreeSet<String> = settings.iter().map(|s| s.key.to_owned()).collect();
+    let listed: BTreeSet<String> = settings.iter().map(|s| s.key.clone()).collect();
     let unlisted: Vec<String> = leaves.difference(&listed).cloned().collect();
     if !unlisted.is_empty() {
         return Err(SettingsError::Unlisted(unlisted));
@@ -161,27 +220,27 @@ fn descriptor(setting: &Setting) -> bc::SettingDescriptor {
             .collect(),
         ..Default::default()
     };
-    let kind = match setting.kind {
+    let kind = match &setting.kind {
         SettingKind::Text => bc::kind::Kind::Text(bc::TextKind::default()),
         SettingKind::Choice(values) => bc::kind::Kind::OneOf(choices(
             &values
                 .iter()
-                .map(|value| (*value, *value))
+                .map(|value| (value.as_str(), value.as_str()))
                 .collect::<Vec<_>>(),
         )),
         SettingKind::Bool => {
             bc::kind::Kind::OneOf(choices(&[("true", "✅ Yes"), ("false", "❌ No")]))
         }
-        SettingKind::Number { min, max } => bc::kind::Kind::Number(bc::NumberKind {
+        &SettingKind::Number { min, max } => bc::kind::Kind::Number(bc::NumberKind {
             min,
             max,
             ..Default::default()
         }),
     };
     bc::SettingDescriptor {
-        key: setting.key.to_owned(),
-        title: setting.title.to_owned(),
-        description: setting.description.to_owned(),
+        key: setting.key.clone(),
+        title: setting.title.clone(),
+        description: setting.description.clone(),
         kind: Some(bc::Kind { kind: Some(kind) }),
         ..Default::default()
     }
@@ -518,30 +577,20 @@ mod tests {
     impl RuntimeSettings for Section {
         fn settings() -> Vec<Setting> {
             vec![
-                Setting {
-                    key: "level",
-                    title: "Level",
-                    description: "How loud",
-                    kind: SettingKind::Choice(&["low", "high"]),
-                },
-                Setting {
-                    key: "verbose",
-                    title: "Verbose",
-                    description: "Say more",
-                    kind: SettingKind::Bool,
-                },
-                Setting {
-                    key: "limit",
-                    title: "Limit",
-                    description: "At most",
-                    kind: SettingKind::Number { min: 0, max: 10 },
-                },
-                Setting {
-                    key: "nested.name",
-                    title: "Name",
-                    description: "Called",
-                    kind: SettingKind::Text,
-                },
+                Setting::new(
+                    "level",
+                    "Level",
+                    "How loud",
+                    SettingKind::Choice(vec!["low".into(), "high".into()]),
+                ),
+                Setting::new("verbose", "Verbose", "Say more", SettingKind::Bool),
+                Setting::new(
+                    "limit",
+                    "Limit",
+                    "At most",
+                    SettingKind::Number { min: 0, max: 10 },
+                ),
+                Setting::new("nested.name", "Name", "Called", SettingKind::Text),
             ]
         }
     }
@@ -660,12 +709,7 @@ mod tests {
         }
         impl RuntimeSettings for Extra {
             fn settings() -> Vec<Setting> {
-                vec![Setting {
-                    key: "listed",
-                    title: "Listed",
-                    description: "",
-                    kind: SettingKind::Bool,
-                }]
+                vec![Setting::new("listed", "Listed", "", SettingKind::Bool)]
             }
         }
         let error = declare(&Extra::default()).unwrap_err();

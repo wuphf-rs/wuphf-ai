@@ -25,6 +25,7 @@ mod receipts;
 mod resync;
 mod sender;
 mod session;
+mod setup;
 mod stickermeta;
 mod supervise;
 #[cfg(test)]
@@ -36,7 +37,7 @@ use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 
 use anyhow::Context as _;
-use clap::Parser;
+use clap::{Parser, Subcommand};
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 use tracing::{error, info};
@@ -69,11 +70,29 @@ struct Cli {
     /// archive, settings) in full again once connected, as if newly linked.
     #[arg(long)]
     resync_app_state: bool,
+    #[command(subcommand)]
+    command: Option<Command>,
+}
+
+#[derive(Subcommand)]
+enum Command {
+    /// Edit the config file and the env file its options name (tokens can be
+    /// generated) on a setup screen, every option with its description.
+    /// Works while the connector is down.
+    Setup {
+        #[arg(long, default_value = "config.local.toml")]
+        config: PathBuf,
+        #[arg(long, default_value = ".env.local")]
+        env_file: PathBuf,
+    },
 }
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
+    if let Some(Command::Setup { config, env_file }) = cli.command {
+        return setup::run(config, env_file);
+    }
     let config = Config::load(&cli.config)?;
     let log = wuphf_connector::logging::init(&config.runtime.log_level);
 

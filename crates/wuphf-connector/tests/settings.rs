@@ -37,18 +37,13 @@ struct Section {
 impl RuntimeSettings for Section {
     fn settings() -> Vec<Setting> {
         vec![
-            Setting {
-                key: "limit",
-                title: "Limit",
-                description: "At most",
-                kind: SettingKind::Number { min: 0, max: 100 },
-            },
-            Setting {
-                key: "verbose",
-                title: "Verbose",
-                description: "Say more",
-                kind: SettingKind::Bool,
-            },
+            Setting::new(
+                "limit",
+                "Limit",
+                "At most",
+                SettingKind::Number { min: 0, max: 100 },
+            ),
+            Setting::new("verbose", "Verbose", "Say more", SettingKind::Bool),
         ]
     }
 }
@@ -428,4 +423,61 @@ async fn the_registration_carries_the_declaration() {
     cancel.cancel();
     session.await.unwrap().unwrap();
     server.abort();
+}
+
+/// A section described once, on its type, lists the settings a hand-written
+/// list would.
+#[cfg(feature = "describe")]
+#[test]
+fn settings_come_from_the_sections_description() {
+    use botconf::Describe;
+    use botconf::describe::Description;
+    use wuphf_connector::settings::settings_of;
+
+    #[derive(Describe, Serialize, Deserialize)]
+    #[allow(dead_code)]
+    struct Described {
+        /// How loud
+        ///
+        /// More about it, for the file only.
+        #[serde(default)]
+        #[botconf(runtime, kind = ValueKind::OneOf(vec!["low".into(), "high".into()]))]
+        level: String,
+        /// At most
+        #[serde(default)]
+        #[botconf(runtime, max = 100)]
+        limit: u8,
+        #[serde(default)]
+        nested: Nested,
+        /// Not a runtime setting.
+        #[serde(default)]
+        file_only: bool,
+    }
+
+    #[derive(Default, Describe, Serialize, Deserialize)]
+    struct Nested {
+        /// Say more
+        #[serde(default)]
+        #[botconf(runtime, title = "Verbose")]
+        loud: bool,
+    }
+
+    assert_eq!(
+        settings_of(&Description::of::<Described>("Described", "")),
+        [
+            Setting::new(
+                "level",
+                "Level",
+                "How loud",
+                SettingKind::Choice(vec!["low".into(), "high".into()])
+            ),
+            Setting::new(
+                "limit",
+                "Limit",
+                "At most",
+                SettingKind::Number { min: 0, max: 100 }
+            ),
+            Setting::new("nested.loud", "Verbose", "Say more", SettingKind::Bool),
+        ]
+    );
 }

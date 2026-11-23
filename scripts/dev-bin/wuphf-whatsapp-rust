@@ -23,6 +23,11 @@ if [ -x "$installed" ]; then
     run=("$installed")
 fi
 
+# `setup` edits the repo's shared .env.local (this runs from the connector's
+# directory), unless told otherwise.
+if [ "${1:-}" = setup ] && [[ " $* " != *" --env-file"* ]]; then
+    exec "${run[@]}" "$@" --env-file "$repo/.env.local"
+fi
 if [ "$#" -gt 0 ]; then
     exec "${run[@]}" "$@"
 fi

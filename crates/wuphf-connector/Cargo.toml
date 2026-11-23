@@ -5,8 +5,13 @@ edition.workspace = true
 license.workspace = true
 version.workspace = true
 
+[features]
+# `settings::settings_of`: a section's settings from its botconf description.
+describe = ["dep:botconf"]
+
 [dependencies]
 anyhow.workspace = true
+botconf = { workspace = true, optional = true }
 botconf-proto.workspace = true
 prost.workspace = true
 serde.workspace = true
@@ -21,6 +26,7 @@ tracing-subscriber.workspace = true
 wuphf-proto.workspace = true
 
 [dev-dependencies]
+botconf = { workspace = true, features = ["derive"] }
 tokio = { workspace = true, features = ["net"] }
 wuphf-core.workspace = true
 wuphf-model.workspace = true

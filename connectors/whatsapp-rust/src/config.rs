@@ -1,50 +1,93 @@
 use std::path::Path;
 use std::time::Duration;
 
+use botconf::Describe;
+use botconf::describe::Description;
 use serde::{Deserialize, Serialize};
 use wuphf_connector::logging::{LEVELS, check_level};
-use wuphf_connector::settings::{RuntimeSettings, Setting, SettingKind};
+use wuphf_connector::settings::{RuntimeSettings, Setting, settings_of};
+
+/// The config file's description: every option, from the types below. The
+/// checked-in `config.example.toml` is its example.
+pub fn description() -> Description {
+    Description::of::<Config>("wuphf WhatsApp connector (whatsapp-rust)", FILE_DESCRIPTION)
+}
+
+const FILE_DESCRIPTION: &str = "Runtime settings (`log_level`, `media_convert_timeout_ms`, \
+     `[sticker_metadata]`, `[rendering]`) can also change while the connector runs: the \
+     connector declares them to the core, which keeps any change (made from its settings \
+     panel or `wuphf-server settings`, under `connector_settings.<connector id>`) and \
+     pushes it back here. The values in this file are the base; unsetting a change returns \
+     to them.\n\n\
+     WhatsApp has no threads, so the thread capabilities are hardcoded false. Routing is \
+     owned entirely by the core: configure `[rules.<id>]` entries there, using WhatsApp JIDs \
+     such as `12345@s.whatsapp.net` or `12345@g.us` as chat ids.";
 
 /// Connector-local configuration. Routing is owned entirely by the core; this
 /// file only carries how to reach the core and how to run the WhatsApp
 /// session.
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Describe)]
 pub struct Config {
     /// The core's gRPC address.
+    #[botconf(example = "127.0.0.1:50051")]
     pub core_address: String,
     /// Must match a `[[connectors]]` entry in the core's configuration.
+    #[botconf(example = "whatsapp-rust")]
     pub connector_id: String,
     /// Environment variable holding this connector's core token; must match the
-    /// core's `[[connectors]].token_env` value for this connector id. Required.
+    /// core's `[[connectors]].token_env` value for this connector id.
+    #[botconf(env = token, example = "WUPHF_CONNECTOR_WHATSAPP_RUST_TOKEN")]
     pub core_token_env: String,
     /// Path of the SQLite database holding the WhatsApp device session.
-    /// Reopening the same path restores the paired session.
+    /// Reopening the same path restores the paired session; after a logout,
+    /// delete the database and restart the connector to pair again.
+    #[botconf(example = "whatsapp-rust.session.db")]
     pub session_database: String,
-    /// The account's phone number (country code, digits only), which a pair
-    /// code is issued for. Required by `login_method = "pair_code"`.
+    /// The account's number, country code first, digits only (no `+`): the
+    /// number a pair code is issued for. Required by `login_method =
+    /// "pair_code"`.
     #[serde(default)]
+    #[botconf(hint = "15551234567")]
     pub phone_number: Option<String>,
-    /// How the session is linked, at first start and again after a logout:
-    /// `"qr"` (scan a QR code) or `"pair_code"` (type an 8-character code into
-    /// WhatsApp). Unset: `pair_code` when `phone_number` is set, else `qr`.
+    /// How the session is linked, at the first start and again by itself
+    /// after WhatsApp logs it out.
+    ///
+    /// Either way the code is printed in the connector's log and sent to the
+    /// owner through the core's notice chats (the QR code as a picture): the
+    /// first at once, later ones at growing gaps until it is linked. Unset:
+    /// `pair_code` when `phone_number` is set, else `qr`.
     #[serde(default)]
     login_method: Option<LoginMethod>,
     /// Stamp each chat's disappearing-messages timer on what this connector
-    /// sends, look a group's timer up when the core does not know it, and
-    /// warn the owner when a DM's timer is unknown. Part of the registration,
-    /// so it must match `supports_disappearing_timers` in the core's
-    /// `[[connectors]]` entry for this connector, or the core refuses it.
+    /// sends, so contacts do not see "sent from an older version of WhatsApp,
+    /// will not disappear"; look a group's timer up when the core does not
+    /// know it, and warn the owner when a DM's timer is unknown.
+    ///
+    /// Part of the registration, so it must match
+    /// `supports_disappearing_timers` in the core's `[[connectors]]` entry for
+    /// this connector: when only one side sets it, the core refuses the
+    /// connector.
     #[serde(default)]
+    #[botconf(example = true)]
     pub supports_disappearing_timers: bool,
     /// Which WhatsApp client the session registers as. Both pair as an Android
     /// client, so WhatsApp delivers view-once media, which it withholds from a
     /// web companion; they differ only in the account type they match.
-    /// Applied at pairing, so a change needs a fresh pairing.
+    ///
+    /// Experimental, and applied only at the next fresh pairing: after a
+    /// change, unlink the device on the phone, move the session database
+    /// aside and pair again.
     #[serde(default)]
+    #[botconf(example = "android_business")]
     pub client_mode: ClientMode,
     /// Environment variable holding the core's invoke token, when the core
     /// sets `[functions] invoke_token_env`; unset or empty means none.
+    ///
+    /// Animated stickers from other platforms (Telegram video and Lottie
+    /// stickers) are converted to WebP by the core's `media.convert` provider
+    /// (providers/mediaconv); without one they arrive as files.
     #[serde(default)]
+    #[botconf(env = token, hint = "WUPHF_INVOKE_TOKEN")]
     pub functions_token_env: Option<String>,
     /// Settings that may change while the connector runs: declared to the core,
     /// which pushes every change back (see [`RuntimeSettings`]). Flattened, so
@@ -54,21 +97,38 @@ pub struct Config {
 }
 
 /// Settings that may change while the connector runs, the shape of the Go
-/// connector's `config.Runtime`.
-#[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
+/// connector's `config.Runtime`. Each first doc paragraph is the description
+/// the settings panel shows, the Go connector's word for word (the shared
+/// fixture test checks it).
+#[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq, Eq, Describe)]
 pub struct Runtime {
-    /// Log verbosity (trace, debug, info, warn, error; empty means info); the
-    /// WUPHF_LOG_LEVEL environment variable overrides it.
+    /// How much the connector logs (WUPHF_LOG_LEVEL wins)
+    ///
+    /// Any case; anything else is refused. Empty means info.
     #[serde(default)]
+    #[botconf(
+        runtime,
+        title = "Log level",
+        kind = ValueKind::OneOf(LEVELS.iter().map(|level| (*level).to_owned()).collect()),
+        example = "info",
+    )]
     pub log_level: String,
-    /// Bounds a sticker conversion, waiting for the converter included;
-    /// deliveries on this connector wait behind it. 0 means 20000.
+    /// How long converting a sticker may take, waiting for the converter
+    /// included; 0 means 20000
+    ///
+    /// This connector delivers in order, so later messages wait behind a
+    /// conversion.
     #[serde(default)]
+    #[botconf(runtime, title = "Sticker conversion timeout (ms)")]
     pub media_convert_timeout_ms: u32,
-    /// The pack metadata embedded in stickers bridged to WhatsApp; blank
-    /// fields fall back to the defaults (see [`Runtime::sticker_metadata`]).
+    /// Sticker-pack metadata embedded in stickers bridged to WhatsApp, shown in
+    /// WhatsApp's sticker info. A field left blank falls back to the default
+    /// shown. WhatsApp has no link field for received stickers, so the link is
+    /// appended to the publisher text (visible, not clickable).
     #[serde(default)]
     pub sticker_metadata: StickerMetadata,
+    /// How replicated copies are rendered on WhatsApp: this connector's own
+    /// policy; the core dispatches content only.
     #[serde(default)]
     pub rendering: Rendering,
 }
@@ -117,91 +177,56 @@ impl Runtime {
     }
 }
 
-/// The Go connector's runtime settings, word for word and in its order
-/// (`connectors/whatsapp/internal/config/config.go`), so the settings panel
-/// and `wuphf settings` treat both connectors alike; the shared fixture test
-/// checks it.
+/// The runtime settings, from the section's description: the Go connector's
+/// word for word and in its order (`connectors/whatsapp/internal/config/
+/// config.go`), so the settings panel and `wuphf-server settings` treat both
+/// connectors alike; the shared fixture test checks it.
 impl RuntimeSettings for Runtime {
     fn settings() -> Vec<Setting> {
-        let up_to_u32 = SettingKind::Number {
-            min: 0,
-            max: i64::from(u32::MAX),
-        };
-        vec![
-            Setting {
-                key: "log_level",
-                title: "Log level",
-                description: "How much the connector logs (WUPHF_LOG_LEVEL wins)",
-                kind: SettingKind::Choice(&LEVELS),
-            },
-            Setting {
-                key: "media_convert_timeout_ms",
-                title: "Sticker conversion timeout (ms)",
-                description: "How long converting a sticker may take, waiting for the converter \
-                              included; 0 means 20000",
-                kind: up_to_u32.clone(),
-            },
-            Setting {
-                key: "sticker_metadata.pack_name",
-                title: "Sticker pack name",
-                description: "The pack name WhatsApp shows for bridged stickers",
-                kind: SettingKind::Text,
-            },
-            Setting {
-                key: "sticker_metadata.author_name",
-                title: "Sticker author",
-                description: "The author WhatsApp shows for bridged stickers",
-                kind: SettingKind::Text,
-            },
-            Setting {
-                key: "sticker_metadata.link",
-                title: "Sticker link",
-                description: "A link folded into the sticker's publisher",
-                kind: SettingKind::Text,
-            },
-            Setting {
-                key: "rendering.attachments_as_files",
-                title: "Attachments as files",
-                description: "Send every attachment as a file, whatever its kind",
-                kind: SettingKind::Bool,
-            },
-            Setting {
-                key: "rendering.max_message_length",
-                title: "Longest inline message",
-                description: "Longer text is sent as a file; 0 means no limit",
-                kind: up_to_u32,
-            },
-        ]
+        settings_of(&Description::of::<Runtime>("Runtime", ""))
     }
 }
 
 /// How mirrored copies are rendered on WhatsApp: this connector's own policy;
 /// the core dispatches content only.
-#[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq, Eq, Describe)]
 pub struct Rendering {
-    /// Send every attachment as a file, whatever its kind.
+    /// Send every attachment as a file, whatever its kind
     #[serde(default)]
+    #[botconf(runtime, title = "Attachments as files")]
     pub attachments_as_files: bool,
-    /// Longer text (in characters) is sent as a plain-text file; 0 means no
-    /// limit.
+    /// Longer text is sent as a file; 0 means no limit
+    ///
+    /// Counted in characters; the file is plain text.
     #[serde(default)]
+    #[botconf(runtime, title = "Longest inline message", hint = 4096)]
     pub max_message_length: u32,
 }
 
 /// The sticker-pack metadata embedded in stickers bridged to WhatsApp, shown in
 /// WhatsApp's sticker info. A blank field falls back to its default.
-#[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq, Eq, Describe)]
 pub struct StickerMetadata {
+    /// The pack name WhatsApp shows for bridged stickers
     #[serde(default)]
+    #[botconf(runtime, title = "Sticker pack name", hint = "wuphf")]
     pub pack_name: String,
+    /// The author WhatsApp shows for bridged stickers
     #[serde(default)]
+    #[botconf(runtime, title = "Sticker author", hint = "wuphf-ai")]
     pub author_name: String,
+    /// A link folded into the sticker's publisher
     #[serde(default)]
+    #[botconf(
+        runtime,
+        title = "Sticker link",
+        hint = "https://github.com/wuphf/wuphf-ai"
+    )]
     pub link: String,
 }
 
 /// The WhatsApp client kind the session registers as.
-#[derive(Clone, Copy, Debug, Default, Deserialize, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, Deserialize, Serialize, PartialEq, Eq, Describe)]
 #[serde(rename_all = "snake_case")]
 pub enum ClientMode {
     /// A personal WhatsApp account.
@@ -212,8 +237,11 @@ pub enum ClientMode {
     AndroidBusiness,
 }
 
-/// How the WhatsApp session is linked to the account.
-#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq)]
+/// How the WhatsApp session is linked to the account: `qr` (scan a QR code in
+/// WhatsApp → Linked devices → Link a device) or `pair_code` (type an
+/// 8-character code after "Link with phone number instead"; needs
+/// `phone_number`).
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq, Describe)]
 #[serde(rename_all = "snake_case")]
 pub enum LoginMethod {
     /// Scan a QR code in WhatsApp → Linked devices → Link a device.
@@ -231,7 +259,7 @@ impl Config {
             .map_err(|error| anyhow::anyhow!("parse config {}: {error}", path.display()))
     }
 
-    fn parse(contents: &str) -> anyhow::Result<Self> {
+    pub(crate) fn parse(contents: &str) -> anyhow::Result<Self> {
         let config: Self = toml::from_str(contents)?;
         check_level(&config.runtime.log_level).map_err(anyhow::Error::msg)?;
         if config.login_method() == LoginMethod::PairCode && config.phone_number.is_none() {
@@ -412,5 +440,28 @@ mod tests {
     fn an_unknown_client_mode_is_refused() {
         let error = Config::parse(&format!("{MINIMAL}client_mode = \"web\"\n")).unwrap_err();
         assert!(error.to_string().contains("unknown variant"), "{error}");
+    }
+}
+
+#[cfg(test)]
+mod example_tests {
+    use super::*;
+
+    const EXAMPLE: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/config.example.toml");
+
+    /// The checked-in example is the description's: regenerate it with
+    /// `WUPHF_WRITE_EXAMPLES=1 RUSTC_BOOTSTRAP=1 cargo test example`.
+    #[test]
+    fn the_example_is_generated_from_the_config_type() {
+        let generated = description().example();
+        if std::env::var_os("WUPHF_WRITE_EXAMPLES").is_some() {
+            std::fs::write(EXAMPLE, &generated).unwrap();
+        }
+        let checked_in = std::fs::read_to_string(EXAMPLE).unwrap();
+        assert!(
+            checked_in == generated,
+            "config.example.toml differs from the Config type's description; regenerate it \
+             with WUPHF_WRITE_EXAMPLES=1 RUSTC_BOOTSTRAP=1 cargo test example"
+        );
     }
 }

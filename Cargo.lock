@@ -3945,6 +3945,7 @@ name = "wuphf-connector"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "botconf",
  "botconf-proto",
  "prost",
  "serde",
