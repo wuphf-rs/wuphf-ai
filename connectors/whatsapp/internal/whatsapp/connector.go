@@ -44,6 +44,8 @@ type sessionDeps struct {
 	inputs    chan *wuphfpb.ClientFrame
 	linked    *linkedSender
 	linking   *linking
+	// client is the linked session's WhatsApp client, for the commands.
+	client *linkedClient
 }
 
 // Run runs the connector: one core session for the process, and a WhatsApp
@@ -107,6 +109,7 @@ func (c Connector) Run(ctx context.Context) error {
 		inputs:    inputs,
 		linked:    &linkedSender{},
 		linking:   newLinking(inputs, media, c.cfg.ResolvedLoginMethod(), c.logger),
+		client:    &linkedClient{},
 	}
 
 	// The core session starts first, so the codes of a pairing reach the owner.
@@ -123,6 +126,8 @@ func (c Connector) Run(ctx context.Context) error {
 			SupportsTopicCreate:        c.cfg.SupportsTopicCreate,
 			SupportsDisappearingTimers: c.cfg.SupportsDisappearingTimers,
 			Settings:                   runtime.Declaration,
+			// The settings panel's buttons on this connector's section.
+			Commands: newCommands(ctx, deps.client.fetcher, deps.linking, c.logger),
 		}, c.logger).Run(ctx, deps.linked, inputs)
 	}()
 	sessionResult := make(chan error, 1)
@@ -238,6 +243,8 @@ func (c Connector) runSession(ctx context.Context, deps sessionDeps) error {
 	}
 	deps.linked.set(&sender)
 	defer deps.linked.set(nil)
+	deps.client.set(client)
+	defer deps.client.set(nil)
 	select {
 	case <-ctx.Done():
 		return ctx.Err()
@@ -293,7 +300,8 @@ func (c Connector) pairRound(ctx context.Context, client *whatsmeow.Client, link
 		case whatsmeow.QRChannelEventCode:
 			// A pair code is asked for once the round's socket is up (the
 			// first QR code shows it is).
-			if !asked {
+			// The owner asking for a code now asks for one again.
+			if !asked || linking.FreshPending() {
 				asked = true
 				if ask, ok := linking.PairCodeAsk(); ok {
 					pairCode, err := client.PairPhone(ctx, c.cfg.PhoneNumber, ask.promptPhone, whatsmeow.PairClientChrome, "Chrome (Linux)")

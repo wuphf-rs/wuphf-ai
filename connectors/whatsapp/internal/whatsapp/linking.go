@@ -43,6 +43,9 @@ type linking struct {
 
 	mu       sync.Mutex
 	schedule linkSchedule
+	// fresh: the owner asked for a code now, so the next one is told
+	// whatever the gap.
+	fresh bool
 }
 
 func newLinking(inputs chan<- *wuphfpb.ClientFrame, media MediaBroker, method string, logger zerolog.Logger) *linking {
@@ -110,7 +113,29 @@ func (l *linking) Linked() {
 func (l *linking) due(now time.Time) (time.Duration, bool) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
+	if l.fresh {
+		l.fresh = false
+		return l.schedule.tell(now), true
+	}
 	return l.schedule.due(now)
+}
+
+// FreshCode is the owner asking for a code now (the settings panel's "send a
+// new link code"): the next one — the next QR code, or a pair code asked for
+// at the next QR code — is told at once whatever the gap, and a pair code
+// prompts the phone.
+func (l *linking) FreshCode() {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.fresh = true
+}
+
+// FreshPending reports whether a code the owner asked for is still to come,
+// so a pairing round asks for a pair code again.
+func (l *linking) FreshPending() bool {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.fresh
 }
 
 func (l *linking) uploadQR(ctx context.Context, code string) (string, error) {
@@ -153,9 +178,15 @@ func (s *linkSchedule) due(now time.Time) (time.Duration, bool) {
 	if s.told > 0 && now.Sub(s.last) < linkGaps[min(s.told-1, len(linkGaps)-1)] {
 		return 0, false
 	}
+	return s.tell(now), true
+}
+
+// tell records a code told at now, whatever the gap, and returns the gap
+// before the next told code.
+func (s *linkSchedule) tell(now time.Time) time.Duration {
 	s.told++
 	s.last = now
-	return linkGaps[min(s.told-1, len(linkGaps)-1)], true
+	return linkGaps[min(s.told-1, len(linkGaps)-1)]
 }
 
 func qrDetail(valid, next time.Duration) string {
