@@ -4389,7 +4389,7 @@ checksum = "3ad82d2a33cdc9674dc7465672f271e096168fcdbe0f799d9e6db8c5892679dc"
 
 [[package]]
 name = "wuphf-cli"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "botconf",
@@ -4416,7 +4416,7 @@ dependencies = [
 
 [[package]]
 name = "wuphf-connector"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "botconf",
@@ -4440,7 +4440,7 @@ dependencies = [
 
 [[package]]
 name = "wuphf-core"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "sha2 0.11.1",
  "thiserror 2.0.21",
@@ -4451,7 +4451,7 @@ dependencies = [
 
 [[package]]
 name = "wuphf-functions"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "botconf",
  "serde",
@@ -4468,7 +4468,7 @@ dependencies = [
 
 [[package]]
 name = "wuphf-model"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "botconf",
  "serde",
@@ -4479,7 +4479,7 @@ dependencies = [
 
 [[package]]
 name = "wuphf-proto"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "prost",
  "tonic",
@@ -4488,7 +4488,7 @@ dependencies = [
 
 [[package]]
 name = "wuphf-runtime"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "botconf",
  "botconf-grpc",
@@ -4511,7 +4511,7 @@ dependencies = [
 
 [[package]]
 name = "wuphf-settings"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "botconf",
  "botconf-panel",
@@ -4529,7 +4529,7 @@ dependencies = [
 
 [[package]]
 name = "wuphf-storage"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "async-trait",
  "serde",
@@ -4543,7 +4543,7 @@ dependencies = [
 
 [[package]]
 name = "wuphf-tui"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "clap",
@@ -4557,7 +4557,7 @@ dependencies = [
 
 [[package]]
 name = "wuphf-update"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "async-trait",
  "botconf",
