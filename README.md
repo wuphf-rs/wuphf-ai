@@ -109,14 +109,26 @@ Telegram's application credentials (`WUPHF_TELEGRAM_APP_ID`,
 environment without an option naming them, so the setup screen describes them
 but does not edit them: put them in `.env.local` yourself.
 
+A first setup also links each connector's account, on its setup screen
+(**Link account**, at the end of the root screen), so the connector starts
+linked: WhatsApp (both connectors) by a QR code drawn there or a pair code,
+by `login_method`; a Telegram user session by its phone, the login code and
+the 2FA password (`WUPHF_TELEGRAM_PHONE` and `_PASSWORD` are used when set);
+a Telegram bot by checking its token; Instagram by the session cookies, pasted
+as JSON or named by a file and written to `cookies_file`. The account's chats
+are then fetched into the chat directory (below); **Refresh chats** fetches
+them again. Both act on the saved config, and refuse while the connector runs:
+a running connector holds its session's lock (`<session>.lock`). A WhatsApp QR
+code needs a terminal of about 70 × 40.
+
 Chats are picked by name. The core's chat options (`notify`, the rules'
 chats, chat-state overrides) and misc's `[instagram] chats` suggest chats as
 you type, from the **chat directory**: one file per connector,
 `<connector_id>.chats.json`, in `$WUPHF_CHAT_DIRECTORY`, else
 `$XDG_STATE_HOME/wuphf/chats` (`~/.local/state/wuphf/chats`). A connector's
-setup writes its file when its account is linked there (Link account); the
-core's setup offers the chats of the
-connectors its config lists, misc's those of every file. A typed
+setup writes its file when its account is linked there, and Refresh
+chats rewrites it; the core's setup offers the chats of the connectors its
+config lists, misc's those of every file. A typed
 `connector:chat` is still taken, so a chat the directory lacks can be named
 by hand.
 

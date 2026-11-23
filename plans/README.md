@@ -79,7 +79,7 @@ code).
 | 059 | Offline setup TUIs for the Rust binaries (core, whatsapp-rust), each option described once on its config type | P1 | L | botconf 015 | DONE (see notes) |
 | 060 | Offline setup TUIs for the Go binaries (Telegram, WhatsApp, Instagram, mediaconv, misc) | P1 | L | botconf 015, 059 | DONE (see notes) |
 | 062 | The chat directory (one file per connector, fetched by its setup) and chats picked by name in the core's and misc's setup | P1 | M | botconf 017, 059, 060 | DONE |
-| 063 | Link a connector's account from its setup (WhatsApp Go and Rust, Telegram, Instagram) and fetch its chats into the directory | P1 | L | botconf 017, 062 | TODO |
+| 063 | Link a connector's account from its setup (WhatsApp Go and Rust, Telegram, Instagram) and fetch its chats into the directory | P1 | L | botconf 017, 062 | DONE |
 | 061 | Settings backup: `wuphf-server export` / `import` (config + every stored override, connectors' included; secrets only with a flag), online `wuphf settings export` / `import` | P1 | M | botconf 016, 059; after 062, 063 | TODO |
 
 Status values: TODO | IN PROGRESS | DONE | BLOCKED (with one-line reason) |
@@ -1688,3 +1688,42 @@ From the 2026-10-22 remote-functions design:
   tests clean; gofmt, `go vet` and the tests clean in every Go module.
   Owner: `wuphf-server setup` and `wmi setup` show "No chats known yet" in a chat
   field until 063's Link account writes a file (or one is written by hand).
+
+- **063 (2026-11-23).** Every connector's setup has **Link account** and
+  **Refresh chats** (the root screen's end), on the saved config, writing the
+  chat directory (062). A session lock (`<session>.lock`, flock; Go
+  `connectors/shared/sessionlock`, Rust `wuphf_connector::session_lock`) is
+  held by each connector while it runs, and the actions refuse while it is
+  ("wuphf-<platform> is running on …: stop it"). Go's actions are shared
+  (`setup.AccountActions` over a connector's `setup.Account`).
+  - WhatsApp (Go): the pairing round takes a code sink (`pairCodes`), the
+    owner notices while running, the screen in setup (QR codes as they
+    rotate, or a pair code each round, prompting the phone); after a new link
+    it waits (bounded, 90 s) for the contacts' app-state sync. Chats: joined
+    groups, saved contacts and businesses (people seen only in groups are
+    left out), followed channels, by the connector's canonical ids (LID when
+    known). The lock is on the database's file (`SessionFile()`, from the
+    URI).
+  - whatsapp-rust: the same, its bot on the connector's runtime and its
+    events relayed to setup's worker thread; the contacts arrive through the
+    connector's own contacts table (no sync-complete event: it waits for the
+    first contact, then a 10 s pause, at most 90 s). Followed channels are
+    not listed (deviation: no channel listing is wired in that library yet).
+  - Telegram: a user session logs in with the phone (asked unless
+    `WUPHF_TELEGRAM_PHONE`), the code, and the 2FA password (masked, unless
+    `WUPHF_TELEGRAM_PASSWORD`); chats are the dialogs (`formatPeer` ids). A
+    bot's token is checked, and it lists no chats (Refresh chats says so).
+    `ReadCredentials` reads the env file being edited.
+  - Instagram: the cookies pasted as JSON or named by a file, checked by
+    loading the account, written to `cookies_file` (the refreshed ones to
+    the session file, which the connector reads first); chats are the
+    inbox's threads (the first page of the listing).
+  Tests: shared +5 (lock, actions), WhatsApp Go +4, Telegram +3, Instagram
+  +2, whatsapp-rust +3, SDK +1. Live pty runs, on throwaway sessions: Go
+  WhatsApp and whatsapp-rust drew WhatsApp's real QR code, Esc stopped the
+  pairing; the Go one refused a locked session. Not run live: a real link
+  (any platform), Telegram (it would send a login code) and Instagram (real
+  cookies needed). Owner: link each account once from its setup
+  (`wwa setup`, `wtg setup`, `wig setup`, whatsapp-rust's), then pick chats
+  in `wuphf-server setup`; check a QR code scans (botconf 017's open STOP
+  condition).
