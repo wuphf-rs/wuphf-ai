@@ -11,11 +11,16 @@ import (
 	"github.com/wuphf-rs/wuphf-ai/connectors/shared/chatdir"
 	"github.com/wuphf-rs/wuphf-ai/connectors/shared/logging"
 	"github.com/wuphf-rs/wuphf-ai/connectors/shared/setup"
+	"github.com/wuphf-rs/wuphf-ai/connectors/shared/version"
 	"github.com/wuphf-rs/wuphf-ai/connectors/telegram/internal/config"
 	telegramconnector "github.com/wuphf-rs/wuphf-ai/connectors/telegram/internal/telegram"
 )
 
 func main() {
+	if version.Requested(os.Args[1:]) {
+		version.Print("wuphf-telegram")
+		return
+	}
 	// The first non-flag argument selects a subcommand; absent one, the
 	// connector runs normally. Each subcommand owns its own flag set.
 	args := os.Args[1:]

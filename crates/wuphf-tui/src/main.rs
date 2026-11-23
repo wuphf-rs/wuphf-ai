@@ -26,7 +26,7 @@ use crate::app::{Action, App, PAGE_SIZE};
 use crate::client::ObserverClient;
 
 #[derive(Parser)]
-#[command(about = "Terminal viewer for the wuphf observation log")]
+#[command(version, about = "Terminal viewer for the wuphf observation log")]
 struct Arguments {
     /// Observer gRPC endpoint of the running core.
     #[arg(long, default_value = "http://127.0.0.1:50051")]

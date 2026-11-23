@@ -36,7 +36,9 @@ pub(crate) fn lock_database(database_url: &str) -> Result<Option<SessionLock>> {
 }
 
 /// The env file's variables, then the process environment's.
-fn env_lookup(env_file: &Path) -> Result<impl Fn(&str) -> Option<String> + Send + Sync + 'static> {
+pub(crate) fn env_lookup(
+    env_file: &Path,
+) -> Result<impl Fn(&str) -> Option<String> + Send + Sync + 'static> {
     let vars = EnvFile::parse(&read_optional(env_file)?).vars();
     Ok(move |name: &str| vars.get(name).cloned().or_else(|| std::env::var(name).ok()))
 }

@@ -16,8 +16,8 @@ Enable only the parts your `core.toml` configures.
 
 ## Layout
 
-- Binaries in `/usr/local/bin`, named as `scripts/install-dev-bins.sh` names
-  them (it builds them all into `scripts/dev-bin/.bin/`).
+- Binaries in `/usr/local/bin`, named as releases and `scripts/build-release.sh`
+  name them (`wuphf-server`, `wuphf-telegram`, …).
 - Config in `/etc/wuphf/<part>.toml`, started from each part's
   `config.example.toml` (`config/example.toml` for the core).
 - Secrets in `/etc/wuphf/<part>.env` (templates in `env/`), mode `0600`,
@@ -32,8 +32,14 @@ Enable only the parts your `core.toml` configures.
 # 1. A system user for every part.
 sudo useradd --system --home-dir /var/lib/wuphf --shell /usr/sbin/nologin wuphf
 
-# 2. Binaries (built with scripts/install-dev-bins.sh).
-sudo install -m 0755 scripts/dev-bin/.bin/wuphf-* /usr/local/bin/
+# 2. Binaries: from a release (wuphf-server first, checked by hand once, then
+#    it installs the parts you run, checked against the signed SHA256SUMS) ...
+release=https://github.com/wuphf-rs/wuphf-ai/releases/latest/download
+curl -fL -O "$release/wuphf-server-linux-$(uname -m)" -O "$release/SHA256SUMS" -O "$release/SHA256SUMS.minisig"
+minisign -V -p release/minisign.pub -m SHA256SUMS && sha256sum --check --ignore-missing SHA256SUMS
+sudo install -m 0755 "wuphf-server-linux-$(uname -m)" /usr/local/bin/wuphf-server
+#    (the other parts come with step 3) ... or built here (scripts/install-dev-bins.sh builds them all).
+# sudo install -m 0755 scripts/dev-bin/.bin/wuphf-* /usr/local/bin/
 
 # 3. Config and secrets. Copy each example, then edit it.
 sudo install -d -m 0750 -o root -g wuphf /etc/wuphf
@@ -46,6 +52,9 @@ done
 # Fill the tokens: one random value per part, the same in core.env and in
 # that part's own file (`openssl rand -hex 32`). wuphf-misc's token is the
 # core's observer token (WUPHF_CORE_OBSERVER_TOKEN in core.env).
+# From a release, the parts you run (wuphf-server installs and checks them):
+sudo wuphf-server update --config /etc/wuphf/core.toml --yes \
+    --only wuphf-telegram --only wuphf-whatsapp --only wuphf-mediaconv --only wuphf-tui
 
 # 4. Units.
 sudo install -m 0644 deploy/systemd/wuphf.target deploy/systemd/wuphf-*.service /etc/systemd/system/
@@ -109,8 +118,12 @@ not need it.
 - **Remote core.** When a connector runs on another host, drop
   `wuphf-core.service` from its `After=` and point its `core_address` at the
   core.
-- **Upgrades.** Install the new binaries, then
-  `sudo systemctl restart wuphf.target`. The core applies its SQLite
-  migrations on start.
+- **Updates.** `sudo wuphf-server update --config /etc/wuphf/core.toml`
+  installs every binary's newest release and restarts the units that were
+  running (add `--env-file /etc/wuphf/core.env` when `[updates]` names a
+  token variable). `--rollback` undoes it. The core applies its SQLite
+  migrations on start, and it tells the owner when a release is out (once a
+  day it checks; `[updates] check_interval_seconds`). See the README,
+  "Versions and updates".
 - **TUI.** `wuphf-tui` is interactive and has no unit:
   `wuphf-tui --server http://127.0.0.1:50051 --token <observer_token>`.

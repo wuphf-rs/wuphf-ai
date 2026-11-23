@@ -1,0 +1,84 @@
+# A tag vX.Y.Z (scripts/release.sh makes it) builds every binary for linux
+# x86_64 and aarch64 and publishes them on the release with SHA256SUMS, signed
+# with the release key: `wuphf-server update` installs only what that
+# signature covers (the public key is release/minisign.pub).
+#
+# Needs the secret MINISIGN_SECRET_KEY: the contents of the secret key made
+# with `minisign -G -W -p release/minisign.pub -s <file>` (see release/README.md).
+name: release
+
+on:
+  push:
+    tags: ["v[0-9]+.[0-9]+.[0-9]+*"]
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        include:
+          # 22.04: glibc 2.35, so the binaries run on older systems too.
+          - runner: ubuntu-22.04
+            arch: x86_64
+          - runner: ubuntu-22.04-arm
+            arch: aarch64
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: The tag is the workspace's version
+        run: |
+          version="$(sed -n 's/^version = "\(.*\)"$/\1/p' Cargo.toml | head -n 1)"
+          if [ "${GITHUB_REF_NAME#v}" != "$version" ]; then
+            echo "tag $GITHUB_REF_NAME, Cargo.toml $version" >&2
+            exit 1
+          fi
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: connectors/shared/go.mod
+      - uses: arduino/setup-protoc@v3
+        with:
+          repo-token: ${{ github.token }}
+      - name: Build
+        run: scripts/build-release.sh dist
+      - name: Name by platform
+        run: for file in dist/*; do mv "$file" "$file-linux-${{ matrix.arch }}"; done
+      - uses: actions/upload-artifact@v4
+        with:
+          name: binaries-${{ matrix.arch }}
+          path: dist/*
+          if-no-files-found: error
+
+  publish:
+    needs: build
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Sign the checksums
+        env:
+          MINISIGN_SECRET_KEY: ${{ secrets.MINISIGN_SECRET_KEY }}
+        run: |
+          sudo apt-get update -q && sudo apt-get install -y -q minisign
+          cd dist
+          sha256sum wuphf-* > SHA256SUMS
+          key="$(mktemp)"
+          trap 'rm -f "$key"' EXIT
+          printf '%s\n' "$MINISIGN_SECRET_KEY" > "$key"
+          # The trusted comment names the release: an update checks it, so an
+          # old release's signed checksums cannot pass for a newer one.
+          minisign -S -s "$key" -m SHA256SUMS -t "wuphf $GITHUB_REF_NAME"
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          prerelease=()
+          case "$GITHUB_REF_NAME" in *-*) prerelease=(--prerelease) ;; esac
+          gh release create "$GITHUB_REF_NAME" dist/* --repo "$GITHUB_REPOSITORY" \
+            --title "wuphf $GITHUB_REF_NAME" --generate-notes "${prerelease[@]}"

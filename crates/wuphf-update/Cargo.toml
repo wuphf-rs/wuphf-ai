@@ -1,0 +1,32 @@
+[package]
+name = "wuphf-update"
+description = "Versions and updates: release sources, signed checksums, installing and the owner's update notice"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[features]
+# `botconf::Describe` for the `[updates]` section the core configuration holds.
+describe = ["dep:botconf"]
+
+[dependencies]
+async-trait.workspace = true
+botconf = { workspace = true, features = ["derive"], optional = true }
+flate2 = "1"
+minisign-verify = "0.2"
+# Release APIs and downloads over HTTPS. rustls with the bundled web PKI
+# roots: no system CA directory needed under systemd's sandbox.
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "http2"] }
+semver = "1"
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+tar = "0.4"
+thiserror.workspace = true
+tokio = { workspace = true, features = ["process", "time"] }
+tracing.workspace = true
+
+[dev-dependencies]
+minisign = "0.7"
+tempfile = "3"
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }

@@ -81,6 +81,7 @@ code).
 | 062 | The chat directory (one file per connector, fetched by its setup) and chats picked by name in the core's and misc's setup | P1 | M | botconf 017, 059, 060 | DONE |
 | 063 | Link a connector's account from its setup (WhatsApp Go and Rust, Telegram, Instagram) and fetch its chats into the directory | P1 | L | botconf 017, 062 | DONE |
 | 061 | Settings backup: `wuphf-server export` / `import` (config + every stored override, connectors' included; secrets only with a flag), online `wuphf settings export` / `import` | P1 | M | botconf 016, 059; after 062, 063 | DONE |
+| 064 | Versions, releases and `wuphf-server update` (every binary, third-party sources, release or source builds, signed checksums, a scheduled check that tells the owner) | P1 | L | — | DONE (see notes) |
 
 Status values: TODO | IN PROGRESS | DONE | BLOCKED (with one-line reason) |
 REJECTED (with one-line rationale).
@@ -1765,3 +1766,26 @@ From the 2026-10-22 remote-functions design:
   checks the app id and hash as startup does (plan 060's deviation closed).
   Live: the Telegram setup's Environment screen set both in the env file,
   the hash masked throughout.
+
+- **064 (2026-11-23).** Moved to `github.com/wuphf-rs/wuphf-ai` first (Go
+  module paths, proto `go_package`, repo links; `scripts/gen-proto-go.sh`).
+  Every binary prints one project version (`--version`; Go stamped through
+  `connectors/shared/version`); `scripts/build-release.sh` is the one build
+  (CI, source updates, `install-dev-bins.sh`); `scripts/release.sh` tags;
+  `.github/workflows/release.yml` publishes linux x86_64/aarch64 binaries
+  with `SHA256SUMS` signed by minisign (trusted comment `wuphf <tag>`,
+  checked, so an old release's signature cannot pass for a newer one).
+  `crates/wuphf-update` + `wuphf-server update` (`--check`, `--yes`,
+  `--only`, which also installs a missing binary, `--from-source`,
+  `--no-restart`, `--rollback`): all downloads checked before any install,
+  atomic replace, previous copies for rollback, a lock, running units
+  restarted core first. `[[updates.sources]]`: GitHub, Gitea/Forgejo or
+  GitLab releases (raw or `.tar.gz` assets) or source builds for binaries
+  of their own (a custom `wuphf-misc`); the forge token goes only to the
+  forge. `serve` checks daily and tells the owner once per release
+  (`Core::announce`, every notice target). Live: a fake forge served two
+  signed releases; check, install (incl. `.tar.gz`), re-check, rollback,
+  a tampered download and a wrong key (nothing installed), and `serve`'s
+  check queued both notices for the `notify` chat. Pending on the owner:
+  the release key (`release/minisign.pub` is empty until generated; see
+  `release/README.md`) and the GitHub repository for a real release.

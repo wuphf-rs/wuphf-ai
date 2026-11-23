@@ -330,3 +330,62 @@ functions = ["media.convert"]
 # Limits for one function name (every major), replacing the global ones:
 # `[functions.overrides."media.convert"]`.
 # [functions.overrides.<name>]
+
+# Updates: `wuphf-server update` replaces every installed binary with its latest
+# release, and `serve` checks for new releases and tells the owner.
+#
+# wuphf's own binaries come from wuphf's releases (`[updates.wuphf]`); binaries
+# built elsewhere (your own `wuphf-misc`, a connector of your own) come from
+# their own (`[[updates.sources]]`). Every download is checked against its
+# release's SHA256SUMS, signed with minisign.
+[updates]
+
+# How often `serve` checks for new releases, in seconds; `0` never checks. Each
+# new release is told to the owner once, through the notice chats (`notify`);
+# the check never installs anything.
+# Default: 86400.
+# check_interval_seconds = 86400
+
+# The directory the binaries are installed in. Unset: the directory of the
+# running `wuphf-server`.
+# install_dir = ""
+
+# Where `wuphf-server update` keeps the binaries it replaced (for `--rollback`),
+# its source checkouts and its lock.
+# Default: "/var/lib/wuphf/update".
+# state_dir = "/var/lib/wuphf/update"
+
+# Pre-releases (`v1.2.0-rc.1`) count as updates.
+# Default: false.
+# prerelease = false
+
+# wuphf's own binaries.
+[updates.wuphf]
+
+# Update wuphf's own binaries. Off: only `sources` are updated and checked.
+# Default: true.
+# enabled = true
+
+# `release` installs the release's downloads; `source` builds the release's tag
+# (needs git, cargo, go and a C toolchain on this host).
+# One of: release, source.
+# Default: "release".
+# from = "release"
+
+# The repository: wuphf's own, or a fork publishing releases the same way (set
+# `public_key` to the fork's key).
+# Default: "https://github.com/wuphf-rs/wuphf-ai".
+# repository = "https://github.com/wuphf-rs/wuphf-ai"
+
+# The minisign public key the release's SHA256SUMS is signed with: the `.pub`
+# file, or its key line. Unset: wuphf's own release key.
+# public_key = ""
+
+# Environment variable holding a token for the repository's API, for a private
+# fork or past GitHub's 60 unauthenticated requests an hour.
+# token_env = ""
+
+# Other release sources, each providing some binaries. A binary a source lists
+# is updated from that source only, never from wuphf's releases: list your own
+# `wuphf-misc` here to keep it.
+# [[updates.sources]]

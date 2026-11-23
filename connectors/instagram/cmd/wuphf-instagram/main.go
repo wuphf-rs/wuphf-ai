@@ -13,9 +13,14 @@ import (
 	"github.com/wuphf-rs/wuphf-ai/connectors/shared/chatdir"
 	"github.com/wuphf-rs/wuphf-ai/connectors/shared/logging"
 	"github.com/wuphf-rs/wuphf-ai/connectors/shared/setup"
+	"github.com/wuphf-rs/wuphf-ai/connectors/shared/version"
 )
 
 func main() {
+	if version.Requested(os.Args[1:]) {
+		version.Print("wuphf-instagram")
+		return
+	}
 	if setup.Requested(os.Args[1:]) {
 		if err := setup.Run(os.Args[2:], tui.Setup{
 			Description: config.Description(),

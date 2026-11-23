@@ -16,6 +16,7 @@ wuphf-core.workspace = true
 wuphf-functions = { workspace = true, features = ["describe"] }
 wuphf-model = { workspace = true, features = ["describe"] }
 wuphf-storage.workspace = true
+wuphf-update = { workspace = true, features = ["describe"] }
 
 [dev-dependencies]
 figment = { workspace = true, features = ["test"] }

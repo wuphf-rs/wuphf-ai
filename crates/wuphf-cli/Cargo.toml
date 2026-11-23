@@ -24,6 +24,7 @@ wuphf-proto.workspace = true
 wuphf-runtime.workspace = true
 wuphf-settings.workspace = true
 wuphf-storage.workspace = true
+wuphf-update.workspace = true
 
 [dev-dependencies]
 tokio-stream.workspace = true

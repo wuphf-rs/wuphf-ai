@@ -15,6 +15,7 @@ import (
 	"github.com/wuphf-rs/wuphf-ai/connectors/shared/functions"
 	"github.com/wuphf-rs/wuphf-ai/connectors/shared/logging"
 	"github.com/wuphf-rs/wuphf-ai/connectors/shared/setup"
+	"github.com/wuphf-rs/wuphf-ai/connectors/shared/version"
 	"github.com/wuphf-rs/wuphf-ai/providers/mediaconv/internal/config"
 	"github.com/wuphf-rs/wuphf-ai/providers/mediaconv/internal/convert"
 )
@@ -30,6 +31,10 @@ func validate(candidate tui.Candidate) error {
 }
 
 func main() {
+	if version.Requested(os.Args[1:]) {
+		version.Print("wuphf-mediaconv")
+		return
+	}
 	if setup.Requested(os.Args[1:]) {
 		if err := setup.Run(os.Args[2:], tui.Setup{Description: config.Description(), Validate: validate}); err != nil {
 			exit(err)

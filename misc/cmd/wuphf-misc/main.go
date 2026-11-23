@@ -16,6 +16,7 @@ import (
 	"github.com/wuphf-rs/wuphf-ai/connectors/shared/coreclient"
 	"github.com/wuphf-rs/wuphf-ai/connectors/shared/logging"
 	"github.com/wuphf-rs/wuphf-ai/connectors/shared/setup"
+	"github.com/wuphf-rs/wuphf-ai/connectors/shared/version"
 	"github.com/wuphf-rs/wuphf-ai/misc/internal/config"
 	"github.com/wuphf-rs/wuphf-ai/misc/internal/misc"
 	wuphfpb "github.com/wuphf-rs/wuphf-ai/proto/go/connector/v1"
@@ -34,6 +35,10 @@ func validate(candidate tui.Candidate) error {
 }
 
 func main() {
+	if version.Requested(os.Args[1:]) {
+		version.Print("wuphf-misc")
+		return
+	}
 	if setup.Requested(os.Args[1:]) {
 		if err := setup.Run(os.Args[2:], tui.Setup{
 			Description: config.Description(),

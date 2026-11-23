@@ -31,6 +31,8 @@
             clippy
             go
             gopls
+            # Signs releases (release/README.md).
+            minisign
             pkg-config
             protobuf
             protoc-gen-go

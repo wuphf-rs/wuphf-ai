@@ -179,6 +179,52 @@ value differs, and lists what differs but only the offline import restores
 (the listen address, the connectors, …). `wuphf-server setup` has the same
 as Export settings and Import settings at the end of its screen.
 
+### Versions and updates
+
+Every binary prints its version (`wuphf-server --version`,
+`wuphf-telegram version`): one version for the whole project, released as
+a tag `vX.Y.Z` with binaries for linux `x86_64` and `aarch64`
+([release/README.md](release/README.md)). One command updates every
+installed binary:
+
+```sh
+sudo wuphf-server update --config /etc/wuphf/core.toml --check  # what would change
+sudo wuphf-server update --config /etc/wuphf/core.toml          # asks, then installs
+sudo wuphf-server update --config /etc/wuphf/core.toml --rollback
+```
+
+It looks for the binaries beside `wuphf-server` (or `[updates] install_dir`),
+asks each one its version, and fetches the newest release. Every download
+must be in that release's `SHA256SUMS`, and the file must carry a valid
+minisign signature from wuphf's release key for that exact tag. Nothing is
+installed until every download has passed. Each binary is then replaced
+atomically, the old one kept for `--rollback`, and the systemd units that
+were running an updated binary are restarted, the core first. `--only
+BINARY` limits it to one binary (and installs that binary if it isn't there
+yet), `--from-source` builds the release's tag instead of downloading it
+(this needs git, cargo, go and a C toolchain), and `--yes` skips the
+question.
+
+Parts built elsewhere, such as your own `wuphf-misc` or a connector of your
+own, are update sources of their own. They can live on GitHub, Gitea/Forgejo
+(Codeberg) or GitLab. A binary a source lists is never touched by wuphf's own
+releases:
+
+```toml
+[[updates.sources]]
+name = "my-misc"
+repository = "https://codeberg.org/you/wuphf-misc"
+binaries = ["wuphf-misc"]
+asset = "{binary}-{version}-{os}-{goarch}.tar.gz"  # default "{binary}-{os}-{arch}"
+public_key = "RW..."   # its minisign key; without one, only SHA256SUMS is checked
+# from = "source"; build = "make OUT=$OUT"   # build its tag instead
+```
+
+While it runs, the core checks for new releases once a day
+(`[updates] check_interval_seconds`, `0` turns it off). It tells the owner
+about each new one once, through the notice chats (`notify`), with the
+command that installs it. The check only reads; it never installs anything.
+
 ### Tokens and settings
 
 Every connector authenticates to the core with a token. The core reads each

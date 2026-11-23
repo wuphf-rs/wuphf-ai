@@ -9,6 +9,7 @@ use std::fmt;
 use std::net::SocketAddr;
 use wuphf_functions::FunctionsConfig;
 use wuphf_model::{ChatAddress, ChatFilter, ChatRef, ChatStateDirection, ConnectorId, RuleKind};
+use wuphf_update::config::UpdatesConfig;
 
 /// The core configuration file's description: every option, from the types
 /// below. The checked-in example (`config/example.toml`) is its example.
@@ -151,6 +152,8 @@ pub struct Configuration {
     pub chat_state: ChatStateConfig,
     #[serde(default)]
     pub functions: FunctionsConfig,
+    #[serde(default)]
+    pub updates: UpdatesConfig,
     // Present only when the file holds a `[connector_settings]` table, which
     // `derive` refuses: a connector's settings take their base from the
     // connector's own file, so a second base here would make unsetting an

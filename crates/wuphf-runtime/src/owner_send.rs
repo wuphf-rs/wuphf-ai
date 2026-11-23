@@ -84,6 +84,17 @@ where
         Ok(settled)
     }
 
+    /// Tell the owner something about the bridge itself (a new release)
+    /// through every notice target, returning how many messages that took.
+    pub async fn announce(&self, text: &str) -> Result<usize, OwnerSendError> {
+        let dispatches = self.core.announce(text, now_ms()).await?;
+        let sent = dispatches.len();
+        for dispatch in dispatches {
+            self.inject(dispatch).await?;
+        }
+        Ok(sent)
+    }
+
     /// The observation-log row for an owner message, complete except for the native
     /// message id its acknowledgement will supply and the attachments the core
     /// resolves.

@@ -62,7 +62,11 @@ use crate::wa_client::LiveClient;
 const EVENT_CAPACITY: usize = 64;
 
 #[derive(Parser)]
-#[command(about = "WhatsApp connector for wuphf (whatsapp-rust)")]
+#[command(
+    name = "wuphf-whatsapp-rust",
+    version,
+    about = "WhatsApp connector for wuphf (whatsapp-rust)"
+)]
 struct Cli {
     /// Path to the connector TOML configuration.
     #[arg(long, default_value = "config.example.toml")]

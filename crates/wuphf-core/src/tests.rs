@@ -1767,6 +1767,24 @@ async fn an_owner_notice_reaches_the_other_connectors_only() {
 }
 
 #[tokio::test]
+async fn an_announcement_reaches_every_notice_target_each_time() {
+    let core = notifying_core();
+    let announce = || core.announce("⬆️ wuphf 0.2.0 is out", 1);
+    let dispatches = announce().await.unwrap();
+
+    // Not about a connector: none is skipped, and the text is the caller's.
+    let mut reached: Vec<_> = dispatches
+        .iter()
+        .map(|dispatch| dispatch.to.connector_id.0.as_str())
+        .collect();
+    reached.sort();
+    assert_eq!(reached, [TELEGRAM, WHATSAPP]);
+    assert_eq!(notice_text(&dispatches[0]), "⬆️ wuphf 0.2.0 is out");
+    // The caller decides what repeats.
+    assert_eq!(announce().await.unwrap().len(), 2);
+}
+
+#[tokio::test]
 async fn a_link_notice_shows_its_stored_qr_and_every_round_is_sent() {
     let core = notifying_core();
     let whatsapp = ConnectorId(WHATSAPP.into());

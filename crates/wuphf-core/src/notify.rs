@@ -1,4 +1,5 @@
-//! Owner notices: a connector telling the account owner that it is in trouble,
+//! Owner notices: a connector telling the account owner that it is in trouble
+//! (or the bridge announcing something about itself, such as a new release),
 //! delivered through the connectors that still work.
 //!
 //! A connector that loses its session goes quiet, and a bridge that has quietly
@@ -44,12 +45,36 @@ where
                 stored.push(media_id);
             }
         }
+        self.deliver_notice(Some(&connector_id), &text, &stored, timestamp_ms)
+            .await
+    }
+
+    /// Tell the owner something about the bridge itself (a new release),
+    /// through every notice target, returning the dispatches to deliver. The
+    /// caller decides whether it is worth saying; nothing here repeats or
+    /// suppresses it.
+    pub async fn announce(
+        &self,
+        text: &str,
+        timestamp_ms: i64,
+    ) -> Result<Vec<Dispatch>, CoreError> {
+        self.deliver_notice(None, text, &[], timestamp_ms).await
+    }
+
+    /// Send `text` to every notice target, except those served by `raising`.
+    async fn deliver_notice(
+        &self,
+        raising: Option<&ConnectorId>,
+        text: &str,
+        media_ids: &[MediaId],
+        timestamp_ms: i64,
+    ) -> Result<Vec<Dispatch>, CoreError> {
         // One snapshot for the whole notice: the targets and every send to them.
         let routing = self.routing.routing();
-        let targets: Vec<_> = routing
-            .notice_targets_excluding(&connector_id)
-            .cloned()
-            .collect();
+        let targets: Vec<_> = match raising {
+            Some(raising) => routing.notice_targets_excluding(raising).cloned().collect(),
+            None => routing.notice_targets().cloned().collect(),
+        };
 
         let mut dispatches = Vec::new();
         for target in targets {
@@ -60,8 +85,8 @@ where
                         connector_id: target.connector_id,
                         chat_id: target.address.chat_id,
                         thread_id: target.address.thread_id,
-                        text: text.clone(),
-                        media_ids: stored.clone(),
+                        text: text.to_owned(),
+                        media_ids: media_ids.to_vec(),
                         client: None,
                         reply_to_native_id: None,
                         timestamp_ms,

@@ -100,6 +100,11 @@ impl RoutingConfig {
         self
     }
 
+    /// The chats an owner notice is delivered to.
+    pub fn notice_targets(&self) -> impl Iterator<Item = &ChatRef> {
+        self.notice_targets.iter()
+    }
+
     /// The chats an owner notice is delivered to, excluding any served by
     /// `raising` — the connector reporting trouble is the one least likely to
     /// be able to deliver the news about it.

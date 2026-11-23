@@ -27,9 +27,14 @@ use wuphf_settings::{LiveRouting, WuphfSchema};
 mod backup;
 mod settings;
 mod setup;
+mod update;
 
 #[derive(Parser)]
-#[command(about = "Run the wuphf messaging replication runtime")]
+#[command(
+    name = "wuphf-server",
+    version,
+    about = "Run the wuphf messaging replication runtime"
+)]
 struct Arguments {
     #[command(subcommand)]
     command: Command,
@@ -93,6 +98,11 @@ enum Command {
         #[arg(long, default_value = ".env.local")]
         env_file: PathBuf,
     },
+    /// Update every installed wuphf binary (and those of the [updates]
+    /// sources) to its newest release, checked against the release's signed
+    /// checksums, then restart the units that run them. Run it as the user
+    /// that owns the binaries (root, for /usr/local/bin).
+    Update(update::UpdateArguments),
 }
 
 #[derive(Subcommand)]
@@ -143,6 +153,7 @@ async fn main() -> Result<()> {
             println!("{}", backup::imported_summary(&config, &imported));
             Ok(())
         }
+        Command::Update(arguments) => update::run(arguments).await,
     }
 }
 
@@ -200,6 +211,8 @@ async fn serve(path: PathBuf) -> Result<()> {
         Arc::new(Core::new(storage, LiveRouting::new(Arc::clone(&settings)))),
         128,
     );
+    // New releases are told to the owner through the notice targets.
+    update::spawn_check(&configuration.updates, &path, runtime.owner_sender());
     let observer_service = ObserverTransportServer::with_interceptor(
         GrpcObserverService::new(observer).with_sender(runtime.owner_sender()),
         bearer_auth(observer_token),

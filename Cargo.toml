@@ -10,6 +10,7 @@ members = [
   "crates/wuphf-cli",
   "crates/wuphf-tui",
   "crates/wuphf-connector",
+  "crates/wuphf-update",
 ]
 # The whatsapp-rust connector is its own workspace (like the Go connectors are
 # separate Go modules): its session store links libsqlite3-sys 0.37 via diesel,
@@ -60,3 +61,4 @@ wuphf-proto = { path = "crates/wuphf-proto" }
 wuphf-runtime = { path = "crates/wuphf-runtime" }
 wuphf-settings = { path = "crates/wuphf-settings" }
 wuphf-storage = { path = "crates/wuphf-storage" }
+wuphf-update = { path = "crates/wuphf-update" }
