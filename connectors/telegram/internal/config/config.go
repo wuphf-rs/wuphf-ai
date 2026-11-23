@@ -10,70 +10,67 @@ import (
 
 	"github.com/akshettrj/wuphf/connectors/shared/logging"
 	"github.com/pelletier/go-toml/v2"
+	"github.com/propheci/botconf/go/describe"
 )
 
+// File is the connector's config file. Each option is described once, in its
+// tags (see the shared setup package); config.example.toml is generated from
+// them.
 type File struct {
-	CoreAddress string `toml:"core_address"`
-	ConnectorID string `toml:"connector_id"`
-	// CoreTokenEnv names the environment variable holding this connector's core
-	// token; it must match the core's [[connectors]].token_env for this
-	// connector id. Required.
-	CoreTokenEnv        string `toml:"core_token_env"`
-	SessionFile         string `toml:"session_file"`
-	SupportsThreads     bool   `toml:"supports_threads"`
-	SupportsTopicCreate bool   `toml:"supports_topic_create"`
-	// FunctionsTokenEnv names the environment variable holding the core's
-	// invoke token, when the core requires one.
-	FunctionsTokenEnv string `toml:"functions_token_env"`
-	// BotToken is the @BotFather token for a bot session. The
-	// WUPHF_TELEGRAM_BOT_TOKEN environment variable wins over it. It is read
-	// once and never declared as a runtime setting, so it never leaves this
-	// process.
-	BotToken string `toml:"bot_token"`
-	// PanelBotToken is the helper bot's token, used by a user session to show
-	// the settings panel with buttons (see Panel). The
-	// WUPHF_TELEGRAM_PANEL_BOT_TOKEN environment variable wins over it. Like
-	// BotToken, it is read once and never a runtime setting.
-	PanelBotToken string `toml:"panel_bot_token"`
-	// Panel configures the settings panel opened with a command.
-	Panel PanelOptions `toml:"panel"`
+	CoreAddress string `toml:"core_address" required:"true" example:"127.0.0.1:50051" doc:"The core's gRPC address."`
+	ConnectorID string `toml:"connector_id" required:"true" example:"telegram-main" doc:"Must match a [[connectors]] entry in the core's configuration."`
+	// CoreTokenEnv names the variable; the token itself is read from the
+	// environment at startup.
+	CoreTokenEnv        string `toml:"core_token_env" required:"true" env:"token" example:"WUPHF_CONNECTOR_TELEGRAM_MAIN_TOKEN" doc:"Environment variable holding this connector's core token; must match the core's [[connectors]].token_env for this connector id."`
+	SessionFile         string `toml:"session_file" required:"true" example:"./telegram.session.json" doc:"Where the Telegram session is kept. Reusing it restores the logged-in session."`
+	SupportsThreads     bool   `toml:"supports_threads" example:"true" doc:"Telegram supports forum topics, so the core may use this connector as a threaded mirror. Must match the core's [[connectors]] entry."`
+	SupportsTopicCreate bool   `toml:"supports_topic_create" example:"true" doc:"The core may provision one topic per source conversation (needs supports_threads). Must match the core's [[connectors]] entry."`
+	FunctionsTokenEnv   string `toml:"functions_token_env" env:"token" hint:"WUPHF_INVOKE_TOKEN" doc:"Environment variable holding the core's invoke token, when the core sets [functions] invoke_token_env.\n\nAnimated stickers from other platforms (animated WebP) are converted to Telegram video stickers by the core's media.convert function, served by the providers/mediaconv process. Without it they arrive as static stickers."`
+	// BotToken and PanelBotToken are read once and never declared as runtime
+	// settings, so they never leave this process.
+	BotToken      string       `toml:"bot_token" secret:"true" doc:"The @BotFather token, for a bot session. WUPHF_TELEGRAM_BOT_TOKEN wins over it. Keep this file private when it holds the token.\n\nA bot session needs two things set up on the bot itself, or the bridge runs one-way without any error to show for it: privacy mode off (@BotFather → /setprivacy → Disable) or the bot made an admin, or it only receives commands, replies and mentions; and admin in the mirror group with \"manage topics\", which provisioning and renaming a topic per conversation requires. A bot also cannot open a chat with someone who has not messaged it first, so any rule (or core notify target) pointing at telegram:user:... needs that person to have started the bot."`
+	PanelBotToken string       `toml:"panel_bot_token" secret:"true" doc:"A helper bot's token, for a user session's settings panel. WUPHF_TELEGRAM_PANEL_BOT_TOKEN wins over it.\n\nA user session cannot attach buttons to its messages, so it shows the panel through a helper bot: create one with @BotFather, turn on inline mode (/setinline), set its token here, and set [panel] session_file. Without one the panel is sent as text with numbered options. A bot session needs none of this. Owners can also send the panel command to the helper bot in a private chat from their own account, which gets an ordinary button panel: use that when the bridge runs on an account other than yours, and list your own user id in the core's owner_ids, not the bridge account's."`
+	Panel         PanelOptions `toml:"panel" doc:"The settings panel, opened with a command (/wuphf by default): the core's settings with buttons. The core only obeys the Telegram user ids listed in its [[connectors]].owner_ids for this connector; for a user session that is the session's own account id. The command is never mirrored, whoever sends it. Read once at startup."`
 	// Runtime holds the settings that may change while the connector runs.
 	// Embedded, so the file keeps its layout (`log_level`, `[rendering]`).
 	Runtime
 }
 
+// Description is the config file's description, from File's tags.
+func Description() *describe.Description {
+	return describe.MustOf("wuphf Telegram connector", fileDescription, File{})
+}
+
+const fileDescription = "Runtime settings (log_level, media_convert_timeout_ms, [rendering]) can " +
+	"also change while the connector runs: the connector declares them to the core, which keeps any " +
+	"change (made from its settings panel or `wuphf-server settings`, under " +
+	"`connector_settings.<connector id>`) and pushes it back here. The values in this file are the " +
+	"base; unsetting a change returns to them.\n\n" +
+	"The Telegram application credentials are read from the environment: WUPHF_TELEGRAM_APP_ID and " +
+	"WUPHF_TELEGRAM_APP_HASH, and for a user session WUPHF_TELEGRAM_PHONE and optionally " +
+	"WUPHF_TELEGRAM_PASSWORD (authentication codes are prompted on first login).\n\n" +
+	"Routing is owned entirely by the core: configure [rules.<id>] entries there, using typed chat " +
+	"ids such as telegram:channel:1234567890, telegram:chat:7 or telegram:user:88."
+
 // Runtime holds the settings that can change while the connector runs. The
 // connector declares them to the core (the `botconf` tags, see the shared
 // settings package), which stores, validates and pushes every change; the
 // values in the file are the base. Everything else in File is read once.
+//
+// Each doc tag's first paragraph is what the settings panel shows.
 type Runtime struct {
-	// LogLevel sets log verbosity (trace, debug, info, warn, error). Empty
-	// means info; the WUPHF_LOG_LEVEL environment variable overrides it.
-	LogLevel string `toml:"log_level" botconf:"Log level" doc:"How much the connector logs (WUPHF_LOG_LEVEL wins)" jsonschema:"enum=trace,enum=debug,enum=info,enum=warn,enum=error"`
-	// MediaConvertTimeoutMs bounds a sticker conversion, including waiting for
-	// the converter; deliveries on this connector wait behind it. 0 = 20000.
-	MediaConvertTimeoutMs uint32 `toml:"media_convert_timeout_ms" botconf:"Sticker conversion timeout (ms)" doc:"How long converting a sticker may take, waiting for the converter included; 0 means 20000"`
-	// Rendering governs how replicated copies are rendered on Telegram. It is
-	// this connector's own policy; the core dispatches content only.
-	Rendering RenderingOptions `toml:"rendering"`
+	LogLevel              string           `toml:"log_level" botconf:"Log level" example:"info" doc:"How much the connector logs (WUPHF_LOG_LEVEL wins)\n\nAny case; anything else is refused. Empty means info." jsonschema:"enum=trace,enum=debug,enum=info,enum=warn,enum=error"`
+	MediaConvertTimeoutMs uint32           `toml:"media_convert_timeout_ms" botconf:"Sticker conversion timeout (ms)" doc:"How long converting a sticker may take, waiting for the converter included; 0 means 20000\n\nThis connector delivers in order, so later messages wait behind a conversion."`
+	Rendering             RenderingOptions `toml:"rendering" doc:"How replicated copies are rendered on Telegram: this connector's own policy; the core dispatches content only."`
 }
 
 // RenderingOptions are the connector-owned knobs for how mirrored copies are
 // rendered on the platform.
 type RenderingOptions struct {
-	// Send every attachment using the generic file/document method, regardless
-	// of its origin kind (image/video/audio/sticker).
-	AttachmentsAsFiles bool `toml:"attachments_as_files" botconf:"Attachments as files" doc:"Send every attachment as a file, whatever its kind"`
-	// Maximum text length, in characters, to carry inline in one message; text
-	// over the limit is sent as a plain-text file instead. Zero is unbounded.
-	MaxMessageLength uint32 `toml:"max_message_length" botconf:"Longest inline message" doc:"Longer text is sent as a file; 0 means no limit"`
-	// EditMode picks how a replicated edit is rendered: "in_place" (default)
-	// revises the original copy, "repost" leaves it untouched and posts the
-	// revision as a reply marked as an edit.
-	EditMode string `toml:"edit_mode" botconf:"Edits" doc:"in_place revises the copy; repost replies to it with the new text" jsonschema:"enum=in_place,enum=repost"`
-	// DeleteMode picks how a replicated delete is rendered: "revoke" (default)
-	// deletes the copy, "tombstone" leaves it and posts a deletion notice.
-	DeleteMode string `toml:"delete_mode" botconf:"Deletes" doc:"revoke deletes the copy; tombstone replies to it with a notice" jsonschema:"enum=revoke,enum=tombstone"`
+	AttachmentsAsFiles bool   `toml:"attachments_as_files" botconf:"Attachments as files" doc:"Send every attachment as a file, whatever its kind"`
+	MaxMessageLength   uint32 `toml:"max_message_length" botconf:"Longest inline message" hint:"4096" doc:"Longer text is sent as a file; 0 means no limit\n\nCounted in characters; the file is plain text."`
+	EditMode           string `toml:"edit_mode" botconf:"Edits" default:"in_place" example:"in_place" doc:"in_place revises the copy; repost replies to it with the new text\n\nrepost leaves the mirrored copy untouched and posts the revision as a reply marked as an edit." jsonschema:"enum=in_place,enum=repost"`
+	DeleteMode         string `toml:"delete_mode" botconf:"Deletes" default:"revoke" example:"revoke" doc:"revoke deletes the copy; tombstone replies to it with a notice" jsonschema:"enum=revoke,enum=tombstone"`
 }
 
 // defaultMediaConvertTimeout bounds a sticker conversion when the
@@ -110,12 +107,9 @@ const DefaultPanelCommand = "wuphf"
 
 // PanelOptions configure the settings panel. They are read once at startup.
 type PanelOptions struct {
-	// Command opens the panel, without the slash. Empty means
-	// DefaultPanelCommand.
-	Command string `toml:"command"`
-	// SessionFile is where the helper bot keeps its session (user sessions
-	// with a panel bot token only).
-	SessionFile string `toml:"session_file"`
+	// Empty means DefaultPanelCommand.
+	Command     string `toml:"command" default:"wuphf" doc:"The command that opens the panel, without the slash: 1 to 32 lowercase letters, digits or underscores."`
+	SessionFile string `toml:"session_file" hint:"./telegram-panel.session.json" doc:"Where the helper bot keeps its session (user sessions with panel_bot_token only)."`
 }
 
 // CommandName is the panel command without the slash, defaulted.
@@ -163,7 +157,11 @@ func Load(path string) (File, error) {
 	if err != nil {
 		return File{}, fmt.Errorf("read configuration: %w", err)
 	}
+	return Parse(data)
+}
 
+// Parse reads and checks a configuration's text.
+func Parse(data []byte) (File, error) {
 	var cfg File
 	if err := toml.Unmarshal(data, &cfg); err != nil {
 		return File{}, fmt.Errorf("decode configuration: %w", err)

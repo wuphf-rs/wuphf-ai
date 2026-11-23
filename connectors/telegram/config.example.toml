@@ -1,100 +1,128 @@
-# Keys marked "Runtime." can also change while the connector runs: the
-# connector declares them to the core, which keeps any change (made from its
-# settings panel or `wuphf settings`, under
-# `connector_settings.<connector id>`) and pushes it back here. The values in
-# this file are the base; unsetting a change returns to them.
+# wuphf Telegram connector
+#
+# Runtime settings (log_level, media_convert_timeout_ms, [rendering]) can also
+# change while the connector runs: the connector declares them to the core,
+# which keeps any change (made from its settings panel or `wuphf-server
+# settings`, under `connector_settings.<connector id>`) and pushes it back here.
+# The values in this file are the base; unsetting a change returns to them.
+#
+# The Telegram application credentials are read from the environment:
+# WUPHF_TELEGRAM_APP_ID and WUPHF_TELEGRAM_APP_HASH, and for a user session
+# WUPHF_TELEGRAM_PHONE and optionally WUPHF_TELEGRAM_PASSWORD (authentication
+# codes are prompted on first login).
+#
+# Routing is owned entirely by the core: configure [rules.<id>] entries there,
+# using typed chat ids such as telegram:channel:1234567890, telegram:chat:7 or
+# telegram:user:88.
 
+# The core's gRPC address.
+# Required.
 core_address = "127.0.0.1:50051"
+
+# Must match a [[connectors]] entry in the core's configuration.
+# Required.
 connector_id = "telegram-main"
+
 # Environment variable holding this connector's core token; must match the
-# core's `[[connectors]].token_env` value for this connector id.
+# core's [[connectors]].token_env for this connector id.
+# Required.
 core_token_env = "WUPHF_CONNECTOR_TELEGRAM_MAIN_TOKEN"
+
+# Where the Telegram session is kept. Reusing it restores the logged-in session.
+# Required.
 session_file = "./telegram.session.json"
 
 # Telegram supports forum topics, so the core may use this connector as a
-# threaded mirror and provision one topic per source conversation.
+# threaded mirror. Must match the core's [[connectors]] entry.
 supports_threads = true
+
+# The core may provision one topic per source conversation (needs
+# supports_threads). Must match the core's [[connectors]] entry.
 supports_topic_create = true
 
-# Telegram application credentials are read from:
-# WUPHF_TELEGRAM_APP_ID and WUPHF_TELEGRAM_APP_HASH.
-# For a user session also set WUPHF_TELEGRAM_PHONE and optionally
-# WUPHF_TELEGRAM_PASSWORD. Authentication codes are prompted on first login.
+# Environment variable holding the core's invoke token, when the core sets
+# [functions] invoke_token_env.
 #
-# For a bot session, set the token from @BotFather here or in
-# WUPHF_TELEGRAM_BOT_TOKEN (the environment wins). Keep this file private when
-# it holds the token. It is read once at startup and is never a runtime setting.
-# bot_token = "123456789:replace-with-your-bot-token"
-#
-# A bot session needs two things set up on the bot itself, or the bridge runs
-# one-way without any error to show for it:
-#
-#   * Privacy mode off (@BotFather -> /setprivacy -> Disable), or the bot made an
-#     admin. Otherwise it only receives commands, replies and mentions, so
-#     messages typed into a mirror topic never reach the core.
-#   * Admin in the mirror group with "manage topics", which is what
-#     provisioning and renaming a topic per conversation requires.
-#
-# A bot also cannot open a chat with someone who has not messaged it first, so
-# any rule (or core notify target) pointing at "telegram:user:..." needs
-# that person to have started the bot.
-#
-# Routing is owned entirely by the core. Configure which conversations map
-# where through the core's [rules.<id>] entries using typed chat IDs such as
-# "telegram:channel:1234567890", "telegram:chat:7", or "telegram:user:88".
-
-# Settings panel: /wuphf (see [panel] below) opens the core's settings with
-# buttons. The core only obeys the Telegram user ids listed in its
-# [[connectors]].owner_ids for this connector; for a user session that is the
-# session's own account id. The command is never mirrored, whoever sends it.
-#
-# A user session cannot attach buttons to its messages, so it shows the panel
-# through a helper bot: create one with @BotFather, turn on inline mode
-# (/setinline), and set its token here or in WUPHF_TELEGRAM_PANEL_BOT_TOKEN
-# (the environment wins; keep this file private when it holds the token). It
-# also needs [panel] session_file. Without a helper bot the panel is sent as
-# text with numbered options. A bot session needs none of this.
-#
-# Owners can also send /wuphf to the helper bot in a private chat from their
-# own account, which gets an ordinary button panel there. Use that when the
-# bridge runs on an account other than yours: list your own user id in
-# owner_ids, not the bridge account's.
-# panel_bot_token = "123456789:replace-with-the-helper-bot-token"
-
-# Runtime. Log verbosity: trace, debug, info, warn, error (WUPHF_LOG_LEVEL
-# overrides).
-log_level = "info"
-
 # Animated stickers from other platforms (animated WebP) are converted to
 # Telegram video stickers by the core's media.convert function, served by the
 # providers/mediaconv process. Without it they arrive as static stickers.
-#
-# Environment variable holding the core's invoke token, when the core sets
-# [functions] invoke_token_env.
 # functions_token_env = "WUPHF_INVOKE_TOKEN"
-# Runtime. Bound on one sticker conversion, including waiting for the
-# converter. This connector delivers in order, so later messages wait behind it.
-# media_convert_timeout_ms = 20000
 
-# Runtime. How replicated copies are rendered on Telegram. This connector's own
-# policy; the core dispatches content only.
-[rendering]
-# Send every attachment as a generic file/document instead of its origin kind.
-attachments_as_files = false
-# Text longer than this many characters is sent as a plain-text file instead of
-# an inline message. 0 (or omitted) leaves text unbounded.
-# max_message_length = 4096
-# "in_place" (default) revises the mirrored copy; "repost" leaves it untouched
-# and posts the revision as a reply marked as an edit.
-edit_mode = "in_place"
-# "revoke" (default) deletes the mirrored copy; "tombstone" leaves it and posts
-# a deletion notice replying to it.
-delete_mode = "revoke"
+# The @BotFather token, for a bot session. WUPHF_TELEGRAM_BOT_TOKEN wins over
+# it. Keep this file private when it holds the token.
+#
+# A bot session needs two things set up on the bot itself, or the bridge runs
+# one-way without any error to show for it: privacy mode off (@BotFather →
+# /setprivacy → Disable) or the bot made an admin, or it only receives
+# commands, replies and mentions; and admin in the mirror group with "manage
+# topics", which provisioning and renaming a topic per conversation requires. A
+# bot also cannot open a chat with someone who has not messaged it first, so any
+# rule (or core notify target) pointing at telegram:user:... needs that person
+# to have started the bot.
+# bot_token = ""
 
-# The settings panel. Read once at startup.
-# [panel]
-# The command that opens it, without the slash (default "wuphf").
+# A helper bot's token, for a user session's settings panel.
+# WUPHF_TELEGRAM_PANEL_BOT_TOKEN wins over it.
+#
+# A user session cannot attach buttons to its messages, so it shows the panel
+# through a helper bot: create one with @BotFather, turn on inline mode
+# (/setinline), set its token here, and set [panel] session_file. Without one
+# the panel is sent as text with numbered options. A bot session needs none of
+# this. Owners can also send the panel command to the helper bot in a private
+# chat from their own account, which gets an ordinary button panel: use that
+# when the bridge runs on an account other than yours, and list your own user id
+# in the core's owner_ids, not the bridge account's.
+# panel_bot_token = ""
+
+# How much the connector logs (WUPHF_LOG_LEVEL wins)
+#
+# Any case; anything else is refused. Empty means info.
+# One of: trace, debug, info, warn, error.
+log_level = "info"
+
+# How long converting a sticker may take, waiting for the converter included; 0
+# means 20000
+#
+# This connector delivers in order, so later messages wait behind a conversion.
+# media_convert_timeout_ms = 0
+
+# The settings panel, opened with a command (/wuphf by default): the core's
+# settings with buttons. The core only obeys the Telegram user ids listed in its
+# [[connectors]].owner_ids for this connector; for a user session that is the
+# session's own account id. The command is never mirrored, whoever sends it.
+# Read once at startup.
+[panel]
+
+# The command that opens the panel, without the slash: 1 to 32 lowercase
+# letters, digits or underscores.
+# Default: "wuphf".
 # command = "wuphf"
-# Where the helper bot keeps its session (user sessions with
-# panel_bot_token only).
+
+# Where the helper bot keeps its session (user sessions with panel_bot_token
+# only).
 # session_file = "./telegram-panel.session.json"
+
+# How replicated copies are rendered on Telegram: this connector's own policy;
+# the core dispatches content only.
+[rendering]
+
+# Send every attachment as a file, whatever its kind
+# attachments_as_files = false
+
+# Longer text is sent as a file; 0 means no limit
+#
+# Counted in characters; the file is plain text.
+# max_message_length = 4096
+
+# in_place revises the copy; repost replies to it with the new text
+#
+# repost leaves the mirrored copy untouched and posts the revision as a reply
+# marked as an edit.
+# One of: in_place, repost.
+# Default: "in_place".
+edit_mode = "in_place"
+
+# revoke deletes the copy; tombstone replies to it with a notice
+# One of: revoke, tombstone.
+# Default: "revoke".
+delete_mode = "revoke"

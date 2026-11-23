@@ -8,8 +8,10 @@ import (
 	"os/signal"
 
 	"github.com/akshettrj/wuphf/connectors/shared/logging"
+	"github.com/akshettrj/wuphf/connectors/shared/setup"
 	"github.com/akshettrj/wuphf/connectors/telegram/internal/config"
 	telegramconnector "github.com/akshettrj/wuphf/connectors/telegram/internal/telegram"
+	"github.com/propheci/botconf/go/tui"
 )
 
 func main() {
@@ -27,9 +29,23 @@ func main() {
 		runConnector(args)
 	case "reset":
 		runReset(args)
+	case "setup":
+		if err := setup.Run(args, config.Description(), validate); err != nil {
+			exit(err)
+		}
 	default:
-		exit(fmt.Errorf("unknown command %q (expected \"run\" or \"reset\")", command))
+		exit(fmt.Errorf("unknown command %q (expected \"run\", \"reset\" or \"setup\")", command))
 	}
+}
+
+// validate is setup's check of a candidate config: what the connector checks
+// at startup (the file, then its core token).
+func validate(candidate tui.Candidate) error {
+	cfg, err := config.Parse([]byte(candidate.Config))
+	if err != nil {
+		return err
+	}
+	return setup.RequireToken(candidate, "core_token_env", cfg.CoreTokenEnv)
 }
 
 func runConnector(args []string) {

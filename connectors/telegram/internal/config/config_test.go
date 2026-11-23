@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/akshettrj/wuphf/connectors/shared/setup"
 	"github.com/pelletier/go-toml/v2"
 )
 
@@ -269,5 +270,13 @@ func TestPanelBotTokenFromTheEnvironmentWins(t *testing.T) {
 	}
 	if credentials.PanelBotToken != "444:env" {
 		t.Fatalf("panel bot token = %q, want the environment's", credentials.PanelBotToken)
+	}
+}
+
+// The checked-in example is the description's: WUPHF_WRITE_EXAMPLES=1 go
+// test ./... rewrites it.
+func TestTheExampleIsGeneratedFromTheConfigType(t *testing.T) {
+	if err := setup.CheckExample(Description(), "../../config.example.toml"); err != nil {
+		t.Fatal(err)
 	}
 }
