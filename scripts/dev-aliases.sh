@@ -54,8 +54,9 @@ refuses to start until all of them are set. Put them in the git-ignored
   WUPHF_CONNECTOR_WHATSAPP_RUST_TOKEN, and a [[connectors]] entry for it in
   the server config.
 
-`ws setup` and `wwr setup` edit a config and .env.local on a setup screen
-(every option described; g generates a token), checked before they write.
+Every command takes `setup` (`ws setup`, `wtg setup`, …): a setup screen over
+its config and .env.local (every option described; g generates a token),
+checked before it writes.
 
 wmc needs WUPHF_PROVIDER_MEDIACONV_TOKEN set, and the server config needs the
 matching [[functions.providers]] entry (see providers/mediaconv/README.md).

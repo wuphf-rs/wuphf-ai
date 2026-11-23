@@ -77,7 +77,7 @@ code).
 | 057 | WhatsApp connectors link again by themselves after a logout (QR or pair code, delivered to the owner) | P1 | L | — | DONE (no migration; see notes) |
 | 058 | Connector commands in the settings panel: WhatsApp "resync app state" and "send a new link code" | P1 | L | botconf 014, 056, 057 | DONE (see notes) |
 | 059 | Offline setup TUIs for the Rust binaries (core, whatsapp-rust), each option described once on its config type | P1 | L | botconf 015 | DONE (see notes) |
-| 060 | Offline setup TUIs for the Go binaries (Telegram, WhatsApp, Instagram, mediaconv, misc) | P1 | L | botconf 015, 059 | TODO |
+| 060 | Offline setup TUIs for the Go binaries (Telegram, WhatsApp, Instagram, mediaconv, misc) | P1 | L | botconf 015, 059 | DONE (see notes) |
 | 061 | Settings backup: `wuphf-server export` / `import` (config + every stored override, connectors' included; secrets only with a flag), online `wuphf settings export` / `import` | P1 | M | botconf 016, 059 | TODO |
 
 Status values: TODO | IN PROGRESS | DONE | BLOCKED (with one-line reason) |
@@ -1636,3 +1636,35 @@ From the 2026-10-22 remote-functions design:
   Owner: `ws setup` and `wwr setup` (dev binaries rebuilt). A save rewrites
   the config file in the example's layout, so comments of your own in
   config.local.toml are dropped (unknown keys are kept, commented out).
+
+### 060: offline setup for the Go binaries
+
+- **060 done 2026-11-23** (on `v2`, `03986c8`..this commit), with botconf
+  `v0.13.3` (an optional table left empty is rendered commented out:
+  Instagram's `[functions]` header alone turned function serving on) and
+  `v0.13.4` (`go/tui` splits quickly typed keys and pastes, which bubbletea
+  reads as one message), both pushed. `connectors/shared/settings.Declare`
+  takes its descriptors from botconf's `go/describe` (its own reflection
+  went); the new `connectors/shared/setup` is every Go binary's `setup`
+  subcommand plus the example drift check. Telegram, WhatsApp, Instagram,
+  mediaconv and misc describe every option in their `File` tags (the Go
+  comments that held user text moved into `doc` tags), generate their
+  `config.example.toml` (a drift test each), and check a candidate as they do
+  at startup (`Parse`, then the token variables). The dev launchers point
+  `setup` at the repo's `.env.local`. Tests: shared +2, one drift test per
+  binary; the shared runtime-declaration fixture and Telegram's declaration
+  test pass unchanged. gofmt, `go vet` and the tests clean in every module.
+  The Go WhatsApp setup driven in a pty: refused without the token, then a
+  generated token saved (env file 0600), the config byte-for-byte the
+  example. Deviations:
+  - The Rust workspace stays on botconf `v0.13.2`: `v0.13.3` changes only
+    optional tables, which no Rust config has, and `v0.13.4` only Go.
+  - Telegram's credentials (`WUPHF_TELEGRAM_APP_ID`, `_APP_HASH`, `_PHONE`,
+    `_PASSWORD`) are read from fixed variables no option names, so setup
+    describes them (the file's header) but cannot edit them; doing so needs
+    botconf to describe a program's own environment variables (a follow-up).
+  - misc's `observer_token_env` is a secret, not a generated token: its value
+    must equal the core's `observer_token`, which lives in the core's file.
+  Owner: `wtg setup`, `wwa setup`, `wig setup`, `wmc setup`, `wmi setup`
+  (dev binaries rebuilt). As with the Rust binaries, a save drops your own
+  comments from config.local.toml.

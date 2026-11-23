@@ -96,8 +96,18 @@ owner only.
 
 ```sh
 wuphf-server setup                  # config.local.toml and .env.local at the repo root
-wuphf-whatsapp-rust setup           # its config.local.toml, the repo's .env.local
+wuphf-telegram setup                # each component: its config.local.toml, the repo's .env.local
+wuphf-whatsapp setup
+wuphf-whatsapp-rust setup
+wuphf-instagram setup
+wuphf-mediaconv setup
+wuphf-misc setup
 ```
+
+Telegram's application credentials (`WUPHF_TELEGRAM_APP_ID`,
+`WUPHF_TELEGRAM_APP_HASH`, `WUPHF_TELEGRAM_PHONE`) are read from the
+environment without an option naming them, so the setup screen describes them
+but does not edit them: put them in `.env.local` yourself.
 
 The core and the connectors read a connector's token from variables of the
 same name, so a token generated on one side is set for the other too. Each
