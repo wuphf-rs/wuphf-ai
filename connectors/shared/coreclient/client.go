@@ -75,6 +75,10 @@ type Options struct {
 	// registration (see the settings package), so the core keeps and pushes
 	// them. Nil declares none, and the core keeps any section declared before.
 	Settings *wuphfpb.ConnectorSettingsDeclaration
+	// Commands, when set, are what the owner can run on the connector from the
+	// settings panel (see Commands): declared at registration, run on the
+	// core's RunCommand. Nil declares none.
+	Commands Commands
 }
 
 // Sender is the minimum surface every connector implements: the three message
@@ -232,6 +236,7 @@ func (c Client) runSession(
 				SupportsDisappearingTimers: c.opts.SupportsDisappearingTimers,
 			},
 			Settings: c.opts.Settings,
+			Commands: declarations(c.opts.Commands),
 		}},
 	}); err != nil {
 		return fmt.Errorf("register connector: %w", err)
@@ -256,10 +261,19 @@ func (c Client) runSession(
 		}
 	}()
 
+	// Commands run in their own goroutines, so a slow one never holds up
+	// dispatches; their results are written here, as a stream takes one
+	// writer.
+	commandResults := make(chan *wuphfpb.ClientFrame)
+
 	for {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
+		case result := <-commandResults:
+			if err := stream.Send(result); err != nil {
+				return fmt.Errorf("send a command result to core: %w", err)
+			}
 		case err := <-receiveErrors:
 			return fmt.Errorf("receive core dispatch: %w", err)
 		case input := <-inputs:
@@ -351,6 +365,15 @@ func (c Client) runSession(
 				if err := c.deliver(ctx, stream, dispatch.DispatchId, op); err != nil {
 					return err
 				}
+			case *wuphfpb.ServerFrame_RunCommand:
+				command := body.RunCommand
+				go func() {
+					result := answerCommand(ctx, c.opts.Commands, command)
+					select {
+					case commandResults <- result:
+					case <-ctx.Done():
+					}
+				}()
 			case *wuphfpb.ServerFrame_Rejected:
 				return fmt.Errorf("core rejected connector operation: %s", body.Rejected.Reason)
 			default:
