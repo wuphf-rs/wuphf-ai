@@ -4,9 +4,13 @@
 # wuphf-whatsapp, wuphf-instagram, wuphf-mediaconv, wuphf-misc), every one
 # stamped with the release version (`<binary> --version`).
 #
-#   scripts/build-release.sh OUT_DIR [BINARY...]
+#   scripts/build-release.sh [--target TRIPLE] OUT_DIR [BINARY...]
 #
-# With BINARY arguments only those are built. The release workflow, a source
+# With BINARY arguments only those are built. --target cross-compiles for a
+# Rust target triple (`aarch64-unknown-linux-gnu`): the Rust builds get
+# --target, the Go builds the matching GOOS/GOARCH, and the cgo ones the C and
+# C++ compilers in CC_<triple> and CXX_<triple> (dashes as underscores, as
+# cargo's cc crate reads them; the linker is CARGO_TARGET_<TRIPLE>_LINKER). The release workflow, a source
 # update (`wuphf-server update --from-source`) and scripts/install-dev-bins.sh
 # all build through here.
 #
@@ -19,8 +23,15 @@ set -euo pipefail
 readonly REPO="$(cd "$(dirname "$(readlink -f "$0")")/.." && pwd)"
 readonly ALL=(wuphf-server wuphf-tui wuphf-whatsapp-rust wuphf-telegram wuphf-whatsapp wuphf-instagram wuphf-mediaconv wuphf-misc)
 
+TARGET=""
+if [ "${1:-}" = "--target" ]; then
+    TARGET="${2:?--target needs a triple}"
+    shift 2
+fi
+readonly TARGET
+
 if [ "$#" -lt 1 ]; then
-    echo "usage: $0 OUT_DIR [BINARY...]" >&2
+    echo "usage: $0 [--target TRIPLE] OUT_DIR [BINARY...]" >&2
     exit 2
 fi
 mkdir -p "$1"
@@ -44,6 +55,24 @@ if [ "$whatsapp_rust_version" != "$VERSION" ]; then
     exit 1
 fi
 
+# Where cargo puts a release build, and what cargo and go are told to target.
+cargo_target=()
+release_dir=release
+go_env=()
+if [ -n "$TARGET" ]; then
+    cargo_target=(--target "$TARGET")
+    release_dir="$TARGET/release"
+    case $TARGET in
+        x86_64-*-linux-*) go_env=(GOOS=linux GOARCH=amd64) ;;
+        aarch64-*-linux-*) go_env=(GOOS=linux GOARCH=arm64) ;;
+        *) echo "no Go target known for $TARGET" >&2; exit 2 ;;
+    esac
+    triple_var=${TARGET//-/_}
+    cc_var="CC_$triple_var" cxx_var="CXX_$triple_var"
+    [ -z "${!cc_var:-}" ] || go_env+=("CC=${!cc_var}")
+    [ -z "${!cxx_var:-}" ] || go_env+=("CXX=${!cxx_var}")
+fi
+
 # A Go binary: its module, and whether it needs cgo.
 go_module() {
     case $1 in
@@ -60,7 +89,7 @@ build_go() {
     local binary=$1 module cgo
     read -r module cgo < <(go_module "$binary")
     step "$binary $VERSION"
-    (cd "$REPO/$module" && CGO_ENABLED=$cgo go build -trimpath \
+    (cd "$REPO/$module" && env "${go_env[@]}" CGO_ENABLED=$cgo go build -trimpath \
         -ldflags "-s -w -X github.com/wuphf-rs/wuphf-ai/connectors/shared/version.Version=$VERSION" \
         -o "$OUT/$binary" "./cmd/$binary")
 }
@@ -77,20 +106,20 @@ done
 
 if [ "${#core[@]}" -gt 0 ]; then
     step "core server and TUI $VERSION"
-    cargo build --release --locked --manifest-path "$REPO/Cargo.toml" "${core[@]}"
+    cargo build --release --locked "${cargo_target[@]}" --manifest-path "$REPO/Cargo.toml" "${core[@]}"
 fi
 for binary in "${wanted[@]}"; do
     case $binary in
-        wuphf-server) install -m 0755 "$REPO/target/release/wuphf-cli" "$OUT/wuphf-server" ;;
-        wuphf-tui) install -m 0755 "$REPO/target/release/wuphf-tui" "$OUT/wuphf-tui" ;;
+        wuphf-server) install -m 0755 "$REPO/target/$release_dir/wuphf-cli" "$OUT/wuphf-server" ;;
+        wuphf-tui) install -m 0755 "$REPO/target/$release_dir/wuphf-tui" "$OUT/wuphf-tui" ;;
         wuphf-whatsapp-rust)
             # whatsapp-rust enables the nightly-only portable_simd feature (its
             # default "simd" feature). RUSTC_BOOTSTRAP lets a stable compiler
             # accept the feature gate, so no nightly toolchain is needed.
             step "wuphf-whatsapp-rust $VERSION (nightly features via RUSTC_BOOTSTRAP)"
-            RUSTC_BOOTSTRAP=1 cargo build --release --locked \
+            RUSTC_BOOTSTRAP=1 cargo build --release --locked "${cargo_target[@]}" \
                 --manifest-path "$REPO/connectors/whatsapp-rust/Cargo.toml"
-            install -m 0755 "$REPO/connectors/whatsapp-rust/target/release/wuphf-connector-whatsapp" \
+            install -m 0755 "$REPO/connectors/whatsapp-rust/target/$release_dir/wuphf-connector-whatsapp" \
                 "$OUT/wuphf-whatsapp-rust"
             ;;
         *) build_go "$binary" ;;

@@ -116,3 +116,30 @@ fn the_newest_release_is_a_pre_release_only_when_asked() {
     assert_eq!(latest(releases, true).unwrap().tag, "v2.0.0-rc.1");
     assert_eq!(latest(Vec::new(), true), None);
 }
+
+#[test]
+fn a_github_asset_downloads_through_the_api_with_a_token() {
+    let body = br#"[{"tag_name": "v1.0.0", "assets": [{
+        "name": "wuphf-server-linux-x86_64",
+        "url": "https://api.github.com/repos/o/r/releases/assets/42",
+        "browser_download_url": "https://github.com/o/r/releases/download/v1.0.0/wuphf-server-linux-x86_64"
+    }]}]"#;
+    let asset = &parse_releases(Forge::Github, body).unwrap()[0].assets[0];
+    let github = Repository::parse("https://github.com/o/r", None).unwrap();
+
+    // Public: the download link, no token needed.
+    let (url, headers) = github.asset_request(asset, None);
+    assert_eq!(url, asset.url);
+    assert!(headers.is_empty());
+
+    // Private: only the API serves it to a token, as raw bytes.
+    let (url, headers) = github.asset_request(asset, Some("t"));
+    assert_eq!(url, "https://api.github.com/repos/o/r/releases/assets/42");
+    assert_eq!(
+        headers,
+        [
+            ("authorization".to_owned(), "Bearer t".to_owned()),
+            ("accept".to_owned(), "application/octet-stream".to_owned())
+        ]
+    );
+}

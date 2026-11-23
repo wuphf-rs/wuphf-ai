@@ -362,13 +362,8 @@ impl Updater {
                 Error::Forge(format!("{} {} has no {name}", source.name, release.tag))
             })?;
             progress(&format!("downloading {name}"));
-            self.http
-                .get(
-                    &asset.url,
-                    &source.repository.headers(&asset.url, token),
-                    limit,
-                )
-                .await
+            let (url, headers) = source.repository.asset_request(asset, token);
+            self.http.get(&url, &headers, limit).await
         };
         let checksums = match &source.verification {
             Verification::None => None,

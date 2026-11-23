@@ -3,49 +3,51 @@
 This adapter is implemented in Go using [`gotd/td`](https://github.com/gotd/td)
 and connects to the Rust core through the canonical bidirectional gRPC stream.
 
-Implemented slice:
+Implemented:
 
-- authenticated Telegram MTProto session with file-backed `gotd/td` session
-  storage
-- connector registration against the Rust core, declaring forum-topic
-  capabilities
-- raw-pipe inbound text/image/file normalization tagged with typed chat IDs
-  (`telegram:channel:N`, `telegram:chat:N`, `telegram:user:N`) and forum topic
-  thread IDs
-- outbound text dispatch to any chat ID, with on-demand forum topic
-  provisioning when the core dispatches to a threaded mirror
-- replies using the Telegram-native parent message ID resolved by the core
-- acknowledgement of the resulting Telegram message identifier, plus the newly
-  provisioned topic ID when a thread was created
-- access-hash peer cache populated from update entities so observed peers can
-  be addressed without preconfiguration. A user session also primes it from
-  its dialog list; a bot session looks up a peer it has not seen
-  (`channels.getChannels` / `users.getUsers`) on its first send, since
-  Telegram rejects a zero hash for media
-- the session kind (bot or user) comes from the account the stored session is
-  logged in as, not from which credentials are set. When the two disagree the
-  connector says so at startup and runs as the stored account; delete the
-  session file to log in again
-- core media broker upload/download for one image or file attachment per
-  message
+- a user session (your account: phone, login code, 2FA) or a bot session
+  (a @BotFather token), linked from `wuphf-telegram setup`, the session kept
+  in `session_file`. The kind comes from the account the stored session is
+  logged in as; when it disagrees with the credentials set, the connector says
+  so and runs as the stored account (delete the session file to log in again)
+- the mirror side: it registers forum-topic capabilities, so the core
+  provisions one topic per source chat, posts its info card, and renames the
+  topic when the source chat is renamed
+- inbound text, photos, videos, GIFs, voice notes and audio, files and
+  stickers, edits and deletes, tagged with typed chat ids
+  (`telegram:channel:N`, `telegram:chat:N`, `telegram:user:N`) and topic ids
+- outbound text, media of every kind (several attachments as one album, up
+  to Telegram's 10), stickers labelled with their sender (below; animated
+  ones converted through the core's `media.convert`), replies to the
+  Telegram-native parent the core resolves, edits (`edit_mode`: in place or
+  reposted) and deletes (`delete_mode`: revoked or tombstoned)
+- reactions mirrored as a short reply naming the reactor and the emoji;
+  delivery shown as 👍 and, in direct chats, reads as 👀
+- pin, mute and archive synced with the source chat as a pinned, muted or
+  closed topic (mute needs a user session: a bot's notify settings mean
+  nothing)
+- the settings panel (`/wuphf`, below), and a peer cache from update
+  entities and, for a user session, the dialog list (a bot looks a peer up
+  on its first send)
+- media through the core's media broker; Telegram file locations stay in the
+  connector
 
-Deferred connector work:
+Not done yet:
 
-- video, audio, sticker, and multi-attachment handling
-- topic retitle on conversation rename
-- edits, deletes, and reactions
+- reactions made on Telegram are not reported to the core
 
 Routing, replication membership, deduplication, sent-message loop prevention,
 and logical identity remain in the Rust core. The connector is a raw pipe: it
 emits every observed update tagged with its native chat/thread ID and executes
-dispatches addressed by chat ID, owning no mapping itself. Media-bearing
-updates outside the initial image/file support are ignored. Media bytes are
+dispatches addressed by chat ID, owning no mapping itself. Media bytes are
 uploaded to and fetched from the Rust core by internal media ID; Telegram file
 locations remain connector-local.
 
 ## Configuration
 
-Copy `config.example.toml` and provide Telegram credentials through
+`wuphf-telegram setup` writes the config and, on its Environment screen, the
+credentials into the env file, then links the account (Link account). By
+hand: copy `config.example.toml` and provide the credentials through
 environment variables:
 
 ```sh

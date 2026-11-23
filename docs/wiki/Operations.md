@@ -50,6 +50,9 @@ sudo wuphf-server update --config /etc/wuphf/core.toml --rollback
   it if missing), `--from-source` builds the tag here, `--no-restart` leaves
   the units alone, and `--yes` skips the question. Add
   `--env-file /etc/wuphf/core.env` when a source names a token variable.
+- **While the repository is private** every download needs a GitHub token
+  that can read it: `[updates.wuphf] token_env` names its variable (the
+  core's scheduled check needs it in its environment too).
 - **Your own binaries:** a binary you build yourself is an
   `[[updates.sources]]` entry, published on GitHub, Gitea/Forgejo or GitLab
   ([Configuration](Configuration.md#updates-updates-and-the-release-check)).

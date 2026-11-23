@@ -3,18 +3,24 @@
 This adapter uses [`whatsmeow`](https://github.com/tulir/whatsmeow) and the
 shared gRPC contract under `proto/go`.
 
-Implemented slice:
+Implemented:
 
 - linked-device authentication by QR code or pair code (`login_method`), at
-  the first run and again by itself after a logout, with the code also sent to
-  the owner through the core's notice chats
+  the first run (or from `wuphf-whatsapp setup`) and again by itself after a
+  logout, with the code also sent to the owner through the core's notice
+  chats; `client_mode` registers it as an Android client so view-once media
+  arrives
 - connector-private SQLite session storage
-- raw-pipe inbound/outbound text, image, and file replication keyed by
-  WhatsApp JID chat IDs
-- inbound reply normalization through native WhatsApp stanza IDs
-- WhatsApp group participant normalization
-- phone-to-LID identity migration reported to the core so both addresses
-  resolve to one conversation
+- inbound text, photos, videos, voice notes and audio, documents and
+  stickers (view-once media marked as such), edits, deletes and reactions,
+  replies through native WhatsApp stanza ids, keyed by WhatsApp JID chat ids
+- outbound text, media of every kind (several attachments as consecutive
+  messages, the text on the first), stickers carrying `[sticker_metadata]`
+  (animated ones from other platforms converted through the core's
+  `media.convert`), replies quoting the real author, edits and deletes
+- WhatsApp group participant normalization, and phone-to-LID identity
+  migration reported to the core so both addresses resolve to one
+  conversation
 - media bytes transferred through core-owned `MediaId` broker
 - disappearing-message timers: each chat's timer is reported to the core
   (from messages, timer changes, group notifications and history syncs) and
@@ -28,11 +34,13 @@ Implemented slice:
   core, which posts them as notes in the mirror topic; the first message of a
   chat in each run reports the chat's current state first, for the topic's
   info card. @mentions show the contact's name instead of the number
+- pin, mute and archive synced with the mirror topic, from WhatsApp's app
+  state
 
-Deferred connector work:
+Not done yet:
 
-- video, audio, sticker, and multi-attachment handling
-- edits, deletes, and reactions
+- reactions and receipts from other platforms are acknowledged but not
+  applied on WhatsApp
 - end-to-end live integration tests
 
 Routing, identity, deduplication, echo suppression, reply mapping, and media

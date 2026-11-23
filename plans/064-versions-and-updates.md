@@ -30,8 +30,9 @@ scheduled check that tells the owner when an update is out (2026-11-23).
    commits and tags; CI refuses a tag that disagrees with `Cargo.toml`.
 2. **Releases on GitHub** (`github.com/wuphf-rs/wuphf-ai`): a tag runs
    `.github/workflows/release.yml`, which builds the 8 binaries for linux
-   `x86_64` and `aarch64` (native runners, ubuntu-22.04: glibc 2.35, the only
-   cgo is bundled C) with `scripts/build-release.sh` — the same script a
+   `x86_64` and `aarch64` (ubuntu-22.04, glibc 2.35; aarch64 cross-compiled, as
+   hosted arm runners serve public repositories only, and the only C is
+   bundled) with `scripts/build-release.sh` — the same script a
    source build runs — and publishes `<binary>-linux-<arch>`, `SHA256SUMS` and
    `SHA256SUMS.minisig`.
 3. **Signed checksums.** `SHA256SUMS` is signed with minisign. The release

@@ -106,6 +106,24 @@ impl Repository {
         }
     }
 
+    /// Where to GET `asset`, and with which headers. With a token, a GitHub
+    /// asset comes through the API (which redirects to its storage, the token
+    /// left behind), since a private repository's download links refuse it.
+    pub fn asset_request(
+        &self,
+        asset: &Asset,
+        token: Option<&str>,
+    ) -> (String, Vec<(String, String)>) {
+        match (&asset.api_url, token) {
+            (Some(api_url), Some(_)) if self.forge == Forge::Github => {
+                let mut headers = self.headers(api_url, token);
+                headers.push(("accept".into(), "application/octet-stream".into()));
+                (api_url.clone(), headers)
+            }
+            _ => (asset.url.clone(), self.headers(&asset.url, token)),
+        }
+    }
+
     /// The headers an API request carries: [`Repository::headers`] and the
     /// API's media type.
     fn api_headers(&self, url: &str, token: Option<&str>) -> Vec<(String, String)> {
@@ -130,7 +148,11 @@ pub struct Release {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Asset {
     pub name: String,
+    /// Its download address.
     pub url: String,
+    /// GitHub's API address for it, the only one a private repository's
+    /// assets download from with a token.
+    pub api_url: Option<String>,
 }
 
 impl Release {
@@ -174,6 +196,7 @@ pub fn parse_releases(forge: Forge, body: &[u8]) -> Result<Vec<Release>, Error> 
                         .map(|asset| Asset {
                             name: asset.name,
                             url: asset.browser_download_url,
+                            api_url: asset.url,
                         })
                         .collect(),
                 })
@@ -195,6 +218,7 @@ pub fn parse_releases(forge: Forge, body: &[u8]) -> Result<Vec<Release>, Error> 
                         .map(|link| Asset {
                             name: link.name,
                             url: link.direct_asset_url.unwrap_or(link.url),
+                            api_url: None,
                         })
                         .collect(),
                 })
@@ -264,6 +288,8 @@ struct GithubRelease {
 struct GithubAsset {
     name: String,
     browser_download_url: String,
+    #[serde(default)]
+    url: Option<String>,
 }
 
 #[derive(Deserialize)]
