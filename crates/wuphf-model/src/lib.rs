@@ -25,6 +25,7 @@
 //! flatly, so callers continue to refer to everything as `wuphf_model::Type`.
 
 mod chat;
+mod chat_directory;
 mod connector;
 mod dispatch;
 mod ids;
@@ -33,6 +34,7 @@ mod observation;
 mod routing;
 
 pub use chat::*;
+pub use chat_directory::*;
 pub use connector::*;
 pub use dispatch::*;
 pub use ids::*;

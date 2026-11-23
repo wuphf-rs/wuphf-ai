@@ -1,0 +1,28 @@
+{
+  "version": 1,
+  "connector_id": "whatsapp-main",
+  "platform": "whatsapp",
+  "fetched_at_ms": 1795433971218,
+  "chats": [
+    {
+      "chat": "whatsapp-main:120363041234567890@g.us",
+      "title": "Family",
+      "kind": "group"
+    },
+    {
+      "chat": "whatsapp-main:919876543210@s.whatsapp.net",
+      "title": "Alice",
+      "kind": "direct"
+    },
+    {
+      "chat": "whatsapp-main:120363099999999999@newsletter",
+      "title": "Football club news",
+      "kind": "channel"
+    },
+    {
+      "chat": "whatsapp-main:odd%23id#7",
+      "title": "A thread",
+      "kind": "group"
+    }
+  ]
+}
