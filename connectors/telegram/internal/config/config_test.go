@@ -1,6 +1,7 @@
 package config
 
 import (
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -278,5 +279,22 @@ func TestPanelBotTokenFromTheEnvironmentWins(t *testing.T) {
 func TestTheExampleIsGeneratedFromTheConfigType(t *testing.T) {
 	if err := setup.CheckExample(Description(), "../../config.example.toml"); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// Every variable the credentials are read from is on setup's Environment
+// screen, and nothing else is.
+func TestTheEnvironmentScreenListsTheCredentials(t *testing.T) {
+	read := map[string]bool{}
+	ReadCredentials(File{}, func(name string) string {
+		read[name] = true
+		return "1"
+	})
+	listed := map[string]bool{}
+	for _, variable := range Description().Env {
+		listed[variable.Name] = true
+	}
+	if !reflect.DeepEqual(read, listed) {
+		t.Fatalf("read %v, listed %v", read, listed)
 	}
 }

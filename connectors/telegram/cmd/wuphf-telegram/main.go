@@ -44,13 +44,20 @@ func main() {
 }
 
 // validate is setup's check of a candidate config: what the connector checks
-// at startup (the file, then its core token).
+// at startup (the file, its core token, the application credentials on the
+// Environment screen). The phone may still come at Link account.
 func validate(candidate tui.Candidate) error {
 	cfg, err := config.Parse([]byte(candidate.Config))
 	if err != nil {
 		return err
 	}
-	return setup.RequireToken(candidate, "core_token_env", cfg.CoreTokenEnv)
+	if err := setup.RequireToken(candidate, "core_token_env", cfg.CoreTokenEnv); err != nil {
+		return err
+	}
+	if _, err := config.ReadCredentials(cfg, func(name string) string { return setup.Env(candidate, name) }); err != nil {
+		return fmt.Errorf("%w (set it on the Environment screen)", err)
+	}
+	return nil
 }
 
 // openAccount is setup's account on the saved config, its credentials read

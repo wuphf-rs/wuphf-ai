@@ -1752,3 +1752,16 @@ From the 2026-10-22 remote-functions design:
     shell; import opens the database the backup's file names. After an
     Import settings the setup screen still shows the old file: it says to
     quit and reopen (a save would write the old values back).
+
+- **Follow-ups (2026-11-23).** Bearer tokens are compared in constant time
+  (`wuphf_model::tokens_match` / `matching_token`: connector, observer,
+  invoke and provider tokens; every candidate compared, no early return).
+  whatsapp-rust's setup lists the followed channels (a failure to list them
+  is shown, the rest still saved). Instagram's setup pages through the whole
+  inbox (`PaginateMailbox`, 50 a page, at most 40 pages; a failed page keeps
+  what came before). Telegram's credentials are on setup's Environment
+  screen (botconf `v0.16.0`: a description's own variables), a guard test
+  keeping the list equal to what `ReadCredentials` reads, and setup's save
+  checks the app id and hash as startup does (plan 060's deviation closed).
+  Live: the Telegram setup's Environment screen set both in the env file,
+  the hash masked throughout.

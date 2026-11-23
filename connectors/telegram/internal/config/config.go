@@ -38,7 +38,24 @@ type File struct {
 
 // Description is the config file's description, from File's tags.
 func Description() *describe.Description {
-	return describe.MustOf("wuphf Telegram connector", fileDescription, File{})
+	return describe.MustOf("wuphf Telegram connector", fileDescription, File{}).WithEnv(Variables...)
+}
+
+// Variables are the credentials the connector reads from the environment by
+// their names (see ReadCredentials), set on setup's Environment screen.
+var Variables = []describe.Variable{
+	{Name: "WUPHF_TELEGRAM_APP_ID", Title: "App id", Required: true,
+		Description: "The Telegram application's api_id, a number, from https://my.telegram.org → API development tools."},
+	{Name: "WUPHF_TELEGRAM_APP_HASH", Title: "App hash", Required: true, Secret: true,
+		Description: "The application's api_hash, from the same page."},
+	{Name: "WUPHF_TELEGRAM_PHONE", Title: "Phone",
+		Description: "A user session's phone number, international (+15551234567). Without it (and without a bot token), Link account asks for it."},
+	{Name: "WUPHF_TELEGRAM_PASSWORD", Title: "Two-step password", Secret: true,
+		Description: "A user session's two-step verification password, when the account has one. Without it, Link account asks for it."},
+	{Name: "WUPHF_TELEGRAM_BOT_TOKEN", Title: "Bot token", Secret: true,
+		Description: "A bot session's @BotFather token; it wins over bot_token in this file."},
+	{Name: "WUPHF_TELEGRAM_PANEL_BOT_TOKEN", Title: "Panel bot token", Secret: true,
+		Description: "The helper bot's token for a user session's settings panel; it wins over panel_bot_token in this file."},
 }
 
 const fileDescription = "Runtime settings (log_level, media_convert_timeout_ms, [rendering]) can " +
@@ -46,9 +63,9 @@ const fileDescription = "Runtime settings (log_level, media_convert_timeout_ms, 
 	"change (made from its settings panel or `wuphf-server settings`, under " +
 	"`connector_settings.<connector id>`) and pushes it back here. The values in this file are the " +
 	"base; unsetting a change returns to them.\n\n" +
-	"The Telegram application credentials are read from the environment: WUPHF_TELEGRAM_APP_ID and " +
-	"WUPHF_TELEGRAM_APP_HASH, and for a user session WUPHF_TELEGRAM_PHONE and optionally " +
-	"WUPHF_TELEGRAM_PASSWORD (authentication codes are prompted on first login).\n\n" +
+	"The Telegram application credentials are read from the environment (setup sets them on its " +
+	"Environment screen): WUPHF_TELEGRAM_APP_ID and WUPHF_TELEGRAM_APP_HASH, and for a user session " +
+	"WUPHF_TELEGRAM_PHONE and optionally WUPHF_TELEGRAM_PASSWORD (setup's Link account logs in).\n\n" +
 	"Routing is owned entirely by the core: configure [rules.<id>] entries there, using typed chat " +
 	"ids such as telegram:channel:1234567890, telegram:chat:7 or telegram:user:88."
 

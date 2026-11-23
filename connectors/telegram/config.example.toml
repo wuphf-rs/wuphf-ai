@@ -6,10 +6,10 @@
 # settings`, under `connector_settings.<connector id>`) and pushes it back here.
 # The values in this file are the base; unsetting a change returns to them.
 #
-# The Telegram application credentials are read from the environment:
-# WUPHF_TELEGRAM_APP_ID and WUPHF_TELEGRAM_APP_HASH, and for a user session
-# WUPHF_TELEGRAM_PHONE and optionally WUPHF_TELEGRAM_PASSWORD (authentication
-# codes are prompted on first login).
+# The Telegram application credentials are read from the environment (setup sets
+# them on its Environment screen): WUPHF_TELEGRAM_APP_ID and
+# WUPHF_TELEGRAM_APP_HASH, and for a user session WUPHF_TELEGRAM_PHONE and
+# optionally WUPHF_TELEGRAM_PASSWORD (setup's Link account logs in).
 #
 # Routing is owned entirely by the core: configure [rules.<id>] entries there,
 # using typed chat ids such as telegram:channel:1234567890, telegram:chat:7 or

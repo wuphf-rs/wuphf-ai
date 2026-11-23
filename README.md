@@ -105,9 +105,11 @@ wuphf-misc setup
 ```
 
 Telegram's application credentials (`WUPHF_TELEGRAM_APP_ID`,
-`WUPHF_TELEGRAM_APP_HASH`, `WUPHF_TELEGRAM_PHONE`) are read from the
-environment without an option naming them, so the setup screen describes them
-but does not edit them: put them in `.env.local` yourself.
+`WUPHF_TELEGRAM_APP_HASH`, `WUPHF_TELEGRAM_PHONE`, `_PASSWORD`, the bot
+tokens) are read from the environment without an option naming them: its
+setup sets them on its Environment screen (the root screen's Environment
+row), in the env file, and a save is refused while the app id or hash is
+missing.
 
 A first setup also links each connector's account, on its setup screen
 (**Link account**, at the end of the root screen), so the connector starts
