@@ -6,7 +6,9 @@ rather than forwarding platform messages without identity tracking. A Rust core
 owns all identity, routing, dedup, and loop prevention; Go connectors are thin
 pipes.
 
-For a human-friendly tour, open [`docs/index.html`](docs/index.html).
+New here? The [wiki](docs/wiki/Home.md) walks through setup, configuration,
+every component and operations. For a human-friendly tour, open
+[`docs/index.html`](docs/index.html).
 
 ## What works
 
