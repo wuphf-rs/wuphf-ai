@@ -171,3 +171,26 @@ Open items, none blocking:
    skipped with a warning rather than routed.
 3. The Telegram echo invariant in §3 needs a suppression rule *before* anyone
    adds inbound reaction reporting to that connector.
+
+## Amended by plan 080 (2026-11-25)
+
+Plan 080 sends the owner's Telegram reactions to WhatsApp and Instagram as
+the owner's own, which changes three decisions above:
+
+- **Reactions are stored** (`reactions`, migration 0023): the last reaction
+  each reactor has on each copy. A Telegram user session reports a message's
+  whole set of reactions, so a clear can only be found by diffing; and a
+  reaction equal to the stored one is ignored, which makes replays and echoes
+  harmless.
+- **`from_me` is honoured.** It marks the connector's own session account,
+  which the core counts as the owner, along with the connector's `owner_ids`.
+  `ReactionDispatch.by_owner` carries the verdict: WhatsApp and Instagram
+  apply only the owner's reactions natively, and Telegram still shows every
+  reaction as text.
+- **The echo invariant in §3 holds by the boundary filter it asked for.** The
+  Telegram connector now reports reactions, but never those of its own
+  account (the 👍/👀 signals): a user session drops `my` reactions, a bot
+  drops its own id. The bridge's Telegram session must therefore be an
+  account other than the owner's. When the bridge applies an owner's reaction
+  on WhatsApp or Instagram, it stores that reaction as the session account's
+  there, so the platform's echo of it is ignored.

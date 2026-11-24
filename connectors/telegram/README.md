@@ -23,6 +23,11 @@ Implemented:
   reposted) and deletes (`delete_mode`: revoked or tombstoned)
 - reactions mirrored as a short reply naming the reactor and the emoji;
   delivery shown as 👍 and, in direct chats, reads as 👀
+- reactions made on Telegram reported to the core, which sends the owner's
+  (`owner_ids`) to WhatsApp and Instagram as the owner's own. A user session
+  reports a message's whole set of reactions; it must be an account other
+  than the owner's, since its own reactions (the 👍/👀 above) are never
+  reported. A bot session hears of reactions only as an admin of the group
 - pin, mute and archive synced with the source chat as a pinned, muted or
   closed topic (mute needs a user session: a bot's notify settings mean
   nothing)
@@ -31,10 +36,6 @@ Implemented:
   on its first send)
 - media through the core's media broker; Telegram file locations stay in the
   connector
-
-Not done yet:
-
-- reactions made on Telegram are not reported to the core
 
 Routing, replication membership, deduplication, sent-message loop prevention,
 and logical identity remain in the Rust core. The connector is a raw pipe: it

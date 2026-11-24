@@ -228,7 +228,14 @@ dedup, reply mapping, loop prevention, or address mapping.
   configuration, so policy stays connector-specific and directional without the
   core shipping it.
 - **Reactions** — fanned out like edits, carrying the reactor and emoji
-  (empty = cleared); the target connector decides how to display them.
+  (empty = cleared); the target connector decides how to display them. The
+  core decides whether the reactor is the owner (`owner_ids`, or a session
+  account that is the owner's): the owner's reactions are applied natively
+  where the bridge's account is the owner's (WhatsApp, Instagram), and
+  everyone's show as a short reply on Telegram. Each reactor's last reaction
+  on each copy is stored (plan 080), so a platform that reports a message's
+  reactions as a whole can be diffed, and a repeated reaction, or an echo of
+  one the bridge applied, is ignored.
 - **Delivery / read receipts** — emitted as their own signals rather than as
   reactions, so a connector can render them separately (Telegram: 👍 delivered,
   👀 read in DMs). A connector that renders neither acknowledges them unchanged.

@@ -82,6 +82,19 @@ connection dies silently; the SDKs keep retrying with backoff until then.
     dispatching chat state.
 - `MessageEditEvent` / `MessageDeleteEvent` — the original message's native id
   plus the change; the core resolves it to the logical message and fans it out.
+- `ReactionEvent` — one reactor's reaction on a message is now `emoji`, or
+  cleared when it is empty. `sender` names the reactor as the connector's
+  `owner_ids` name users (a Telegram user's plain id), and `from_me` marks the
+  connector's own session account. Set `from_me` only where that account is
+  the owner's (WhatsApp, Instagram): the core counts it as the owner. Never
+  report reactions the bridge itself applies as signals (Telegram's 👍/👀).
+- `ReactionsEvent` — the complete set of other accounts' reactions on a
+  message, each reactor once with their newest, for a platform that reports
+  a message's reactions as a whole (a Telegram user session). A reactor
+  missing from the set has none, so send it only when the set is known in
+  full. The core stores each reactor's last reaction per copy, turns the
+  differences into toggles, and ignores a reaction equal to the stored one,
+  so a replay or an echo of a reaction it applied does nothing.
 - `Acknowledgement` — echoes the `dispatch_id`, supplies the resulting native
   `platform_message_id`, and sets `thread_id` only when the dispatch provisioned
   a new thread.
@@ -134,6 +147,15 @@ connection dies silently; the SDKs keep retrying with backoff until then.
   plus an `edit_mode` / `delete_mode` resolved server-side from the target
   connector's delivery options, so the connector renders the operation without
   any local policy.
+- `ReactionDispatch` — a reaction to reflect on the target copy: `reactor`,
+  `reactor_name`, `emoji` (empty clears it). `by_owner` says the reactor is the
+  owner (one of the origin connector's `owner_ids`, or its session account). A
+  platform that reacts as the owner's account applies it natively and drops
+  anyone else's (WhatsApp, Instagram); Telegram shows every reaction as a
+  short reply. The reacted copy's author comes as a quote's does
+  (`target_sender`, `target_participant`, `target_authored_by_bridge`), since
+  WhatsApp names the reacted message by its author. Acknowledge with the
+  target id.
 - `MessageRetitleDispatch` — `target_chat_id`/`target_thread_id` plus the new
   `title`, sent when a source conversation is renamed so the mirror thread's
   title tracks it. Carries no message; the connector renames the thread and

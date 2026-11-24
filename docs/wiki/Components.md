@@ -44,7 +44,8 @@ what it does when wuphf sends to it.
 | Stickers (animated ones via mediaconv) | ✓ | ✓ | ✓ | in |
 | Replies | ✓ | ✓ | ✓ | ✓ |
 | Edits and deletes out | ✓ | ✓ | ✓ | ✓ |
-| Reactions out | as text | — | — | ✓ |
+| Reactions in | ✓ | ✓ | ✓ | ✓ |
+| Reactions out | as text | yours | yours | yours |
 | Delivered / read receipts out | 👍 / 👀 (DMs) | — | — | — |
 | Topics (a mirror destination) | ✓ | — | — | — |
 | Pin, mute, archive sync | ✓ (mute: user session) | ✓ | ✓ | — |
@@ -53,8 +54,9 @@ what it does when wuphf sends to it.
 | Link the account from `setup` | ✓ | ✓ (QR or pair code) | ✓ (QR or pair code) | ✓ (cookies) |
 | Settings panel in chat | `/wuphf` | — | — | — |
 
-A connector that can't apply something (a reaction on WhatsApp) acknowledges
-it, so nothing piles up.
+"Yours" means only your own reactions are applied, as your account; anyone
+else's is shown on Telegram only. A connector that can't apply something (a
+read receipt on WhatsApp) acknowledges it, so nothing piles up.
 
 ### Telegram
 

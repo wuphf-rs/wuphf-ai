@@ -39,8 +39,9 @@ Implemented:
 
 Not done yet:
 
-- reactions and receipts from other platforms are acknowledged but not
-  applied on WhatsApp
+- receipts from other platforms, and reactions by anyone but the owner, are
+  acknowledged but not applied on WhatsApp (the owner's reactions are sent
+  as this account's, plan 080)
 - end-to-end live integration tests
 
 Routing, identity, deduplication, echo suppression, reply mapping, and media

@@ -13,8 +13,8 @@ Implemented:
   thread keys (decimal IDs): text, media (photos, videos, albums, voice notes,
   GIFs, stickers), shared posts/reels (full quality when resolvable), edits,
   unsends, reactions, and chat titles
-- outbound text (with reply target), edits, unsends and reactions over
-  Instagram's graphql API, resolving the canonical message id from the send
+- outbound text (with reply target), edits, unsends and the owner's reactions
+  (anyone else's are not set on the owner's account) over Instagram's graphql API, resolving the canonical message id from the send
   response
 - offline catch-up: the stream position is saved to `state_file`, and a
   restart resumes from it, replaying what was missed
