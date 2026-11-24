@@ -64,3 +64,11 @@ func (l *linkedSender) ApplyChatState(ctx context.Context, dispatch *wuphfpb.Cha
 	}
 	return sender.ApplyChatState(ctx, dispatch)
 }
+
+func (l *linkedSender) ApplyReaction(ctx context.Context, dispatch *wuphfpb.ReactionDispatch) (string, error) {
+	sender, err := l.sender()
+	if err != nil {
+		return "", err
+	}
+	return sender.ApplyReaction(ctx, dispatch)
+}

@@ -155,7 +155,7 @@ func TestApplyReactionSetsAndClears(t *testing.T) {
 	sender, _ := newTestSender(client)
 	for _, emoji := range []string{"👍", ""} {
 		if _, err := sender.ApplyReaction(context.Background(), &wuphfpb.ReactionDispatch{
-			TargetChatId: "42", TargetPlatformMessageId: "mid.1", Emoji: emoji,
+			TargetChatId: "42", TargetPlatformMessageId: "mid.1", Emoji: emoji, ByOwner: true,
 		}); err != nil {
 			t.Fatalf("ApplyReaction(%q) error = %v", emoji, err)
 		}
@@ -166,5 +166,19 @@ func TestApplyReactionSetsAndClears(t *testing.T) {
 	}
 	if clear.ReactionStatus != slidetypes.ReactionStatusDeleted {
 		t.Fatalf("clear = %+v", clear)
+	}
+}
+
+// Only the owner's reactions are set on the owner's account: anyone else's
+// is acknowledged without sending.
+func TestApplyReactionSendsNothingForSomeoneElse(t *testing.T) {
+	t.Parallel()
+	client := &stubSendClient{}
+	sender, _ := newTestSender(client)
+	id, err := sender.ApplyReaction(context.Background(), &wuphfpb.ReactionDispatch{
+		TargetChatId: "42", TargetPlatformMessageId: "mid.1", Emoji: "😂", Reactor: "15550001111@s.whatsapp.net",
+	})
+	if err != nil || id != "mid.1" || len(client.reactions) != 0 {
+		t.Fatalf("ApplyReaction() = %q, %v; sent %d reactions", id, err, len(client.reactions))
 	}
 }

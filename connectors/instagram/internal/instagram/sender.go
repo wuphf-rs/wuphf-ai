@@ -130,11 +130,16 @@ func (s Sender) DeleteMessage(ctx context.Context, dispatch *wuphfpb.MessageDele
 	return messageID, nil
 }
 
-// ApplyReaction sets or clears the account's reaction on a delivered copy. An
+// ApplyReaction sets or clears the owner's reaction on a delivered copy. An
 // empty emoji clears it. Instagram allows one reaction per person per message,
 // matching the core's per-reactor toggle.
 func (s Sender) ApplyReaction(ctx context.Context, dispatch *wuphfpb.ReactionDispatch) (string, error) {
 	messageID := dispatch.GetTargetPlatformMessageId()
+	// This account is the owner's, so only the owner's reactions are set on
+	// it; anyone else's is acknowledged without sending (plan 080).
+	if !dispatch.GetByOwner() {
+		return messageID, nil
+	}
 	if messageID == "" {
 		return "", coreclient.Permanent(errors.New("Instagram reaction dispatch has no target message id"))
 	}

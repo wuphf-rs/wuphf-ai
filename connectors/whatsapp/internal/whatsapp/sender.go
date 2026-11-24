@@ -22,6 +22,7 @@ type SendClient interface {
 	Upload(context.Context, []byte, whatsmeow.MediaType) (whatsmeow.UploadResponse, error)
 	BuildEdit(types.JID, types.MessageID, *waE2E.Message) *waE2E.Message
 	BuildRevoke(chat, sender types.JID, id types.MessageID) *waE2E.Message
+	BuildReaction(chat, sender types.JID, id types.MessageID, reaction string) *waE2E.Message
 	appStateSender
 }
 
@@ -229,6 +230,34 @@ func (s Sender) DeleteMessage(ctx context.Context, dispatch *wuphfpb.MessageDele
 	return dispatch.GetTargetPlatformMessageId(), nil
 }
 
+// ApplyReaction sets the owner's reaction on a copy, as this account (the
+// owner's): WhatsApp names the reacted message by its author, which the
+// dispatch carries as a quote does. Anyone else's reaction is not the
+// owner's to make, so it is acknowledged without sending (plan 080). An
+// empty emoji removes the reaction. The target id is returned unchanged.
+func (s Sender) ApplyReaction(ctx context.Context, dispatch *wuphfpb.ReactionDispatch) (string, error) {
+	if !dispatch.GetByOwner() {
+		return dispatch.GetTargetPlatformMessageId(), nil
+	}
+	chat, mode, err := s.target(ctx, dispatch.GetTargetChatId())
+	if err != nil {
+		return "", err
+	}
+	author, err := s.messageAuthor(ctx, dispatch.GetTargetAuthoredByBridge(), dispatch.GetTargetParticipant(), dispatch.GetTargetSender(), mode)
+	if err != nil {
+		return "", err
+	}
+	authorJID, err := types.ParseJID(author)
+	if err != nil {
+		return "", coreclient.Permanent(fmt.Errorf("parse WhatsApp reaction target author %q: %w", author, err))
+	}
+	reaction := s.client.BuildReaction(chat, authorJID, types.MessageID(dispatch.GetTargetPlatformMessageId()), dispatch.GetEmoji())
+	if _, err := s.client.SendMessage(ctx, chat, reaction); err != nil {
+		return "", fmt.Errorf("react to WhatsApp message: %w", err)
+	}
+	return dispatch.GetTargetPlatformMessageId(), nil
+}
+
 // quotedContext builds the WhatsApp quote metadata for a reply dispatch. The
 // quoted copy is not necessarily one the bridge wrote: the router only skips the
 // *replying* message's origin endpoint, so a reply arriving from another
@@ -241,7 +270,7 @@ func (s Sender) quotedContext(ctx context.Context, dispatch *wuphfpb.MessageCrea
 		}
 		return nil, nil
 	}
-	participant, err := s.quotedAuthor(ctx, reply, mode)
+	participant, err := s.messageAuthor(ctx, reply.GetAuthoredByBridge(), reply.GetParticipant(), reply.GetSender(), mode)
 	if err != nil {
 		return nil, err
 	}
@@ -252,9 +281,10 @@ func (s Sender) quotedContext(ctx context.Context, dispatch *wuphfpb.MessageCrea
 	}, nil
 }
 
-// quotedAuthor resolves the JID WhatsApp is told wrote the quoted message.
-// WhatsApp links a quote by (StanzaID, Participant) together, so naming the
-// wrong author leaves the reply unlinked in clients.
+// messageAuthor resolves the JID WhatsApp is told wrote a message that a
+// quote or a reaction names. WhatsApp links a quote by (StanzaID,
+// Participant), and a reaction by its key's author, so naming the wrong one
+// leaves it unlinked in clients.
 //
 // A copy the bridge sent into this chat was written by the paired account. A
 // copy the bridge received here came from WhatsApp itself, so the reply context
@@ -263,11 +293,11 @@ func (s Sender) quotedContext(ctx context.Context, dispatch *wuphfpb.MessageCrea
 // it in canonical form, which need not be the form the chat is addressed in, so it
 // is translated into the chat's form (mode); so is the paired account's own
 // address, since WhatsApp keys our messages in a LID-addressed chat by our LID.
-func (s Sender) quotedAuthor(ctx context.Context, reply *wuphfpb.ReplyContext, mode types.AddressingMode) (string, error) {
-	if !reply.GetAuthoredByBridge() {
-		author := reply.GetParticipant()
+func (s Sender) messageAuthor(ctx context.Context, authoredByBridge bool, participant, sender string, mode types.AddressingMode) (string, error) {
+	if !authoredByBridge {
+		author := participant
 		if author == "" {
-			author = reply.GetSender()
+			author = sender
 		}
 		if author != "" {
 			jid, err := types.ParseJID(author)
@@ -279,7 +309,7 @@ func (s Sender) quotedAuthor(ctx context.Context, reply *wuphfpb.ReplyContext, m
 	}
 	own := s.addressing.Own(mode)
 	if own.IsEmpty() {
-		return "", coreclient.Permanent(errors.New("outbound WhatsApp reply requires a paired account JID"))
+		return "", coreclient.Permanent(errors.New("naming our own WhatsApp message requires a paired account JID"))
 	}
 	return own.String(), nil
 }

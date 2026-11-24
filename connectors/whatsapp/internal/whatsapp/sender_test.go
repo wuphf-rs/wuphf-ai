@@ -26,6 +26,14 @@ type stubSendClient struct {
 	editedKey  types.MessageID
 	revokedKey types.MessageID
 	patches    []appstate.PatchInfo
+	reaction   *stubReaction
+}
+
+// stubReaction is what BuildReaction was asked for.
+type stubReaction struct {
+	chat, author types.JID
+	id           types.MessageID
+	emoji        string
 }
 
 func (s *stubSendClient) SendMessage(_ context.Context, to types.JID, message *waE2E.Message, _ ...whatsmeow.SendRequestExtra) (whatsmeow.SendResponse, error) {
@@ -42,6 +50,11 @@ func (s *stubSendClient) BuildEdit(_ types.JID, id types.MessageID, newContent *
 func (s *stubSendClient) BuildRevoke(_ types.JID, _ types.JID, id types.MessageID) *waE2E.Message {
 	s.revokedKey = id
 	return &waE2E.Message{}
+}
+
+func (s *stubSendClient) BuildReaction(chat, sender types.JID, id types.MessageID, reaction string) *waE2E.Message {
+	s.reaction = &stubReaction{chat: chat, author: sender, id: id, emoji: reaction}
+	return &waE2E.Message{ReactionMessage: &waE2E.ReactionMessage{Text: proto.String(reaction)}}
 }
 
 func (s *stubSendClient) SendAppState(_ context.Context, patch appstate.PatchInfo) error {
@@ -414,7 +427,7 @@ func TestSendFirstAttachmentFailureStaysRetryable(t *testing.T) {
 	}
 }
 
-func TestQuotedAuthorAttributesTheRealSender(t *testing.T) {
+func TestMessageAuthorAttributesTheRealSender(t *testing.T) {
 	t.Parallel()
 	own := types.NewJID("19998887777", types.DefaultUserServer)
 	peer := "88887777@lid"
@@ -450,12 +463,12 @@ func TestQuotedAuthorAttributesTheRealSender(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			sender := NewSender(&stubSendClient{}, &stubBroker{}, stubConverter{}, staticAddressing{ownPN: own}, liveRendering(config.RenderingOptions{}))
-			got, err := sender.quotedAuthor(context.Background(), tc.reply, "")
+			got, err := sender.messageAuthor(context.Background(), tc.reply.GetAuthoredByBridge(), tc.reply.GetParticipant(), tc.reply.GetSender(), "")
 			if err != nil {
-				t.Fatalf("quotedAuthor() error = %v", err)
+				t.Fatalf("messageAuthor() error = %v", err)
 			}
 			if got != tc.want {
-				t.Fatalf("quotedAuthor() = %q, want %q", got, tc.want)
+				t.Fatalf("messageAuthor() = %q, want %q", got, tc.want)
 			}
 		})
 	}
@@ -805,4 +818,83 @@ func TestSendRendersASystemNote(t *testing.T) {
 		t.Fatalf("a note quotes nothing, got %v", context)
 	}
 	assertStamped(t, "note", client.sent)
+}
+
+// The owner's reaction is sent as this account's, naming the reacted message
+// by its author: the participant for a received group message, our own
+// account for a copy the bridge sent, the peer in a DM.
+func TestApplyReactionNamesTheReactedMessagesAuthor(t *testing.T) {
+	t.Parallel()
+	own := types.NewJID("19998887777", types.DefaultUserServer)
+	participant := "88887777@lid"
+	cases := []struct {
+		name     string
+		dispatch *wuphfpb.ReactionDispatch
+		chat     string
+		author   string
+	}{
+		{
+			"a received group message",
+			&wuphfpb.ReactionDispatch{TargetChatId: "123@g.us", TargetSender: "123@g.us", TargetParticipant: &participant},
+			"123@g.us", participant,
+		},
+		{
+			"a copy the bridge sent",
+			&wuphfpb.ReactionDispatch{TargetChatId: "123@g.us", TargetSender: "alice", TargetAuthoredByBridge: true},
+			"123@g.us", own.String(),
+		},
+		{
+			"a DM",
+			&wuphfpb.ReactionDispatch{TargetChatId: "15550001111@s.whatsapp.net", TargetSender: "15550001111@s.whatsapp.net"},
+			"15550001111@s.whatsapp.net", "15550001111@s.whatsapp.net",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			client := &stubSendClient{}
+			sender := NewSender(client, &stubBroker{}, stubConverter{}, staticAddressing{ownPN: own}, liveRendering(config.RenderingOptions{}))
+			tc.dispatch.ByOwner = true
+			tc.dispatch.TargetPlatformMessageId = "wa-1"
+			tc.dispatch.Emoji = "❤️"
+			id, err := sender.ApplyReaction(context.Background(), tc.dispatch)
+			if err != nil || id != "wa-1" {
+				t.Fatalf("ApplyReaction() = %q, %v", id, err)
+			}
+			got := client.reaction
+			if got == nil || got.chat.String() != tc.chat || got.author.String() != tc.author || got.id != "wa-1" || got.emoji != "❤️" {
+				t.Fatalf("reaction = %+v, want %s by %s", got, tc.chat, tc.author)
+			}
+			if client.sent.GetReactionMessage() == nil || client.sentTo.String() != tc.chat {
+				t.Fatalf("sent %v to %s", client.sent, client.sentTo)
+			}
+		})
+	}
+}
+
+// An empty emoji removes the owner's reaction.
+func TestApplyReactionClearsWithAnEmptyEmoji(t *testing.T) {
+	t.Parallel()
+	client := &stubSendClient{}
+	sender := NewSender(client, &stubBroker{}, stubConverter{}, staticAddressing{}, liveRendering(config.RenderingOptions{}))
+	_, err := sender.ApplyReaction(context.Background(), &wuphfpb.ReactionDispatch{
+		TargetChatId: "15550001111@s.whatsapp.net", TargetSender: "15550001111@s.whatsapp.net",
+		TargetPlatformMessageId: "wa-1", ByOwner: true,
+	})
+	if err != nil || client.reaction == nil || client.reaction.emoji != "" {
+		t.Fatalf("reaction = %+v, %v; want a removal", client.reaction, err)
+	}
+}
+
+// Someone else's reaction is not the owner's to make: nothing is sent, and
+// the dispatch is acknowledged.
+func TestApplyReactionSendsNothingForSomeoneElse(t *testing.T) {
+	t.Parallel()
+	client := &stubSendClient{}
+	sender := NewSender(client, &stubBroker{}, stubConverter{}, staticAddressing{}, liveRendering(config.RenderingOptions{}))
+	id, err := sender.ApplyReaction(context.Background(), &wuphfpb.ReactionDispatch{
+		TargetChatId: "123@g.us", TargetPlatformMessageId: "wa-1", Emoji: "😂", Reactor: "stranger",
+	})
+	if err != nil || id != "wa-1" || client.sent != nil || client.reaction != nil {
+		t.Fatalf("ApplyReaction() = %q, %v; sent %v", id, err, client.sent)
+	}
 }
