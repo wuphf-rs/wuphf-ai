@@ -278,6 +278,12 @@ async fn run_once(shared: &Shared, cancel: &CancellationToken) -> anyhow::Result
                 async move { health.handle(event).await }
             },
         )
+        // The library goes online at each connect and push-name sync, which
+        // holds back the phone's notifications: go back offline.
+        .on_event_for(
+            &[EventKind::Connected, EventKind::SelfPushNameUpdated],
+            move |_event, client| async move { crate::presence::stay_offline(client) },
+        )
         // Delivered and read receipts in direct chats mark the mirror copies.
         .on_event_for(&[EventKind::Receipt], move |event, client| {
             let receipts = receipts.clone();

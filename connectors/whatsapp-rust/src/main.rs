@@ -21,6 +21,7 @@ mod media;
 mod names;
 mod normalize;
 mod outbound;
+mod presence;
 mod qr_png;
 mod receipts;
 mod resync;
