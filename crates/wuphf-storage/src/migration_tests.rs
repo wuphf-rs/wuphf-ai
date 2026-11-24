@@ -571,6 +571,26 @@ async fn migration_0021_keys_seen_events_by_connector() {
     );
 }
 
+/// 0022 only adds the health tables: a database from before it keeps its
+/// dispatches, and the new tables take a problem, an ignore and a held
+/// dispatch.
+#[tokio::test]
+async fn migration_0022_adds_the_health_tables() {
+    let pool = database_before(22).await;
+    insert_dispatches(&pool, &DISPATCHES_BEFORE_0019).await;
+
+    MIGRATOR.run(&pool).await.unwrap();
+
+    assert_dispatches(&pool).await;
+    for statement in [
+        "INSERT INTO health_problems (key, since_ms, payload) VALUES ('k', 1, '{}')",
+        "INSERT INTO health_ignores (key) VALUES ('k')",
+        "INSERT INTO held_dispatches (id, pause, held_at_ms, payload) VALUES ('d', '{}', 1, '{}')",
+    ] {
+        sqlx::query(statement).execute(&pool).await.unwrap();
+    }
+}
+
 /// An observed row stored before `sent_by` existed decodes with no client, and
 /// today's model writes it back byte for byte: the key appears only when set.
 #[test]

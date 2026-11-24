@@ -54,3 +54,12 @@ fn bind_native_parent(dispatch: &mut Dispatch, parent: Message, native_id: Strin
         Action::Note { .. } | Action::SetChatState { .. } => {}
     }
 }
+
+/// The wall clock in Unix epoch milliseconds, for the times storage stamps
+/// itself (when a dispatch was held).
+pub(crate) fn wall_clock_ms() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|elapsed| i64::try_from(elapsed.as_millis()).unwrap_or(i64::MAX))
+        .unwrap_or_default()
+}

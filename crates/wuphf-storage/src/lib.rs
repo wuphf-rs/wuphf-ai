@@ -10,11 +10,12 @@ pub use memory::InMemoryStorage;
 pub use sqlite::SqliteStorage;
 
 use async_trait::async_trait;
+use std::collections::BTreeSet;
 use thiserror::Error;
 use wuphf_model::{
     AddressLink, Alias, ChatAddress, ChatProfile, ConnectorId, Conversation, ConversationId,
-    DedupKey, Dispatch, DispatchId, Endpoint, EndpointId, MediaBlob, MediaId, Message, MessageCopy,
-    MessageId, ObservedChat, ObservedMessage, RuleId,
+    DedupKey, Dispatch, DispatchId, Endpoint, EndpointId, HealthPause, MediaBlob, MediaId, Message,
+    MessageCopy, MessageId, ObservedChat, ObservedMessage, Problem, RuleId,
 };
 
 #[derive(Debug, Error)]
@@ -386,6 +387,46 @@ pub trait SettingsDeclarations: Send + Sync + 'static {
     async fn settings_declarations(&self) -> StorageResult<Vec<SettingsDeclaration>>;
 }
 
+/// An open health problem and when it was first seen.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct StoredProblem {
+    pub problem: Problem,
+    pub since_ms: i64,
+}
+
+/// A dispatch held for a paused direction of a rule.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct HeldDispatch {
+    pub dispatch: Dispatch,
+    pub pause: HealthPause,
+    pub held_at_ms: i64,
+}
+
+/// What the health checks keep (plan 079): the open problems, the ignored
+/// ones, the dispatches held while a direction is paused, and the dead
+/// letters to list.
+#[async_trait]
+pub trait HealthStore: Send + Sync + 'static {
+    /// Every open problem, by key.
+    async fn health_problems(&self) -> StorageResult<Vec<StoredProblem>>;
+    /// Replace the open problems with `problems`.
+    async fn set_health_problems(&self, problems: &[StoredProblem]) -> StorageResult<()>;
+    /// The keys of the problems the owner ignores.
+    async fn health_ignores(&self) -> StorageResult<BTreeSet<String>>;
+    /// Ignore the problem `key`, or stop ignoring it.
+    async fn set_health_ignored(&self, key: &str, ignored: bool) -> StorageResult<()>;
+    /// Hold `dispatch` for `pause`, stamped with the time it was held.
+    async fn hold_dispatch(&self, dispatch: &Dispatch, pause: &HealthPause) -> StorageResult<()>;
+    /// Every held dispatch, in the order it was held.
+    async fn held_dispatches(&self) -> StorageResult<Vec<HeldDispatch>>;
+    /// Remove and return the dispatches held for `pause`, in the order they
+    /// were held.
+    async fn release_held(&self, pause: &HealthPause) -> StorageResult<Vec<HeldDispatch>>;
+    /// Failed dispatches, newest first: `limit` of them after skipping
+    /// `offset`.
+    async fn dead_letters(&self, offset: usize, limit: usize) -> StorageResult<Vec<Dispatch>>;
+}
+
 /// The full persistence surface the core needs: the sum of the role traits.
 /// Blanket-implemented, so a backend implements the roles and gets `Storage`;
 /// a consumer that needs only part of it bounds on the roles it uses.
@@ -397,6 +438,7 @@ pub trait Storage:
     + ProvisioningStash
     + ObservationStore
     + ChatProfileStore
+    + HealthStore
 {
 }
 
@@ -408,6 +450,7 @@ impl<T> Storage for T where
         + ProvisioningStash
         + ObservationStore
         + ChatProfileStore
+        + HealthStore
 {
 }
 

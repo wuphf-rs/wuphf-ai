@@ -1,21 +1,24 @@
 //! SQLite-backed [`Storage`]. Rows hold JSON-encoded model values keyed by id;
 //! dispatch state is denormalized into columns so pending work can be queried.
 
-use crate::shared::{acknowledged_copy, release_blocked};
+use crate::shared::{acknowledged_copy, release_blocked, wall_clock_ms};
 use crate::{
-    ChatProfileStore, DispatchStore, MediaStore, MessageStore, ObservationStore, PanelTokens,
-    ProvisioningStash, SettingsDeclaration, SettingsDeclarations, SettingsOverrides, SettingsOwner,
-    StorageError, StorageResult, StoredSetting, TopologyStore,
+    ChatProfileStore, DispatchStore, HealthStore, HeldDispatch, MediaStore, MessageStore,
+    ObservationStore, PanelTokens, ProvisioningStash, SettingsDeclaration, SettingsDeclarations,
+    SettingsOverrides, SettingsOwner, StorageError, StorageResult, StoredProblem, StoredSetting,
+    TopologyStore,
 };
 use async_trait::async_trait;
 use sqlx::migrate::Migrator;
 use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
 use sqlx::{Row, SqlitePool};
+use std::collections::BTreeSet;
 use std::str::FromStr;
 use wuphf_model::{
     AddressLink, Alias, ChatAddress, ChatProfile, ConnectorId, Conversation, ConversationId,
-    DedupKey, Dispatch, DispatchId, DispatchState, Endpoint, EndpointId, MediaBlob, MediaId,
-    Message, MessageCopy, MessageId, ObservedChat, ObservedDirection, ObservedMessage, RuleId,
+    DedupKey, Dispatch, DispatchId, DispatchState, Endpoint, EndpointId, HealthPause, MediaBlob,
+    MediaId, Message, MessageCopy, MessageId, ObservedChat, ObservedDirection, ObservedMessage,
+    RuleId,
 };
 
 /// The schema migrations, embedded at build time. Shared with the migration
@@ -1274,4 +1277,116 @@ async fn insert_conversation_endpoint(
     .execute(&mut **transaction)
     .await?;
     Ok(())
+}
+
+#[async_trait]
+impl HealthStore for SqliteStorage {
+    async fn health_problems(&self) -> StorageResult<Vec<StoredProblem>> {
+        let rows = sqlx::query("SELECT since_ms, payload FROM health_problems ORDER BY key")
+            .fetch_all(&self.pool)
+            .await?;
+        rows.into_iter()
+            .map(|row| {
+                Ok(StoredProblem {
+                    problem: serde_json::from_str(row.get("payload"))?,
+                    since_ms: row.get("since_ms"),
+                })
+            })
+            .collect()
+    }
+
+    async fn set_health_problems(&self, problems: &[StoredProblem]) -> StorageResult<()> {
+        let mut transaction = self.pool.begin().await?;
+        sqlx::query("DELETE FROM health_problems")
+            .execute(&mut *transaction)
+            .await?;
+        for stored in problems {
+            sqlx::query("INSERT INTO health_problems (key, since_ms, payload) VALUES (?, ?, ?)")
+                .bind(&stored.problem.key)
+                .bind(stored.since_ms)
+                .bind(serde_json::to_string(&stored.problem)?)
+                .execute(&mut *transaction)
+                .await?;
+        }
+        transaction.commit().await?;
+        Ok(())
+    }
+
+    async fn health_ignores(&self) -> StorageResult<BTreeSet<String>> {
+        let rows = sqlx::query("SELECT key FROM health_ignores")
+            .fetch_all(&self.pool)
+            .await?;
+        Ok(rows.into_iter().map(|row| row.get("key")).collect())
+    }
+
+    async fn set_health_ignored(&self, key: &str, ignored: bool) -> StorageResult<()> {
+        let query = if ignored {
+            "INSERT OR IGNORE INTO health_ignores (key) VALUES (?)"
+        } else {
+            "DELETE FROM health_ignores WHERE key = ?"
+        };
+        sqlx::query(query).bind(key).execute(&self.pool).await?;
+        Ok(())
+    }
+
+    async fn hold_dispatch(&self, dispatch: &Dispatch, pause: &HealthPause) -> StorageResult<()> {
+        sqlx::query(
+            "INSERT OR REPLACE INTO held_dispatches (id, pause, held_at_ms, payload)
+             VALUES (?, ?, ?, ?)",
+        )
+        .bind(dispatch.id.to_string())
+        .bind(serde_json::to_string(pause)?)
+        .bind(wall_clock_ms())
+        .bind(serde_json::to_string(dispatch)?)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    async fn held_dispatches(&self) -> StorageResult<Vec<HeldDispatch>> {
+        let rows =
+            sqlx::query("SELECT pause, held_at_ms, payload FROM held_dispatches ORDER BY rowid")
+                .fetch_all(&self.pool)
+                .await?;
+        rows.into_iter().map(held_from_row).collect()
+    }
+
+    async fn release_held(&self, pause: &HealthPause) -> StorageResult<Vec<HeldDispatch>> {
+        let pause = serde_json::to_string(pause)?;
+        let mut transaction = self.pool.begin().await?;
+        let rows = sqlx::query(
+            "SELECT pause, held_at_ms, payload FROM held_dispatches WHERE pause = ? ORDER BY rowid",
+        )
+        .bind(&pause)
+        .fetch_all(&mut *transaction)
+        .await?;
+        sqlx::query("DELETE FROM held_dispatches WHERE pause = ?")
+            .bind(&pause)
+            .execute(&mut *transaction)
+            .await?;
+        transaction.commit().await?;
+        rows.into_iter().map(held_from_row).collect()
+    }
+
+    async fn dead_letters(&self, offset: usize, limit: usize) -> StorageResult<Vec<Dispatch>> {
+        let rows = sqlx::query(
+            "SELECT payload FROM dispatches WHERE state = 'failed'
+             ORDER BY rowid DESC LIMIT ? OFFSET ?",
+        )
+        .bind(i64::try_from(limit).unwrap_or(i64::MAX))
+        .bind(i64::try_from(offset).unwrap_or(i64::MAX))
+        .fetch_all(&self.pool)
+        .await?;
+        rows.into_iter()
+            .map(|row| serde_json::from_str(row.get("payload")).map_err(Into::into))
+            .collect()
+    }
+}
+
+fn held_from_row(row: sqlx::sqlite::SqliteRow) -> StorageResult<HeldDispatch> {
+    Ok(HeldDispatch {
+        pause: serde_json::from_str(row.get("pause"))?,
+        held_at_ms: row.get("held_at_ms"),
+        dispatch: serde_json::from_str(row.get("payload"))?,
+    })
 }

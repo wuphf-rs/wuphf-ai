@@ -1,19 +1,20 @@
 //! In-memory [`Storage`] backend. Keeps all state behind a single `RwLock`,
 //! used for tests and ephemeral runs.
 
-use crate::shared::{acknowledged_copy, release_blocked};
+use crate::shared::{acknowledged_copy, release_blocked, wall_clock_ms};
 use crate::{
-    ChatProfileStore, DispatchStore, MediaStore, MessageStore, ObservationStore, PanelTokens,
-    ProvisioningStash, SettingsDeclaration, SettingsDeclarations, SettingsOverrides, StorageError,
-    StorageResult, StoredSetting, TopologyStore,
+    ChatProfileStore, DispatchStore, HealthStore, HeldDispatch, MediaStore, MessageStore,
+    ObservationStore, PanelTokens, ProvisioningStash, SettingsDeclaration, SettingsDeclarations,
+    SettingsOverrides, StorageError, StorageResult, StoredProblem, StoredSetting, TopologyStore,
 };
 use async_trait::async_trait;
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use tokio::sync::RwLock;
 use wuphf_model::{
     AddressLink, Alias, ChatAddress, ChatProfile, ConnectorId, Conversation, ConversationId,
-    DedupKey, Dispatch, DispatchId, DispatchState, Endpoint, EndpointId, MediaBlob, MediaId,
-    Message, MessageCopy, MessageId, ObservedChat, ObservedDirection, ObservedMessage, RuleId,
+    DedupKey, Dispatch, DispatchId, DispatchState, Endpoint, EndpointId, HealthPause, MediaBlob,
+    MediaId, Message, MessageCopy, MessageId, ObservedChat, ObservedDirection, ObservedMessage,
+    RuleId,
 };
 
 #[derive(Default)]
@@ -55,6 +56,13 @@ struct State {
     /// Chat profiles by connector and native chat id, mirroring the SQLite
     /// `chat_profiles` table.
     chat_profiles: HashMap<(ConnectorId, String), ChatProfile>,
+    /// Open health problems by key, mirroring `health_problems`.
+    health_problems: BTreeMap<String, StoredProblem>,
+    /// Ignored problem keys, mirroring `health_ignores`.
+    health_ignores: BTreeSet<String>,
+    /// Held dispatches in the order they were held, mirroring
+    /// `held_dispatches`.
+    held: Vec<HeldDispatch>,
 }
 
 struct StoredMedia {
@@ -876,4 +884,80 @@ fn put_copy(state: &mut State, copy: MessageCopy, sent: bool) {
     state
         .copies
         .insert((copy.message_id, copy.endpoint_id), copy);
+}
+
+#[async_trait]
+impl HealthStore for InMemoryStorage {
+    async fn health_problems(&self) -> StorageResult<Vec<StoredProblem>> {
+        Ok(self
+            .state
+            .read()
+            .await
+            .health_problems
+            .values()
+            .cloned()
+            .collect())
+    }
+
+    async fn set_health_problems(&self, problems: &[StoredProblem]) -> StorageResult<()> {
+        self.state.write().await.health_problems = problems
+            .iter()
+            .map(|stored| (stored.problem.key.clone(), stored.clone()))
+            .collect();
+        Ok(())
+    }
+
+    async fn health_ignores(&self) -> StorageResult<BTreeSet<String>> {
+        Ok(self.state.read().await.health_ignores.clone())
+    }
+
+    async fn set_health_ignored(&self, key: &str, ignored: bool) -> StorageResult<()> {
+        let mut state = self.state.write().await;
+        if ignored {
+            state.health_ignores.insert(key.to_owned());
+        } else {
+            state.health_ignores.remove(key);
+        }
+        Ok(())
+    }
+
+    async fn hold_dispatch(&self, dispatch: &Dispatch, pause: &HealthPause) -> StorageResult<()> {
+        let mut state = self.state.write().await;
+        state.held.retain(|held| held.dispatch.id != dispatch.id);
+        state.held.push(HeldDispatch {
+            dispatch: dispatch.clone(),
+            pause: pause.clone(),
+            held_at_ms: wall_clock_ms(),
+        });
+        Ok(())
+    }
+
+    async fn held_dispatches(&self) -> StorageResult<Vec<HeldDispatch>> {
+        Ok(self.state.read().await.held.clone())
+    }
+
+    async fn release_held(&self, pause: &HealthPause) -> StorageResult<Vec<HeldDispatch>> {
+        let mut state = self.state.write().await;
+        let (released, kept) = std::mem::take(&mut state.held)
+            .into_iter()
+            .partition(|held| &held.pause == pause);
+        state.held = kept;
+        Ok(released)
+    }
+
+    async fn dead_letters(&self, offset: usize, limit: usize) -> StorageResult<Vec<Dispatch>> {
+        // No insertion order here: newest first by id, which is enough for
+        // tests.
+        let mut failed: Vec<_> = self
+            .state
+            .read()
+            .await
+            .dispatches
+            .values()
+            .filter(|dispatch| matches!(dispatch.state, DispatchState::Failed { .. }))
+            .cloned()
+            .collect();
+        failed.sort_by_key(|dispatch| std::cmp::Reverse(dispatch.id.0));
+        Ok(failed.into_iter().skip(offset).take(limit).collect())
+    }
 }

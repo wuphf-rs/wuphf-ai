@@ -1,4 +1,5 @@
 use super::*;
+use std::collections::BTreeSet;
 use wuphf_model::{
     Action, Attachment, AttachmentKind, DedupKey, DispatchState, MediaBlob, MediaId, MessageCopy,
     ObservedDirection, ObservedMessage, Platform, ReceiptKind, Target,
@@ -1569,4 +1570,102 @@ fn a_database_url_names_its_file() {
         Some("/var/lib/wuphf/core.sqlite".into())
     );
     assert_eq!(SqliteStorage::database_file("sqlite::memory:"), None);
+}
+
+fn pause(chat: &str) -> HealthPause {
+    HealthPause {
+        rule: RuleId("mirror".into()),
+        direction: wuphf_model::FlowDirection::Forward,
+        connector: ConnectorId("telegram".into()),
+        chat_id: chat.into(),
+    }
+}
+
+fn problem(key: &str) -> StoredProblem {
+    StoredProblem {
+        problem: Problem {
+            key: key.into(),
+            severity: wuphf_model::Severity::Pause(pause("-100")),
+            text: format!("{key} text"),
+        },
+        since_ms: 5,
+    }
+}
+
+#[tokio::test]
+async fn memory_health_state_round_trips() {
+    health_state_round_trips(InMemoryStorage::default()).await;
+}
+
+#[tokio::test]
+async fn sqlite_health_state_round_trips() {
+    health_state_round_trips(temp_sqlite().await).await;
+}
+
+/// Problems are replaced as a set, ignores toggle, held dispatches come back
+/// per pause in the order they were held, and dead letters list newest
+/// first.
+async fn health_state_round_trips<S: Storage>(storage: S) {
+    storage
+        .set_health_problems(&[problem("b"), problem("a")])
+        .await
+        .unwrap();
+    let keys = |problems: Vec<StoredProblem>| {
+        problems
+            .into_iter()
+            .map(|stored| stored.problem.key)
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(keys(storage.health_problems().await.unwrap()), ["a", "b"]);
+    storage.set_health_problems(&[problem("c")]).await.unwrap();
+    assert_eq!(storage.health_problems().await.unwrap(), [problem("c")]);
+
+    storage.set_health_ignored("c", true).await.unwrap();
+    storage.set_health_ignored("c", true).await.unwrap();
+    assert_eq!(
+        storage.health_ignores().await.unwrap(),
+        BTreeSet::from(["c".to_owned()])
+    );
+    storage.set_health_ignored("c", false).await.unwrap();
+    assert!(storage.health_ignores().await.unwrap().is_empty());
+
+    let endpoint = EndpointId::new();
+    let [first, second, other] =
+        [MessageId::new(), MessageId::new(), MessageId::new()].map(|id| send(id, endpoint, None));
+    storage.hold_dispatch(&first, &pause("-100")).await.unwrap();
+    storage.hold_dispatch(&other, &pause("-200")).await.unwrap();
+    storage
+        .hold_dispatch(&second, &pause("-100"))
+        .await
+        .unwrap();
+    assert_eq!(storage.held_dispatches().await.unwrap().len(), 3);
+    let released = storage.release_held(&pause("-100")).await.unwrap();
+    assert_eq!(
+        released
+            .iter()
+            .map(|held| held.dispatch.id)
+            .collect::<Vec<_>>(),
+        [first.id, second.id]
+    );
+    assert!(released.iter().all(|held| held.held_at_ms > 0));
+    assert_eq!(storage.held_dispatches().await.unwrap()[0].dispatch, other);
+    assert!(
+        storage
+            .release_held(&pause("-100"))
+            .await
+            .unwrap()
+            .is_empty()
+    );
+
+    for dispatch in [&first, &second] {
+        storage.enqueue_dispatch(dispatch).await.unwrap();
+    }
+    storage
+        .fail_dispatch(first.id, "CHAT_ADMIN_REQUIRED".into())
+        .await
+        .unwrap();
+    let dead = storage.dead_letters(0, 10).await.unwrap();
+    assert_eq!(dead.len(), 1);
+    assert_eq!(dead[0].id, first.id);
+    assert!(storage.dead_letters(1, 10).await.unwrap().is_empty());
 }
