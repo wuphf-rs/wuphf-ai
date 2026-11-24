@@ -414,7 +414,12 @@ func (s Sender) sendAttachment(
 		return s.sendSticker(ctx, builder, target, attachment, bytes, label)
 	}
 	if attachment.Kind == wuphfpb.Attachment_KIND_VIDEO && attachment.GetAnimated() && !asFile {
-		return builder.Upload(message.FromBytes(gifUploadName(attachment), bytes)).GIF(ctx, captionOptions...)
+		name := gifUploadName(attachment)
+		file, err := builder.Upload(message.FromBytes(name, bytes)).AsInputFile(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("upload Telegram animation: %w", err)
+		}
+		return builder.Media(ctx, message.Media(animationDocument(file, name, attachment.GetMimeType(), bytes), captionOptions...))
 	}
 	name, hasExtension := uploadName(attachment)
 	upload := builder.Upload(message.FromBytes(name, bytes))
@@ -664,13 +669,42 @@ func (s Sender) animatedStickerWebM(ctx context.Context, attachment *wuphfpb.Att
 	return s.converter.Convert(ctx, attachment.GetMediaId(), attachment.GetMimeType(), attachment.GetFileName(), "video/webm")
 }
 
-// gifUploadName names a GIF upload with a .mp4 extension, the container Telegram
-// animations use, falling back when the source supplied no name.
+// gifUploadName names a GIF upload: the source's name when it has an
+// extension, else animation.gif for a real GIF and animation.mp4 (the container
+// Telegram animations use) for the rest.
 func gifUploadName(attachment *wuphfpb.Attachment) string {
 	if name := attachment.GetFileName(); name != "" && path.Ext(name) != "" {
 		return name
 	}
+	if attachment.GetMimeType() == "image/gif" {
+		return "animation.gif"
+	}
 	return "animation.mp4"
+}
+
+// animationDocument is a GIF as Telegram's own apps send one: video/mp4 (or a
+// real image/gif) with its filename, the video attribute (size and length, read
+// from the MP4 header) and the animated attribute, marked silent. gotd's GIF
+// builder sends only image/gif and the animated attribute, which Telegram
+// Desktop plays but the iPhone app shows as a nameless "file".
+func animationDocument(file tg.InputFileClass, name, mime string, data []byte) *tg.InputMediaUploadedDocument {
+	if mime != "image/gif" {
+		mime = "video/mp4"
+	}
+	attributes := []tg.DocumentAttributeClass{&tg.DocumentAttributeFilename{FileName: name}}
+	if mime == "video/mp4" {
+		video := &tg.DocumentAttributeVideo{SupportsStreaming: true, Nosound: true}
+		if info, ok := probeMP4(data); ok {
+			video.W, video.H, video.Duration = info.width, info.height, info.seconds
+		}
+		attributes = append(attributes, video)
+	}
+	return &tg.InputMediaUploadedDocument{
+		File:         file,
+		MimeType:     mime,
+		NosoundVideo: true,
+		Attributes:   append(attributes, &tg.DocumentAttributeAnimated{}),
+	}
 }
 
 // uploadName builds the filename for a Telegram media upload and reports whether
