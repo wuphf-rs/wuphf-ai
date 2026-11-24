@@ -63,6 +63,13 @@ enum Command {
         /// Ask the running core to probe and check now.
         #[arg(long)]
         run: bool,
+        /// Ignore this problem (by key) until it passes once; a running core
+        /// resumes what it paused at its next check, within a minute.
+        #[arg(long, value_name = "KEY", conflicts_with = "unignore")]
+        ignore: Option<String>,
+        /// Stop ignoring this problem.
+        #[arg(long, value_name = "KEY")]
+        unignore: Option<String>,
         #[arg(long, default_value = "http://127.0.0.1:50051")]
         address: String,
     },
@@ -147,9 +154,16 @@ async fn main() -> Result<()> {
         Command::Health {
             config,
             run,
+            ignore,
+            unignore,
             address,
         } => {
-            if health::run(&config, run, address).await? {
+            let toggle = match (ignore, unignore) {
+                (Some(key), _) => Some((key, true)),
+                (None, Some(key)) => Some((key, false)),
+                (None, None) => None,
+            };
+            if health::run(&config, run, toggle, address).await? {
                 std::process::exit(1);
             }
             Ok(())

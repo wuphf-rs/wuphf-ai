@@ -2,8 +2,9 @@
 //! `--run` they are read from the core's database, so it works while the
 //! core is down; with `--run` the running core probes and checks again first
 //! (its `HealthTransport.Run`, with the observer token from
-//! `WUPHF_OBSERVER_TOKEN`). Exits non-zero while a problem not ignored is
-//! open, for systemd or monitoring.
+//! `WUPHF_OBSERVER_TOKEN`). `--ignore KEY` / `--unignore KEY` change what is
+//! ignored. Exits non-zero while a problem not ignored is open, for systemd or
+//! monitoring.
 
 use anyhow::{Context, Result};
 use std::path::Path;
@@ -13,7 +14,27 @@ use wuphf_runtime::health::{HealthReport, report_to_wire};
 use wuphf_storage::HealthStore;
 
 /// Print the problems and say whether any is open (not ignored).
-pub(crate) async fn run(config: &Path, check_now: bool, address: String) -> Result<bool> {
+/// `toggle` ignores a problem (`true`) or stops ignoring it, in the database,
+/// before anything is printed.
+pub(crate) async fn run(
+    config: &Path,
+    check_now: bool,
+    toggle: Option<(String, bool)>,
+    address: String,
+) -> Result<bool> {
+    if let Some((key, ignored)) = toggle {
+        let (storage, _) =
+            crate::settings::open(config, wuphf_settings::WuphfSchema::new()).await?;
+        storage.set_health_ignored(&key, ignored).await?;
+        println!(
+            "{} {key}; a running core acts on it at its next check",
+            if ignored {
+                "ignoring"
+            } else {
+                "no longer ignoring"
+            }
+        );
+    }
     let report = if check_now {
         let mut client = HealthTransportClient::connect(address.clone())
             .await
