@@ -29,8 +29,9 @@ connectors stop on SIGINT so they save their sessions.
 
 ## On NixOS
 
-The flake has every binary as a package and a NixOS module. Each part is a
-service, with the same user, state directories and hardening as the systemd
+The flake has every binary as a package and a NixOS module. It runs one
+core, any number of connectors and providers (by id), and wuphf-misc, each as
+a service with the same user, state directories and hardening as the systemd
 units:
 
 ```nix
@@ -44,23 +45,36 @@ units:
         wuphf.nixosModules.default
         {
           services.wuphf = {
+            secretsDirectory = "/run/secrets";   # wuphf-<id>.env for each
             core = {
               enable = true;
               settings = {            # config/example.toml, as Nix
-                listen = "127.0.0.1:50051";
-                database_url = "sqlite://wuphf.sqlite";
                 notify = [ "telegram-main:telegram:user:704338780" ];
-                connectors = [ /* … */ ];
-                rules = { /* … */ };
+                rules.wa-to-telegram = {
+                  kind = "many-to-one";
+                  source_connector = "whatsapp-jio";
+                  destination = "telegram-main:telegram:channel:2060340733";
+                };
               };
-              environmentFile = "/run/secrets/wuphf-core.env";  # the tokens
             };
-            telegram = {
-              enable = true;
-              settings = { /* connectors/telegram/config.example.toml */ };
-              environmentFile = "/run/secrets/wuphf-telegram.env";
+            connectors = {
+              telegram-main = {
+                type = "telegram";
+                threads = true;
+                topicCreate = true;
+                ownerIds = [ "704338780" ];
+                settings.session_file = "./telegram.session.json";
+              };
+              # Two accounts of one kind: one connector each.
+              whatsapp-jio = { type = "whatsapp-rust"; disappearingTimers = true; };
+              whatsapp-airtel = { type = "whatsapp-rust"; disappearingTimers = true; };
+              instagram-main = {
+                type = "instagram";
+                functions = [ "instagram.fetch_media" ];   # for wuphf-misc
+              };
             };
-            whatsapp.enable = true;    # also: whatsapp-rust, instagram, mediaconv, misc
+            providers.mediaconv.type = "mediaconv";
+            misc.enable = true;
           };
         }
       ];
@@ -69,16 +83,33 @@ units:
 }
 ```
 
-- Every part has `enable`, `settings` (its TOML file as Nix) or `configFile`,
-  `environmentFile` (its tokens, kept out of the store; sops-nix or agenix
-  work), and `package`.
-- The core's `observer_token` is a value, not a variable name: leave it out
-  of `settings` (the store is world-readable) and put
-  `WUPHF_CORE_OBSERVER_TOKEN=…` in its `environmentFile` instead.
-- State is in `/var/lib/wuphf/<part>`, as on any server; relative paths in
-  the settings resolve there.
-- First logins: stop the part, then run its `setup` (Link account) or run it
-  once by hand as `wuphf` in its state directory, as the
+- **A connector is described once.** `type` is one of `telegram`,
+  `whatsapp`, `whatsapp-rust` or `instagram`. The module writes:
+  - the core's `[[connectors]]` entry;
+  - the connector's `connector_id` (its id), `core_address` and
+    `core_token_env`;
+  - the flags both sides must agree on: `threads`, `topicCreate` and
+    `disappearingTimers`, each accepted only by the kinds that have it.
+
+  `settings` holds the rest of its config file
+  (`connectors/<kind>/config.example.toml`). `coreSettings` adds keys to its
+  core entry. With `functions`, it also serves functions to the core under
+  its id (Instagram only).
+- **Providers** (`providers.<id>`, type `mediaconv`) are wired the same way
+  into `[[functions.providers]]`. **wuphf-misc** presents the core's observer
+  token.
+- **Tokens:** each connector's is `WUPHF_CONNECTOR_<ID>_TOKEN`, and each
+  provider's `WUPHF_PROVIDER_<ID>_TOKEN` (`whatsapp-jio` →
+  `WHATSAPP_JIO`). Each lives only in that unit's `environmentFile`: by
+  default `<secretsDirectory>/wuphf-<id>.env`, or set it per unit. Keep
+  these files out of the store; sops-nix or agenix work. The core loads
+  every connector's and provider's file, and its own `wuphf-core.env` holds
+  `WUPHF_CORE_OBSERVER_TOKEN=…`, which wuphf-misc reads too.
+- Each unit is `wuphf-<id>` (`wuphf-core`, `wuphf-whatsapp-jio`, …), with its
+  state in `/var/lib/wuphf/<id>`. Relative paths in its settings resolve
+  there.
+- First logins: stop the unit, then run its binary's `setup` (Link account),
+  or run it once by hand as `wuphf` in its state directory, as the
   [systemd guide](../../deploy/systemd/README.md#first-login) shows.
 - **Updates come from the flake** (`nix flake update wuphf`, then rebuild).
   `wuphf-server update` cannot write to the store, so the module turns the

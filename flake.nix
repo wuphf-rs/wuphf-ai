@@ -57,16 +57,31 @@
                   boot.isContainer = true;
                   system.stateVersion = "25.05";
                   services.wuphf = {
-                    core = {
-                      enable = true;
-                      settings = {
-                        listen = "127.0.0.1:50051";
-                        database_url = "sqlite://wuphf.sqlite";
+                    secretsDirectory = "/run/secrets";
+                    core.enable = true;
+                    connectors = {
+                      telegram-main = {
+                        type = "telegram";
+                        threads = true;
+                        topicCreate = true;
+                        ownerIds = [ "704338780" ];
                       };
-                      environmentFile = "/run/secrets/wuphf-core.env";
+                      # Two copies of one kind.
+                      whatsapp-jio = {
+                        type = "whatsapp-rust";
+                        disappearingTimers = true;
+                      };
+                      whatsapp-airtel = {
+                        type = "whatsapp-rust";
+                        disappearingTimers = true;
+                      };
+                      instagram-main = {
+                        type = "instagram";
+                        functions = [ "instagram.fetch_media" ];
+                      };
                     };
-                    telegram.enable = true;
-                    mediaconv.enable = true;
+                    providers.mediaconv.type = "mediaconv";
+                    misc.enable = true;
                   };
                 }
               ];
@@ -81,8 +96,12 @@
               })
               [
                 "wuphf-core.service"
-                "wuphf-telegram.service"
+                "wuphf-telegram-main.service"
+                "wuphf-whatsapp-jio.service"
+                "wuphf-whatsapp-airtel.service"
+                "wuphf-instagram-main.service"
                 "wuphf-mediaconv.service"
+                "wuphf-misc.service"
               ]
           );
       });

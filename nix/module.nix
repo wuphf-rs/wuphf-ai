@@ -1,7 +1,12 @@
-# The NixOS module: services.wuphf.<part> runs each part as deploy/systemd's
-# units do (one user, a state directory a part, secrets from an environment
-# file, the same hardening), its config written from `settings` or given as a
-# file.
+# The NixOS module. A core (services.wuphf.core), any number of connectors
+# and providers by id (services.wuphf.connectors.<id>, .providers.<id>), and
+# wuphf-misc, each a unit as deploy/systemd's (one user, a state directory a
+# unit, secrets from an environment file, the same hardening).
+#
+# A connector is described once: the module writes the core's [[connectors]]
+# entry and the connector's own connector_id, core_address, token variable
+# and the flags both sides must agree on. Its token lives in its own env file
+# only; the core reads every connector's and provider's.
 packages:
 {
   config,
@@ -11,6 +16,7 @@ packages:
 }:
 let
   inherit (lib)
+    mkDefault
     mkEnableOption
     mkIf
     mkOption
@@ -20,141 +26,384 @@ let
   toml = pkgs.formats.toml { };
   ours = cfg.packages;
 
-  # The parts: their binary, package, how they take a config, and how they
-  # stop (the connectors and the provider save their session on SIGINT).
-  parts = {
-    core = {
-      description = "wuphf core server";
-      package = ours.wuphf-server;
-      binary = "wuphf-server";
-      args = config: [
-        "serve"
-        "--config"
-        config
+  # The kinds of connector: the platform the core knows them as, and which of
+  # the flags both sides share their config has.
+  connectorTypes = {
+    telegram = {
+      description = "Telegram connector";
+      binary = "wuphf-telegram";
+      platform = "telegram";
+      flags = [
+        "threads"
+        "topicCreate"
       ];
-      sigint = false;
     };
-    telegram = connector "Telegram connector" ours.wuphf-telegram "wuphf-telegram";
-    whatsapp = connector "WhatsApp connector" ours.wuphf-whatsapp "wuphf-whatsapp";
-    whatsapp-rust =
-      connector "WhatsApp connector (whatsapp-rust)" ours.wuphf-whatsapp-rust
-        "wuphf-whatsapp-rust";
-    instagram = connector "Instagram connector" ours.wuphf-instagram "wuphf-instagram";
-    mediaconv = connector "sticker converter" ours.wuphf-mediaconv "wuphf-mediaconv" // {
+    whatsapp = {
+      description = "WhatsApp connector";
+      binary = "wuphf-whatsapp";
+      platform = "whatsapp";
+      flags = [
+        "threads"
+        "topicCreate"
+        "disappearingTimers"
+      ];
+    };
+    whatsapp-rust = {
+      description = "WhatsApp connector (whatsapp-rust)";
+      binary = "wuphf-whatsapp-rust";
+      platform = "whatsapp";
+      flags = [ "disappearingTimers" ];
+    };
+    instagram = {
+      description = "Instagram connector";
+      binary = "wuphf-instagram";
+      platform = "instagram";
+      flags = [
+        "threads"
+        "topicCreate"
+      ];
+      # Serves functions to the core (its [functions] section).
+      provides = true;
+    };
+  };
+
+  providerTypes = {
+    mediaconv = {
+      description = "sticker converter";
+      binary = "wuphf-mediaconv";
+      functions = [ "media.convert" ];
       # It runs ffmpeg and ImageMagick.
       writeExecute = true;
     };
-    misc = connector "features (wuphf-misc)" ours.wuphf-misc "wuphf-misc" // {
-      stopTimeout = "90s";
-    };
-  };
-  connector = description: package: binary: {
-    description = "wuphf ${description}";
-    inherit package binary;
-    args = config: [
-      "--config"
-      config
-    ];
-    sigint = true;
   };
 
-  partOptions = name: part: {
-    enable = mkEnableOption part.description;
-    package = mkOption {
-      type = types.package;
-      default = part.package;
-      defaultText = lib.literalExpression "wuphf's ${part.binary}";
-      description = "The package providing {command}`${part.binary}`.";
+  # Each flag: its option's description and the key both configs use.
+  flags = {
+    threads = {
+      key = "supports_threads";
+      description = "Chats have threads (Telegram forum topics).";
     };
-    settings = mkOption {
-      type = toml.type;
-      default = { };
-      description = ''
-        The part's configuration, written as its TOML file. Every option is
-        described in its example file (the core's `config/example.toml`, the
-        others' `config.example.toml`). Secrets never go here: name their
-        environment variables (`token_env`, `core_token_env`, …) and set
-        them in `environmentFile`.
-      '';
+    topicCreate = {
+      key = "supports_topic_create";
+      description = "The connector can create threads (a topic per mirrored chat).";
     };
-    configFile = mkOption {
-      type = types.path;
-      default = toml.generate "wuphf-${name}.toml" cfg.${name}.settings;
-      defaultText = lib.literalExpression "a file written from settings";
-      description = "The config file, instead of `settings`.";
-    };
-    environmentFile = mkOption {
-      type = types.nullOr types.path;
-      default = null;
-      example = "/run/secrets/wuphf-${name}.env";
-      description = ''
-        A file of `NAME=value` lines (the tokens the config names), read by
-        systemd. Keep it out of the Nix store.
-      '';
+    disappearingTimers = {
+      key = "supports_disappearing_timers";
+      description = "Stamp chats' disappearing-message timers on what it sends (WhatsApp).";
     };
   };
 
-  unit =
-    name: part:
-    let
-      settings = cfg.${name};
-    in
+  # `whatsapp-jio` → `WHATSAPP_JIO`, as the token variables are named.
+  envName = id: lib.toUpper (builtins.replaceStrings [ "-" "." ] [ "_" "_" ] id);
+
+  secretFile =
+    id: if cfg.secretsDirectory == null then null else "${cfg.secretsDirectory}/wuphf-${id}.env";
+
+  # The options every unit has: its package, its config (as Nix, or a file)
+  # and its env file (by default in secretsDirectory, when the unit has
+  # secrets of its own).
+  unitOptions =
     {
-      description = part.description;
-      documentation = [ "https://github.com/wuphf-rs/wuphf-ai/blob/main/docs/wiki/Home.md" ];
-      wantedBy = [ "multi-user.target" ];
-      wants = [ "network-online.target" ];
-      after = [
-        "network-online.target"
-      ]
-      ++ lib.optional (name != "core" && cfg.core.enable) "wuphf-core.service";
-      serviceConfig = {
-        Type = "simple";
-        User = cfg.user;
-        Group = cfg.group;
-        EnvironmentFile = lib.optional (settings.environmentFile != null) settings.environmentFile;
-        StateDirectory = "wuphf/${name}";
-        StateDirectoryMode = "0750";
-        # Relative paths in the configs (sqlite://wuphf.sqlite, session files)
-        # live here.
-        WorkingDirectory = "%S/wuphf/${name}";
-        ExecStart = lib.escapeShellArgs (
-          [ (lib.getExe' settings.package part.binary) ] ++ part.args settings.configFile
-        );
-        Restart = "on-failure";
-        RestartSec = "5s";
-        KillSignal = if part.sigint then "SIGINT" else "SIGTERM";
-        TimeoutStopSec = part.stopTimeout or "30s";
-
-        NoNewPrivileges = true;
-        ProtectSystem = "strict";
-        ProtectHome = true;
-        PrivateTmp = true;
-        PrivateDevices = true;
-        ProtectKernelTunables = true;
-        ProtectKernelModules = true;
-        ProtectKernelLogs = true;
-        ProtectControlGroups = true;
-        ProtectClock = true;
-        ProtectHostname = true;
-        RestrictSUIDSGID = true;
-        RestrictRealtime = true;
-        RestrictNamespaces = true;
-        LockPersonality = true;
-        MemoryDenyWriteExecute = !(part.writeExecute or false);
-        SystemCallArchitectures = "native";
-        RestrictAddressFamilies = [
-          "AF_INET"
-          "AF_INET6"
-          "AF_UNIX"
-        ];
-        UMask = "0027";
+      id,
+      binary,
+      settings,
+      example,
+      secrets ? true,
+    }:
+    {
+      package = mkOption {
+        type = types.package;
+        default = ours.${binary};
+        defaultText = lib.literalExpression "wuphf's ${binary}";
+        description = "The package providing {command}`${binary}`.";
+      };
+      settings = mkOption {
+        type = toml.type;
+        default = { };
+        description = ''
+          Its configuration, written as its TOML file (every option is in
+          ${example}); what the module derives is set already. Secrets never
+          go here: name their variables and set them in `environmentFile`.
+        '';
+      };
+      configFile = mkOption {
+        type = types.path;
+        default = toml.generate "wuphf-${id}.toml" settings;
+        defaultText = lib.literalExpression "a file written from settings";
+        description = "The config file, instead of `settings`.";
+      };
+      environmentFile = mkOption {
+        type = types.nullOr types.path;
+        default = if secrets then secretFile id else null;
+        defaultText =
+          if secrets then
+            lib.literalExpression ''"''${secretsDirectory}/wuphf-${id}.env", or null''
+          else
+            lib.literalExpression "null";
+        description = ''
+          A file of `NAME=value` lines (its tokens), read by systemd. Keep it
+          out of the Nix store.
+        '';
       };
     };
 
-  enabled = lib.filterAttrs (name: _: cfg.${name}.enable) parts;
+  connectorType = types.submodule (
+    { name, config, ... }:
+    let
+      kind = connectorTypes.${config.type};
+    in
+    {
+      options = {
+        enable = mkOption {
+          type = types.bool;
+          default = true;
+          description = "Whether to run this connector.";
+        };
+        type = mkOption {
+          type = types.enum (lib.attrNames connectorTypes);
+          description = "The connector's kind.";
+        };
+        tokenEnv = mkOption {
+          type = types.str;
+          default = "WUPHF_CONNECTOR_${envName name}_TOKEN";
+          defaultText = lib.literalExpression ''"WUPHF_CONNECTOR_<ID>_TOKEN"'';
+          description = "The variable holding its token, set in its `environmentFile`.";
+        };
+        ownerIds = mkOption {
+          type = types.listOf types.str;
+          default = [ ];
+          example = [ "704338780" ];
+          description = "The platform's user ids that may change settings through this connector (`/wuphf`).";
+        };
+        functions = mkOption {
+          type = types.listOf types.str;
+          default = [ ];
+          example = [ "instagram.fetch_media" ];
+          description = ''
+            Functions it serves to the core, under its own id (Instagram's
+            downloads, for wuphf-misc); its token is
+            `WUPHF_PROVIDER_<ID>_TOKEN`, in its `environmentFile`.
+          '';
+        };
+        coreSettings = mkOption {
+          type = toml.type;
+          default = { };
+          description = "More keys for its `[[connectors]]` entry in the core's config.";
+        };
+      }
+      // lib.mapAttrs (
+        _: flag:
+        mkOption {
+          type = types.bool;
+          default = false;
+          description = flag.description + " Set on both sides.";
+        }
+      ) flags
+      // unitOptions {
+        id = name;
+        inherit (kind) binary;
+        inherit (config) settings;
+        example = "its `config.example.toml`";
+      };
+
+      config.settings = {
+        connector_id = mkDefault name;
+        core_address = mkDefault cfg.coreAddress;
+        core_token_env = mkDefault config.tokenEnv;
+      }
+      // lib.listToAttrs (map (flag: lib.nameValuePair flags.${flag}.key config.${flag}) kind.flags)
+      // lib.optionalAttrs (config.functions != [ ]) {
+        functions = {
+          provider_id = mkDefault name;
+          token_env = mkDefault "WUPHF_PROVIDER_${envName name}_TOKEN";
+        };
+      };
+    }
+  );
+
+  providerType = types.submodule (
+    { name, config, ... }:
+    let
+      kind = providerTypes.${config.type};
+    in
+    {
+      options = {
+        enable = mkOption {
+          type = types.bool;
+          default = true;
+          description = "Whether to run this provider.";
+        };
+        type = mkOption {
+          type = types.enum (lib.attrNames providerTypes);
+          description = "The provider's kind.";
+        };
+        tokenEnv = mkOption {
+          type = types.str;
+          default = "WUPHF_PROVIDER_${envName name}_TOKEN";
+          defaultText = lib.literalExpression ''"WUPHF_PROVIDER_<ID>_TOKEN"'';
+          description = "The variable holding its token, set in its `environmentFile`.";
+        };
+        functions = mkOption {
+          type = types.listOf types.str;
+          default = kind.functions;
+          defaultText = lib.literalMD "what its kind serves (mediaconv: `media.convert`)";
+          description = "The function names it may register.";
+        };
+      }
+      // unitOptions {
+        id = name;
+        inherit (kind) binary;
+        inherit (config) settings;
+        example = "its `config.example.toml`";
+      };
+
+      config.settings = {
+        provider_id = mkDefault name;
+        core_address = mkDefault cfg.coreAddress;
+        token_env = mkDefault config.tokenEnv;
+      };
+    }
+  );
+
+  connectors = lib.filterAttrs (_: connector: connector.enable) cfg.connectors;
+  providers = lib.filterAttrs (_: provider: provider.enable) cfg.providers;
+
+  # Every running unit: its binary, arguments, env files and how it stops
+  # (the connectors and providers save their sessions on SIGINT).
+  units =
+    lib.optionalAttrs cfg.core.enable {
+      core = {
+        description = "wuphf core server";
+        inherit (cfg.core) package configFile;
+        binary = "wuphf-server";
+        args = [ "serve" ];
+        # The tokens it checks live in each part's own file.
+        environmentFiles = [
+          cfg.core.environmentFile
+        ]
+        ++ lib.mapAttrsToList (_: unit: unit.environmentFile) (connectors // providers);
+        sigint = false;
+      };
+    }
+    // lib.mapAttrs (id: connector: {
+      description = "wuphf ${connectorTypes.${connector.type}.description} (${id})";
+      inherit (connector) package configFile;
+      binary = connectorTypes.${connector.type}.binary;
+      environmentFiles = [ connector.environmentFile ];
+    }) connectors
+    // lib.mapAttrs (id: provider: {
+      description = "wuphf ${providerTypes.${provider.type}.description} (${id})";
+      inherit (provider) package configFile;
+      binary = providerTypes.${provider.type}.binary;
+      environmentFiles = [ provider.environmentFile ];
+      writeExecute = providerTypes.${provider.type}.writeExecute or false;
+    }) providers
+    // lib.optionalAttrs cfg.misc.enable {
+      misc = {
+        description = "wuphf features (wuphf-misc)";
+        inherit (cfg.misc) package configFile;
+        binary = "wuphf-misc";
+        # The observer token is the core's.
+        environmentFiles = [
+          cfg.core.environmentFile
+          cfg.misc.environmentFile
+        ];
+        stopTimeout = "90s";
+      };
+    };
+
+  unit = id: spec: {
+    description = spec.description;
+    documentation = [ "https://github.com/wuphf-rs/wuphf-ai/blob/main/docs/wiki/Home.md" ];
+    wantedBy = [ "multi-user.target" ];
+    wants = [ "network-online.target" ];
+    after = [
+      "network-online.target"
+    ]
+    ++ lib.optional (id != "core" && cfg.core.enable) "wuphf-core.service";
+    serviceConfig = {
+      Type = "simple";
+      User = cfg.user;
+      Group = cfg.group;
+      EnvironmentFile = lib.unique (lib.filter (file: file != null) spec.environmentFiles);
+      StateDirectory = "wuphf/${id}";
+      StateDirectoryMode = "0750";
+      # Relative paths in the configs (sqlite://wuphf.sqlite, session files)
+      # live here.
+      WorkingDirectory = "%S/wuphf/${id}";
+      ExecStart = lib.escapeShellArgs (
+        [ (lib.getExe' spec.package spec.binary) ]
+        ++ spec.args or [ ]
+        ++ [
+          "--config"
+          spec.configFile
+        ]
+      );
+      Restart = "on-failure";
+      RestartSec = "5s";
+      KillSignal = if spec.sigint or true then "SIGINT" else "SIGTERM";
+      TimeoutStopSec = spec.stopTimeout or "30s";
+
+      NoNewPrivileges = true;
+      ProtectSystem = "strict";
+      ProtectHome = true;
+      PrivateTmp = true;
+      PrivateDevices = true;
+      ProtectKernelTunables = true;
+      ProtectKernelModules = true;
+      ProtectKernelLogs = true;
+      ProtectControlGroups = true;
+      ProtectClock = true;
+      ProtectHostname = true;
+      RestrictSUIDSGID = true;
+      RestrictRealtime = true;
+      RestrictNamespaces = true;
+      LockPersonality = true;
+      MemoryDenyWriteExecute = !(spec.writeExecute or false);
+      SystemCallArchitectures = "native";
+      RestrictAddressFamilies = [
+        "AF_INET"
+        "AF_INET6"
+        "AF_UNIX"
+      ];
+      UMask = "0027";
+    };
+  };
+
+  # Connectors setting a flag their kind's config does not have.
+  badFlags = lib.concatLists (
+    lib.mapAttrsToList (
+      id: connector:
+      map (flag: "${id}.${flag}") (
+        lib.filter (flag: connector.${flag} && !(lib.elem flag connectorTypes.${connector.type}.flags)) (
+          lib.attrNames flags
+        )
+      )
+    ) cfg.connectors
+  );
+  badFunctions = lib.attrNames (
+    lib.filterAttrs (
+      _: connector: connector.functions != [ ] && !(connectorTypes.${connector.type}.provides or false)
+    ) cfg.connectors
+  );
+  clashes =
+    lib.intersectLists (lib.attrNames cfg.connectors) (lib.attrNames cfg.providers)
+    ++ lib.intersectLists [
+      "core"
+      "misc"
+    ] (lib.attrNames cfg.connectors ++ lib.attrNames cfg.providers);
+
+  removed = name: replacement: lib.mkRemovedOptionModule [ "services" "wuphf" name ] replacement;
 in
 {
+  imports = [
+    (removed "telegram" "Use services.wuphf.connectors.<id> with type = \"telegram\".")
+    (removed "whatsapp" "Use services.wuphf.connectors.<id> with type = \"whatsapp\".")
+    (removed "whatsapp-rust" "Use services.wuphf.connectors.<id> with type = \"whatsapp-rust\".")
+    (removed "instagram" "Use services.wuphf.connectors.<id> with type = \"instagram\".")
+    (removed "mediaconv" "Use services.wuphf.providers.<id> with type = \"mediaconv\".")
+  ];
+
   options.services.wuphf = {
     packages = mkOption {
       type = types.attrsOf types.anything;
@@ -162,7 +411,7 @@ in
       defaultText = lib.literalMD "the flake's packages for the host (those its CI puts in the cache)";
       example = lib.literalExpression "pkgs.wuphf-packages";
       description = ''
-        The package set every part's `package` defaults to. The default is the
+        The package set every unit's `package` defaults to. The default is the
         flake's own builds, which the binary cache holds, so a machine
         (or a laptop deploying to it, cross or not) downloads them. To build
         them with this system's nixpkgs instead (natively, or cross-compiled
@@ -173,17 +422,108 @@ in
     user = mkOption {
       type = types.str;
       default = "wuphf";
-      description = "The user every part runs as.";
+      description = "The user every unit runs as.";
     };
     group = mkOption {
       type = types.str;
       default = "wuphf";
-      description = "The group every part runs as.";
+      description = "The group every unit runs as.";
     };
-  }
-  // lib.mapAttrs (name: part: partOptions name part) parts;
+    secretsDirectory = mkOption {
+      type = types.nullOr types.str;
+      default = null;
+      example = "/etc/secrets";
+      description = ''
+        When set, the `environmentFile` of the core, every connector and every
+        provider defaults to `<dir>/wuphf-<id>.env` (`wuphf-core.env`,
+        `wuphf-telegram-main.env`, …).
+      '';
+    };
+    coreAddress = mkOption {
+      type = types.str;
+      default = cfg.core.listen;
+      defaultText = lib.literalExpression "config.services.wuphf.core.listen";
+      description = "Where the connectors, providers and wuphf-misc reach the core.";
+    };
 
-  config = mkIf (enabled != { }) {
+    core = {
+      enable = mkEnableOption "the wuphf core";
+      listen = mkOption {
+        type = types.str;
+        default = "127.0.0.1:50051";
+        description = "The address the core listens on.";
+      };
+    }
+    // unitOptions {
+      id = "core";
+      binary = "wuphf-server";
+      inherit (cfg.core) settings;
+      example = "`config/example.toml`";
+    };
+
+    connectors = mkOption {
+      type = types.attrsOf connectorType;
+      default = { };
+      example = lib.literalExpression ''
+        {
+          telegram-main = {
+            type = "telegram";
+            threads = true;
+            topicCreate = true;
+            ownerIds = [ "704338780" ];
+            settings.session_file = "./telegram.session.json";
+          };
+          whatsapp-jio = {
+            type = "whatsapp-rust";
+            disappearingTimers = true;
+          };
+        }
+      '';
+      description = ''
+        The connectors, by id: each runs as `wuphf-<id>` in
+        `/var/lib/wuphf/<id>`, and the core gets its `[[connectors]]` entry.
+      '';
+    };
+
+    providers = mkOption {
+      type = types.attrsOf providerType;
+      default = { };
+      example = lib.literalExpression ''{ mediaconv.type = "mediaconv"; }'';
+      description = ''
+        The function providers, by id: each runs as `wuphf-<id>`, and the core
+        gets its `[[functions.providers]]` entry.
+      '';
+    };
+
+    misc = {
+      enable = mkEnableOption "wuphf-misc (features that are not bridging)";
+    }
+    // unitOptions {
+      id = "misc";
+      binary = "wuphf-misc";
+      inherit (cfg.misc) settings;
+      example = "`misc/config.example.toml`";
+      # It presents the core's observer token, from the core's env file.
+      secrets = false;
+    };
+  };
+
+  config = mkIf (units != { }) {
+    assertions = [
+      {
+        assertion = badFlags == [ ];
+        message = "services.wuphf.connectors: ${lib.concatStringsSep ", " badFlags}: that connector's kind has no such setting.";
+      }
+      {
+        assertion = badFunctions == [ ];
+        message = "services.wuphf.connectors: ${lib.concatStringsSep ", " badFunctions} cannot serve functions (only instagram does).";
+      }
+      {
+        assertion = clashes == [ ];
+        message = "services.wuphf: ${lib.concatStringsSep ", " clashes} names two units (ids are unique across connectors and providers, and core and misc are taken).";
+      }
+    ];
+
     users.users = mkIf (cfg.user == "wuphf") {
       wuphf = {
         isSystemUser = true;
@@ -193,15 +533,44 @@ in
     };
     users.groups = mkIf (cfg.group == "wuphf") { wuphf = { }; };
 
-    # The store is read-only: `wuphf-server update` cannot replace anything,
-    # and its notice would tell the owner to run it. Update through the flake.
-    services.wuphf.core.settings.updates.check_interval_seconds = lib.mkDefault 0;
+    services.wuphf.core.settings = {
+      listen = mkDefault cfg.core.listen;
+      database_url = mkDefault "sqlite://wuphf.sqlite";
+      # The store is read-only: `wuphf-server update` cannot replace anything,
+      # and its notice would tell the owner to run it. Update through the flake.
+      updates.check_interval_seconds = mkDefault 0;
+      connectors = lib.mapAttrsToList (
+        id: connector:
+        {
+          inherit id;
+          platform = connectorTypes.${connector.type}.platform;
+          token_env = connector.tokenEnv;
+          owner_ids = connector.ownerIds;
+        }
+        // lib.mapAttrs' (flag: spec: lib.nameValuePair spec.key connector.${flag}) flags
+        // connector.coreSettings
+      ) connectors;
+      functions.providers =
+        lib.mapAttrsToList (id: provider: {
+          inherit id;
+          token_env = provider.tokenEnv;
+          inherit (provider) functions;
+        }) providers
+        ++ lib.mapAttrsToList (_: connector: {
+          id = connector.settings.functions.provider_id;
+          token_env = connector.settings.functions.token_env;
+          inherit (connector) functions;
+        }) (lib.filterAttrs (_: connector: connector.functions != [ ]) connectors);
+    };
+
+    services.wuphf.misc.settings = {
+      core_address = mkDefault cfg.coreAddress;
+      observer_token_env = mkDefault "WUPHF_CORE_OBSERVER_TOKEN";
+    };
 
     # The binaries for setup, settings, export and the TUI.
-    environment.systemPackages = lib.mapAttrsToList (name: _: cfg.${name}.package) enabled;
+    environment.systemPackages = lib.unique (lib.mapAttrsToList (_: spec: spec.package) units);
 
-    systemd.services = lib.mapAttrs' (
-      name: part: lib.nameValuePair "wuphf-${name}" (unit name part)
-    ) enabled;
+    systemd.services = lib.mapAttrs' (id: spec: lib.nameValuePair "wuphf-${id}" (unit id spec)) units;
   };
 }

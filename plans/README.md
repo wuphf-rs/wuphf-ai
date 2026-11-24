@@ -84,6 +84,7 @@ code).
 | 064 | Versions, releases and `wuphf-server update` (every binary, third-party sources, release or source builds, signed checksums, a scheduled check that tells the owner) | P1 | L | — | DONE (see notes) |
 | 065 | Nix packages for every binary, a NixOS module (`services.wuphf.<part>`), and a Cachix cache built by CI | P2 | M | 064 | DONE (see notes) |
 | 066 | A Docker image of each release (every binary, signature-checked), a compose setup with mounted config and data directories, GHCR on release tags | P2 | M | 064, 065 | DONE (see notes) |
+| 067 | NixOS module by id: `services.wuphf.connectors.<id>` and `.providers.<id>`, the core's entries derived, one token file each | P2 | M | 065 | DONE (see notes) |
 
 Status values: TODO | IN PROGRESS | DONE | BLOCKED (with one-line reason) |
 REJECTED (with one-line rationale).
@@ -1852,3 +1853,24 @@ From the 2026-10-22 remote-functions design:
   Pending:
   - The arm64 image and the GHCR push are untested until the workflow runs.
   - The owner makes the GHCR package public after its first push.
+
+- **067 (2026-11-24).** The module is rebuilt around ids.
+  - `services.wuphf.connectors.<id>` and `.providers.<id>` derive the core's
+    entries and each part's `connector_id`/`provider_id`, `core_address`,
+    token variable and both-sides flags, so a connector is written once.
+  - Each token lives only in its unit's env file, which the core also
+    loads. `secretsDirectory` gives every unit `wuphf-<id>.env`, and misc
+    reads the observer token from the core's file.
+  - Assertions catch a flag the kind lacks, functions on a kind other than
+    instagram, and id clashes. The v0.2.0 per-part options are removed,
+    with a message.
+  - A first version (`instances.<name>` beside the per-part options) was
+    replaced before it was pushed, on the owner's ask.
+
+  Verified with `nix eval` only (no builds: this laptop had no Cachix
+  substituter, so the check would compile whatsapp-rust):
+  - the derived settings of every unit, their env files, state directories
+    and stop signals;
+  - all three assertions, and the removed-option message;
+  - the derived core TOML loads in `wuphf-server settings list` (dev
+    binary).
