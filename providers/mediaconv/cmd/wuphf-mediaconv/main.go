@@ -16,6 +16,7 @@ import (
 	"github.com/wuphf-rs/wuphf-ai/connectors/shared/logging"
 	"github.com/wuphf-rs/wuphf-ai/connectors/shared/setup"
 	"github.com/wuphf-rs/wuphf-ai/connectors/shared/version"
+	wuphfpb "github.com/wuphf-rs/wuphf-ai/proto/go/connector/v1"
 	"github.com/wuphf-rs/wuphf-ai/providers/mediaconv/internal/config"
 	"github.com/wuphf-rs/wuphf-ai/providers/mediaconv/internal/convert"
 )
@@ -77,4 +78,16 @@ func main() {
 func exit(err error) {
 	fmt.Fprintf(os.Stderr, "wuphf-mediaconv: %v\n", err)
 	os.Exit(1)
+}
+
+// mediaTools are the programs media.convert runs, and whether all are there.
+// ImageMagick is `magick` (v7) or the legacy `convert`.
+func mediaTools() ([]*wuphfpb.ToolStatus, bool) {
+	const neededFor = "animated stickers to WhatsApp (they arrive as files)"
+	ffmpeg := coreclient.ToolStatus("ffmpeg", neededFor)
+	magick := coreclient.ToolStatus("magick", neededFor)
+	if !magick.GetAvailable() && coreclient.ToolStatus("convert", "").GetAvailable() {
+		magick.Available = true
+	}
+	return []*wuphfpb.ToolStatus{ffmpeg, magick}, ffmpeg.GetAvailable() && magick.GetAvailable()
 }

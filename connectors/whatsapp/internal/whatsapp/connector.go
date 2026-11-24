@@ -136,6 +136,8 @@ func (c Connector) Run(ctx context.Context) error {
 			Settings:                   runtime.Declaration,
 			// The settings panel's buttons on this connector's section.
 			Commands: newCommands(ctx, deps.client.fetcher, deps.linking, c.logger),
+			Prober:   newProber(deps.client),
+			Tools:    tools,
 		}, c.logger).Run(ctx, deps.linked, inputs)
 	}()
 	sessionResult := make(chan error, 1)

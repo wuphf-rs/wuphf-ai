@@ -147,6 +147,7 @@ func (c Connector) Run(ctx context.Context) error {
 					SupportsTopicCreate: c.cfg.SupportsTopicCreate,
 					IsPermanent:         telegramPermanent,
 					Settings:            runtime.Declaration,
+					Prober:              NewProber(client.API(), peers),
 				}, c.logger).Run(ctx, sender, inputs)
 			})
 		})

@@ -127,6 +127,7 @@ func (c Connector) Run(ctx context.Context) error {
 			SupportsThreads:     c.cfg.SupportsThreads,
 			SupportsTopicCreate: c.cfg.SupportsTopicCreate,
 			Settings:            runtime.Declaration,
+			Prober:              prober{threads: ig.threads},
 		}, logger).Run(ctx, NewSender(client, ig.threads), inputs)
 	}()
 	// The stream starts after the core consumer, so a burst of replayed

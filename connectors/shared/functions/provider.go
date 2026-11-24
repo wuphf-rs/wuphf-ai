@@ -76,10 +76,14 @@ type Function struct {
 }
 
 type ProviderOptions struct {
-	Address        string
-	ProviderID     string
-	Token          string
-	Functions      []Function
+	Address    string
+	ProviderID string
+	Token      string
+	Functions  []Function
+	// Tools are the external programs the provider runs, found or not (plan
+	// 079): the core warns about a missing one. A provider leaves out a
+	// function whose tools are missing, so callers fail over at once.
+	Tools          []*wuphfpb.ToolStatus
 	ReconnectDelay time.Duration // 0 = 2s
 
 	// dialOptions are appended to the connection's options (tests dial an
@@ -96,7 +100,7 @@ type functionKey struct {
 // after transient failures. It returns at once on a rejection that retrying
 // cannot fix: Unauthenticated, PermissionDenied or InvalidArgument.
 func Serve(ctx context.Context, opts ProviderOptions, logger zerolog.Logger) error {
-	if len(opts.Functions) == 0 {
+	if len(opts.Functions) == 0 && len(opts.Tools) == 0 {
 		return errors.New("serve: no functions to register")
 	}
 	delay := opts.ReconnectDelay
@@ -244,7 +248,7 @@ func (s providerSession) hello() *wuphfpb.ProviderHello {
 		}
 		declarations = append(declarations, declaration)
 	}
-	return &wuphfpb.ProviderHello{ProviderId: s.opts.ProviderID, Functions: declarations}
+	return &wuphfpb.ProviderHello{ProviderId: s.opts.ProviderID, Functions: declarations, Tools: s.opts.Tools}
 }
 
 // execute runs the call's handler and turns its outcome, error or panic into

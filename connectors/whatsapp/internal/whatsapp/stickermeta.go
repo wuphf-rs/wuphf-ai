@@ -11,7 +11,9 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/wuphf-rs/wuphf-ai/connectors/shared/coreclient"
 	"github.com/wuphf-rs/wuphf-ai/connectors/whatsapp/internal/config"
+	wuphfpb "github.com/wuphf-rs/wuphf-ai/proto/go/connector/v1"
 )
 
 // stickerPackID is the stable identifier WhatsApp uses to group bridged stickers
@@ -106,4 +108,9 @@ func stickerExif(meta config.StickerMetadata) ([]byte, error) {
 	buf.Write([]byte{0x16, 0x00, 0x00, 0x00})
 	buf.Write(jsonBytes)
 	return buf.Bytes(), nil
+}
+
+// tools are the external programs the connector runs (plan 079).
+func tools() []*wuphfpb.ToolStatus {
+	return []*wuphfpb.ToolStatus{coreclient.ToolStatus("webpmux", "sticker pack names on stickers sent to WhatsApp")}
 }

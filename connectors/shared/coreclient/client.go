@@ -79,6 +79,12 @@ type Options struct {
 	// settings panel (see Commands): declared at registration, run on the
 	// core's RunCommand. Nil declares none.
 	Commands Commands
+	// Prober, when set, answers the core's health probes (see Prober). Nil
+	// answers every chat as unknown.
+	Prober Prober
+	// Tools, when set, reports the external programs the connector runs, at
+	// registration and in every probe's answer.
+	Tools Tools
 }
 
 // Sender is the minimum surface every connector implements: the three message
@@ -237,6 +243,7 @@ func (c Client) runSession(
 			},
 			Settings: c.opts.Settings,
 			Commands: declarations(c.opts.Commands),
+			Tools:    toolsNow(c.opts.Tools),
 		}},
 	}); err != nil {
 		return fmt.Errorf("register connector: %w", err)
@@ -369,6 +376,17 @@ func (c Client) runSession(
 				command := body.RunCommand
 				go func() {
 					result := answerCommand(ctx, c.opts.Commands, command)
+					select {
+					case commandResults <- result:
+					case <-ctx.Done():
+					}
+				}()
+			// Probes look chats up on the platform: in their own goroutines,
+			// answered through the same writer as commands.
+			case *wuphfpb.ServerFrame_Probe:
+				probe := body.Probe
+				go func() {
+					result := answerProbe(ctx, c.opts.Prober, c.opts.Tools, probe)
 					select {
 					case commandResults <- result:
 					case <-ctx.Done():
