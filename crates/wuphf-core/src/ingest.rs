@@ -64,7 +64,7 @@ where
         }
 
         let dedup_key = DedupKey {
-            platform: origin.platform.clone(),
+            connector_id: origin.connector_id.clone(),
             chat_id: origin.chat_id.clone(),
             native_id: inbound.native_id.clone(),
         };
