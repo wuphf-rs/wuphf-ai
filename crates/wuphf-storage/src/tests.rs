@@ -184,7 +184,7 @@ async fn sqlite_claim_event_dedups_repeat_events() {
 /// rejected. This is the loop-prevention primitive, so both backends must agree.
 async fn claim_event_dedups_repeat_events<S: Storage>(storage: S) {
     let key = DedupKey {
-        platform: Platform::WhatsApp,
+        connector_id: ConnectorId("whatsapp-a".into()),
         chat_id: "chat".into(),
         native_id: "m-1".into(),
     };
@@ -192,11 +192,17 @@ async fn claim_event_dedups_repeat_events<S: Storage>(storage: S) {
     assert!(!storage.claim_event(key.clone()).await.unwrap());
     // A different key is unaffected.
     let other = DedupKey {
-        platform: Platform::WhatsApp,
-        chat_id: "chat".into(),
         native_id: "m-2".into(),
+        ..key.clone()
     };
     assert!(storage.claim_event(other).await.unwrap());
+    // A second account in the same group sees the same native id; its report
+    // is its own event, not a repeat of the first account's.
+    let second_account = DedupKey {
+        connector_id: ConnectorId("whatsapp-b".into()),
+        ..key
+    };
+    assert!(storage.claim_event(second_account).await.unwrap());
 }
 
 #[tokio::test]

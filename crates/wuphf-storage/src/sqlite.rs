@@ -302,9 +302,9 @@ impl TopologyStore for SqliteStorage {
 impl MessageStore for SqliteStorage {
     async fn claim_event(&self, key: DedupKey) -> StorageResult<bool> {
         let result = sqlx::query(
-            "INSERT OR IGNORE INTO seen_events (platform, chat_id, platform_message_id) VALUES (?, ?, ?)",
+            "INSERT OR IGNORE INTO seen_events (connector_id, chat_id, platform_message_id) VALUES (?, ?, ?)",
         )
-        .bind(serde_json::to_string(&key.platform)?)
+        .bind(key.connector_id.0)
         .bind(key.chat_id)
         .bind(key.native_id)
         .execute(&self.pool)

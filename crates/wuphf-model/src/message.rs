@@ -146,9 +146,13 @@ impl ReplyContext {
 
 /// Identifies an inbound platform event so the same message seen twice (e.g. on
 /// reconnect) is ingested only once.
+///
+/// Keyed by the connector that saw it, not the platform: two accounts in one
+/// group (two WhatsApp connectors, say) each report every message under the
+/// same native id, and each report belongs to that account's own conversation.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct DedupKey {
-    pub platform: Platform,
+    pub connector_id: ConnectorId,
     pub chat_id: String,
     pub native_id: String,
 }

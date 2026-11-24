@@ -469,6 +469,53 @@ async fn ignores_duplicate_events() {
     );
 }
 
+/// Two accounts in one WhatsApp group each report every message under the same
+/// native id. Each report is its own event, bridged by its own account's rule;
+/// only a repeat from the same account is a duplicate.
+#[tokio::test]
+async fn two_accounts_in_one_group_each_bridge_the_same_message() {
+    const SECOND: &str = "whatsapp-second";
+    let rule = |id: &str, source: &str, destination: &str| Rule {
+        id: RuleId(id.into()),
+        flow: RuleKind::OneToOne {
+            source_connector: ConnectorId(source.into()),
+            source_chat: ChatAddress::new("111@g.us", None),
+            destination_connector: ConnectorId(TELEGRAM.into()),
+            destination_chat: ChatAddress::new(destination, Some("1".into())),
+        },
+    };
+    let mut connectors = connectors();
+    connectors.push(Connector {
+        id: ConnectorId(SECOND.into()),
+        platform: Platform::WhatsApp,
+        capabilities: ConnectorCapabilities::default(),
+    });
+    let config = Arc::new(RoutingConfig::new(
+        vec![
+            rule("first", WHATSAPP, "-100111"),
+            rule("second", SECOND, "-100222"),
+        ],
+        connectors,
+    ));
+    let core = Core::new(Arc::new(InMemoryStorage::default()), config);
+
+    for (connector, destination) in [(WHATSAPP, "-100111"), (SECOND, "-100222")] {
+        let outcome = core
+            .ingest(event(connector, "111@g.us", "wa-1", None))
+            .await
+            .unwrap();
+        let dispatches = outcome.dispatches();
+        assert_eq!(dispatches.len(), 1, "{connector}");
+        assert_eq!(dispatches[0].to.address.chat_id, destination);
+    }
+    assert_eq!(
+        core.ingest(event(SECOND, "111@g.us", "wa-1", None))
+            .await
+            .unwrap(),
+        IngestOutcome::Ignored(IgnoreReason::DuplicateEvent)
+    );
+}
+
 #[tokio::test]
 async fn maps_replies_through_internal_identity_and_target_copy() {
     let core = core(vec![direct_rule()]);

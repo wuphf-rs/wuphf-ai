@@ -484,6 +484,93 @@ async fn migration_0020_keeps_connector_settings_declarations() {
     assert!(old.is_none(), "the old table is dropped");
 }
 
+/// 0021 keys event claims by connector. A claim made before it is attributed to
+/// the connector whose received copy it produced, so that account still dedups
+/// the event while a second account in the same group can claim it; a sent
+/// copy under the same native id attributes nothing, and a claim with no
+/// received copy is dropped. A platform without a variant of its own (stored
+/// as an object) is matched too.
+#[tokio::test]
+async fn migration_0021_keys_seen_events_by_connector() {
+    let pool = database_before(21).await;
+    for (id, connector, platform) in [
+        ("e-a", "whatsapp-a", r#""whats_app""#),
+        ("e-b", "whatsapp-b", r#""whats_app""#),
+        ("e-o", "custom-1", r#"{"other":"custom"}"#),
+    ] {
+        sqlx::query("INSERT INTO endpoints (id, payload) VALUES (?, ?)")
+            .bind(id)
+            .bind(format!(
+                r#"{{"id":"{id}","connector_id":"{connector}","platform":{platform},"chat_id":"g@g.us","thread_id":null}}"#
+            ))
+            .execute(&pool)
+            .await
+            .unwrap();
+    }
+    for (message, endpoint, native, sent) in [
+        ("m-1", "e-a", "n-1", 0),
+        ("m-1", "e-b", "n-1", 1),
+        ("m-2", "e-b", "n-2", 0),
+        ("m-3", "e-o", "n-3", 0),
+    ] {
+        sqlx::query(
+            "INSERT INTO message_copies (message_id, endpoint_id, platform_message_id, sent, payload)
+             VALUES (?, ?, ?, ?, '{}')",
+        )
+        .bind(message)
+        .bind(endpoint)
+        .bind(native)
+        .bind(sent)
+        .execute(&pool)
+        .await
+        .unwrap();
+    }
+    for (platform, native) in [
+        (r#""whats_app""#, "n-1"),
+        (r#""whats_app""#, "n-2"),
+        (r#"{"other":"custom"}"#, "n-3"),
+        (r#""whats_app""#, "n-orphan"),
+    ] {
+        sqlx::query(
+            "INSERT INTO seen_events (platform, chat_id, platform_message_id)
+             VALUES (?, 'g@g.us', ?)",
+        )
+        .bind(platform)
+        .bind(native)
+        .execute(&pool)
+        .await
+        .unwrap();
+    }
+
+    MIGRATOR.run(&pool).await.unwrap();
+
+    let rows = sqlx::query(
+        "SELECT connector_id, chat_id, platform_message_id FROM seen_events
+         ORDER BY platform_message_id",
+    )
+    .fetch_all(&pool)
+    .await
+    .unwrap();
+    let claims = rows
+        .iter()
+        .map(|row| {
+            (
+                row.get::<String, _>("connector_id"),
+                row.get::<String, _>("chat_id"),
+                row.get::<String, _>("platform_message_id"),
+            )
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        claims,
+        [
+            ("whatsapp-a".into(), "g@g.us".into(), "n-1".into()),
+            ("whatsapp-b".into(), "g@g.us".into(), "n-2".into()),
+            ("custom-1".into(), "g@g.us".into(), "n-3".into()),
+        ]
+    );
+}
+
 /// An observed row stored before `sent_by` existed decodes with no client, and
 /// today's model writes it back byte for byte: the key appears only when set.
 #[test]
