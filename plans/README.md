@@ -97,7 +97,7 @@ code).
 | 077 | Merge two address forms of one chat; split a wrong merge (nothing moves) | P2 | M–L | 074, 075 | TODO |
 | 078 | wuphf-misc's settings in /wuphf: plugins declare their own settings (`plugin_settings.<id>`) | P2 | M | 040, 050 | DONE (migration 0020; live panel test pending the owner; see notes) |
 | 079 | Health checks: probes of rule chats, health pauses that hold messages, tools, notices, a Health page, `wuphf-server health` | P1 | L | botconf 018 (page only) | IN PROGRESS |
-| 080 | The owner's Telegram reactions as their own reaction on WhatsApp and Instagram (reactions stored; Instagram owner-only) | P2 | M–L | — | TODO |
+| 080 | The owner's Telegram reactions as their own reaction on WhatsApp and Instagram (reactions stored; Instagram owner-only) | P2 | M–L | — | DONE (migration 0023; live test pending the owner; see notes) |
 
 Status values: TODO | IN PROGRESS | DONE | BLOCKED (with one-line reason) |
 REJECTED (with one-line rationale).
@@ -1913,3 +1913,45 @@ From the 2026-10-22 remote-functions design:
   - Tests: storage (owner keys, migration 0020), runtime (section, refused
     keys and ids, restart, gRPC auth), Go (ConnectPlugin, live reconfigure,
     concurrency change, retry codes). Not yet seen in a live `/wuphf` panel.
+- **080 (2026-11-25).** The owner's Telegram reactions reach WhatsApp and
+  Instagram as the owner's own (`2bcdf97`..this commit). Live test pending
+  the owner (the plan's "Live test").
+  - Core: `RoutingConfig::is_owner` (`owner_ids` from the settings, or
+    `from_me`); `ReactionDispatch.by_owner` and the reacted copy's author.
+    Reactions are stored per copy and reactor (migration 0023, the
+    `ReactionStore` role): a toggle equal to the stored one is
+    `IgnoreReason::RedundantReaction`, a `ReactionsEvent` is diffed with the
+    stored rows (the session account's `""` row excluded), and an owner's
+    reaction is stored as `""` at each target so WhatsApp's or Instagram's
+    echo of it is ignored; a dead-lettered owner reaction drops that row.
+  - Telegram: `Reactions` (`reactions.go`). A user session reports a
+    message's whole set, read from the reaction list when the update is
+    partial (`min`, or fewer listed than counted), and nothing when the set
+    cannot be read in full. A bot session reports per actor, with the
+    message's topic read and cached. `my` reactions and the session's own id
+    are dropped (plan 015's echo invariant). Reactors are named by plain
+    user id, as `owner_ids` name them, not `telegram:user:N` like senders.
+  - WhatsApp: Go `BuildReaction` with the author from `messageAuthor` (was
+    `quotedAuthor`, now shared with quotes); Rust through the library's
+    `send_reaction` (it also handles community announcement groups), keyed
+    like its `MessageContext::message_key`. Instagram: only `by_owner`.
+  - Deviations:
+    - `ReplyContext` keeps its stored shape, and reactions get their own
+      `MessageAuthor`, so no stored dispatch JSON changes. The new `React`
+      fields are left out of the JSON when at their defaults.
+    - `IgnoreReason::RedundantReaction` instead of `DuplicateEvent`.
+    - Telegram's `serve` hands `bridge` the session user, not only `bot`.
+  - Tests:
+    - core +8;
+    - storage +5 (reactions and the blocked reaction's author on both
+      backends, migration 0023);
+    - runtime grpc +2;
+    - Telegram +9;
+    - Go WhatsApp +3 (one with three cases), and the quote test renamed;
+    - whatsapp-rust 174 → 178;
+    - Instagram +1.
+  - Mutations, each failing a test: no expected `""` row (the echo test);
+    no own-reaction filter in Telegram.
+  - clippy (workspace and whatsapp-rust), `go vet` and fmt are clean.
+  - The pre-commit hook caught the stale vendor hashes after the proto
+    change; all five were updated in `2bcdf97`.
