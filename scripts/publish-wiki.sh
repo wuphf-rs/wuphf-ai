@@ -8,13 +8,13 @@
 #   scripts/publish-wiki.sh WIKI_CHECKOUT [REPOSITORY_URL [BRANCH]]
 #
 # The repository defaults to https://github.com/wuphf-rs/wuphf-ai, the branch
-# to v2. .github/workflows/wiki.yml runs it on every change to docs/wiki.
+# to main. .github/workflows/wiki.yml runs it on every change to docs/wiki.
 set -euo pipefail
 
 readonly REPO="$(cd "$(dirname "$(readlink -f "$0")")/.." && pwd)"
 readonly WIKI="${1:?usage: $0 WIKI_CHECKOUT [REPOSITORY_URL [BRANCH]]}"
 readonly URL="${2:-https://github.com/wuphf-rs/wuphf-ai}"
-readonly BRANCH="${3:-v2}"
+readonly BRANCH="${3:-main}"
 readonly SOURCE="$REPO/docs/wiki"
 
 [ -d "$WIKI/.git" ] || { echo "$WIKI is not a git checkout of the wiki" >&2; exit 1; }

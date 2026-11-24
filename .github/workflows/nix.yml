@@ -10,11 +10,11 @@
 name: nix
 
 on:
-  # A release is tagged on a v2 commit, which this has built already. Only
+  # A release is tagged on a main commit, which this has built already. Only
   # what the packages or the module are built from starts a run: a docs-only
   # push builds nothing new.
   push:
-    branches: [v2]
+    branches: [main]
     paths:
       - "flake.nix"
       - "flake.lock"

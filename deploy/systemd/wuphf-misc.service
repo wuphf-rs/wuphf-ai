@@ -11,7 +11,7 @@
 #     working directory
 [Unit]
 Description=wuphf-misc features
-Documentation=https://github.com/wuphf-rs/wuphf-ai/tree/v2/deploy/systemd
+Documentation=https://github.com/wuphf-rs/wuphf-ai/tree/main/deploy/systemd
 After=network-online.target wuphf-core.service
 Wants=network-online.target
 PartOf=wuphf.target

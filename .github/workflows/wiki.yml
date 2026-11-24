@@ -1,5 +1,5 @@
 # Publishes docs/wiki to the repository's GitHub wiki whenever it changes on
-# v2 (scripts/publish-wiki.sh rewrites the links for it). docs/wiki is the
+# main (scripts/publish-wiki.sh rewrites the links for it). docs/wiki is the
 # source: edits made in the wiki's web editor are overwritten.
 #
 # The wiki's git repository exists only once its first page has been created
@@ -8,7 +8,7 @@ name: wiki
 
 on:
   push:
-    branches: [v2]
+    branches: [main]
     paths: ["docs/wiki/**", "scripts/publish-wiki.sh"]
   workflow_dispatch:
 
@@ -29,7 +29,7 @@ jobs:
           TOKEN: ${{ github.token }}
         run: git clone "https://x-access-token:${TOKEN}@github.com/${GITHUB_REPOSITORY}.wiki.git" wiki
       - name: Write the pages
-        run: scripts/publish-wiki.sh wiki "https://github.com/${GITHUB_REPOSITORY}" v2
+        run: scripts/publish-wiki.sh wiki "https://github.com/${GITHUB_REPOSITORY}" main
       - name: Push
         run: |
           cd wiki

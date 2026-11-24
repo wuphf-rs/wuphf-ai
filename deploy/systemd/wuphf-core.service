@@ -12,7 +12,7 @@
 #     "sqlite://wuphf.sqlite" lives here
 [Unit]
 Description=wuphf core server
-Documentation=https://github.com/wuphf-rs/wuphf-ai/tree/v2/deploy/systemd
+Documentation=https://github.com/wuphf-rs/wuphf-ai/tree/main/deploy/systemd
 After=network-online.target
 Wants=network-online.target
 PartOf=wuphf.target

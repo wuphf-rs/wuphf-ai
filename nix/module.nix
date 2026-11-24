@@ -101,7 +101,7 @@ let
     in
     {
       description = part.description;
-      documentation = [ "https://github.com/wuphf-rs/wuphf-ai/blob/v2/docs/wiki/Home.md" ];
+      documentation = [ "https://github.com/wuphf-rs/wuphf-ai/blob/main/docs/wiki/Home.md" ];
       wantedBy = [ "multi-user.target" ];
       wants = [ "network-online.target" ];
       after = [

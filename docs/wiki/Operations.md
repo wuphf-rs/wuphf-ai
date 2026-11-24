@@ -35,7 +35,7 @@ units:
 
 ```nix
 {
-  inputs.wuphf.url = "github:wuphf-rs/wuphf-ai/v2";   # or a release tag: /v0.2.0
+  inputs.wuphf.url = "github:wuphf-rs/wuphf-ai";   # or a release tag: /v0.2.0
 
   outputs = { nixpkgs, wuphf, ... }: {
     nixosConfigurations.server = nixpkgs.lib.nixosSystem {
@@ -84,9 +84,9 @@ units:
   `wuphf-server update` cannot write to the store, so the module turns the
   core's release check off by default.
 - **The binary cache:** CI builds every package natively for x86_64-linux and
-  aarch64-linux on every push to `v2` (a release tag is a `v2` commit), and pushes
-  them to Cachix. Add the cache as a substituter (its name and public key are
-  on its Cachix page) to download instead of build:
+  aarch64-linux on every push to `main` (a release tag is a `main` commit),
+  and pushes them to Cachix. Add the cache as a substituter (its name and
+  public key are on its Cachix page) to download instead of build:
 
   ```nix
   nix.settings = {
