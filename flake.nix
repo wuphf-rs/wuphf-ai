@@ -139,6 +139,13 @@
           ];
 
           env.RUST_BACKTRACE = "1";
+
+          # The repo's pre-commit checks (scripts/git-hooks/pre-commit).
+          shellHook = ''
+            if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+              git config core.hooksPath scripts/git-hooks
+            fi
+          '';
         };
       });
 

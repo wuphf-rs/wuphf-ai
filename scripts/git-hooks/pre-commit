@@ -1,0 +1,101 @@
+#!/usr/bin/env bash
+# The repo's pre-commit checks, each run only when the commit touches what it
+# checks. The dev shell turns them on (git config core.hooksPath
+# scripts/git-hooks); `git commit --no-verify` skips them.
+#
+# - formatting: rustfmt (the workspace, whatsapp-rust) and gofmt;
+# - generated code: proto/go matches the .proto files, and every
+#   config.example.toml matches its config type;
+# - Go vendor hashes in nix/packages.nix (scripts/update-vendor-hashes.sh).
+#
+# Checks that build or fetch are skipped on battery, with a warning: CI
+# still runs them.
+set -euo pipefail
+
+readonly REPO="$(git rev-parse --show-toplevel)"
+cd "$REPO"
+mapfile -t staged < <(git diff --cached --name-only --diff-filter=ACMR)
+[ ${#staged[@]} -gt 0 ] || exit 0
+
+failed=()
+fail() { failed+=("$1"); }
+# Whether a staged path matches the extended regex.
+touched() { printf '%s\n' "${staged[@]}" | grep -Eq "$1"; }
+on_battery() {
+    local supply
+    for supply in /sys/class/power_supply/AC*/online; do
+        [ -r "$supply" ] && [ "$(cat "$supply")" = 0 ] && return 0
+    done
+    return 1
+}
+skip_on_battery() {
+    if on_battery; then
+        echo "pre-commit: on battery, skipping $1 (CI checks it)" >&2
+        return 0
+    fi
+    return 1
+}
+have() { command -v "$1" >/dev/null 2>&1; }
+
+# Formatting.
+if touched '^crates/.*\.rs$|^Cargo\.toml$'; then
+    cargo fmt --all --check >/dev/null 2>&1 || fail "rustfmt: run cargo fmt --all"
+fi
+if touched '^connectors/whatsapp-rust/.*\.rs$'; then
+    (cd connectors/whatsapp-rust && cargo fmt --check >/dev/null 2>&1) ||
+        fail "rustfmt: run cargo fmt in connectors/whatsapp-rust"
+fi
+mapfile -t go_files < <(printf '%s\n' "${staged[@]}" | grep -E '\.go$' | grep -v '^proto/go/' || true)
+if [ ${#go_files[@]} -gt 0 ]; then
+    unformatted="$(gofmt -l "${go_files[@]}")"
+    [ -z "$unformatted" ] || fail "gofmt: run gofmt -w on $(echo $unformatted)"
+fi
+
+# Generated code: the Go bindings.
+if touched '^crates/wuphf-proto/.*\.proto$|^scripts/gen-proto-go\.sh$'; then
+    if have protoc && have protoc-gen-go && have protoc-gen-go-grpc; then
+        scripts/gen-proto-go.sh
+        # Unstaged changes or new files there: what is staged is not current.
+        if [ -n "$(git diff --name-only -- proto/go; git ls-files --others --exclude-standard -- proto/go)" ]; then
+            fail "proto/go: regenerated from the .proto files; stage proto/go"
+        fi
+    else
+        echo "pre-commit: protoc or its Go plugins are missing (nix develop); not checking proto/go" >&2
+    fi
+fi
+
+# Generated code: the example configs, from each config type's tags.
+example_check() {
+    local module="$1"
+    (cd "$module" && go test -run 'Example' ./internal/config/ >/dev/null 2>&1) ||
+        fail "$module/config.example.toml: run WUPHF_WRITE_EXAMPLES=1 go test ./internal/config/ in $module"
+}
+for module in connectors/telegram connectors/whatsapp connectors/instagram providers/mediaconv misc; do
+    if touched "^$module/(internal/config/|config\.example\.toml$)|^connectors/shared/(setup|settings)/"; then
+        skip_on_battery "the $module example config" || example_check "$module"
+    fi
+done
+if touched '^crates/wuphf-(settings|model)/src/|^config/example\.toml$'; then
+    skip_on_battery "config/example.toml" ||
+        CARGO_BUILD_JOBS=2 nice cargo test -q -p wuphf-settings example >/dev/null 2>&1 ||
+        fail "config/example.toml: run WUPHF_WRITE_EXAMPLES=1 cargo test -p wuphf-settings example"
+fi
+if touched '^connectors/whatsapp-rust/(src/config\.rs|config\.example\.toml)$'; then
+    skip_on_battery "the whatsapp-rust example config" ||
+        (cd connectors/whatsapp-rust && RUSTC_BOOTSTRAP=1 CARGO_BUILD_JOBS=1 nice cargo test -q example >/dev/null 2>&1) ||
+        fail "whatsapp-rust config.example.toml: run WUPHF_WRITE_EXAMPLES=1 RUSTC_BOOTSTRAP=1 cargo test example there"
+fi
+
+# Go vendor hashes.
+if touched '(^|/)go\.(mod|sum)$|^connectors/shared/|^proto/go/|^nix/packages\.nix$'; then
+    if ! skip_on_battery "the Go vendor hashes" && ! scripts/update-vendor-hashes.sh --check; then
+        fail "nix/packages.nix: run scripts/update-vendor-hashes.sh and stage it"
+    fi
+fi
+
+if [ ${#failed[@]} -gt 0 ]; then
+    echo "pre-commit failed:" >&2
+    printf '  - %s\n' "${failed[@]}" >&2
+    echo "(git commit --no-verify skips these checks)" >&2
+    exit 1
+fi

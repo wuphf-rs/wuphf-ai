@@ -60,9 +60,25 @@ conflicts with the core's.
 | A Go part's `config.example.toml` | `WUPHF_WRITE_EXAMPLES=1 go test ./...` in its module |
 | `proto/go/**` | `nix develop -c scripts/gen-proto-go.sh` |
 | WhatsApp sticker fixtures | `WUPHF_UPDATE_FIXTURES=1 go test ./internal/whatsapp/` in `connectors/whatsapp` |
-| A Go module's `vendorHash` (`nix/packages.nix`), after its dependencies change | set it to `lib.fakeHash`, `nix build .#<binary>`, copy the hash it prints |
+| Every Go package's `vendorHash` (`nix/packages.nix`), after a `go.mod`/`go.sum`, `connectors/shared` or `proto/go` change (they are vendored too) | `scripts/update-vendor-hashes.sh` (`--check` only reports) |
 
 A test fails whenever a generated file is out of date.
+
+## Pre-commit checks
+
+`nix develop` turns on `scripts/git-hooks/pre-commit`
+(`git config core.hooksPath scripts/git-hooks`; run that yourself outside the
+dev shell). Each check runs only when the commit touches what it checks:
+
+- formatting: `cargo fmt --check` (the workspace, whatsapp-rust) and `gofmt`;
+- `proto/go` regenerated from the `.proto` files, and every
+  `config.example.toml` matching its config type;
+- the Go vendor hashes (`scripts/update-vendor-hashes.sh --check`, about a
+  minute, fetching modules but compiling nothing).
+
+The checks that build or fetch are skipped on battery, with a warning. They
+look at the working tree, so stage everything you commit.
+`git commit --no-verify` skips them.
 
 ## Adding a connector
 
