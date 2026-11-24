@@ -230,6 +230,47 @@ database is its login: back those up too to avoid linking again.
 - **The TUI** shows every captured chat live:
   `wuphf-tui --server http://127.0.0.1:50051 --token <observer_token>`.
 - **Providers:** `wuphf-server functions list` shows which are connected.
+- **Health checks** (below) report what stops messages getting through.
+
+## Health checks
+
+The core checks that each rule can deliver. It asks the connectors about
+the chats the rules use (a *probe*), and it does this when a connector
+connects, when the rules change, and when you ask
+(`wuphf-server health --run`). What it checks:
+
+- **Rule targets:** the chat exists, the account is in it and may post.
+  Where the rule creates topics (a many-to-one into Telegram), the group
+  has Topics turned on and the account may create topics (the Manage Topics
+  admin right, or "anyone may create topics").
+- **Rule sources a rule names** (a one-to-one's chat, a many-to-one's
+  `only` list): the account is still in the chat and may post there. An
+  admin-only WhatsApp group blocks replies typed in its topic.
+- **Wiring:** a connector away for 15 minutes; a function no connected
+  provider has offered for 15 minutes (mediaconv down, or missing a tool).
+- **Tools:** mediaconv's `ffmpeg` and ImageMagick (animated stickers to
+  WhatsApp), and the Go WhatsApp connector's `webpmux` (sticker pack names).
+- **Pins:** an account that may not pin where pins sync (`chat_state`).
+
+A failed chat check **pauses** that rule's direction into the chat. Its
+messages are held, not sent, and when a later check passes they go out in
+order. A message held for more than 7 days is dropped, and the ✅ notice
+says how many. A pause covers one direction only: an admin-only WhatsApp
+group holds replies from the topic, while the group still mirrors into it.
+Everything else only warns.
+
+You hear about each problem once, in the `notify` chats, and again with a
+✅ when it is fixed. When a connector cannot tell (it is not connected, or
+the lookup failed), nothing changes: an unknown never pauses or resumes.
+
+```sh
+wuphf-server health --config FILE          # the open problems, from the database
+wuphf-server health --config FILE --run    # check now (WUPHF_OBSERVER_TOKEN)
+```
+
+Both exit 1 while a problem that is not ignored is open. To ignore a check
+you know is wrong, use the Health page in `/wuphf` (it lapses once the check
+passes).
 
 ## Restarts and recovery
 

@@ -362,6 +362,34 @@ section at `plugin_settings.<plugin id>`, and the plugin follows it with
   `[plugin_settings]`.
 - Go plugins use `settings.ConnectPlugin` in `connectors/shared/settings`.
 
+## Health probes and tools
+
+The core checks that its rules can deliver (plan 079). It asks a live
+session about the chats the rules use with `ServerFrame.probe`
+(`ProbeChats { request_id, chat_ids }`), and the connector answers with
+`ClientFrame.probe_result` (`ProbeResult { request_id, chats, tools }`):
+
+- One `ChatFacts` per chat it can say something about: `exists`, `member`,
+  `can_send`, `forum`, `can_create_topics`, `can_pin`, `can_delete_others`,
+  each a `Fact` (`FACT_UNKNOWN`, `FACT_YES`, `FACT_NO`), and `detail`, the
+  platform's own words for a `FACT_NO` or a failed lookup. A connector only
+  reports what it sees. It never decides what a rule needs.
+- Answer within 20 s; a late or missing answer is unknown, and so is a
+  fact left `FACT_UNKNOWN` or a chat left out. Unknown never changes what
+  the core decided before.
+- Answer in the background, like a command: a probe is not a dispatch, so
+  nothing is stored or redelivered.
+
+`tools` (in `Registration.tools`, `ProviderHello.tools` and every
+`ProbeResult`) lists the external programs a process runs (`ToolStatus {
+name, available, needed_for }`). The core warns about a missing one. A
+provider leaves out a function it cannot run, and a call to a function its
+connected provider withheld fails at once (`UNAVAILABLE`) instead of waiting.
+
+The SDKs take a prober beside the sender (`Options.prober` in Rust,
+`Options.Prober` and `Options.Tools` in Go, with `coreclient.ToolStatus`
+for a `PATH` lookup).
+
 ## Connectors
 
 - **Telegram** (`connectors/telegram`, `gotd/td`) — registers with forum-topic

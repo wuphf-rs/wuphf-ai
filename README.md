@@ -73,6 +73,7 @@ crates/
   wuphf-core/      Identity, rule matching, fan-out, and event ingestion
   wuphf-runtime/   Tokio event bus, dispatch pipeline, media broker, gRPC
   wuphf-functions/ Remote function broker: provider sessions and Invoke
+  wuphf-health/    Health checks: what the rules need of their chats, as problems
   wuphf-settings/  Core configuration: loading, env overrides, botconf schema
   wuphf-cli/       Server executable
   wuphf-tui/       Observer TUI (read-only view of the observation log)

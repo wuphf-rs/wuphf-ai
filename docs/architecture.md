@@ -171,6 +171,25 @@ not know a plugin's features, so it refuses only the plugin's connection keys
 plugin declaration at startup. The shared conversion of a declaration into a
 section is `declared_settings`.
 
+## Health Checks
+
+Health checks (plan 079) keep the split: connectors report facts, the core
+decides. `wuphf-health` is pure. It takes the rules, the probed chat facts,
+the tools, which connectors are away and which functions are unoffered, and
+returns `Problem`s, each with a subject (a chat, a process or the wiring)
+and a severity: a `HealthPause` of one direction of a rule into one chat,
+or a warning. The runtime's `HealthMonitor` probes live sessions (through
+`LiveSessions`, which also runs commands), stores the problems
+(`HealthStore`), tells the owner when they appear and clear, and sets the
+core's pauses. A problem whose subject could not be checked again stands,
+so a restart or an unanswered probe never resumes anything.
+
+The core holds a dispatch into a paused direction in `held_dispatches`
+instead of queueing it (`save_dispatches`). A held thread creation still
+counts as its conversation's provisioning, so later messages wait in the
+provisioning stash rather than each creating a topic. Releasing a pause
+queues what it held in order and drops what is older than the cutoff.
+
 ## Data Flow
 
 ```text
