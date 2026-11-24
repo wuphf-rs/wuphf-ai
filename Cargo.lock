@@ -4467,6 +4467,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "wuphf-health"
+version = "0.3.0"
+dependencies = [
+ "wuphf-model",
+]
+
+[[package]]
 name = "wuphf-model"
 version = "0.3.0"
 dependencies = [

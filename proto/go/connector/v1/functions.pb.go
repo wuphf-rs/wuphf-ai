@@ -350,9 +350,13 @@ func (x *FunctionDeclaration) GetDefaultDeadlineMs() uint32 {
 }
 
 type ProviderHello struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	ProviderId    string                 `protobuf:"bytes,1,opt,name=provider_id,json=providerId,proto3" json:"provider_id,omitempty"`
-	Functions     []*FunctionDeclaration `protobuf:"bytes,2,rep,name=functions,proto3" json:"functions,omitempty"`
+	state      protoimpl.MessageState `protogen:"open.v1"`
+	ProviderId string                 `protobuf:"bytes,1,opt,name=provider_id,json=providerId,proto3" json:"provider_id,omitempty"`
+	// Only the functions it can run: one whose tools are missing is left out
+	// (and the tool reported below), so callers fail over at once.
+	Functions []*FunctionDeclaration `protobuf:"bytes,2,rep,name=functions,proto3" json:"functions,omitempty"`
+	// The external programs the provider runs, found or not (plan 079).
+	Tools         []*ToolStatus `protobuf:"bytes,3,rep,name=tools,proto3" json:"tools,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -397,6 +401,13 @@ func (x *ProviderHello) GetProviderId() string {
 func (x *ProviderHello) GetFunctions() []*FunctionDeclaration {
 	if x != nil {
 		return x.Functions
+	}
+	return nil
+}
+
+func (x *ProviderHello) GetTools() []*ToolStatus {
+	if x != nil {
+		return x.Tools
 	}
 	return nil
 }
@@ -1086,7 +1097,7 @@ var File_functions_proto protoreflect.FileDescriptor
 
 const file_functions_proto_rawDesc = "" +
 	"\n" +
-	"\x0ffunctions.proto\x12\x12wuphf.connector.v1\"7\n" +
+	"\x0ffunctions.proto\x12\x12wuphf.connector.v1\x1a\fcommon.proto\"7\n" +
 	"\vFunctionRef\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x14\n" +
 	"\x05major\x18\x02 \x01(\rR\x05major\"\x95\x01\n" +
@@ -1109,11 +1120,12 @@ const file_functions_proto_rawDesc = "" +
 	"idempotent\x12'\n" +
 	"\x0fmax_concurrency\x18\x05 \x01(\rR\x0emaxConcurrency\x123\n" +
 	"\x13default_deadline_ms\x18\x06 \x01(\rH\x00R\x11defaultDeadlineMs\x88\x01\x01B\x16\n" +
-	"\x14_default_deadline_ms\"w\n" +
+	"\x14_default_deadline_ms\"\xad\x01\n" +
 	"\rProviderHello\x12\x1f\n" +
 	"\vprovider_id\x18\x01 \x01(\tR\n" +
 	"providerId\x12E\n" +
-	"\tfunctions\x18\x02 \x03(\v2'.wuphf.connector.v1.FunctionDeclarationR\tfunctions\"\x92\x01\n" +
+	"\tfunctions\x18\x02 \x03(\v2'.wuphf.connector.v1.FunctionDeclarationR\tfunctions\x124\n" +
+	"\x05tools\x18\x03 \x03(\v2\x1e.wuphf.connector.v1.ToolStatusR\x05tools\"\x92\x01\n" +
 	"\x13ProviderClientFrame\x129\n" +
 	"\x05hello\x18\x01 \x01(\v2!.wuphf.connector.v1.ProviderHelloH\x00R\x05hello\x128\n" +
 	"\x06result\x18\x02 \x01(\v2\x1e.wuphf.connector.v1.CallResultH\x00R\x06resultB\x06\n" +
@@ -1200,33 +1212,35 @@ var file_functions_proto_goTypes = []any{
 	(*ListFunctionsRequest)(nil),  // 13: wuphf.connector.v1.ListFunctionsRequest
 	(*FunctionStatus)(nil),        // 14: wuphf.connector.v1.FunctionStatus
 	(*ListFunctionsResponse)(nil), // 15: wuphf.connector.v1.ListFunctionsResponse
+	(*ToolStatus)(nil),            // 16: wuphf.connector.v1.ToolStatus
 }
 var file_functions_proto_depIdxs = []int32{
 	1,  // 0: wuphf.connector.v1.InvokeRequest.function:type_name -> wuphf.connector.v1.FunctionRef
 	1,  // 1: wuphf.connector.v1.FunctionDeclaration.function:type_name -> wuphf.connector.v1.FunctionRef
 	4,  // 2: wuphf.connector.v1.ProviderHello.functions:type_name -> wuphf.connector.v1.FunctionDeclaration
-	5,  // 3: wuphf.connector.v1.ProviderClientFrame.hello:type_name -> wuphf.connector.v1.ProviderHello
-	12, // 4: wuphf.connector.v1.ProviderClientFrame.result:type_name -> wuphf.connector.v1.CallResult
-	8,  // 5: wuphf.connector.v1.ProviderServerFrame.call:type_name -> wuphf.connector.v1.ProviderCall
-	9,  // 6: wuphf.connector.v1.ProviderServerFrame.cancel:type_name -> wuphf.connector.v1.CancelCall
-	1,  // 7: wuphf.connector.v1.ProviderCall.function:type_name -> wuphf.connector.v1.FunctionRef
-	0,  // 8: wuphf.connector.v1.CallError.code:type_name -> wuphf.connector.v1.CallErrorCode
-	11, // 9: wuphf.connector.v1.CallResult.success:type_name -> wuphf.connector.v1.CallSuccess
-	10, // 10: wuphf.connector.v1.CallResult.error:type_name -> wuphf.connector.v1.CallError
-	1,  // 11: wuphf.connector.v1.FunctionStatus.function:type_name -> wuphf.connector.v1.FunctionRef
-	4,  // 12: wuphf.connector.v1.FunctionStatus.declaration:type_name -> wuphf.connector.v1.FunctionDeclaration
-	14, // 13: wuphf.connector.v1.ListFunctionsResponse.functions:type_name -> wuphf.connector.v1.FunctionStatus
-	2,  // 14: wuphf.connector.v1.FunctionTransport.Invoke:input_type -> wuphf.connector.v1.InvokeRequest
-	13, // 15: wuphf.connector.v1.FunctionTransport.ListFunctions:input_type -> wuphf.connector.v1.ListFunctionsRequest
-	6,  // 16: wuphf.connector.v1.ProviderTransport.OpenProviderSession:input_type -> wuphf.connector.v1.ProviderClientFrame
-	3,  // 17: wuphf.connector.v1.FunctionTransport.Invoke:output_type -> wuphf.connector.v1.InvokeResponse
-	15, // 18: wuphf.connector.v1.FunctionTransport.ListFunctions:output_type -> wuphf.connector.v1.ListFunctionsResponse
-	7,  // 19: wuphf.connector.v1.ProviderTransport.OpenProviderSession:output_type -> wuphf.connector.v1.ProviderServerFrame
-	17, // [17:20] is the sub-list for method output_type
-	14, // [14:17] is the sub-list for method input_type
-	14, // [14:14] is the sub-list for extension type_name
-	14, // [14:14] is the sub-list for extension extendee
-	0,  // [0:14] is the sub-list for field type_name
+	16, // 3: wuphf.connector.v1.ProviderHello.tools:type_name -> wuphf.connector.v1.ToolStatus
+	5,  // 4: wuphf.connector.v1.ProviderClientFrame.hello:type_name -> wuphf.connector.v1.ProviderHello
+	12, // 5: wuphf.connector.v1.ProviderClientFrame.result:type_name -> wuphf.connector.v1.CallResult
+	8,  // 6: wuphf.connector.v1.ProviderServerFrame.call:type_name -> wuphf.connector.v1.ProviderCall
+	9,  // 7: wuphf.connector.v1.ProviderServerFrame.cancel:type_name -> wuphf.connector.v1.CancelCall
+	1,  // 8: wuphf.connector.v1.ProviderCall.function:type_name -> wuphf.connector.v1.FunctionRef
+	0,  // 9: wuphf.connector.v1.CallError.code:type_name -> wuphf.connector.v1.CallErrorCode
+	11, // 10: wuphf.connector.v1.CallResult.success:type_name -> wuphf.connector.v1.CallSuccess
+	10, // 11: wuphf.connector.v1.CallResult.error:type_name -> wuphf.connector.v1.CallError
+	1,  // 12: wuphf.connector.v1.FunctionStatus.function:type_name -> wuphf.connector.v1.FunctionRef
+	4,  // 13: wuphf.connector.v1.FunctionStatus.declaration:type_name -> wuphf.connector.v1.FunctionDeclaration
+	14, // 14: wuphf.connector.v1.ListFunctionsResponse.functions:type_name -> wuphf.connector.v1.FunctionStatus
+	2,  // 15: wuphf.connector.v1.FunctionTransport.Invoke:input_type -> wuphf.connector.v1.InvokeRequest
+	13, // 16: wuphf.connector.v1.FunctionTransport.ListFunctions:input_type -> wuphf.connector.v1.ListFunctionsRequest
+	6,  // 17: wuphf.connector.v1.ProviderTransport.OpenProviderSession:input_type -> wuphf.connector.v1.ProviderClientFrame
+	3,  // 18: wuphf.connector.v1.FunctionTransport.Invoke:output_type -> wuphf.connector.v1.InvokeResponse
+	15, // 19: wuphf.connector.v1.FunctionTransport.ListFunctions:output_type -> wuphf.connector.v1.ListFunctionsResponse
+	7,  // 20: wuphf.connector.v1.ProviderTransport.OpenProviderSession:output_type -> wuphf.connector.v1.ProviderServerFrame
+	18, // [18:21] is the sub-list for method output_type
+	15, // [15:18] is the sub-list for method input_type
+	15, // [15:15] is the sub-list for extension type_name
+	15, // [15:15] is the sub-list for extension extendee
+	0,  // [0:15] is the sub-list for field type_name
 }
 
 func init() { file_functions_proto_init() }
@@ -1234,6 +1248,7 @@ func file_functions_proto_init() {
 	if File_functions_proto != nil {
 		return
 	}
+	file_common_proto_init()
 	file_functions_proto_msgTypes[3].OneofWrappers = []any{}
 	file_functions_proto_msgTypes[5].OneofWrappers = []any{
 		(*ProviderClientFrame_Hello)(nil),

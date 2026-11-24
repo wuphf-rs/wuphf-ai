@@ -192,6 +192,8 @@ async fn main() -> anyhow::Result<()> {
             linked.clone(),
             resync.clone(),
         ))),
+        // Answered in step 6 of plan 079.
+        prober: None,
     });
     // With the flag off the sender stamps only what the core sends: no group
     // lookups, no owner notices.

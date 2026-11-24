@@ -2,9 +2,9 @@ use super::*;
 use crate::RuntimeChannels;
 use crate::auth::ConnectorTokens;
 use crate::connector::ConnectorHub;
-use crate::connector_commands::ConnectorCommands;
 use crate::declared_settings::kind_from_wire;
 use crate::grpc::GrpcConnectorService;
+use crate::live_sessions::LiveSessions;
 use botconf::Kind;
 use botconf::SettingsError;
 use botconf_grpc::proto;
@@ -369,7 +369,7 @@ async fn serve() -> Served {
 }
 
 /// As [`serve`], offering live sessions' commands through `commands`.
-async fn serve_with(commands: Option<Arc<ConnectorCommands>>) -> Served {
+async fn serve_with(commands: Option<Arc<LiveSessions>>) -> Served {
     let store = store().await;
     let declarations = Arc::new(InMemoryStorage::default());
     let settings = Arc::new(ConnectorSettings::new(
@@ -456,6 +456,7 @@ async fn open_declaring(
                 capabilities: Some(pb::Capabilities::default()),
                 settings,
                 commands,
+                tools: Vec::new(),
             })),
         })
         .await
@@ -499,7 +500,7 @@ async fn registration_with_a_declaration_registers_the_section() {
 
 #[tokio::test]
 async fn a_live_session_s_commands_run_from_its_section() {
-    let commands = Arc::new(ConnectorCommands::default());
+    let commands = Arc::new(LiveSessions::default());
     let served = serve_with(Some(Arc::clone(&commands))).await;
     let resync = pb::ConnectorCommand {
         id: "resync".into(),

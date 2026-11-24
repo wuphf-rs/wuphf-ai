@@ -14,6 +14,7 @@ mod functions;
 pub mod logging;
 mod media;
 mod notice;
+pub mod probe;
 mod sender;
 pub mod session_lock;
 pub mod settings;
@@ -26,4 +27,5 @@ pub use functions::{
 };
 pub use media::{MediaClient, MediaConnectError};
 pub use notice::{notice, notice_with_media, send_notice};
+pub use probe::Prober;
 pub use sender::{Delivery, Failure, Sender};

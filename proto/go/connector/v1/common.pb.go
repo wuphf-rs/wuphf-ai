@@ -140,7 +140,7 @@ func (x Attachment_Kind) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use Attachment_Kind.Descriptor instead.
 func (Attachment_Kind) EnumDescriptor() ([]byte, []int) {
-	return file_common_proto_rawDescGZIP(), []int{5, 0}
+	return file_common_proto_rawDescGZIP(), []int{6, 0}
 }
 
 type Capabilities struct {
@@ -273,7 +273,10 @@ type Registration struct {
 	Settings *ConnectorSettingsDeclaration `protobuf:"bytes,4,opt,name=settings,proto3,oneof" json:"settings,omitempty"`
 	// What the owner can run on the connector from the settings panel (buttons on
 	// its section), offered while this session is live.
-	Commands      []*ConnectorCommand `protobuf:"bytes,5,rep,name=commands,proto3" json:"commands,omitempty"`
+	Commands []*ConnectorCommand `protobuf:"bytes,5,rep,name=commands,proto3" json:"commands,omitempty"`
+	// The external programs the connector runs, found or not (plan 079): the
+	// core warns the owner about a missing one.
+	Tools         []*ToolStatus `protobuf:"bytes,6,rep,name=tools,proto3" json:"tools,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -343,6 +346,75 @@ func (x *Registration) GetCommands() []*ConnectorCommand {
 	return nil
 }
 
+func (x *Registration) GetTools() []*ToolStatus {
+	if x != nil {
+		return x.Tools
+	}
+	return nil
+}
+
+// An external program a process needs (`ffmpeg`, `webpmux`), whether it was
+// found, and what goes without it (`needed_for`, e.g. "sticker pack names").
+type ToolStatus struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Name          string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
+	Available     bool                   `protobuf:"varint,2,opt,name=available,proto3" json:"available,omitempty"`
+	NeededFor     string                 `protobuf:"bytes,3,opt,name=needed_for,json=neededFor,proto3" json:"needed_for,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ToolStatus) Reset() {
+	*x = ToolStatus{}
+	mi := &file_common_proto_msgTypes[3]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ToolStatus) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ToolStatus) ProtoMessage() {}
+
+func (x *ToolStatus) ProtoReflect() protoreflect.Message {
+	mi := &file_common_proto_msgTypes[3]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ToolStatus.ProtoReflect.Descriptor instead.
+func (*ToolStatus) Descriptor() ([]byte, []int) {
+	return file_common_proto_rawDescGZIP(), []int{3}
+}
+
+func (x *ToolStatus) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+func (x *ToolStatus) GetAvailable() bool {
+	if x != nil {
+		return x.Available
+	}
+	return false
+}
+
+func (x *ToolStatus) GetNeededFor() string {
+	if x != nil {
+		return x.NeededFor
+	}
+	return ""
+}
+
 // A command a connector declares: `id` names it in a RunCommand, `title` is
 // the panel button's label (e.g. "🔄 Resync app state").
 type ConnectorCommand struct {
@@ -355,7 +427,7 @@ type ConnectorCommand struct {
 
 func (x *ConnectorCommand) Reset() {
 	*x = ConnectorCommand{}
-	mi := &file_common_proto_msgTypes[3]
+	mi := &file_common_proto_msgTypes[4]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -367,7 +439,7 @@ func (x *ConnectorCommand) String() string {
 func (*ConnectorCommand) ProtoMessage() {}
 
 func (x *ConnectorCommand) ProtoReflect() protoreflect.Message {
-	mi := &file_common_proto_msgTypes[3]
+	mi := &file_common_proto_msgTypes[4]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -380,7 +452,7 @@ func (x *ConnectorCommand) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ConnectorCommand.ProtoReflect.Descriptor instead.
 func (*ConnectorCommand) Descriptor() ([]byte, []int) {
-	return file_common_proto_rawDescGZIP(), []int{3}
+	return file_common_proto_rawDescGZIP(), []int{4}
 }
 
 func (x *ConnectorCommand) GetId() string {
@@ -416,7 +488,7 @@ type ConnectorSettingsDeclaration struct {
 
 func (x *ConnectorSettingsDeclaration) Reset() {
 	*x = ConnectorSettingsDeclaration{}
-	mi := &file_common_proto_msgTypes[4]
+	mi := &file_common_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -428,7 +500,7 @@ func (x *ConnectorSettingsDeclaration) String() string {
 func (*ConnectorSettingsDeclaration) ProtoMessage() {}
 
 func (x *ConnectorSettingsDeclaration) ProtoReflect() protoreflect.Message {
-	mi := &file_common_proto_msgTypes[4]
+	mi := &file_common_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -441,7 +513,7 @@ func (x *ConnectorSettingsDeclaration) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ConnectorSettingsDeclaration.ProtoReflect.Descriptor instead.
 func (*ConnectorSettingsDeclaration) Descriptor() ([]byte, []int) {
-	return file_common_proto_rawDescGZIP(), []int{4}
+	return file_common_proto_rawDescGZIP(), []int{5}
 }
 
 func (x *ConnectorSettingsDeclaration) GetDescriptor_() []byte {
@@ -484,7 +556,7 @@ type Attachment struct {
 
 func (x *Attachment) Reset() {
 	*x = Attachment{}
-	mi := &file_common_proto_msgTypes[5]
+	mi := &file_common_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -496,7 +568,7 @@ func (x *Attachment) String() string {
 func (*Attachment) ProtoMessage() {}
 
 func (x *Attachment) ProtoReflect() protoreflect.Message {
-	mi := &file_common_proto_msgTypes[5]
+	mi := &file_common_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -509,7 +581,7 @@ func (x *Attachment) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Attachment.ProtoReflect.Descriptor instead.
 func (*Attachment) Descriptor() ([]byte, []int) {
-	return file_common_proto_rawDescGZIP(), []int{5}
+	return file_common_proto_rawDescGZIP(), []int{6}
 }
 
 func (x *Attachment) GetMediaId() string {
@@ -567,7 +639,7 @@ type MediaMetadata struct {
 
 func (x *MediaMetadata) Reset() {
 	*x = MediaMetadata{}
-	mi := &file_common_proto_msgTypes[6]
+	mi := &file_common_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -579,7 +651,7 @@ func (x *MediaMetadata) String() string {
 func (*MediaMetadata) ProtoMessage() {}
 
 func (x *MediaMetadata) ProtoReflect() protoreflect.Message {
-	mi := &file_common_proto_msgTypes[6]
+	mi := &file_common_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -592,7 +664,7 @@ func (x *MediaMetadata) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MediaMetadata.ProtoReflect.Descriptor instead.
 func (*MediaMetadata) Descriptor() ([]byte, []int) {
-	return file_common_proto_rawDescGZIP(), []int{6}
+	return file_common_proto_rawDescGZIP(), []int{7}
 }
 
 func (x *MediaMetadata) GetKind() Attachment_Kind {
@@ -641,7 +713,7 @@ type MuteState struct {
 
 func (x *MuteState) Reset() {
 	*x = MuteState{}
-	mi := &file_common_proto_msgTypes[7]
+	mi := &file_common_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -653,7 +725,7 @@ func (x *MuteState) String() string {
 func (*MuteState) ProtoMessage() {}
 
 func (x *MuteState) ProtoReflect() protoreflect.Message {
-	mi := &file_common_proto_msgTypes[7]
+	mi := &file_common_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -666,7 +738,7 @@ func (x *MuteState) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MuteState.ProtoReflect.Descriptor instead.
 func (*MuteState) Descriptor() ([]byte, []int) {
-	return file_common_proto_rawDescGZIP(), []int{7}
+	return file_common_proto_rawDescGZIP(), []int{8}
 }
 
 func (x *MuteState) GetMutedUntil() int64 {
@@ -688,14 +760,21 @@ const file_common_proto_rawDesc = "" +
 	"\x11DisappearingTimer\x12\x18\n" +
 	"\aseconds\x18\x01 \x01(\rR\aseconds\x120\n" +
 	"\x11setting_timestamp\x18\x02 \x01(\x03H\x00R\x10settingTimestamp\x88\x01\x01B\x14\n" +
-	"\x12_setting_timestamp\"\xd3\x02\n" +
+	"\x12_setting_timestamp\"\x89\x03\n" +
 	"\fRegistration\x12!\n" +
 	"\fconnector_id\x18\x01 \x01(\tR\vconnectorId\x128\n" +
 	"\bplatform\x18\x02 \x01(\x0e2\x1c.wuphf.connector.v1.PlatformR\bplatform\x12D\n" +
 	"\fcapabilities\x18\x03 \x01(\v2 .wuphf.connector.v1.CapabilitiesR\fcapabilities\x12Q\n" +
 	"\bsettings\x18\x04 \x01(\v20.wuphf.connector.v1.ConnectorSettingsDeclarationH\x00R\bsettings\x88\x01\x01\x12@\n" +
-	"\bcommands\x18\x05 \x03(\v2$.wuphf.connector.v1.ConnectorCommandR\bcommandsB\v\n" +
-	"\t_settings\"8\n" +
+	"\bcommands\x18\x05 \x03(\v2$.wuphf.connector.v1.ConnectorCommandR\bcommands\x124\n" +
+	"\x05tools\x18\x06 \x03(\v2\x1e.wuphf.connector.v1.ToolStatusR\x05toolsB\v\n" +
+	"\t_settings\"]\n" +
+	"\n" +
+	"ToolStatus\x12\x12\n" +
+	"\x04name\x18\x01 \x01(\tR\x04name\x12\x1c\n" +
+	"\tavailable\x18\x02 \x01(\bR\tavailable\x12\x1d\n" +
+	"\n" +
+	"needed_for\x18\x03 \x01(\tR\tneededFor\"8\n" +
 	"\x10ConnectorCommand\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x14\n" +
 	"\x05title\x18\x02 \x01(\tR\x05title\"|\n" +
@@ -768,31 +847,33 @@ func file_common_proto_rawDescGZIP() []byte {
 }
 
 var file_common_proto_enumTypes = make([]protoimpl.EnumInfo, 2)
-var file_common_proto_msgTypes = make([]protoimpl.MessageInfo, 8)
+var file_common_proto_msgTypes = make([]protoimpl.MessageInfo, 9)
 var file_common_proto_goTypes = []any{
 	(Platform)(0),                        // 0: wuphf.connector.v1.Platform
 	(Attachment_Kind)(0),                 // 1: wuphf.connector.v1.Attachment.Kind
 	(*Capabilities)(nil),                 // 2: wuphf.connector.v1.Capabilities
 	(*DisappearingTimer)(nil),            // 3: wuphf.connector.v1.DisappearingTimer
 	(*Registration)(nil),                 // 4: wuphf.connector.v1.Registration
-	(*ConnectorCommand)(nil),             // 5: wuphf.connector.v1.ConnectorCommand
-	(*ConnectorSettingsDeclaration)(nil), // 6: wuphf.connector.v1.ConnectorSettingsDeclaration
-	(*Attachment)(nil),                   // 7: wuphf.connector.v1.Attachment
-	(*MediaMetadata)(nil),                // 8: wuphf.connector.v1.MediaMetadata
-	(*MuteState)(nil),                    // 9: wuphf.connector.v1.MuteState
+	(*ToolStatus)(nil),                   // 5: wuphf.connector.v1.ToolStatus
+	(*ConnectorCommand)(nil),             // 6: wuphf.connector.v1.ConnectorCommand
+	(*ConnectorSettingsDeclaration)(nil), // 7: wuphf.connector.v1.ConnectorSettingsDeclaration
+	(*Attachment)(nil),                   // 8: wuphf.connector.v1.Attachment
+	(*MediaMetadata)(nil),                // 9: wuphf.connector.v1.MediaMetadata
+	(*MuteState)(nil),                    // 10: wuphf.connector.v1.MuteState
 }
 var file_common_proto_depIdxs = []int32{
 	0, // 0: wuphf.connector.v1.Registration.platform:type_name -> wuphf.connector.v1.Platform
 	2, // 1: wuphf.connector.v1.Registration.capabilities:type_name -> wuphf.connector.v1.Capabilities
-	6, // 2: wuphf.connector.v1.Registration.settings:type_name -> wuphf.connector.v1.ConnectorSettingsDeclaration
-	5, // 3: wuphf.connector.v1.Registration.commands:type_name -> wuphf.connector.v1.ConnectorCommand
-	1, // 4: wuphf.connector.v1.Attachment.kind:type_name -> wuphf.connector.v1.Attachment.Kind
-	1, // 5: wuphf.connector.v1.MediaMetadata.kind:type_name -> wuphf.connector.v1.Attachment.Kind
-	6, // [6:6] is the sub-list for method output_type
-	6, // [6:6] is the sub-list for method input_type
-	6, // [6:6] is the sub-list for extension type_name
-	6, // [6:6] is the sub-list for extension extendee
-	0, // [0:6] is the sub-list for field type_name
+	7, // 2: wuphf.connector.v1.Registration.settings:type_name -> wuphf.connector.v1.ConnectorSettingsDeclaration
+	6, // 3: wuphf.connector.v1.Registration.commands:type_name -> wuphf.connector.v1.ConnectorCommand
+	5, // 4: wuphf.connector.v1.Registration.tools:type_name -> wuphf.connector.v1.ToolStatus
+	1, // 5: wuphf.connector.v1.Attachment.kind:type_name -> wuphf.connector.v1.Attachment.Kind
+	1, // 6: wuphf.connector.v1.MediaMetadata.kind:type_name -> wuphf.connector.v1.Attachment.Kind
+	7, // [7:7] is the sub-list for method output_type
+	7, // [7:7] is the sub-list for method input_type
+	7, // [7:7] is the sub-list for extension type_name
+	7, // [7:7] is the sub-list for extension extendee
+	0, // [0:7] is the sub-list for field type_name
 }
 
 func init() { file_common_proto_init() }
@@ -802,15 +883,15 @@ func file_common_proto_init() {
 	}
 	file_common_proto_msgTypes[1].OneofWrappers = []any{}
 	file_common_proto_msgTypes[2].OneofWrappers = []any{}
-	file_common_proto_msgTypes[5].OneofWrappers = []any{}
 	file_common_proto_msgTypes[6].OneofWrappers = []any{}
+	file_common_proto_msgTypes[7].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_common_proto_rawDesc), len(file_common_proto_rawDesc)),
 			NumEnums:      2,
-			NumMessages:   8,
+			NumMessages:   9,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

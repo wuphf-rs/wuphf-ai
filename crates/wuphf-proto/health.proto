@@ -1,0 +1,32 @@
+syntax = "proto3";
+
+package wuphf.connector.v1;
+
+option go_package = "github.com/wuphf-rs/wuphf-ai/proto/go/connector/v1;wuphfpb";
+
+// The core's health checks (plan 079): what is wrong with the rules' chats,
+// the wiring and the tools. Authenticated with the observer token.
+service HealthTransport {
+  // Probe every connected connector's rule chats again, re-evaluate, and
+  // return the open problems. Waits for the probes (at most their timeout).
+  rpc Run(RunHealthRequest) returns (HealthReport);
+}
+
+message RunHealthRequest {}
+
+message HealthReport {
+  repeated HealthProblem problems = 1;
+}
+
+message HealthProblem {
+  // Stable across runs, e.g. `target-not-forum:<rule>:<connector>:<chat>`.
+  string key = 1;
+  // The owner-facing description.
+  string text = 2;
+  // Whether it pauses a direction of a rule (else it only warns).
+  bool pauses = 3;
+  // The owner chose to ignore it until it passes once.
+  bool ignored = 4;
+  // When it was first seen (Unix epoch milliseconds).
+  int64 since_ms = 5;
+}

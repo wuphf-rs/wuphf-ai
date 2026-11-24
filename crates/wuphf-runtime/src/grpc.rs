@@ -1,7 +1,7 @@
 use crate::auth::{ConnectorTokens, bearer_token};
 use crate::connector::{ConnectorConnection, ConnectorHubHandle, RegistrationError};
-use crate::connector_commands::ConnectorCommands;
 use crate::connector_settings::{ConnectorSettings, declaration_from_wire};
+use crate::live_sessions::LiveSessions;
 use std::pin::Pin;
 use std::sync::Arc;
 use thiserror::Error;
@@ -25,7 +25,7 @@ pub struct GrpcConnectorService {
     settings: Option<Arc<ConnectorSettings>>,
     /// Where live sessions' commands are offered and run; `None` ignores the
     /// commands connectors declare.
-    commands: Option<Arc<ConnectorCommands>>,
+    commands: Option<Arc<LiveSessions>>,
 }
 
 impl GrpcConnectorService {
@@ -42,7 +42,7 @@ impl GrpcConnectorService {
 
     /// Offer the commands live sessions declare, and run them on their
     /// sessions.
-    pub fn with_commands(mut self, commands: Arc<ConnectorCommands>) -> Self {
+    pub fn with_commands(mut self, commands: Arc<LiveSessions>) -> Self {
         self.commands = Some(commands);
         self
     }
@@ -70,15 +70,16 @@ impl ConnectorTransport for GrpcConnectorService {
             .message()
             .await?
             .ok_or_else(|| Status::invalid_argument("registration frame required"))?;
-        let (registration, declaration, commands) = match first.body {
+        let (registration, declaration, commands, tools) = match first.body {
             Some(pb::client_frame::Body::Registration(mut registration)) => {
                 // The declaration is not part of the connector's identity: the
                 // hub matches the rest against the configured entry.
                 let declaration = registration.settings.take();
                 let commands = std::mem::take(&mut registration.commands);
+                let tools = std::mem::take(&mut registration.tools);
                 let registration = registration_from_proto(registration)
                     .map_err(|error| Status::invalid_argument(error.to_string()))?;
-                (registration, declaration, commands)
+                (registration, declaration, commands, tools)
             }
             _ => return Err(Status::invalid_argument("first frame must be registration")),
         };
@@ -136,7 +137,7 @@ impl ConnectorTransport for GrpcConnectorService {
         let mut command_session = self
             .commands
             .as_ref()
-            .map(|registry| registry.attach(&connector_id.0, commands));
+            .map(|registry| registry.attach(&connector_id.0, commands, tools));
         let registry = self.commands.clone();
         // Fired when the reader returns for any reason, so the outgoing task
         // drops `output` at once and the hub sees the session as no longer live.
@@ -144,11 +145,20 @@ impl ConnectorTransport for GrpcConnectorService {
         tokio::spawn(async move {
             let _ended = ended_tx;
             while let Ok(Some(frame)) = incoming.message().await {
-                if let Some(pb::client_frame::Body::CommandResult(result)) = &frame.body {
-                    if let Some(registry) = &registry {
-                        registry.settle(&connector_id.0, result.clone());
+                match &frame.body {
+                    Some(pb::client_frame::Body::CommandResult(result)) => {
+                        if let Some(registry) = &registry {
+                            registry.settle(&connector_id.0, result.clone());
+                        }
+                        continue;
                     }
-                    continue;
+                    Some(pb::client_frame::Body::ProbeResult(result)) => {
+                        if let Some(registry) = &registry {
+                            registry.settle_probe(&connector_id.0, result.clone());
+                        }
+                        continue;
+                    }
+                    _ => {}
                 }
                 let message = match input_from_proto(frame, &connector_id) {
                     Ok(message) => message,
@@ -197,7 +207,7 @@ impl ConnectorTransport for GrpcConnectorService {
 /// The next press to write to the session; never, for a service without
 /// commands.
 async fn next_press(
-    session: &mut Option<crate::connector_commands::CommandSession>,
+    session: &mut Option<crate::live_sessions::LiveSession>,
 ) -> Option<pb::ServerFrame> {
     match session {
         Some(session) => session.frames.recv().await,
@@ -349,6 +359,9 @@ fn input_from_proto(
         // Settled by the session before frames reach here.
         Some(pb::client_frame::Body::CommandResult(_)) => {
             Err(WireError("a command result outside a session".into()))
+        }
+        Some(pb::client_frame::Body::ProbeResult(_)) => {
+            Err(WireError("a probe result outside a session".into()))
         }
         Some(pb::client_frame::Body::ChatUpdate(event)) => {
             Ok(ConnectorInput::Work(Box::new(InboundWork::ChatUpdate {
@@ -1233,6 +1246,7 @@ mod tests {
             }),
             settings: None,
             commands: Vec::new(),
+            tools: Vec::new(),
         })
         .unwrap();
         assert!(connector.capabilities.supports_disappearing_timers);

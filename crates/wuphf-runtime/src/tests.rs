@@ -717,6 +717,7 @@ fn registration_frame(
             capabilities,
             settings: None,
             commands: Vec::new(),
+            tools: Vec::new(),
         })),
     }
 }

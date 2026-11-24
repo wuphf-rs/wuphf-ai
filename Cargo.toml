@@ -3,6 +3,7 @@ members = [
   "crates/wuphf-model",
   "crates/wuphf-proto",
   "crates/wuphf-functions",
+  "crates/wuphf-health",
   "crates/wuphf-settings",
   "crates/wuphf-storage",
   "crates/wuphf-core",
@@ -56,6 +57,7 @@ uuid = { version = "1", features = ["serde", "v4"] }
 wuphf-connector = { path = "crates/wuphf-connector" }
 wuphf-core = { path = "crates/wuphf-core" }
 wuphf-functions = { path = "crates/wuphf-functions" }
+wuphf-health = { path = "crates/wuphf-health" }
 wuphf-model = { path = "crates/wuphf-model" }
 wuphf-proto = { path = "crates/wuphf-proto" }
 wuphf-runtime = { path = "crates/wuphf-runtime" }

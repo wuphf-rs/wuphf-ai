@@ -152,6 +152,7 @@ fn sdk_client(address: &str) -> Client {
         is_permanent: None,
         settings: None,
         commands: None,
+        prober: None,
     })
 }
 
@@ -352,6 +353,7 @@ async fn inbound_event_frames_are_forwarded_to_the_core() {
             is_permanent: None,
             settings: None,
             commands: None,
+            prober: None,
         });
         let received = Arc::new(StdMutex::new(Vec::new()));
         let sender = HarnessSender::succeeding(received);
@@ -428,6 +430,7 @@ async fn the_registration_carries_the_disappearing_capability() {
             is_permanent: None,
             settings: None,
             commands: None,
+            prober: None,
         });
         let sender = HarnessSender::succeeding(Arc::new(StdMutex::new(Vec::new())));
         async move { client.run(sender, inputs_rx, cancel).await }

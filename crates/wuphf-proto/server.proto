@@ -142,7 +142,18 @@ message ServerFrame {
     SeenReceiptDispatch seen_receipt = 8;
     ChatStateDispatch chat_state = 9;
     RunCommand run_command = 10;
+    ProbeChats probe = 11;
   }
+}
+
+// Report what this account can do in these chats (plan 079): the core checks
+// its rules against the answers. Not a dispatch: never stored or redelivered.
+// Answer with a ProbeResult carrying the same request_id, within 20 s (the
+// core counts a late answer as unknown); a fact the connector cannot learn is
+// FACT_UNKNOWN.
+message ProbeChats {
+  string request_id = 1;
+  repeated string chat_ids = 2;
 }
 
 // Run one of the commands the connector declared (Registration.commands),

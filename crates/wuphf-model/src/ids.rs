@@ -57,7 +57,7 @@ uuid_id!(
 macro_rules! string_id {
     ($name:ident, $doc:expr) => {
         #[doc = $doc]
-        #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+        #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
         pub struct $name(pub String);
 
         impl fmt::Display for $name {

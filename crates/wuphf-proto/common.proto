@@ -44,6 +44,17 @@ message Registration {
   // What the owner can run on the connector from the settings panel (buttons on
   // its section), offered while this session is live.
   repeated ConnectorCommand commands = 5;
+  // The external programs the connector runs, found or not (plan 079): the
+  // core warns the owner about a missing one.
+  repeated ToolStatus tools = 6;
+}
+
+// An external program a process needs (`ffmpeg`, `webpmux`), whether it was
+// found, and what goes without it (`needed_for`, e.g. "sticker pack names").
+message ToolStatus {
+  string name = 1;
+  bool available = 2;
+  string needed_for = 3;
 }
 
 // A command a connector declares: `id` names it in a RunCommand, `title` is

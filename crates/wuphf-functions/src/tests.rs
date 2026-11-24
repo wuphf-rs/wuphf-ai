@@ -115,6 +115,7 @@ impl Provider {
                 body: Some(pb::provider_client_frame::Body::Hello(pb::ProviderHello {
                     provider_id: provider_id.into(),
                     functions,
+                    tools: Vec::new(),
                 })),
             })
             .await

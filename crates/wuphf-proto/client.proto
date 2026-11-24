@@ -249,7 +249,44 @@ message ClientFrame {
     OwnerNotice owner_notice = 10;
     ChatUpdateEvent chat_update = 11;
     CommandResult command_result = 12;
+    ProbeResult probe_result = 13;
   }
+}
+
+// The answer to a ProbeChats: one ChatFacts per chat asked about, and the
+// connector's tools as they are now.
+message ProbeResult {
+  string request_id = 1;
+  repeated ChatFacts chats = 2;
+  repeated ToolStatus tools = 3;
+}
+
+// What this account can do in one chat. The core decides what a rule needs.
+message ChatFacts {
+  string chat_id = 1;
+  // The chat exists and this account can see it.
+  Fact exists = 2;
+  // This account is in it.
+  Fact member = 3;
+  // This account may post in it (not an admin-only group it does not admin).
+  Fact can_send = 4;
+  // It has topics (a Telegram forum).
+  Fact forum = 5;
+  // This account may create topics in it.
+  Fact can_create_topics = 6;
+  // This account may pin messages in it.
+  Fact can_pin = 7;
+  // This account may delete other people's messages in it.
+  Fact can_delete_others = 8;
+  // The platform's own words when a fact is FACT_NO or a lookup failed, for
+  // the owner's notice.
+  string detail = 9;
+}
+
+enum Fact {
+  FACT_UNKNOWN = 0;
+  FACT_YES = 1;
+  FACT_NO = 2;
 }
 
 // The answer to a RunCommand: `message` is shown to the owner (as an error

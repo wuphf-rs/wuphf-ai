@@ -148,6 +148,7 @@ async fn session(
         is_permanent: None,
         settings: None,
         commands,
+        prober: None,
     });
     let (_inputs, inputs_rx) = mpsc::channel(1);
     let cancel = CancellationToken::new();

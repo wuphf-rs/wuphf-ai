@@ -158,6 +158,55 @@ func (NoticeKind) EnumDescriptor() ([]byte, []int) {
 	return file_client_proto_rawDescGZIP(), []int{1}
 }
 
+type Fact int32
+
+const (
+	Fact_FACT_UNKNOWN Fact = 0
+	Fact_FACT_YES     Fact = 1
+	Fact_FACT_NO      Fact = 2
+)
+
+// Enum value maps for Fact.
+var (
+	Fact_name = map[int32]string{
+		0: "FACT_UNKNOWN",
+		1: "FACT_YES",
+		2: "FACT_NO",
+	}
+	Fact_value = map[string]int32{
+		"FACT_UNKNOWN": 0,
+		"FACT_YES":     1,
+		"FACT_NO":      2,
+	}
+)
+
+func (x Fact) Enum() *Fact {
+	p := new(Fact)
+	*p = x
+	return p
+}
+
+func (x Fact) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (Fact) Descriptor() protoreflect.EnumDescriptor {
+	return file_client_proto_enumTypes[2].Descriptor()
+}
+
+func (Fact) Type() protoreflect.EnumType {
+	return &file_client_proto_enumTypes[2]
+}
+
+func (x Fact) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use Fact.Descriptor instead.
+func (Fact) EnumDescriptor() ([]byte, []int) {
+	return file_client_proto_rawDescGZIP(), []int{2}
+}
+
 type ParticipantChange_Kind int32
 
 const (
@@ -197,11 +246,11 @@ func (x ParticipantChange_Kind) String() string {
 }
 
 func (ParticipantChange_Kind) Descriptor() protoreflect.EnumDescriptor {
-	return file_client_proto_enumTypes[2].Descriptor()
+	return file_client_proto_enumTypes[3].Descriptor()
 }
 
 func (ParticipantChange_Kind) Type() protoreflect.EnumType {
-	return &file_client_proto_enumTypes[2]
+	return &file_client_proto_enumTypes[3]
 }
 
 func (x ParticipantChange_Kind) Number() protoreflect.EnumNumber {
@@ -1287,6 +1336,7 @@ type ClientFrame struct {
 	//	*ClientFrame_OwnerNotice
 	//	*ClientFrame_ChatUpdate
 	//	*ClientFrame_CommandResult
+	//	*ClientFrame_ProbeResult
 	Body          isClientFrame_Body `protobuf_oneof:"body"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -1437,6 +1487,15 @@ func (x *ClientFrame) GetCommandResult() *CommandResult {
 	return nil
 }
 
+func (x *ClientFrame) GetProbeResult() *ProbeResult {
+	if x != nil {
+		if x, ok := x.Body.(*ClientFrame_ProbeResult); ok {
+			return x.ProbeResult
+		}
+	}
+	return nil
+}
+
 type isClientFrame_Body interface {
 	isClientFrame_Body()
 }
@@ -1489,6 +1548,10 @@ type ClientFrame_CommandResult struct {
 	CommandResult *CommandResult `protobuf:"bytes,12,opt,name=command_result,json=commandResult,proto3,oneof"`
 }
 
+type ClientFrame_ProbeResult struct {
+	ProbeResult *ProbeResult `protobuf:"bytes,13,opt,name=probe_result,json=probeResult,proto3,oneof"`
+}
+
 func (*ClientFrame_Registration) isClientFrame_Body() {}
 
 func (*ClientFrame_MessageCreate) isClientFrame_Body() {}
@@ -1513,6 +1576,188 @@ func (*ClientFrame_ChatUpdate) isClientFrame_Body() {}
 
 func (*ClientFrame_CommandResult) isClientFrame_Body() {}
 
+func (*ClientFrame_ProbeResult) isClientFrame_Body() {}
+
+// The answer to a ProbeChats: one ChatFacts per chat asked about, and the
+// connector's tools as they are now.
+type ProbeResult struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	RequestId     string                 `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	Chats         []*ChatFacts           `protobuf:"bytes,2,rep,name=chats,proto3" json:"chats,omitempty"`
+	Tools         []*ToolStatus          `protobuf:"bytes,3,rep,name=tools,proto3" json:"tools,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ProbeResult) Reset() {
+	*x = ProbeResult{}
+	mi := &file_client_proto_msgTypes[14]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ProbeResult) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ProbeResult) ProtoMessage() {}
+
+func (x *ProbeResult) ProtoReflect() protoreflect.Message {
+	mi := &file_client_proto_msgTypes[14]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ProbeResult.ProtoReflect.Descriptor instead.
+func (*ProbeResult) Descriptor() ([]byte, []int) {
+	return file_client_proto_rawDescGZIP(), []int{14}
+}
+
+func (x *ProbeResult) GetRequestId() string {
+	if x != nil {
+		return x.RequestId
+	}
+	return ""
+}
+
+func (x *ProbeResult) GetChats() []*ChatFacts {
+	if x != nil {
+		return x.Chats
+	}
+	return nil
+}
+
+func (x *ProbeResult) GetTools() []*ToolStatus {
+	if x != nil {
+		return x.Tools
+	}
+	return nil
+}
+
+// What this account can do in one chat. The core decides what a rule needs.
+type ChatFacts struct {
+	state  protoimpl.MessageState `protogen:"open.v1"`
+	ChatId string                 `protobuf:"bytes,1,opt,name=chat_id,json=chatId,proto3" json:"chat_id,omitempty"`
+	// The chat exists and this account can see it.
+	Exists Fact `protobuf:"varint,2,opt,name=exists,proto3,enum=wuphf.connector.v1.Fact" json:"exists,omitempty"`
+	// This account is in it.
+	Member Fact `protobuf:"varint,3,opt,name=member,proto3,enum=wuphf.connector.v1.Fact" json:"member,omitempty"`
+	// This account may post in it (not an admin-only group it does not admin).
+	CanSend Fact `protobuf:"varint,4,opt,name=can_send,json=canSend,proto3,enum=wuphf.connector.v1.Fact" json:"can_send,omitempty"`
+	// It has topics (a Telegram forum).
+	Forum Fact `protobuf:"varint,5,opt,name=forum,proto3,enum=wuphf.connector.v1.Fact" json:"forum,omitempty"`
+	// This account may create topics in it.
+	CanCreateTopics Fact `protobuf:"varint,6,opt,name=can_create_topics,json=canCreateTopics,proto3,enum=wuphf.connector.v1.Fact" json:"can_create_topics,omitempty"`
+	// This account may pin messages in it.
+	CanPin Fact `protobuf:"varint,7,opt,name=can_pin,json=canPin,proto3,enum=wuphf.connector.v1.Fact" json:"can_pin,omitempty"`
+	// This account may delete other people's messages in it.
+	CanDeleteOthers Fact `protobuf:"varint,8,opt,name=can_delete_others,json=canDeleteOthers,proto3,enum=wuphf.connector.v1.Fact" json:"can_delete_others,omitempty"`
+	// The platform's own words when a fact is FACT_NO or a lookup failed, for
+	// the owner's notice.
+	Detail        string `protobuf:"bytes,9,opt,name=detail,proto3" json:"detail,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ChatFacts) Reset() {
+	*x = ChatFacts{}
+	mi := &file_client_proto_msgTypes[15]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ChatFacts) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ChatFacts) ProtoMessage() {}
+
+func (x *ChatFacts) ProtoReflect() protoreflect.Message {
+	mi := &file_client_proto_msgTypes[15]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ChatFacts.ProtoReflect.Descriptor instead.
+func (*ChatFacts) Descriptor() ([]byte, []int) {
+	return file_client_proto_rawDescGZIP(), []int{15}
+}
+
+func (x *ChatFacts) GetChatId() string {
+	if x != nil {
+		return x.ChatId
+	}
+	return ""
+}
+
+func (x *ChatFacts) GetExists() Fact {
+	if x != nil {
+		return x.Exists
+	}
+	return Fact_FACT_UNKNOWN
+}
+
+func (x *ChatFacts) GetMember() Fact {
+	if x != nil {
+		return x.Member
+	}
+	return Fact_FACT_UNKNOWN
+}
+
+func (x *ChatFacts) GetCanSend() Fact {
+	if x != nil {
+		return x.CanSend
+	}
+	return Fact_FACT_UNKNOWN
+}
+
+func (x *ChatFacts) GetForum() Fact {
+	if x != nil {
+		return x.Forum
+	}
+	return Fact_FACT_UNKNOWN
+}
+
+func (x *ChatFacts) GetCanCreateTopics() Fact {
+	if x != nil {
+		return x.CanCreateTopics
+	}
+	return Fact_FACT_UNKNOWN
+}
+
+func (x *ChatFacts) GetCanPin() Fact {
+	if x != nil {
+		return x.CanPin
+	}
+	return Fact_FACT_UNKNOWN
+}
+
+func (x *ChatFacts) GetCanDeleteOthers() Fact {
+	if x != nil {
+		return x.CanDeleteOthers
+	}
+	return Fact_FACT_UNKNOWN
+}
+
+func (x *ChatFacts) GetDetail() string {
+	if x != nil {
+		return x.Detail
+	}
+	return ""
+}
+
 // The answer to a RunCommand: `message` is shown to the owner (as an error
 // when not `ok`, e.g. an unknown command).
 type CommandResult struct {
@@ -1526,7 +1771,7 @@ type CommandResult struct {
 
 func (x *CommandResult) Reset() {
 	*x = CommandResult{}
-	mi := &file_client_proto_msgTypes[14]
+	mi := &file_client_proto_msgTypes[16]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1538,7 +1783,7 @@ func (x *CommandResult) String() string {
 func (*CommandResult) ProtoMessage() {}
 
 func (x *CommandResult) ProtoReflect() protoreflect.Message {
-	mi := &file_client_proto_msgTypes[14]
+	mi := &file_client_proto_msgTypes[16]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1551,7 +1796,7 @@ func (x *CommandResult) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CommandResult.ProtoReflect.Descriptor instead.
 func (*CommandResult) Descriptor() ([]byte, []int) {
-	return file_client_proto_rawDescGZIP(), []int{14}
+	return file_client_proto_rawDescGZIP(), []int{16}
 }
 
 func (x *CommandResult) GetRequestId() string {
@@ -1708,7 +1953,7 @@ const file_client_proto_rawDesc = "" +
 	"\vOwnerNotice\x122\n" +
 	"\x04kind\x18\x01 \x01(\x0e2\x1e.wuphf.connector.v1.NoticeKindR\x04kind\x12\x16\n" +
 	"\x06detail\x18\x02 \x01(\tR\x06detail\x12\x1b\n" +
-	"\tmedia_ids\x18\x03 \x03(\tR\bmediaIds\"\x98\a\n" +
+	"\tmedia_ids\x18\x03 \x03(\tR\bmediaIds\"\xde\a\n" +
 	"\vClientFrame\x12F\n" +
 	"\fregistration\x18\x01 \x01(\v2 .wuphf.connector.v1.RegistrationH\x00R\fregistration\x12O\n" +
 	"\x0emessage_create\x18\x02 \x01(\v2&.wuphf.connector.v1.MessageCreateEventH\x00R\rmessageCreate\x12O\n" +
@@ -1723,8 +1968,24 @@ const file_client_proto_rawDesc = "" +
 	" \x01(\v2\x1f.wuphf.connector.v1.OwnerNoticeH\x00R\vownerNotice\x12F\n" +
 	"\vchat_update\x18\v \x01(\v2#.wuphf.connector.v1.ChatUpdateEventH\x00R\n" +
 	"chatUpdate\x12J\n" +
-	"\x0ecommand_result\x18\f \x01(\v2!.wuphf.connector.v1.CommandResultH\x00R\rcommandResultB\x06\n" +
-	"\x04body\"X\n" +
+	"\x0ecommand_result\x18\f \x01(\v2!.wuphf.connector.v1.CommandResultH\x00R\rcommandResult\x12D\n" +
+	"\fprobe_result\x18\r \x01(\v2\x1f.wuphf.connector.v1.ProbeResultH\x00R\vprobeResultB\x06\n" +
+	"\x04body\"\x97\x01\n" +
+	"\vProbeResult\x12\x1d\n" +
+	"\n" +
+	"request_id\x18\x01 \x01(\tR\trequestId\x123\n" +
+	"\x05chats\x18\x02 \x03(\v2\x1d.wuphf.connector.v1.ChatFactsR\x05chats\x124\n" +
+	"\x05tools\x18\x03 \x03(\v2\x1e.wuphf.connector.v1.ToolStatusR\x05tools\"\xc4\x03\n" +
+	"\tChatFacts\x12\x17\n" +
+	"\achat_id\x18\x01 \x01(\tR\x06chatId\x120\n" +
+	"\x06exists\x18\x02 \x01(\x0e2\x18.wuphf.connector.v1.FactR\x06exists\x120\n" +
+	"\x06member\x18\x03 \x01(\x0e2\x18.wuphf.connector.v1.FactR\x06member\x123\n" +
+	"\bcan_send\x18\x04 \x01(\x0e2\x18.wuphf.connector.v1.FactR\acanSend\x12.\n" +
+	"\x05forum\x18\x05 \x01(\x0e2\x18.wuphf.connector.v1.FactR\x05forum\x12D\n" +
+	"\x11can_create_topics\x18\x06 \x01(\x0e2\x18.wuphf.connector.v1.FactR\x0fcanCreateTopics\x121\n" +
+	"\acan_pin\x18\a \x01(\x0e2\x18.wuphf.connector.v1.FactR\x06canPin\x12D\n" +
+	"\x11can_delete_others\x18\b \x01(\x0e2\x18.wuphf.connector.v1.FactR\x0fcanDeleteOthers\x12\x16\n" +
+	"\x06detail\x18\t \x01(\tR\x06detail\"X\n" +
 	"\rCommandResult\x12\x1d\n" +
 	"\n" +
 	"request_id\x18\x01 \x01(\tR\trequestId\x12\x0e\n" +
@@ -1743,7 +2004,11 @@ const file_client_proto_rawDesc = "" +
 	"\x15NOTICE_KIND_RECOVERED\x10\x04\x12*\n" +
 	"&NOTICE_KIND_DISAPPEARING_TIMER_UNKNOWN\x10\x05\x12!\n" +
 	"\x1dNOTICE_KIND_MEDIA_UNAVAILABLE\x10\x06\x12\x1d\n" +
-	"\x19NOTICE_KIND_LINK_REQUIRED\x10\aB<Z:github.com/wuphf-rs/wuphf-ai/proto/go/connector/v1;wuphfpbb\x06proto3"
+	"\x19NOTICE_KIND_LINK_REQUIRED\x10\a*3\n" +
+	"\x04Fact\x12\x10\n" +
+	"\fFACT_UNKNOWN\x10\x00\x12\f\n" +
+	"\bFACT_YES\x10\x01\x12\v\n" +
+	"\aFACT_NO\x10\x02B<Z:github.com/wuphf-rs/wuphf-ai/proto/go/connector/v1;wuphfpbb\x06proto3"
 
 var (
 	file_client_proto_rawDescOnce sync.Once
@@ -1757,60 +2022,74 @@ func file_client_proto_rawDescGZIP() []byte {
 	return file_client_proto_rawDescData
 }
 
-var file_client_proto_enumTypes = make([]protoimpl.EnumInfo, 3)
-var file_client_proto_msgTypes = make([]protoimpl.MessageInfo, 15)
+var file_client_proto_enumTypes = make([]protoimpl.EnumInfo, 4)
+var file_client_proto_msgTypes = make([]protoimpl.MessageInfo, 17)
 var file_client_proto_goTypes = []any{
 	(ReceiptKind)(0),            // 0: wuphf.connector.v1.ReceiptKind
 	(NoticeKind)(0),             // 1: wuphf.connector.v1.NoticeKind
-	(ParticipantChange_Kind)(0), // 2: wuphf.connector.v1.ParticipantChange.Kind
-	(*MessageCreateEvent)(nil),  // 3: wuphf.connector.v1.MessageCreateEvent
-	(*ChatUpdate)(nil),          // 4: wuphf.connector.v1.ChatUpdate
-	(*ChatAvatar)(nil),          // 5: wuphf.connector.v1.ChatAvatar
-	(*ParticipantChange)(nil),   // 6: wuphf.connector.v1.ParticipantChange
-	(*ChatUpdateEvent)(nil),     // 7: wuphf.connector.v1.ChatUpdateEvent
-	(*MessageEditEvent)(nil),    // 8: wuphf.connector.v1.MessageEditEvent
-	(*MessageDeleteEvent)(nil),  // 9: wuphf.connector.v1.MessageDeleteEvent
-	(*IdentityMigrated)(nil),    // 10: wuphf.connector.v1.IdentityMigrated
-	(*Acknowledgement)(nil),     // 11: wuphf.connector.v1.Acknowledgement
-	(*DispatchFailed)(nil),      // 12: wuphf.connector.v1.DispatchFailed
-	(*ReactionEvent)(nil),       // 13: wuphf.connector.v1.ReactionEvent
-	(*ReceiptEvent)(nil),        // 14: wuphf.connector.v1.ReceiptEvent
-	(*OwnerNotice)(nil),         // 15: wuphf.connector.v1.OwnerNotice
-	(*ClientFrame)(nil),         // 16: wuphf.connector.v1.ClientFrame
-	(*CommandResult)(nil),       // 17: wuphf.connector.v1.CommandResult
-	(*Attachment)(nil),          // 18: wuphf.connector.v1.Attachment
-	(*DisappearingTimer)(nil),   // 19: wuphf.connector.v1.DisappearingTimer
-	(*MuteState)(nil),           // 20: wuphf.connector.v1.MuteState
-	(*Registration)(nil),        // 21: wuphf.connector.v1.Registration
+	(Fact)(0),                   // 2: wuphf.connector.v1.Fact
+	(ParticipantChange_Kind)(0), // 3: wuphf.connector.v1.ParticipantChange.Kind
+	(*MessageCreateEvent)(nil),  // 4: wuphf.connector.v1.MessageCreateEvent
+	(*ChatUpdate)(nil),          // 5: wuphf.connector.v1.ChatUpdate
+	(*ChatAvatar)(nil),          // 6: wuphf.connector.v1.ChatAvatar
+	(*ParticipantChange)(nil),   // 7: wuphf.connector.v1.ParticipantChange
+	(*ChatUpdateEvent)(nil),     // 8: wuphf.connector.v1.ChatUpdateEvent
+	(*MessageEditEvent)(nil),    // 9: wuphf.connector.v1.MessageEditEvent
+	(*MessageDeleteEvent)(nil),  // 10: wuphf.connector.v1.MessageDeleteEvent
+	(*IdentityMigrated)(nil),    // 11: wuphf.connector.v1.IdentityMigrated
+	(*Acknowledgement)(nil),     // 12: wuphf.connector.v1.Acknowledgement
+	(*DispatchFailed)(nil),      // 13: wuphf.connector.v1.DispatchFailed
+	(*ReactionEvent)(nil),       // 14: wuphf.connector.v1.ReactionEvent
+	(*ReceiptEvent)(nil),        // 15: wuphf.connector.v1.ReceiptEvent
+	(*OwnerNotice)(nil),         // 16: wuphf.connector.v1.OwnerNotice
+	(*ClientFrame)(nil),         // 17: wuphf.connector.v1.ClientFrame
+	(*ProbeResult)(nil),         // 18: wuphf.connector.v1.ProbeResult
+	(*ChatFacts)(nil),           // 19: wuphf.connector.v1.ChatFacts
+	(*CommandResult)(nil),       // 20: wuphf.connector.v1.CommandResult
+	(*Attachment)(nil),          // 21: wuphf.connector.v1.Attachment
+	(*DisappearingTimer)(nil),   // 22: wuphf.connector.v1.DisappearingTimer
+	(*MuteState)(nil),           // 23: wuphf.connector.v1.MuteState
+	(*Registration)(nil),        // 24: wuphf.connector.v1.Registration
+	(*ToolStatus)(nil),          // 25: wuphf.connector.v1.ToolStatus
 }
 var file_client_proto_depIdxs = []int32{
-	18, // 0: wuphf.connector.v1.MessageCreateEvent.attachments:type_name -> wuphf.connector.v1.Attachment
-	19, // 1: wuphf.connector.v1.MessageCreateEvent.disappearing:type_name -> wuphf.connector.v1.DisappearingTimer
-	19, // 2: wuphf.connector.v1.ChatUpdate.disappearing:type_name -> wuphf.connector.v1.DisappearingTimer
-	5,  // 3: wuphf.connector.v1.ChatUpdate.avatar:type_name -> wuphf.connector.v1.ChatAvatar
-	6,  // 4: wuphf.connector.v1.ChatUpdate.participant_changes:type_name -> wuphf.connector.v1.ParticipantChange
-	20, // 5: wuphf.connector.v1.ChatUpdate.mute:type_name -> wuphf.connector.v1.MuteState
-	2,  // 6: wuphf.connector.v1.ParticipantChange.kind:type_name -> wuphf.connector.v1.ParticipantChange.Kind
-	4,  // 7: wuphf.connector.v1.ChatUpdateEvent.updates:type_name -> wuphf.connector.v1.ChatUpdate
+	21, // 0: wuphf.connector.v1.MessageCreateEvent.attachments:type_name -> wuphf.connector.v1.Attachment
+	22, // 1: wuphf.connector.v1.MessageCreateEvent.disappearing:type_name -> wuphf.connector.v1.DisappearingTimer
+	22, // 2: wuphf.connector.v1.ChatUpdate.disappearing:type_name -> wuphf.connector.v1.DisappearingTimer
+	6,  // 3: wuphf.connector.v1.ChatUpdate.avatar:type_name -> wuphf.connector.v1.ChatAvatar
+	7,  // 4: wuphf.connector.v1.ChatUpdate.participant_changes:type_name -> wuphf.connector.v1.ParticipantChange
+	23, // 5: wuphf.connector.v1.ChatUpdate.mute:type_name -> wuphf.connector.v1.MuteState
+	3,  // 6: wuphf.connector.v1.ParticipantChange.kind:type_name -> wuphf.connector.v1.ParticipantChange.Kind
+	5,  // 7: wuphf.connector.v1.ChatUpdateEvent.updates:type_name -> wuphf.connector.v1.ChatUpdate
 	0,  // 8: wuphf.connector.v1.ReceiptEvent.kind:type_name -> wuphf.connector.v1.ReceiptKind
 	1,  // 9: wuphf.connector.v1.OwnerNotice.kind:type_name -> wuphf.connector.v1.NoticeKind
-	21, // 10: wuphf.connector.v1.ClientFrame.registration:type_name -> wuphf.connector.v1.Registration
-	3,  // 11: wuphf.connector.v1.ClientFrame.message_create:type_name -> wuphf.connector.v1.MessageCreateEvent
-	11, // 12: wuphf.connector.v1.ClientFrame.acknowledgement:type_name -> wuphf.connector.v1.Acknowledgement
-	10, // 13: wuphf.connector.v1.ClientFrame.identity_migrated:type_name -> wuphf.connector.v1.IdentityMigrated
-	12, // 14: wuphf.connector.v1.ClientFrame.dispatch_failed:type_name -> wuphf.connector.v1.DispatchFailed
-	8,  // 15: wuphf.connector.v1.ClientFrame.message_edit:type_name -> wuphf.connector.v1.MessageEditEvent
-	9,  // 16: wuphf.connector.v1.ClientFrame.message_delete:type_name -> wuphf.connector.v1.MessageDeleteEvent
-	13, // 17: wuphf.connector.v1.ClientFrame.reaction:type_name -> wuphf.connector.v1.ReactionEvent
-	14, // 18: wuphf.connector.v1.ClientFrame.receipt:type_name -> wuphf.connector.v1.ReceiptEvent
-	15, // 19: wuphf.connector.v1.ClientFrame.owner_notice:type_name -> wuphf.connector.v1.OwnerNotice
-	7,  // 20: wuphf.connector.v1.ClientFrame.chat_update:type_name -> wuphf.connector.v1.ChatUpdateEvent
-	17, // 21: wuphf.connector.v1.ClientFrame.command_result:type_name -> wuphf.connector.v1.CommandResult
-	22, // [22:22] is the sub-list for method output_type
-	22, // [22:22] is the sub-list for method input_type
-	22, // [22:22] is the sub-list for extension type_name
-	22, // [22:22] is the sub-list for extension extendee
-	0,  // [0:22] is the sub-list for field type_name
+	24, // 10: wuphf.connector.v1.ClientFrame.registration:type_name -> wuphf.connector.v1.Registration
+	4,  // 11: wuphf.connector.v1.ClientFrame.message_create:type_name -> wuphf.connector.v1.MessageCreateEvent
+	12, // 12: wuphf.connector.v1.ClientFrame.acknowledgement:type_name -> wuphf.connector.v1.Acknowledgement
+	11, // 13: wuphf.connector.v1.ClientFrame.identity_migrated:type_name -> wuphf.connector.v1.IdentityMigrated
+	13, // 14: wuphf.connector.v1.ClientFrame.dispatch_failed:type_name -> wuphf.connector.v1.DispatchFailed
+	9,  // 15: wuphf.connector.v1.ClientFrame.message_edit:type_name -> wuphf.connector.v1.MessageEditEvent
+	10, // 16: wuphf.connector.v1.ClientFrame.message_delete:type_name -> wuphf.connector.v1.MessageDeleteEvent
+	14, // 17: wuphf.connector.v1.ClientFrame.reaction:type_name -> wuphf.connector.v1.ReactionEvent
+	15, // 18: wuphf.connector.v1.ClientFrame.receipt:type_name -> wuphf.connector.v1.ReceiptEvent
+	16, // 19: wuphf.connector.v1.ClientFrame.owner_notice:type_name -> wuphf.connector.v1.OwnerNotice
+	8,  // 20: wuphf.connector.v1.ClientFrame.chat_update:type_name -> wuphf.connector.v1.ChatUpdateEvent
+	20, // 21: wuphf.connector.v1.ClientFrame.command_result:type_name -> wuphf.connector.v1.CommandResult
+	18, // 22: wuphf.connector.v1.ClientFrame.probe_result:type_name -> wuphf.connector.v1.ProbeResult
+	19, // 23: wuphf.connector.v1.ProbeResult.chats:type_name -> wuphf.connector.v1.ChatFacts
+	25, // 24: wuphf.connector.v1.ProbeResult.tools:type_name -> wuphf.connector.v1.ToolStatus
+	2,  // 25: wuphf.connector.v1.ChatFacts.exists:type_name -> wuphf.connector.v1.Fact
+	2,  // 26: wuphf.connector.v1.ChatFacts.member:type_name -> wuphf.connector.v1.Fact
+	2,  // 27: wuphf.connector.v1.ChatFacts.can_send:type_name -> wuphf.connector.v1.Fact
+	2,  // 28: wuphf.connector.v1.ChatFacts.forum:type_name -> wuphf.connector.v1.Fact
+	2,  // 29: wuphf.connector.v1.ChatFacts.can_create_topics:type_name -> wuphf.connector.v1.Fact
+	2,  // 30: wuphf.connector.v1.ChatFacts.can_pin:type_name -> wuphf.connector.v1.Fact
+	2,  // 31: wuphf.connector.v1.ChatFacts.can_delete_others:type_name -> wuphf.connector.v1.Fact
+	32, // [32:32] is the sub-list for method output_type
+	32, // [32:32] is the sub-list for method input_type
+	32, // [32:32] is the sub-list for extension type_name
+	32, // [32:32] is the sub-list for extension extendee
+	0,  // [0:32] is the sub-list for field type_name
 }
 
 func init() { file_client_proto_init() }
@@ -1842,14 +2121,15 @@ func file_client_proto_init() {
 		(*ClientFrame_OwnerNotice)(nil),
 		(*ClientFrame_ChatUpdate)(nil),
 		(*ClientFrame_CommandResult)(nil),
+		(*ClientFrame_ProbeResult)(nil),
 	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_client_proto_rawDesc), len(file_client_proto_rawDesc)),
-			NumEnums:      3,
-			NumMessages:   15,
+			NumEnums:      4,
+			NumMessages:   17,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

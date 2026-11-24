@@ -21,13 +21,14 @@
 //! and identity resolution lives in the core.
 //!
 //! The types are grouped into submodules by domain ([`ids`], [`routing`],
-//! [`connector`], [`message`], [`dispatch`], [`chat`]) and re-exported
+//! [`connector`], [`message`], [`dispatch`], [`chat`], [`health`]) and re-exported
 //! flatly, so callers continue to refer to everything as `wuphf_model::Type`.
 
 mod chat;
 mod chat_directory;
 mod connector;
 mod dispatch;
+mod health;
 mod ids;
 mod message;
 mod observation;
@@ -38,6 +39,7 @@ pub use chat::*;
 pub use chat_directory::*;
 pub use connector::*;
 pub use dispatch::*;
+pub use health::*;
 pub use ids::*;
 pub use message::*;
 pub use observation::*;

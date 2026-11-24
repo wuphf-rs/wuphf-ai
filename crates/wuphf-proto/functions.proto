@@ -4,6 +4,8 @@ package wuphf.connector.v1;
 
 option go_package = "github.com/wuphf-rs/wuphf-ai/proto/go/connector/v1;wuphfpb";
 
+import "common.proto";
+
 // Remote functions. A provider process registers named functions over a
 // ProviderTransport session; any client calls them through FunctionTransport.
 // The core only brokers calls; it never calls a function itself. Bodies are
@@ -70,7 +72,11 @@ message FunctionDeclaration {
 
 message ProviderHello {
   string provider_id = 1;
+  // Only the functions it can run: one whose tools are missing is left out
+  // (and the tool reported below), so callers fail over at once.
   repeated FunctionDeclaration functions = 2;
+  // The external programs the provider runs, found or not (plan 079).
+  repeated ToolStatus tools = 3;
 }
 
 message ProviderClientFrame {

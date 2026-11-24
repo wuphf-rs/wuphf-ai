@@ -19,6 +19,7 @@ use wuphf_proto::connector as pb;
 use wuphf_proto::connector::connector_transport_client::ConnectorTransportClient;
 
 use crate::commands::{self, Commands};
+use crate::probe::{self, Prober};
 use crate::sender::{Delivery, Failure, Sender};
 
 const INITIAL_BACKOFF: Duration = Duration::from_secs(1);
@@ -63,6 +64,9 @@ pub struct Options {
     /// [`crate::commands`]): declared at registration, run on the core's
     /// `RunCommand`. `None` declares none.
     pub commands: Option<Arc<dyn Commands>>,
+    /// Answers the core's health probes (see [`crate::probe`]). `None`
+    /// answers every chat as unknown.
+    pub prober: Option<Arc<dyn Prober>>,
 }
 
 #[derive(Debug, Error)]
@@ -168,6 +172,7 @@ impl Client {
                         .as_ref()
                         .map(|commands| commands.declarations())
                         .unwrap_or_default(),
+                    tools: Vec::new(),
                 })),
             })
             .map_err(|_| SessionError::StreamClosed)?;
@@ -294,6 +299,18 @@ impl Client {
                     let frame = commands::answer(commands.as_ref(), command).await;
                     if outbound.send(frame).await.is_err() {
                         warn!("the session ended before a command's result was sent");
+                    }
+                });
+                Ok(())
+            }
+            // Also in a task: a probe looks chats up on the platform.
+            Some(pb::server_frame::Body::Probe(probe)) => {
+                let prober = self.opts.prober.clone();
+                let outbound = outbound.clone();
+                tokio::spawn(async move {
+                    let frame = probe::answer(prober.as_ref(), probe).await;
+                    if outbound.send(frame).await.is_err() {
+                        warn!("the session ended before a probe's result was sent");
                     }
                 });
                 Ok(())

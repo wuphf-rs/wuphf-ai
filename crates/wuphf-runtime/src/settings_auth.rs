@@ -18,8 +18,8 @@
 //! titles the core has stored), connectors and rules.
 
 use crate::auth::{ConnectorTokens, bearer_token};
-use crate::connector_commands::{COMMAND_TIMEOUT, ConnectorCommands};
 use crate::connector_settings::section_connector;
+use crate::live_sessions::{COMMAND_TIMEOUT, LiveSessions};
 use botconf_grpc::proto::Actor;
 use botconf_grpc::proto::settings_server::SettingsServer;
 use botconf_grpc::{Authorizer, Operation, Principal, SettingsService};
@@ -55,7 +55,7 @@ pub fn settings_server<S>(
     storage: Arc<S>,
     connectors: Arc<ConnectorTokens>,
     observer_token: Option<String>,
-    commands: Arc<ConnectorCommands>,
+    commands: Arc<LiveSessions>,
 ) -> SettingsServer<SettingsService<WuphfSchema>>
 where
     S: ObservationStore + TopologyStore + PanelTokens,
@@ -81,7 +81,7 @@ where
 /// declared, run on that session.
 pub(crate) fn with_commands(
     panel: Panel<WuphfSchema>,
-    commands: Arc<ConnectorCommands>,
+    commands: Arc<LiveSessions>,
 ) -> Panel<WuphfSchema> {
     let offered = Arc::clone(&commands);
     panel

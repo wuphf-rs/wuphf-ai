@@ -16,9 +16,9 @@ use wuphf_runtime::{
     Runtime,
     auth::{ConnectorTokens, any_token_auth},
     connector::ConnectorHub,
-    connector_commands::ConnectorCommands,
     connector_settings::ConnectorSettings,
     grpc::GrpcConnectorService,
+    live_sessions::LiveSessions,
     media::GrpcMediaService,
     observer_service::{GrpcObserverService, bearer_auth},
     plugin_settings::{GrpcPluginService, PluginSettings},
@@ -203,7 +203,7 @@ async fn serve(path: PathBuf) -> Result<()> {
     // their owners, and the observer token as the owner.
     // The commands live connector sessions declare, offered on their sections
     // in the settings panel and run on their sessions.
-    let commands = Arc::new(ConnectorCommands::default());
+    let commands = Arc::new(LiveSessions::default());
     let settings_service = settings_server(
         Arc::clone(&settings),
         Arc::clone(&storage),
