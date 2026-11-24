@@ -102,6 +102,43 @@ pub struct MessageCopy {
     pub native_id: String,
 }
 
+/// One reactor's reaction in an [`EventKind::ReactionSet`].
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ReactorReaction {
+    pub reactor: String,
+    pub reactor_name: Option<String>,
+    pub emoji: String,
+}
+
+/// Who wrote a message's copy at one endpoint, in the terms a platform that
+/// addresses a message by its author needs (a WhatsApp reaction key). When
+/// the bridge wrote that copy the author is the bridge's own account;
+/// otherwise `author_id`/`participant` are the target platform's own ids.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MessageAuthor {
+    pub author_id: String,
+    pub participant: Option<String>,
+    pub authored_by_bridge: bool,
+}
+
+impl MessageAuthor {
+    /// Whether nothing is known of the author: a reaction routed before
+    /// authors were carried, or one blocked until its copy is delivered.
+    pub fn is_unknown(&self) -> bool {
+        *self == Self::default()
+    }
+
+    /// The author of `message`'s copy at an endpoint, given whether the bridge
+    /// sent that copy.
+    pub fn of(message: &Message, authored_by_bridge: bool) -> Self {
+        Self {
+            author_id: message.author_id.clone(),
+            participant: message.participant.clone(),
+            authored_by_bridge,
+        }
+    }
+}
+
 /// The quoted parent of a reply, denormalized so a connector can render a quote
 /// preview without a second lookup. Carries the parent's native id on the target
 /// platform plus enough content to display.
@@ -191,14 +228,22 @@ pub enum EventKind {
     /// A reactor set or cleared their reaction on a message (reactions are
     /// toggles). `native_id` is the reacted message, resolved to the logical
     /// message like an edit; `emoji` is `None` when the reactor cleared theirs;
-    /// `from_me` flags the account owner so the core can recognise a reaction
-    /// it applied being echoed back.
+    /// `from_me` flags the connector's own session account, which is the
+    /// owner's on the platforms that report it.
     Reaction {
         native_id: String,
         reactor: String,
         reactor_name: Option<String>,
         emoji: Option<String>,
         from_me: bool,
+    },
+    /// The complete set of other accounts' reactions on a message, for a
+    /// platform that reports them as a whole (a Telegram user session). A
+    /// reactor absent from `reactions` has none; the core diffs the set with
+    /// what it stored for the copy.
+    ReactionSet {
+        native_id: String,
+        reactions: Vec<ReactorReaction>,
     },
     /// A delivery or read receipt observed on the source platform. Surfaced on
     /// the message's other copies (a 👍 for delivered, 👀 for read in DMs).

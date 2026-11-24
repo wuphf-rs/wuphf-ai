@@ -10,7 +10,7 @@ use std::sync::Arc;
 use thiserror::Error;
 use wuphf_model::{
     Action, ConnectorId, Conversation, ConversationId, Dispatch, Endpoint, EndpointId, Message,
-    MessageId, ReceiptKind, ReplyContext, Rule, RuleKind, Target,
+    MessageAuthor, MessageId, ReceiptKind, ReplyContext, Rule, RuleKind, Target,
 };
 use wuphf_storage::{ChatProfileStore, MessageStore, StorageError, TopologyStore};
 
@@ -157,7 +157,9 @@ where
     /// Fan a reaction change out to the other endpoints. Like an edit, each
     /// target carries the native id of the copy the reaction applies to, blocked
     /// until that copy is delivered. The connector decides how to render the
-    /// reaction (e.g. as text), so the router only carries the reactor and emoji.
+    /// reaction (e.g. as text, or natively when `by_owner`), so the router
+    /// carries the reactor, the emoji, and who wrote each target's copy: a
+    /// delivered copy's author is known now, a blocked one's when it is released.
     pub async fn route_reaction(
         &self,
         message: &Message,
@@ -165,15 +167,33 @@ where
         reactor: String,
         reactor_name: Option<String>,
         emoji: Option<String>,
+        by_owner: bool,
     ) -> Result<Vec<Dispatch>, RouterError> {
-        self.fan_out_to_copies(message, origin_endpoint, |native_id| Action::React {
-            message_id: message.id,
-            native_id,
-            reactor: reactor.clone(),
-            reactor_name: reactor_name.clone(),
-            emoji: emoji.clone(),
-        })
-        .await
+        let mut dispatches = self
+            .fan_out_to_copies(message, origin_endpoint, |native_id| Action::React {
+                message_id: message.id,
+                native_id,
+                reactor: reactor.clone(),
+                reactor_name: reactor_name.clone(),
+                emoji: emoji.clone(),
+                by_owner,
+                target_author: MessageAuthor::default(),
+            })
+            .await?;
+        for dispatch in &mut dispatches {
+            let endpoint_id = dispatch.to.endpoint_id;
+            if let Action::React {
+                native_id,
+                target_author,
+                ..
+            } = &mut dispatch.action
+                && !native_id.is_empty()
+            {
+                let authored_by_bridge = self.storage.is_sent_copy(endpoint_id, native_id).await?;
+                *target_author = MessageAuthor::of(message, authored_by_bridge);
+            }
+        }
+        Ok(dispatches)
     }
 
     /// Fan a delivery/read receipt out to every other endpoint that holds a

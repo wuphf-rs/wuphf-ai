@@ -95,6 +95,14 @@ message MessageRetitleDispatch {
 // only resolves and routes the signal; the connector decides how to render it
 // (e.g. Telegram shows it as a companion text line rather than a native
 // reaction). Acknowledged like any dispatch.
+//
+// `by_owner` says the reactor is the owner: a platform that reacts as the
+// owner's own account (WhatsApp, Instagram) applies it as a native reaction,
+// and drops a reaction that is not the owner's. The target copy's author is
+// carried as a reply's quote carries it, since WhatsApp addresses the reacted
+// message by its author: the bridge's own account when
+// `target_authored_by_bridge`, otherwise `target_participant` or
+// `target_sender` (this platform's own ids in that case).
 message ReactionDispatch {
   string dispatch_id = 1;
   string target_chat_id = 2;
@@ -103,6 +111,10 @@ message ReactionDispatch {
   string reactor = 5;
   optional string reactor_name = 6;
   string emoji = 7;
+  bool by_owner = 8;
+  string target_sender = 9;
+  optional string target_participant = 10;
+  bool target_authored_by_bridge = 11;
 }
 
 // Signal that a message this connector delivered has been replicated to all of

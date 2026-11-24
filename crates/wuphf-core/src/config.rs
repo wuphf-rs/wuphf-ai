@@ -19,6 +19,9 @@ pub struct RoutingConfig {
     notice_targets: Vec<ChatRef>,
     /// Which way pin, mute and archive cross, globally and per conversation.
     chat_state: ChatStateSettings,
+    /// The owner's platform user ids on each connector (`owner_ids`): whose
+    /// reactions are the owner's own.
+    owners: HashMap<ConnectorId, HashSet<String>>,
 }
 
 /// The `chat_state` settings: a global policy, and overrides that each name a
@@ -62,7 +65,26 @@ impl RoutingConfig {
                 .collect(),
             notice_targets: Vec::new(),
             chat_state: ChatStateSettings::default(),
+            owners: HashMap::new(),
         }
+    }
+
+    /// Declare the owner's ids on each connector. Without them only a
+    /// connector's own session account (`from_me`) counts as the owner.
+    pub fn with_owners(mut self, owners: HashMap<ConnectorId, HashSet<String>>) -> Self {
+        self.owners = owners;
+        self
+    }
+
+    /// Whether `actor`, as `connector` reports it, is the owner: one of that
+    /// connector's `owner_ids`, or its own session account (`from_me`), which
+    /// connectors report only where that account is the owner's.
+    pub fn is_owner(&self, connector: &ConnectorId, actor: &str, from_me: bool) -> bool {
+        from_me
+            || self
+                .owners
+                .get(connector)
+                .is_some_and(|owners| owners.contains(actor))
     }
 
     /// Declare which way chat states cross. Without it, every state crosses

@@ -150,20 +150,23 @@ where
                 reactor,
                 reactor_name,
                 emoji,
-                // from_me is unused in the source-to-text direction: the bridge
-                // never applies a native reaction the source could echo back, so
-                // every reported reaction (including the owner's own) mirrors.
-                from_me: _,
+                from_me,
             } => {
-                self.ingest_reaction(
-                    &routing,
-                    origin_endpoint,
-                    native_id,
+                let change = ingest::ReactionChange {
                     reactor,
                     reactor_name,
                     emoji,
-                )
-                .await
+                    from_me,
+                };
+                self.ingest_reaction(&routing, &origin, native_id, change)
+                    .await
+            }
+            EventKind::ReactionSet {
+                native_id,
+                reactions,
+            } => {
+                self.ingest_reaction_set(&routing, &origin, native_id, reactions)
+                    .await
             }
             EventKind::Receipt {
                 native_id,

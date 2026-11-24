@@ -95,7 +95,9 @@ where
                     .mark_observed_deleted(connector_id, chat_id, native_id)
                     .await?
             }
-            EventKind::Reaction { .. } | EventKind::Receipt { .. } => None,
+            EventKind::Reaction { .. }
+            | EventKind::ReactionSet { .. }
+            | EventKind::Receipt { .. } => None,
         };
         if let Some(observed) = captured {
             // A send error means no live subscribers; history is already

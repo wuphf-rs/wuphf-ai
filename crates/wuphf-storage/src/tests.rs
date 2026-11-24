@@ -1,8 +1,8 @@
 use super::*;
 use std::collections::BTreeSet;
 use wuphf_model::{
-    Action, Attachment, AttachmentKind, DedupKey, DispatchState, MediaBlob, MediaId, MessageCopy,
-    ObservedDirection, ObservedMessage, Platform, ReceiptKind, Target,
+    Action, Attachment, AttachmentKind, DedupKey, DispatchState, MediaBlob, MediaId, MessageAuthor,
+    MessageCopy, ObservedDirection, ObservedMessage, Platform, ReceiptKind, Target,
 };
 
 #[tokio::test]
@@ -329,6 +329,8 @@ async fn settling_a_signal_dispatch_records_no_copy<S: Storage>(storage: S) {
             reactor: "someone".into(),
             reactor_name: None,
             emoji: Some("👍".into()),
+            by_owner: false,
+            target_author: MessageAuthor::default(),
         },
         Action::Receipt {
             message_id,
@@ -1669,4 +1671,127 @@ async fn health_state_round_trips<S: Storage>(storage: S) {
     assert_eq!(dead.len(), 1);
     assert_eq!(dead[0].id, first.id);
     assert!(storage.dead_letters(1, 10).await.unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn memory_reactions_round_trip() {
+    reactions_round_trip(InMemoryStorage::default()).await;
+}
+
+#[tokio::test]
+async fn sqlite_reactions_round_trip() {
+    reactions_round_trip(temp_sqlite().await).await;
+}
+
+/// A reaction is kept per copy and reactor: setting it again replaces it, a
+/// clear removes only that reactor's, and other copies are untouched.
+async fn reactions_round_trip<S: Storage>(storage: S) {
+    let message = MessageId::new();
+    let (here, there) = (EndpointId::new(), EndpointId::new());
+    let reaction = |reactor: &str, emoji: &str| StoredReaction {
+        reactor: reactor.into(),
+        emoji: emoji.into(),
+    };
+    storage
+        .set_reaction(message, here, "bob", Some("👍"))
+        .await
+        .unwrap();
+    storage
+        .set_reaction(message, here, "", Some("❤️"))
+        .await
+        .unwrap();
+    storage
+        .set_reaction(message, here, "bob", Some("😂"))
+        .await
+        .unwrap();
+    storage
+        .set_reaction(message, there, "bob", Some("🔥"))
+        .await
+        .unwrap();
+    assert_eq!(
+        storage.reactions_at(message, here).await.unwrap(),
+        [reaction("", "❤️"), reaction("bob", "😂")]
+    );
+
+    storage
+        .set_reaction(message, here, "bob", None)
+        .await
+        .unwrap();
+    storage
+        .set_reaction(message, here, "nobody", None)
+        .await
+        .unwrap();
+    assert_eq!(
+        storage.reactions_at(message, here).await.unwrap(),
+        [reaction("", "❤️")]
+    );
+    assert_eq!(
+        storage.reactions_at(message, there).await.unwrap(),
+        [reaction("bob", "🔥")]
+    );
+}
+
+#[tokio::test]
+async fn memory_acknowledging_create_binds_blocked_reaction_author() {
+    acknowledging_create_binds_blocked_reaction_author(InMemoryStorage::default()).await;
+}
+
+#[tokio::test]
+async fn sqlite_acknowledging_create_binds_blocked_reaction_author() {
+    acknowledging_create_binds_blocked_reaction_author(temp_sqlite().await).await;
+}
+
+/// A reaction blocked behind its message's create is released with the copy's
+/// native id and its author: the bridge, which just sent that copy.
+async fn acknowledging_create_binds_blocked_reaction_author<S: Storage>(storage: S) {
+    let message_id = MessageId::new();
+    let endpoint_id = EndpointId::new();
+    storage.put_endpoint(endpoint(endpoint_id)).await.unwrap();
+    storage.put_message(message(message_id)).await.unwrap();
+    let create = enqueue(&storage, send(message_id, endpoint_id, None)).await;
+    let reaction = Dispatch::new(
+        target(endpoint_id),
+        message(message_id).conversation_id,
+        Action::React {
+            message_id,
+            native_id: String::new(),
+            reactor: "owner".into(),
+            reactor_name: None,
+            emoji: Some("❤️".into()),
+            by_owner: true,
+            target_author: MessageAuthor::default(),
+        },
+        Some(message_id),
+    );
+    enqueue(&storage, reaction).await;
+
+    let released = storage
+        .acknowledge_dispatch(create.id, "native-1".into())
+        .await
+        .unwrap();
+    let [
+        Dispatch {
+            action:
+                Action::React {
+                    native_id,
+                    target_author,
+                    by_owner,
+                    ..
+                },
+            ..
+        },
+    ] = released.as_slice()
+    else {
+        panic!("one released reaction expected: {released:?}");
+    };
+    assert_eq!(native_id, "native-1");
+    assert!(by_owner);
+    assert_eq!(
+        *target_author,
+        MessageAuthor {
+            author_id: "test".into(),
+            participant: None,
+            authored_by_bridge: true,
+        }
+    );
 }

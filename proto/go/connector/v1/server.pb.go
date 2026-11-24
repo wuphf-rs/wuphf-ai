@@ -574,6 +574,14 @@ func (x *MessageRetitleDispatch) GetTitle() string {
 // only resolves and routes the signal; the connector decides how to render it
 // (e.g. Telegram shows it as a companion text line rather than a native
 // reaction). Acknowledged like any dispatch.
+//
+// `by_owner` says the reactor is the owner: a platform that reacts as the
+// owner's own account (WhatsApp, Instagram) applies it as a native reaction,
+// and drops a reaction that is not the owner's. The target copy's author is
+// carried as a reply's quote carries it, since WhatsApp addresses the reacted
+// message by its author: the bridge's own account when
+// `target_authored_by_bridge`, otherwise `target_participant` or
+// `target_sender` (this platform's own ids in that case).
 type ReactionDispatch struct {
 	state                   protoimpl.MessageState `protogen:"open.v1"`
 	DispatchId              string                 `protobuf:"bytes,1,opt,name=dispatch_id,json=dispatchId,proto3" json:"dispatch_id,omitempty"`
@@ -583,6 +591,10 @@ type ReactionDispatch struct {
 	Reactor                 string                 `protobuf:"bytes,5,opt,name=reactor,proto3" json:"reactor,omitempty"`
 	ReactorName             *string                `protobuf:"bytes,6,opt,name=reactor_name,json=reactorName,proto3,oneof" json:"reactor_name,omitempty"`
 	Emoji                   string                 `protobuf:"bytes,7,opt,name=emoji,proto3" json:"emoji,omitempty"`
+	ByOwner                 bool                   `protobuf:"varint,8,opt,name=by_owner,json=byOwner,proto3" json:"by_owner,omitempty"`
+	TargetSender            string                 `protobuf:"bytes,9,opt,name=target_sender,json=targetSender,proto3" json:"target_sender,omitempty"`
+	TargetParticipant       *string                `protobuf:"bytes,10,opt,name=target_participant,json=targetParticipant,proto3,oneof" json:"target_participant,omitempty"`
+	TargetAuthoredByBridge  bool                   `protobuf:"varint,11,opt,name=target_authored_by_bridge,json=targetAuthoredByBridge,proto3" json:"target_authored_by_bridge,omitempty"`
 	unknownFields           protoimpl.UnknownFields
 	sizeCache               protoimpl.SizeCache
 }
@@ -664,6 +676,34 @@ func (x *ReactionDispatch) GetEmoji() string {
 		return x.Emoji
 	}
 	return ""
+}
+
+func (x *ReactionDispatch) GetByOwner() bool {
+	if x != nil {
+		return x.ByOwner
+	}
+	return false
+}
+
+func (x *ReactionDispatch) GetTargetSender() string {
+	if x != nil {
+		return x.TargetSender
+	}
+	return ""
+}
+
+func (x *ReactionDispatch) GetTargetParticipant() string {
+	if x != nil && x.TargetParticipant != nil {
+		return *x.TargetParticipant
+	}
+	return ""
+}
+
+func (x *ReactionDispatch) GetTargetAuthoredByBridge() bool {
+	if x != nil {
+		return x.TargetAuthoredByBridge
+	}
+	return false
 }
 
 // Signal that a message this connector delivered has been replicated to all of
@@ -1350,7 +1390,7 @@ const file_server_proto_rawDesc = "" +
 	"dispatchId\x12$\n" +
 	"\x0etarget_chat_id\x18\x02 \x01(\tR\ftargetChatId\x12(\n" +
 	"\x10target_thread_id\x18\x03 \x01(\tR\x0etargetThreadId\x12\x14\n" +
-	"\x05title\x18\x04 \x01(\tR\x05title\"\xc3\x02\n" +
+	"\x05title\x18\x04 \x01(\tR\x05title\"\x89\x04\n" +
 	"\x10ReactionDispatch\x12\x1f\n" +
 	"\vdispatch_id\x18\x01 \x01(\tR\n" +
 	"dispatchId\x12$\n" +
@@ -1359,9 +1399,15 @@ const file_server_proto_rawDesc = "" +
 	"\x1atarget_platform_message_id\x18\x04 \x01(\tR\x17targetPlatformMessageId\x12\x18\n" +
 	"\areactor\x18\x05 \x01(\tR\areactor\x12&\n" +
 	"\freactor_name\x18\x06 \x01(\tH\x01R\vreactorName\x88\x01\x01\x12\x14\n" +
-	"\x05emoji\x18\a \x01(\tR\x05emojiB\x13\n" +
+	"\x05emoji\x18\a \x01(\tR\x05emoji\x12\x19\n" +
+	"\bby_owner\x18\b \x01(\bR\abyOwner\x12#\n" +
+	"\rtarget_sender\x18\t \x01(\tR\ftargetSender\x122\n" +
+	"\x12target_participant\x18\n" +
+	" \x01(\tH\x02R\x11targetParticipant\x88\x01\x01\x129\n" +
+	"\x19target_authored_by_bridge\x18\v \x01(\bR\x16targetAuthoredByBridgeB\x13\n" +
 	"\x11_target_thread_idB\x0f\n" +
-	"\r_reactor_name\"\xdd\x01\n" +
+	"\r_reactor_nameB\x15\n" +
+	"\x13_target_participant\"\xdd\x01\n" +
 	"\x13DeliveryAckDispatch\x12\x1f\n" +
 	"\vdispatch_id\x18\x01 \x01(\tR\n" +
 	"dispatchId\x12$\n" +

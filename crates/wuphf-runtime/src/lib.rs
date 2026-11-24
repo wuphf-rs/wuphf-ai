@@ -323,6 +323,7 @@ where
         EventKind::Edit { .. } => "edit",
         EventKind::Delete { .. } => "delete",
         EventKind::Reaction { .. } => "reaction",
+        EventKind::ReactionSet { .. } => "reactions",
         EventKind::Receipt {
             kind: ReceiptKind::Delivered,
             ..

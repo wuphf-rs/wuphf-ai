@@ -4,9 +4,9 @@
 use crate::shared::{acknowledged_copy, release_blocked, wall_clock_ms};
 use crate::{
     ChatProfileStore, DispatchStore, HealthStore, HeldDispatch, MediaStore, MessageStore,
-    ObservationStore, PanelTokens, ProvisioningStash, SettingsDeclaration, SettingsDeclarations,
-    SettingsOverrides, SettingsOwner, StorageError, StorageResult, StoredProblem, StoredSetting,
-    TopologyStore,
+    ObservationStore, PanelTokens, ProvisioningStash, ReactionStore, SettingsDeclaration,
+    SettingsDeclarations, SettingsOverrides, SettingsOwner, StorageError, StorageResult,
+    StoredProblem, StoredReaction, StoredSetting, TopologyStore,
 };
 use async_trait::async_trait;
 use sqlx::migrate::Migrator;
@@ -1389,4 +1389,59 @@ fn held_from_row(row: sqlx::sqlite::SqliteRow) -> StorageResult<HeldDispatch> {
         held_at_ms: row.get("held_at_ms"),
         dispatch: serde_json::from_str(row.get("payload"))?,
     })
+}
+
+#[async_trait]
+impl ReactionStore for SqliteStorage {
+    async fn reactions_at(
+        &self,
+        message: MessageId,
+        endpoint: EndpointId,
+    ) -> StorageResult<Vec<StoredReaction>> {
+        let rows = sqlx::query(
+            "SELECT reactor, emoji FROM reactions
+             WHERE message_id = ? AND endpoint_id = ? ORDER BY reactor",
+        )
+        .bind(message.to_string())
+        .bind(endpoint.to_string())
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(rows
+            .into_iter()
+            .map(|row| StoredReaction {
+                reactor: row.get("reactor"),
+                emoji: row.get("emoji"),
+            })
+            .collect())
+    }
+
+    async fn set_reaction(
+        &self,
+        message: MessageId,
+        endpoint: EndpointId,
+        reactor: &str,
+        emoji: Option<&str>,
+    ) -> StorageResult<()> {
+        let query = match emoji {
+            Some(emoji) => sqlx::query(
+                "INSERT INTO reactions (message_id, endpoint_id, reactor, emoji, updated_at_ms)
+                 VALUES (?, ?, ?, ?, ?)
+                 ON CONFLICT (message_id, endpoint_id, reactor)
+                 DO UPDATE SET emoji = excluded.emoji, updated_at_ms = excluded.updated_at_ms",
+            )
+            .bind(message.to_string())
+            .bind(endpoint.to_string())
+            .bind(reactor)
+            .bind(emoji)
+            .bind(wall_clock_ms()),
+            None => sqlx::query(
+                "DELETE FROM reactions WHERE message_id = ? AND endpoint_id = ? AND reactor = ?",
+            )
+            .bind(message.to_string())
+            .bind(endpoint.to_string())
+            .bind(reactor),
+        };
+        query.execute(&self.pool).await?;
+        Ok(())
+    }
 }

@@ -1,10 +1,11 @@
 use super::*;
 use crate::ChatStateSettings;
+use std::collections::{HashMap, HashSet};
 use wuphf_model::{
     Action, Attachment, AttachmentKind, ChatAddress, ChatFilter, ChatRef, ChatUpdate, Connector,
-    ConnectorCapabilities, DisappearingTimer, Dispatch, DispatchAck, MediaBlob, MediaId,
-    NewMessage, NoticeKind, OWNER_AUTHOR, OwnerMessage, Platform, ReceiptKind, Rule, RuleId,
-    RuleKind, SourceAddress,
+    ConnectorCapabilities, DisappearingTimer, Dispatch, DispatchAck, IgnoreReason, MediaBlob,
+    MediaId, MessageAuthor, NewMessage, NoticeKind, OWNER_AUTHOR, OwnerMessage, Platform,
+    ReactorReaction, ReceiptKind, Rule, RuleId, RuleKind, SourceAddress,
 };
 use wuphf_storage::{
     ChatProfileStore, InMemoryStorage, MediaStore, MessageStore, ObservationStore, TopologyStore,
@@ -3753,4 +3754,332 @@ async fn an_owner_message_outside_the_rules_is_never_held() {
         .await
         .unwrap();
     assert_eq!(outcome.direct.to.address.chat_id, "999@g.us");
+}
+
+// Plan 080: the owner's reactions.
+
+const OWNER: &str = "owner-1";
+
+/// A core whose Telegram connector names `OWNER` among its owner ids.
+fn core_with_owner(rules: Vec<Rule>) -> Core<InMemoryStorage> {
+    let owners = HashMap::from([(
+        ConnectorId(TELEGRAM.into()),
+        HashSet::from([OWNER.to_owned()]),
+    )]);
+    let config = Arc::new(RoutingConfig::new(rules, connectors()).with_owners(owners));
+    Core::new(Arc::new(InMemoryStorage::default()), config)
+}
+
+/// A reaction in the direct rule's Telegram topic.
+fn telegram_reaction(native_id: &str, reactor: &str, emoji: Option<&str>) -> Event {
+    Event {
+        source: SourceAddress {
+            connector_id: ConnectorId(TELEGRAM.into()),
+            address: ChatAddress::new("-100123", Some("12".into())),
+            chat_title: None,
+        },
+        payload: EventKind::Reaction {
+            native_id: native_id.into(),
+            reactor: reactor.into(),
+            reactor_name: Some("Owner".into()),
+            emoji: emoji.map(str::to_owned),
+            from_me: false,
+        },
+    }
+}
+
+/// The complete set of reactions on a message in the Telegram topic.
+fn telegram_reaction_set(native_id: &str, reactions: &[(&str, &str)]) -> Event {
+    Event {
+        source: SourceAddress {
+            connector_id: ConnectorId(TELEGRAM.into()),
+            address: ChatAddress::new("-100123", Some("12".into())),
+            chat_title: None,
+        },
+        payload: EventKind::ReactionSet {
+            native_id: native_id.into(),
+            reactions: reactions
+                .iter()
+                .map(|(reactor, emoji)| ReactorReaction {
+                    reactor: (*reactor).into(),
+                    reactor_name: None,
+                    emoji: (*emoji).into(),
+                })
+                .collect(),
+        },
+    }
+}
+
+/// The paired WhatsApp account's own reaction (`from_me`) on `wa-1`.
+fn own_whatsapp_reaction(emoji: Option<&str>) -> Event {
+    Event {
+        source: SourceAddress {
+            connector_id: ConnectorId(WHATSAPP.into()),
+            address: ChatAddress::new("12345@s.whatsapp.net", None),
+            chat_title: None,
+        },
+        payload: EventKind::Reaction {
+            native_id: "wa-1".into(),
+            reactor: "me@s.whatsapp.net".into(),
+            reactor_name: None,
+            emoji: emoji.map(str::to_owned),
+            from_me: true,
+        },
+    }
+}
+
+/// A WhatsApp message `wa-1` mirrored to Telegram as `tg-1`.
+async fn mirrored_whatsapp_message(core: &Core<InMemoryStorage>) {
+    let IngestOutcome::Routed {
+        message_id,
+        dispatches,
+        ..
+    } = core
+        .ingest(event(WHATSAPP, "12345@s.whatsapp.net", "wa-1", None))
+        .await
+        .unwrap()
+    else {
+        panic!("create should route");
+    };
+    core.record_dispatched_copy(message_id, dispatches[0].to.endpoint_id, "tg-1")
+        .await
+        .unwrap();
+}
+
+/// The one reaction dispatch an outcome carries.
+fn only_reaction(outcome: &IngestOutcome) -> (&Dispatch, bool, &MessageAuthor, Option<&str>) {
+    let [dispatch] = outcome.dispatches() else {
+        panic!("one dispatch expected: {outcome:?}");
+    };
+    let Action::React {
+        by_owner,
+        target_author,
+        emoji,
+        ..
+    } = &dispatch.action
+    else {
+        panic!("a reaction expected: {dispatch:?}");
+    };
+    (dispatch, *by_owner, target_author, emoji.as_deref())
+}
+
+#[tokio::test]
+async fn an_owners_telegram_reaction_reaches_whatsapp_as_the_owners() {
+    let core = core_with_owner(vec![direct_rule()]);
+    mirrored_whatsapp_message(&core).await;
+
+    let outcome = core
+        .ingest(telegram_reaction("tg-1", OWNER, Some("❤️")))
+        .await
+        .unwrap();
+    let (dispatch, by_owner, author, emoji) = only_reaction(&outcome);
+    assert_eq!(dispatch.to.connector_id, ConnectorId(WHATSAPP.into()));
+    assert!(by_owner);
+    assert_eq!(emoji, Some("❤️"));
+    // The WhatsApp copy is the one WhatsApp delivered: its author is alice.
+    assert_eq!(
+        *author,
+        MessageAuthor {
+            author_id: "alice".into(),
+            participant: None,
+            authored_by_bridge: false,
+        }
+    );
+    let Action::React { native_id, .. } = &dispatch.action else {
+        unreachable!();
+    };
+    assert_eq!(native_id, "wa-1");
+}
+
+#[tokio::test]
+async fn someone_elses_reaction_is_not_the_owners() {
+    let core = core_with_owner(vec![direct_rule()]);
+    mirrored_whatsapp_message(&core).await;
+
+    let outcome = core
+        .ingest(telegram_reaction("tg-1", "stranger", Some("😂")))
+        .await
+        .unwrap();
+    let (_, by_owner, _, _) = only_reaction(&outcome);
+    assert!(!by_owner);
+}
+
+#[tokio::test]
+async fn a_reaction_on_a_copy_the_bridge_sent_names_the_bridge_as_its_author() {
+    let core = core_with_owner(vec![direct_rule()]);
+    mirrored_whatsapp_message(&core).await;
+    let IngestOutcome::Routed {
+        message_id,
+        dispatches,
+        ..
+    } = core
+        .ingest(event_in(TELEGRAM, "-100123", Some("12"), "tg-5", None))
+        .await
+        .unwrap()
+    else {
+        panic!("a reply typed in the topic should route");
+    };
+    core.record_dispatched_copy(message_id, dispatches[0].to.endpoint_id, "wa-5")
+        .await
+        .unwrap();
+
+    let outcome = core
+        .ingest(telegram_reaction("tg-5", OWNER, Some("👍")))
+        .await
+        .unwrap();
+    let (_, _, author, _) = only_reaction(&outcome);
+    assert!(author.authored_by_bridge);
+}
+
+#[tokio::test]
+async fn a_blocked_owner_reaction_gets_its_author_on_release() {
+    let core = core_with_owner(vec![direct_rule()]);
+    mirrored_whatsapp_message(&core).await;
+    let IngestOutcome::Routed { dispatches, .. } = core
+        .ingest(event_in(TELEGRAM, "-100123", Some("12"), "tg-5", None))
+        .await
+        .unwrap()
+    else {
+        panic!("a reply typed in the topic should route");
+    };
+    let create = dispatches[0].clone();
+
+    let outcome = core
+        .ingest(telegram_reaction("tg-5", OWNER, Some("👍")))
+        .await
+        .unwrap();
+    assert!(matches!(outcome, IngestOutcome::Routed { blocked: 1, .. }));
+
+    let released = core
+        .acknowledge_dispatch(DispatchAck {
+            dispatch_id: create.id,
+            native_id: "wa-5".into(),
+            thread_id: None,
+        })
+        .await
+        .unwrap();
+    let reaction = released
+        .iter()
+        .find(|dispatch| matches!(dispatch.action, Action::React { .. }))
+        .expect("acknowledging the create releases the reaction");
+    let Action::React {
+        native_id,
+        by_owner,
+        target_author,
+        ..
+    } = &reaction.action
+    else {
+        unreachable!();
+    };
+    assert_eq!(native_id, "wa-5");
+    assert!(by_owner);
+    assert!(target_author.authored_by_bridge);
+}
+
+#[tokio::test]
+async fn a_repeated_reaction_is_ignored() {
+    let core = core_with_owner(vec![direct_rule()]);
+    mirrored_whatsapp_message(&core).await;
+    core.ingest(telegram_reaction("tg-1", OWNER, Some("❤️")))
+        .await
+        .unwrap();
+
+    let again = core
+        .ingest(telegram_reaction("tg-1", OWNER, Some("❤️")))
+        .await
+        .unwrap();
+    assert_eq!(
+        again,
+        IngestOutcome::Ignored(IgnoreReason::RedundantReaction)
+    );
+}
+
+#[tokio::test]
+async fn a_reaction_set_is_diffed_with_the_stored_reactions() {
+    let core = core_with_owner(vec![direct_rule()]);
+    mirrored_whatsapp_message(&core).await;
+
+    let set = core
+        .ingest(telegram_reaction_set("tg-1", &[(OWNER, "❤️")]))
+        .await
+        .unwrap();
+    let (_, by_owner, _, emoji) = only_reaction(&set);
+    assert!(by_owner);
+    assert_eq!(emoji, Some("❤️"));
+
+    let unchanged = core
+        .ingest(telegram_reaction_set("tg-1", &[(OWNER, "❤️")]))
+        .await
+        .unwrap();
+    assert_eq!(
+        unchanged,
+        IngestOutcome::Ignored(IgnoreReason::RedundantReaction)
+    );
+
+    let changed = core
+        .ingest(telegram_reaction_set("tg-1", &[(OWNER, "😂")]))
+        .await
+        .unwrap();
+    assert_eq!(only_reaction(&changed).3, Some("😂"));
+
+    let cleared = core
+        .ingest(telegram_reaction_set("tg-1", &[]))
+        .await
+        .unwrap();
+    let (dispatch, by_owner, _, emoji) = only_reaction(&cleared);
+    assert!(by_owner);
+    assert_eq!(emoji, None);
+    let Action::React { reactor, .. } = &dispatch.action else {
+        unreachable!();
+    };
+    assert_eq!(reactor, OWNER);
+}
+
+#[tokio::test]
+async fn whatsapps_echo_of_an_applied_reaction_is_ignored() {
+    let core = core_with_owner(vec![direct_rule()]);
+    mirrored_whatsapp_message(&core).await;
+    core.ingest(telegram_reaction("tg-1", OWNER, Some("❤️")))
+        .await
+        .unwrap();
+
+    let echo = core
+        .ingest(own_whatsapp_reaction(Some("❤️")))
+        .await
+        .unwrap();
+    assert_eq!(
+        echo,
+        IngestOutcome::Ignored(IgnoreReason::RedundantReaction)
+    );
+
+    // A different reaction from the phone is the owner's own, and mirrors.
+    let changed = core
+        .ingest(own_whatsapp_reaction(Some("😂")))
+        .await
+        .unwrap();
+    let (dispatch, by_owner, _, emoji) = only_reaction(&changed);
+    assert_eq!(dispatch.to.connector_id, ConnectorId(TELEGRAM.into()));
+    assert!(by_owner);
+    assert_eq!(emoji, Some("😂"));
+}
+
+#[tokio::test]
+async fn a_dead_lettered_owner_reaction_is_forgotten_at_its_target() {
+    let core = core_with_owner(vec![direct_rule()]);
+    mirrored_whatsapp_message(&core).await;
+    let outcome = core
+        .ingest(telegram_reaction("tg-1", OWNER, Some("❤️")))
+        .await
+        .unwrap();
+    let dispatch_id = only_reaction(&outcome).0.id;
+
+    core.fail_dispatch(dispatch_id, "rejected".into())
+        .await
+        .unwrap();
+
+    let from_phone = core
+        .ingest(own_whatsapp_reaction(Some("❤️")))
+        .await
+        .unwrap();
+    assert_eq!(only_reaction(&from_phone).3, Some("❤️"));
 }

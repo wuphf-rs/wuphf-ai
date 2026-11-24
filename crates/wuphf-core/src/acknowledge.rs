@@ -5,7 +5,7 @@
 use crate::{Core, CoreError, RoutingConfig};
 use std::sync::Arc;
 use wuphf_model::{
-    AddressLink, Alias, ChatAddress, ConnectorId, ConversationId, Dispatch, DispatchAck,
+    Action, AddressLink, Alias, ChatAddress, ConnectorId, ConversationId, Dispatch, DispatchAck,
     DispatchId, EndpointId, MessageCopy, MessageId,
 };
 use wuphf_storage::Storage;
@@ -335,6 +335,24 @@ where
         let routing = self.routing.routing();
         let dispatch = self.storage.dispatch(dispatch_id).await?;
         self.storage.fail_dispatch(dispatch_id, reason).await?;
+        // An owner's reaction that never landed is not shown there, so the
+        // reaction stored as the bridge's at the target goes too: otherwise
+        // the same reaction from the phone would later read as its echo.
+        if let Some(Dispatch {
+            to,
+            action:
+                Action::React {
+                    message_id,
+                    by_owner: true,
+                    ..
+                },
+            ..
+        }) = &dispatch
+        {
+            self.storage
+                .set_reaction(*message_id, to.endpoint_id, "", None)
+                .await?;
+        }
         // A failed provisioning dispatch must still release the stash, or the
         // held messages would never send. Replaying them re-attempts the
         // provision with the next message rather than stranding the conversation.

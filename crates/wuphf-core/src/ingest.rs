@@ -3,10 +3,11 @@
 //! provisioning and source-rename retitling.
 
 use crate::{Core, CoreError, RoutingConfig, notes};
+use std::collections::HashMap;
 use std::sync::Arc;
 use wuphf_model::{
     Action, Conversation, ConversationId, DedupKey, Dispatch, Endpoint, EndpointId, IgnoreReason,
-    IngestOutcome, Message, MessageCopy, MessageId, SourceAddress,
+    IngestOutcome, Message, MessageCopy, MessageId, ReactorReaction, SourceAddress,
 };
 
 /// What [`Core::introduce`] decided for a routed message.
@@ -456,31 +457,33 @@ where
     /// message and fan the reaction out to the other endpoints, blocking targets
     /// whose copy is not delivered yet. The reaction is a toggle (`emoji` None
     /// clears the reactor's reaction); the connector decides how to render it.
-    /// No echo guard is needed in the source-to-text direction, as the bridge
-    /// never applies a native reaction the source could report back.
+    ///
+    /// Each reactor's last reaction on each copy is stored, so a reaction
+    /// equal to the stored one is ignored: a replay, or a platform echoing a
+    /// reaction the bridge applied as the owner.
     pub(crate) async fn ingest_reaction(
         &self,
         routing: &Arc<RoutingConfig>,
-        origin_endpoint: EndpointId,
+        origin: &Endpoint,
         native_id: String,
-        reactor: String,
-        reactor_name: Option<String>,
-        emoji: Option<String>,
+        change: ReactionChange,
     ) -> Result<IngestOutcome, CoreError> {
         let Some((message_id, message)) = self
-            .message_for_copy(
-                origin_endpoint,
-                &native_id,
-                CoreError::ReactionTargetNotStored,
-            )
+            .message_for_copy(origin.id, &native_id, CoreError::ReactionTargetNotStored)
             .await?
         else {
             return Ok(IngestOutcome::Ignored(IgnoreReason::Unmatched));
         };
-
+        let stored = self.storage.reactions_at(message_id, origin.id).await?;
+        let previous = stored
+            .iter()
+            .find(|reaction| reaction.reactor == change.key())
+            .map(|reaction| reaction.emoji.as_str());
+        if previous == change.emoji.as_deref() {
+            return Ok(IngestOutcome::Ignored(IgnoreReason::RedundantReaction));
+        }
         let routed = self
-            .with_routing(routing)
-            .route_reaction(&message, origin_endpoint, reactor, reactor_name, emoji)
+            .reaction_changed(routing, origin, &message, change)
             .await?;
         let (dispatches, blocked) = self.save_dispatches(routed).await?;
         Ok(IngestOutcome::Routed {
@@ -488,6 +491,116 @@ where
             dispatches,
             blocked,
         })
+    }
+
+    /// Apply the complete set of other accounts' reactions on a message: each
+    /// reactor whose reaction differs from the stored one, or who is no
+    /// longer in the set, is a toggle. The connector's own account (`""`)
+    /// is not in a set, so its stored reaction is left alone.
+    pub(crate) async fn ingest_reaction_set(
+        &self,
+        routing: &Arc<RoutingConfig>,
+        origin: &Endpoint,
+        native_id: String,
+        reactions: Vec<ReactorReaction>,
+    ) -> Result<IngestOutcome, CoreError> {
+        let Some((message_id, message)) = self
+            .message_for_copy(origin.id, &native_id, CoreError::ReactionTargetNotStored)
+            .await?
+        else {
+            return Ok(IngestOutcome::Ignored(IgnoreReason::Unmatched));
+        };
+        let stored: HashMap<String, String> = self
+            .storage
+            .reactions_at(message_id, origin.id)
+            .await?
+            .into_iter()
+            .filter(|reaction| !reaction.reactor.is_empty())
+            .map(|reaction| (reaction.reactor, reaction.emoji))
+            .collect();
+        let mut changes = Vec::new();
+        for reaction in &reactions {
+            if reaction.reactor.is_empty() {
+                continue;
+            }
+            if stored.get(&reaction.reactor) != Some(&reaction.emoji) {
+                changes.push(ReactionChange {
+                    reactor: reaction.reactor.clone(),
+                    reactor_name: reaction.reactor_name.clone(),
+                    emoji: Some(reaction.emoji.clone()),
+                    from_me: false,
+                });
+            }
+        }
+        let mut cleared: Vec<&String> = stored
+            .keys()
+            .filter(|reactor| {
+                !reactions
+                    .iter()
+                    .any(|reaction| reaction.reactor == **reactor)
+            })
+            .collect();
+        cleared.sort();
+        changes.extend(cleared.into_iter().map(|reactor| ReactionChange {
+            reactor: reactor.clone(),
+            reactor_name: None,
+            emoji: None,
+            from_me: false,
+        }));
+        if changes.is_empty() {
+            return Ok(IngestOutcome::Ignored(IgnoreReason::RedundantReaction));
+        }
+
+        let mut routed = Vec::new();
+        for change in changes {
+            routed.extend(
+                self.reaction_changed(routing, origin, &message, change)
+                    .await?,
+            );
+        }
+        let (dispatches, blocked) = self.save_dispatches(routed).await?;
+        Ok(IngestOutcome::Routed {
+            message_id,
+            dispatches,
+            blocked,
+        })
+    }
+
+    /// Store one reactor's new reaction at the origin copy and route it. An
+    /// owner's reaction is also stored at each target as the session
+    /// account's (`""`): what a platform reacting as the owner will show, so
+    /// its echo is recognised as redundant.
+    async fn reaction_changed(
+        &self,
+        routing: &Arc<RoutingConfig>,
+        origin: &Endpoint,
+        message: &Message,
+        change: ReactionChange,
+    ) -> Result<Vec<Dispatch>, CoreError> {
+        let emoji = change.emoji.as_deref();
+        self.storage
+            .set_reaction(message.id, origin.id, change.key(), emoji)
+            .await?;
+        let by_owner = routing.is_owner(&origin.connector_id, &change.reactor, change.from_me);
+        let routed = self
+            .with_routing(routing)
+            .route_reaction(
+                message,
+                origin.id,
+                change.reactor,
+                change.reactor_name,
+                change.emoji.clone(),
+                by_owner,
+            )
+            .await?;
+        if by_owner {
+            for dispatch in &routed {
+                self.storage
+                    .set_reaction(message.id, dispatch.to.endpoint_id, "", emoji)
+                    .await?;
+            }
+        }
+        Ok(routed)
     }
 
     /// Surface a delivery/read receipt on the message's other copies. The
@@ -533,5 +646,22 @@ where
             dispatches,
             blocked,
         })
+    }
+}
+
+/// One reactor's reaction change as a connector reported it.
+pub(crate) struct ReactionChange {
+    pub(crate) reactor: String,
+    pub(crate) reactor_name: Option<String>,
+    /// `None` clears the reactor's reaction.
+    pub(crate) emoji: Option<String>,
+    /// The connector's own session account.
+    pub(crate) from_me: bool,
+}
+
+impl ReactionChange {
+    /// The reactor's key in the reaction store: `""` for the session account.
+    fn key(&self) -> &str {
+        if self.from_me { "" } else { &self.reactor }
     }
 }

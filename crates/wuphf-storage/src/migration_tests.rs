@@ -16,8 +16,8 @@ use uuid::Uuid;
 use wuphf_model::{
     Action, Attachment, AttachmentKind, ChatAddress, ChatProfile, ChatRef, ConnectorId,
     Conversation, ConversationId, DisappearingTimer, Dispatch, DispatchId, DispatchState, Endpoint,
-    EndpointId, MediaId, Message, MessageCopy, MessageId, ObservedChat, ObservedDirection,
-    ObservedMessage, Platform, ReceiptKind, ReplyContext, RuleId, Target,
+    EndpointId, MediaId, Message, MessageAuthor, MessageCopy, MessageId, ObservedChat,
+    ObservedDirection, ObservedMessage, Platform, ReceiptKind, ReplyContext, RuleId, Target,
 };
 
 /// A fresh database migrated up to, but not including, `version`.
@@ -591,6 +591,22 @@ async fn migration_0022_adds_the_health_tables() {
     }
 }
 
+/// 0023 only adds the reactions table: a database from before it keeps its
+/// dispatches, and the table takes one reaction per copy and reactor.
+#[tokio::test]
+async fn migration_0023_adds_the_reactions_table() {
+    let pool = database_before(23).await;
+    insert_dispatches(&pool, &DISPATCHES_BEFORE_0019).await;
+
+    MIGRATOR.run(&pool).await.unwrap();
+
+    assert_dispatches(&pool).await;
+    let insert = "INSERT INTO reactions (message_id, endpoint_id, reactor, emoji, updated_at_ms)
+                  VALUES ('m', 'e', 'r', '👍', 1)";
+    sqlx::query(insert).execute(&pool).await.unwrap();
+    assert!(sqlx::query(insert).execute(&pool).await.is_err());
+}
+
 /// An observed row stored before `sent_by` existed decodes with no client, and
 /// today's model writes it back byte for byte: the key appears only when set.
 #[test]
@@ -897,6 +913,8 @@ fn sample_dispatches() -> Vec<Dispatch> {
                 reactor: "15550002222@s.whatsapp.net".into(),
                 reactor_name: Some("Bob".into()),
                 emoji: Some("👍".into()),
+                by_owner: false,
+                target_author: MessageAuthor::default(),
             },
             DispatchState::Pending,
         ),

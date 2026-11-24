@@ -4,8 +4,9 @@
 use crate::shared::{acknowledged_copy, release_blocked, wall_clock_ms};
 use crate::{
     ChatProfileStore, DispatchStore, HealthStore, HeldDispatch, MediaStore, MessageStore,
-    ObservationStore, PanelTokens, ProvisioningStash, SettingsDeclaration, SettingsDeclarations,
-    SettingsOverrides, StorageError, StorageResult, StoredProblem, StoredSetting, TopologyStore,
+    ObservationStore, PanelTokens, ProvisioningStash, ReactionStore, SettingsDeclaration,
+    SettingsDeclarations, SettingsOverrides, StorageError, StorageResult, StoredProblem,
+    StoredReaction, StoredSetting, TopologyStore,
 };
 use async_trait::async_trait;
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
@@ -63,6 +64,8 @@ struct State {
     /// Held dispatches in the order they were held, mirroring
     /// `held_dispatches`.
     held: Vec<HeldDispatch>,
+    /// Reactions by copy, then reactor (ordered), mirroring `reactions`.
+    reactions: HashMap<(MessageId, EndpointId), BTreeMap<String, String>>,
 }
 
 struct StoredMedia {
@@ -959,5 +962,54 @@ impl HealthStore for InMemoryStorage {
             .collect();
         failed.sort_by_key(|dispatch| std::cmp::Reverse(dispatch.id.0));
         Ok(failed.into_iter().skip(offset).take(limit).collect())
+    }
+}
+
+#[async_trait]
+impl ReactionStore for InMemoryStorage {
+    async fn reactions_at(
+        &self,
+        message: MessageId,
+        endpoint: EndpointId,
+    ) -> StorageResult<Vec<StoredReaction>> {
+        Ok(self
+            .state
+            .read()
+            .await
+            .reactions
+            .get(&(message, endpoint))
+            .map(|reactions| {
+                reactions
+                    .iter()
+                    .map(|(reactor, emoji)| StoredReaction {
+                        reactor: reactor.clone(),
+                        emoji: emoji.clone(),
+                    })
+                    .collect()
+            })
+            .unwrap_or_default())
+    }
+
+    async fn set_reaction(
+        &self,
+        message: MessageId,
+        endpoint: EndpointId,
+        reactor: &str,
+        emoji: Option<&str>,
+    ) -> StorageResult<()> {
+        let mut state = self.state.write().await;
+        let reactions = state.reactions.entry((message, endpoint)).or_default();
+        match emoji {
+            Some(emoji) => {
+                reactions.insert(reactor.to_owned(), emoji.to_owned());
+            }
+            None => {
+                reactions.remove(reactor);
+                if reactions.is_empty() {
+                    state.reactions.remove(&(message, endpoint));
+                }
+            }
+        }
+        Ok(())
     }
 }

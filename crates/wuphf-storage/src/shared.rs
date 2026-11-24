@@ -1,7 +1,9 @@
 //! Helpers shared by both [`Storage`](crate::Storage) backends so the
 //! dispatch-queue semantics stay identical across them.
 
-use wuphf_model::{Action, Dispatch, DispatchState, Message, MessageCopy, ReplyContext};
+use wuphf_model::{
+    Action, Dispatch, DispatchState, Message, MessageAuthor, MessageCopy, ReplyContext,
+};
 
 /// The copy an acknowledged dispatch records at its target endpoint, or `None`
 /// when settling it records no copy and releases nothing. Signals that act on
@@ -34,13 +36,19 @@ fn bind_native_parent(dispatch: &mut Dispatch, parent: Message, native_id: Strin
         // the parent to this endpoint, so the quoted copy is always one the
         // bridge authored.
         Action::Send { reply, .. } => *reply = Some(ReplyContext::quoting(parent, native_id, true)),
+        // Likewise the reacted copy.
+        Action::React {
+            native_id: target,
+            target_author,
+            ..
+        } => {
+            *target_author = MessageAuthor::of(&parent, true);
+            *target = native_id;
+        }
         Action::Edit {
             native_id: target, ..
         }
         | Action::Delete {
-            native_id: target, ..
-        }
-        | Action::React {
             native_id: target, ..
         }
         | Action::Receipt {

@@ -112,12 +112,20 @@ pub enum Action {
     /// shows text rather than a native reaction). `native_id` is the native id
     /// of the reacted copy at the target endpoint — empty while the dispatch is
     /// blocked, filled when the original send is acknowledged.
+    ///
+    /// `by_owner` says the reactor is the owner, which a platform reacting as
+    /// the owner's account applies natively. `target_author` is who wrote the
+    /// reacted copy at the target, filled with `native_id`.
     React {
         message_id: MessageId,
         native_id: String,
         reactor: String,
         reactor_name: Option<String>,
         emoji: Option<String>,
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        by_owner: bool,
+        #[serde(default, skip_serializing_if = "MessageAuthor::is_unknown")]
+        target_author: MessageAuthor,
     },
     /// Signal the origin copy that its message reached all of its mirrors
     /// (`Delivered`) or was read on one (`Read`). The connector decides how to
@@ -220,6 +228,9 @@ pub enum IgnoreReason {
     /// A delete of an already-revoked message: a redundant report or our own
     /// mirrored delete echoed back by the platform.
     RedundantDelete,
+    /// A reaction equal to the one stored for that reactor on that copy: a
+    /// replay, or the platform echoing a reaction the bridge applied.
+    RedundantReaction,
 }
 
 /// The `author_id` stamped on owner messages. Platforms deliver the message
@@ -320,6 +331,8 @@ mod tests {
                     reactor: "bob".into(),
                     reactor_name: None,
                     emoji: None,
+                    by_owner: false,
+                    target_author: MessageAuthor::default(),
                 },
                 false,
             ),

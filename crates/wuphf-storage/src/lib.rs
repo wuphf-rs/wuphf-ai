@@ -427,6 +427,35 @@ pub trait HealthStore: Send + Sync + 'static {
     async fn dead_letters(&self, offset: usize, limit: usize) -> StorageResult<Vec<Dispatch>>;
 }
 
+/// One reactor's reaction on one copy of a message. `reactor` is `""` for
+/// the connector's own session account.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct StoredReaction {
+    pub reactor: String,
+    pub emoji: String,
+}
+
+/// The reactions on each copy of a message (plan 080): the last reaction
+/// each reactor has there, so a platform that reports a message's reactions
+/// as a whole can be diffed, and a repeated or echoed reaction ignored.
+#[async_trait]
+pub trait ReactionStore: Send + Sync + 'static {
+    /// The reactions on `message`'s copy at `endpoint`, ordered by reactor.
+    async fn reactions_at(
+        &self,
+        message: MessageId,
+        endpoint: EndpointId,
+    ) -> StorageResult<Vec<StoredReaction>>;
+    /// Set `reactor`'s reaction on that copy, or clear it with `None`.
+    async fn set_reaction(
+        &self,
+        message: MessageId,
+        endpoint: EndpointId,
+        reactor: &str,
+        emoji: Option<&str>,
+    ) -> StorageResult<()>;
+}
+
 /// The full persistence surface the core needs: the sum of the role traits.
 /// Blanket-implemented, so a backend implements the roles and gets `Storage`;
 /// a consumer that needs only part of it bounds on the roles it uses.
@@ -439,6 +468,7 @@ pub trait Storage:
     + ObservationStore
     + ChatProfileStore
     + HealthStore
+    + ReactionStore
 {
 }
 
@@ -451,6 +481,7 @@ impl<T> Storage for T where
         + ObservationStore
         + ChatProfileStore
         + HealthStore
+        + ReactionStore
 {
 }
 

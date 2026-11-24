@@ -145,9 +145,11 @@ message DispatchFailed {
 // The platform reported a reaction change on a message. Reactions are toggles:
 // `emoji` empty means the reactor cleared their reaction. The connector reports
 // the reacted message's native id (resolved to the logical message like an
-// edit), the reactor, and `from_me` so the core can recognize a reaction it
-// applied being echoed back. Mirrored reactions render as text, so this has no
-// dispatch counterpart in the source-to-mirror direction.
+// edit) and the reactor. `from_me` marks a reaction by the connector's own
+// session account, which the core counts as the owner's: report it only where
+// that account is the owner's (WhatsApp, Instagram), and drop the bridge's
+// own reactions elsewhere (Telegram's 👍/👀 signals). The core stores each
+// reactor's last reaction per copy, so a repeated or echoed one is ignored.
 message ReactionEvent {
   string chat_id = 1;
   optional string thread_id = 2;
@@ -156,6 +158,27 @@ message ReactionEvent {
   optional string sender_name = 5;
   string emoji = 6;
   bool from_me = 7;
+}
+
+// The complete set of reactions other accounts have on a message, for a
+// platform that reports a message's reactions as a whole rather than one
+// reactor's change (a Telegram user session). A reactor absent from the set
+// has none: the core compares the set with the reactions it stored for this
+// copy and turns each difference into a toggle. The connector's own account is
+// left out, as for `ReactionEvent`; each reactor appears at most once, with
+// their newest reaction.
+message ReactionsEvent {
+  string chat_id = 1;
+  optional string thread_id = 2;
+  string platform_message_id = 3;
+  repeated ReactorReaction reactions = 4;
+}
+
+// One reactor's reaction in a `ReactionsEvent`.
+message ReactorReaction {
+  string sender = 1;
+  optional string sender_name = 2;
+  string emoji = 3;
 }
 
 // Whether a receipt reports the message reached the peer's device (delivered) or
@@ -250,6 +273,7 @@ message ClientFrame {
     ChatUpdateEvent chat_update = 11;
     CommandResult command_result = 12;
     ProbeResult probe_result = 13;
+    ReactionsEvent reactions_set = 14;
   }
 }
 

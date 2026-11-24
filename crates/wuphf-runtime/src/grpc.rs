@@ -13,7 +13,8 @@ use wuphf_model::{
     Action, Attachment, AttachmentKind, ChatAddress, ChatUpdate, Connector, ConnectorCapabilities,
     ConnectorId, ConnectorInput, ConnectorOutput, DisappearingTimer, DispatchAck, DispatchFailed,
     Event, EventKind, InboundWork, MediaId, MuteState, NewMessage, NoticeKind, ParticipantChange,
-    ParticipantChangeKind, Platform, ReceiptKind, ReplyContext, ReportedAvatar, SourceAddress,
+    ParticipantChangeKind, Platform, ReactorReaction, ReceiptKind, ReplyContext, ReportedAvatar,
+    SourceAddress,
 };
 use wuphf_proto::connector as pb;
 use wuphf_proto::connector::connector_transport_server::ConnectorTransport;
@@ -394,6 +395,30 @@ fn input_from_proto(
                 },
             }))
         }
+        Some(pb::client_frame::Body::ReactionsSet(event)) => Ok(ConnectorInput::event(Event {
+            source: SourceAddress {
+                connector_id: connector_id.clone(),
+                address: ChatAddress::new(
+                    required_string(event.chat_id, "chat_id")?,
+                    event.thread_id,
+                ),
+                chat_title: None,
+            },
+            payload: EventKind::ReactionSet {
+                native_id: required_string(event.platform_message_id, "platform_message_id")?,
+                reactions: event
+                    .reactions
+                    .into_iter()
+                    .map(|reaction| {
+                        Ok(ReactorReaction {
+                            reactor: required_string(reaction.sender, "sender")?,
+                            reactor_name: reaction.sender_name,
+                            emoji: required_string(reaction.emoji, "emoji")?,
+                        })
+                    })
+                    .collect::<Result<_, WireError>>()?,
+            },
+        })),
         Some(pb::client_frame::Body::Receipt(event)) => {
             let kind = match pb::ReceiptKind::try_from(event.kind)
                 .map_err(|_| WireError("invalid receipt kind".into()))?
@@ -533,6 +558,8 @@ fn output_to_proto(output: ConnectorOutput) -> pb::ServerFrame {
                     reactor,
                     reactor_name,
                     emoji,
+                    by_owner,
+                    target_author,
                     ..
                 } => pb::server_frame::Body::Reaction(pb::ReactionDispatch {
                     dispatch_id,
@@ -542,6 +569,10 @@ fn output_to_proto(output: ConnectorOutput) -> pb::ServerFrame {
                     reactor,
                     reactor_name,
                     emoji: emoji.unwrap_or_default(),
+                    by_owner,
+                    target_sender: target_author.author_id,
+                    target_participant: target_author.participant,
+                    target_authored_by_bridge: target_author.authored_by_bridge,
                 }),
                 Action::Receipt {
                     native_id,
@@ -805,6 +836,79 @@ mod tests {
                 container: "tg-chat".into(),
                 title: "Priya".into(),
             })
+        );
+    }
+
+    /// A reaction carries whether it is the owner's and who wrote the reacted
+    /// copy, which WhatsApp needs to address it.
+    #[test]
+    fn an_owners_reaction_carries_the_target_author() {
+        let react = Action::React {
+            message_id: MessageId::new(),
+            native_id: "wa-1".into(),
+            reactor: "owner".into(),
+            reactor_name: None,
+            emoji: Some("❤️".into()),
+            by_owner: true,
+            target_author: wuphf_model::MessageAuthor {
+                author_id: "alice@s.whatsapp.net".into(),
+                participant: Some("alice@lid".into()),
+                authored_by_bridge: false,
+            },
+        };
+        let pb::server_frame::Body::Reaction(reaction) = body(dispatch(react, None)) else {
+            panic!("a reaction is a Reaction frame");
+        };
+        assert!(reaction.by_owner);
+        assert_eq!(reaction.target_sender, "alice@s.whatsapp.net");
+        assert_eq!(reaction.target_participant.as_deref(), Some("alice@lid"));
+        assert!(!reaction.target_authored_by_bridge);
+    }
+
+    /// A message's whole reaction set decodes reactor by reactor; a reactor
+    /// with no emoji is a wire error, since an absent reactor means none.
+    #[test]
+    fn a_reaction_set_decodes_each_reactor() {
+        let set = |emoji: &str| pb::ReactionsEvent {
+            chat_id: "-100".into(),
+            thread_id: Some("7".into()),
+            platform_message_id: "tg-1".into(),
+            reactions: vec![pb::ReactorReaction {
+                sender: "42".into(),
+                sender_name: Some("Owner".into()),
+                emoji: emoji.into(),
+            }],
+        };
+        let frame = |body| pb::ClientFrame { body: Some(body) };
+        let input = input_from_proto(
+            frame(pb::client_frame::Body::ReactionsSet(set("❤️"))),
+            &whatsapp(),
+        )
+        .unwrap();
+        let ConnectorInput::Work(work) = input else {
+            panic!("expected an event, got {input:?}");
+        };
+        let InboundWork::Event(event) = *work else {
+            panic!("expected an event");
+        };
+        assert_eq!(event.source.address.thread_id.as_deref(), Some("7"));
+        assert_eq!(
+            event.payload,
+            EventKind::ReactionSet {
+                native_id: "tg-1".into(),
+                reactions: vec![ReactorReaction {
+                    reactor: "42".into(),
+                    reactor_name: Some("Owner".into()),
+                    emoji: "❤️".into(),
+                }],
+            }
+        );
+        assert!(
+            input_from_proto(
+                frame(pb::client_frame::Body::ReactionsSet(set(""))),
+                &whatsapp()
+            )
+            .is_err()
         );
     }
 
