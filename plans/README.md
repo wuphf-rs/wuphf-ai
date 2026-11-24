@@ -1807,3 +1807,14 @@ From the 2026-10-22 remote-functions design:
   packages build and report `0.1.0`; the units and the generated config were
   read; `nix flake check --all-systems` passes. Pending on the owner: the
   Cachix cache and its variable and secret.
+
+- **v0.2.0 (2026-11-24), the first release.** The release key is
+  `release/minisign.pub` (minisign `06F68CE26D273B61`; its secret is the
+  `MINISIGN_SECRET_KEY` Actions secret). The repository went public, so
+  downloads need no token and the Nix cache (Cachix `wuphf`) builds aarch64
+  natively; the release still cross-compiles aarch64 (glibc 2.35). Verified
+  against the published release in an Ubuntu 22.04 container: the
+  signature (trusted comment `wuphf v0.2.0`) and sums by hand, then the
+  released `wuphf-server update` checking, installing a missing binary,
+  updating an old one and rolling back; the aarch64 assets are ARM ELF; the
+  0.2.0 packages of both systems are in the cache.
