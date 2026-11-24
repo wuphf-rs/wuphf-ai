@@ -283,7 +283,12 @@ type MessageCreateEvent struct {
 	// message carries one greater than 0. A message without one never turns a
 	// known timer off; when the chat's timer is unknown and the connector
 	// declares supports_disappearing_timers, the core records it as off.
-	Disappearing  *DisappearingTimer `protobuf:"bytes,12,opt,name=disappearing,proto3,oneof" json:"disappearing,omitempty"`
+	Disappearing *DisappearingTimer `protobuf:"bytes,12,opt,name=disappearing,proto3,oneof" json:"disappearing,omitempty"`
+	// The sender as the connector's owner_ids name accounts, when that differs
+	// from `sender` (a Telegram user's plain id, where `sender` is
+	// telegram:user:N). The core checks it against owner_ids, for instance to
+	// turn the owner's lone-emoji reply into a reaction (plan 081).
+	SenderAccount *string `protobuf:"bytes,13,opt,name=sender_account,json=senderAccount,proto3,oneof" json:"sender_account,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -400,6 +405,13 @@ func (x *MessageCreateEvent) GetDisappearing() *DisappearingTimer {
 		return x.Disappearing
 	}
 	return nil
+}
+
+func (x *MessageCreateEvent) GetSenderAccount() string {
+	if x != nil && x.SenderAccount != nil {
+		return *x.SenderAccount
+	}
+	return ""
 }
 
 // One chat's properties as the platform reported them. An absent field was not
@@ -1978,7 +1990,7 @@ var File_client_proto protoreflect.FileDescriptor
 
 const file_client_proto_rawDesc = "" +
 	"\n" +
-	"\fclient.proto\x12\x12wuphf.connector.v1\x1a\fcommon.proto\"\x93\x05\n" +
+	"\fclient.proto\x12\x12wuphf.connector.v1\x1a\fcommon.proto\"\xd2\x05\n" +
 	"\x12MessageCreateEvent\x12\x17\n" +
 	"\achat_id\x18\x01 \x01(\tR\x06chatId\x12 \n" +
 	"\tthread_id\x18\x02 \x01(\tH\x00R\bthreadId\x88\x01\x01\x12\"\n" +
@@ -1994,7 +2006,8 @@ const file_client_proto_rawDesc = "" +
 	" \x01(\x03R\vtimestampMs\x12$\n" +
 	"\vsender_name\x18\v \x01(\tH\x05R\n" +
 	"senderName\x88\x01\x01\x12N\n" +
-	"\fdisappearing\x18\f \x01(\v2%.wuphf.connector.v1.DisappearingTimerH\x06R\fdisappearing\x88\x01\x01B\f\n" +
+	"\fdisappearing\x18\f \x01(\v2%.wuphf.connector.v1.DisappearingTimerH\x06R\fdisappearing\x88\x01\x01\x12*\n" +
+	"\x0esender_account\x18\r \x01(\tH\aR\rsenderAccount\x88\x01\x01B\f\n" +
 	"\n" +
 	"_thread_idB\r\n" +
 	"\v_chat_titleB\x0e\n" +
@@ -2002,7 +2015,8 @@ const file_client_proto_rawDesc = "" +
 	"\x05_textB\x1f\n" +
 	"\x1d_reply_to_platform_message_idB\x0e\n" +
 	"\f_sender_nameB\x0f\n" +
-	"\r_disappearing\"\x91\x05\n" +
+	"\r_disappearingB\x11\n" +
+	"\x0f_sender_account\"\x91\x05\n" +
 	"\n" +
 	"ChatUpdate\x12\x17\n" +
 	"\achat_id\x18\x01 \x01(\tR\x06chatId\x12N\n" +

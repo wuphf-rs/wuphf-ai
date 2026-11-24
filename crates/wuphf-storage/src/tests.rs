@@ -331,6 +331,7 @@ async fn settling_a_signal_dispatch_records_no_copy<S: Storage>(storage: S) {
             emoji: Some("👍".into()),
             by_owner: false,
             target_author: MessageAuthor::default(),
+            confirm: None,
         },
         Action::Receipt {
             message_id,
@@ -1760,6 +1761,7 @@ async fn acknowledging_create_binds_blocked_reaction_author<S: Storage>(storage:
             emoji: Some("❤️".into()),
             by_owner: true,
             target_author: MessageAuthor::default(),
+            confirm: None,
         },
         Some(message_id),
     );

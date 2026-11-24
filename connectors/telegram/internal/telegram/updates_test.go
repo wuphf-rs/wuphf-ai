@@ -112,3 +112,16 @@ func TestHandleQueuesMessageCreateFrame(t *testing.T) {
 		t.Fatalf("handle() frame = %#v", frame)
 	}
 }
+
+// A user's message names them as owner_ids do, for the core's owner checks.
+func TestNormalizeNamesTheSendersAccount(t *testing.T) {
+	t.Parallel()
+	normalizer := NewNormalizer(NewPeerCache(), make(chan *wuphfpb.ClientFrame), MediaCodec{})
+	event, ok, err := normalizer.normalize(context.Background(), tg.Entities{}, topicMessage(42, 12, 21))
+	if err != nil || !ok {
+		t.Fatalf("normalize() = %v, %v", ok, err)
+	}
+	if event.Sender != "telegram:user:88" || event.GetSenderAccount() != "88" {
+		t.Fatalf("sender = %q, account = %q", event.Sender, event.GetSenderAccount())
+	}
+}

@@ -126,6 +126,10 @@ pub enum Action {
         by_owner: bool,
         #[serde(default, skip_serializing_if = "MessageAuthor::is_unknown")]
         target_author: MessageAuthor,
+        /// The owner's lone-emoji reply this reaction came from (plan 081):
+        /// marked as delivered once the reaction is acknowledged.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        confirm: Option<MessageCopyRef>,
     },
     /// Signal the origin copy that its message reached all of its mirrors
     /// (`Delivered`) or was read on one (`Read`). The connector decides how to
@@ -333,6 +337,7 @@ mod tests {
                     emoji: None,
                     by_owner: false,
                     target_author: MessageAuthor::default(),
+                    confirm: None,
                 },
                 false,
             ),

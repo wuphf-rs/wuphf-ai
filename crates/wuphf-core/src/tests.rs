@@ -111,6 +111,7 @@ fn event_in(
             reply_to_native_id: reply_to.map(str::to_owned),
             timestamp_ms: 1,
             disappearing: None,
+            author_account: None,
         }),
     }
 }
@@ -4082,4 +4083,194 @@ async fn a_dead_lettered_owner_reaction_is_forgotten_at_its_target() {
         .await
         .unwrap();
     assert_eq!(only_reaction(&from_phone).3, Some("❤️"));
+}
+
+// Plan 081: the owner's lone-emoji reply is a reaction.
+
+/// A message typed in the direct rule's Telegram topic, replying to
+/// `reply_to`, by `account` (as `owner_ids` name it).
+fn topic_reply(native_id: &str, reply_to: &str, text: &str, account: &str) -> Event {
+    let mut event = event_in(TELEGRAM, "-100123", Some("12"), native_id, Some(reply_to));
+    let EventKind::NewMessage(message) = &mut event.payload else {
+        unreachable!();
+    };
+    message.author_id = format!("telegram:user:{account}");
+    message.author_account = Some(account.into());
+    message.text = Some(text.into());
+    event
+}
+
+fn telegram_edit(native_id: &str, text: &str) -> Event {
+    Event {
+        source: SourceAddress {
+            connector_id: ConnectorId(TELEGRAM.into()),
+            address: ChatAddress::new("-100123", Some("12".into())),
+            chat_title: None,
+        },
+        payload: EventKind::Edit {
+            native_id: native_id.into(),
+            text: Some(text.into()),
+        },
+    }
+}
+
+fn telegram_delete(native_id: &str) -> Event {
+    Event {
+        source: SourceAddress {
+            connector_id: ConnectorId(TELEGRAM.into()),
+            address: ChatAddress::new("-100123", Some("12".into())),
+            chat_title: None,
+        },
+        payload: EventKind::Delete {
+            native_id: native_id.into(),
+        },
+    }
+}
+
+#[tokio::test]
+async fn the_owners_lone_emoji_reply_is_their_reaction_and_not_a_message() {
+    let core = core_with_owner(vec![direct_rule()]);
+    mirrored_whatsapp_message(&core).await;
+
+    let outcome = core
+        .ingest(topic_reply("tg-9", "tg-1", "🫠", OWNER))
+        .await
+        .unwrap();
+    let (dispatch, by_owner, author, emoji) = only_reaction(&outcome);
+    assert_eq!(dispatch.to.connector_id, ConnectorId(WHATSAPP.into()));
+    assert!(by_owner);
+    assert_eq!(emoji, Some("🫠"));
+    assert_eq!(author.author_id, "alice");
+    let Action::React {
+        native_id, confirm, ..
+    } = &dispatch.action
+    else {
+        unreachable!();
+    };
+    assert_eq!(native_id, "wa-1");
+    assert_eq!(
+        confirm.as_ref().map(|reply| reply.native_id.as_str()),
+        Some("tg-9")
+    );
+}
+
+#[tokio::test]
+async fn an_acknowledged_reply_reaction_marks_the_reply_delivered() {
+    let core = core_with_owner(vec![direct_rule()]);
+    mirrored_whatsapp_message(&core).await;
+    let outcome = core
+        .ingest(topic_reply("tg-9", "tg-1", "🫠", OWNER))
+        .await
+        .unwrap();
+    let reaction = only_reaction(&outcome).0.id;
+
+    let follow_ups = core
+        .acknowledge_dispatch(DispatchAck {
+            dispatch_id: reaction,
+            native_id: "wa-1".into(),
+            thread_id: None,
+        })
+        .await
+        .unwrap();
+    let [signal] = follow_ups.as_slice() else {
+        panic!("one delivered signal expected: {follow_ups:?}");
+    };
+    assert_eq!(signal.to.connector_id, ConnectorId(TELEGRAM.into()));
+    assert!(matches!(
+        &signal.action,
+        Action::Receipt { native_id, kind: ReceiptKind::Delivered, .. } if native_id == "tg-9"
+    ));
+}
+
+#[tokio::test]
+async fn other_emoji_replies_stay_messages() {
+    let core = core_with_owner(vec![direct_rule()]);
+    mirrored_whatsapp_message(&core).await;
+    for (native_id, text, account) in [
+        ("tg-7", "🫠", "stranger"),
+        ("tg-8", "🫠 nice", OWNER),
+        ("tg-9", "🫠🫠", OWNER),
+    ] {
+        let outcome = core
+            .ingest(topic_reply(native_id, "tg-1", text, account))
+            .await
+            .unwrap();
+        assert!(
+            matches!(&outcome.dispatches()[0].action, Action::Send { .. }),
+            "{text:?} by {account} should be sent: {outcome:?}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn editing_or_deleting_the_reply_changes_or_clears_the_reaction() {
+    let core = core_with_owner(vec![direct_rule()]);
+    mirrored_whatsapp_message(&core).await;
+    core.ingest(topic_reply("tg-9", "tg-1", "🫠", OWNER))
+        .await
+        .unwrap();
+
+    let edited = core.ingest(telegram_edit("tg-9", "🥲")).await.unwrap();
+    assert_eq!(only_reaction(&edited).3, Some("🥲"));
+
+    let deleted = core.ingest(telegram_delete("tg-9")).await.unwrap();
+    let (dispatch, by_owner, _, emoji) = only_reaction(&deleted);
+    assert_eq!(dispatch.to.connector_id, ConnectorId(WHATSAPP.into()));
+    assert!(by_owner);
+    assert_eq!(emoji, None);
+}
+
+#[tokio::test]
+async fn editing_the_reply_to_text_clears_the_reaction_and_sends_nothing_else() {
+    let core = core_with_owner(vec![direct_rule()]);
+    mirrored_whatsapp_message(&core).await;
+    core.ingest(topic_reply("tg-9", "tg-1", "🫠", OWNER))
+        .await
+        .unwrap();
+
+    let edited = core
+        .ingest(telegram_edit("tg-9", "never mind"))
+        .await
+        .unwrap();
+    assert_eq!(only_reaction(&edited).3, None);
+}
+
+#[tokio::test]
+async fn the_latest_reaction_wins_and_clearing_an_older_one_keeps_it() {
+    let core = core_with_owner(vec![direct_rule()]);
+    mirrored_whatsapp_message(&core).await;
+    core.ingest(telegram_reaction_set("tg-1", &[(OWNER, "❤️")]))
+        .await
+        .unwrap();
+    let replied = core
+        .ingest(topic_reply("tg-9", "tg-1", "🫠", OWNER))
+        .await
+        .unwrap();
+    assert_eq!(only_reaction(&replied).3, Some("🫠"));
+
+    // The native ❤️ goes; WhatsApp shows the reply's 🫠, which stays.
+    let unreacted = core
+        .ingest(telegram_reaction_set("tg-1", &[]))
+        .await
+        .unwrap();
+    assert!(unreacted.dispatches().is_empty(), "{unreacted:?}");
+
+    // The reply goes; its 🫠 was WhatsApp's reaction, so it is cleared.
+    let deleted = core.ingest(telegram_delete("tg-9")).await.unwrap();
+    assert_eq!(only_reaction(&deleted).3, None);
+}
+
+#[tokio::test]
+async fn a_reaction_set_never_clears_a_reply_reaction() {
+    let core = core_with_owner(vec![direct_rule()]);
+    mirrored_whatsapp_message(&core).await;
+    core.ingest(topic_reply("tg-9", "tg-1", "🫠", OWNER))
+        .await
+        .unwrap();
+
+    let set = core
+        .ingest(telegram_reaction_set("tg-1", &[]))
+        .await
+        .unwrap();
+    assert_eq!(set, IngestOutcome::Ignored(IgnoreReason::RedundantReaction));
 }

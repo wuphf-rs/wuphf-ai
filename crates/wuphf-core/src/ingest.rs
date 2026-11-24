@@ -2,6 +2,7 @@
 //! logical message and the dispatches that fan it out, including mirror-thread
 //! provisioning and source-rename retitling.
 
+use crate::reply_reaction::lone_emoji;
 use crate::{Core, CoreError, RoutingConfig, notes};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -76,15 +77,24 @@ where
         // The native id outlives the inbound form: the message drops it on
         // promotion, but the received copy is keyed by it.
         let native_id = inbound.native_id.clone();
+        let author_account = inbound.author_account.clone();
         let message = Message::from_inbound(inbound, conversation_id, reply_to);
         self.storage.put_message(message.clone()).await?;
         self.storage
             .put_received_copy(MessageCopy {
                 message_id: message.id,
                 endpoint_id: origin_endpoint,
-                native_id,
+                native_id: native_id.clone(),
             })
             .await?;
+        if let (Some(parent), Some(emoji)) = (
+            message.reply_to,
+            self.reply_reaction_emoji(routing, &origin, &message, author_account.as_deref()),
+        ) {
+            return self
+                .ingest_reply_reaction(routing, &origin, parent, &message, &native_id, Some(emoji))
+                .await;
+        }
 
         let provision_title = source
             .chat_title
@@ -402,6 +412,16 @@ where
         }
         message.text = text;
         self.storage.put_message(message.clone()).await?;
+        if let Some(parent) = self
+            .reply_reaction_parent(origin_endpoint, &message, &native_id)
+            .await?
+        {
+            let origin = self.storage.endpoint(origin_endpoint).await?;
+            let emoji = message.text.as_deref().and_then(lone_emoji);
+            return self
+                .ingest_reply_reaction(routing, &origin, parent, &message, &native_id, emoji)
+                .await;
+        }
 
         let routed = self
             .with_routing(routing)
@@ -440,6 +460,15 @@ where
         }
         message.deleted = true;
         self.storage.put_message(message.clone()).await?;
+        if let Some(parent) = self
+            .reply_reaction_parent(origin_endpoint, &message, &native_id)
+            .await?
+        {
+            let origin = self.storage.endpoint(origin_endpoint).await?;
+            return self
+                .ingest_reply_reaction(routing, &origin, parent, &message, &native_id, None)
+                .await;
+        }
 
         let routed = self
             .with_routing(routing)
@@ -474,12 +503,10 @@ where
         else {
             return Ok(IngestOutcome::Ignored(IgnoreReason::Unmatched));
         };
-        let stored = self.storage.reactions_at(message_id, origin.id).await?;
-        let previous = stored
-            .iter()
-            .find(|reaction| reaction.reactor == change.key())
-            .map(|reaction| reaction.emoji.as_str());
-        if previous == change.emoji.as_deref() {
+        let previous = self
+            .stored_reaction(message_id, origin.id, &change.key())
+            .await?;
+        if previous == change.emoji {
             return Ok(IngestOutcome::Ignored(IgnoreReason::RedundantReaction));
         }
         let routed = self
@@ -515,7 +542,9 @@ where
             .reactions_at(message_id, origin.id)
             .await?
             .into_iter()
-            .filter(|reaction| !reaction.reactor.is_empty())
+            .filter(|reaction| {
+                !reaction.reactor.is_empty() && !reaction.reactor.starts_with(REPLY_KEY_PREFIX)
+            })
             .map(|reaction| (reaction.reactor, reaction.emoji))
             .collect();
         let mut changes = Vec::new();
@@ -524,12 +553,12 @@ where
                 continue;
             }
             if stored.get(&reaction.reactor) != Some(&reaction.emoji) {
-                changes.push(ReactionChange {
-                    reactor: reaction.reactor.clone(),
-                    reactor_name: reaction.reactor_name.clone(),
-                    emoji: Some(reaction.emoji.clone()),
-                    from_me: false,
-                });
+                changes.push(ReactionChange::reported(
+                    reaction.reactor.clone(),
+                    reaction.reactor_name.clone(),
+                    Some(reaction.emoji.clone()),
+                    false,
+                ));
             }
         }
         let mut cleared: Vec<&String> = stored
@@ -541,12 +570,11 @@ where
             })
             .collect();
         cleared.sort();
-        changes.extend(cleared.into_iter().map(|reactor| ReactionChange {
-            reactor: reactor.clone(),
-            reactor_name: None,
-            emoji: None,
-            from_me: false,
-        }));
+        changes.extend(
+            cleared
+                .into_iter()
+                .map(|reactor| ReactionChange::reported(reactor.clone(), None, None, false)),
+        );
         if changes.is_empty() {
             return Ok(IngestOutcome::Ignored(IgnoreReason::RedundantReaction));
         }
@@ -570,18 +598,24 @@ where
     /// owner's reaction is also stored at each target as the session
     /// account's (`""`): what a platform reacting as the owner will show, so
     /// its echo is recognised as redundant.
-    async fn reaction_changed(
+    ///
+    /// An owner's clear removes only what it set: a target now showing
+    /// another owner reaction (a later one, from a native reaction or a
+    /// reply) keeps it, and gets no dispatch (plan 081).
+    pub(crate) async fn reaction_changed(
         &self,
         routing: &Arc<RoutingConfig>,
         origin: &Endpoint,
         message: &Message,
         change: ReactionChange,
     ) -> Result<Vec<Dispatch>, CoreError> {
-        let emoji = change.emoji.as_deref();
+        let key = change.key();
+        let previous = self.stored_reaction(message.id, origin.id, &key).await?;
+        let emoji = change.emoji.clone();
         self.storage
-            .set_reaction(message.id, origin.id, change.key(), emoji)
+            .set_reaction(message.id, origin.id, &key, emoji.as_deref())
             .await?;
-        let by_owner = routing.is_owner(&origin.connector_id, &change.reactor, change.from_me);
+        let by_owner = change.by_owner(routing, origin);
         let routed = self
             .with_routing(routing)
             .route_reaction(
@@ -589,18 +623,41 @@ where
                 origin.id,
                 change.reactor,
                 change.reactor_name,
-                change.emoji.clone(),
+                emoji.clone(),
                 by_owner,
             )
             .await?;
-        if by_owner {
-            for dispatch in &routed {
-                self.storage
-                    .set_reaction(message.id, dispatch.to.endpoint_id, "", emoji)
-                    .await?;
-            }
+        if !by_owner {
+            return Ok(routed);
         }
-        Ok(routed)
+        let mut kept = Vec::with_capacity(routed.len());
+        for dispatch in routed {
+            let target = dispatch.to.endpoint_id;
+            if emoji.is_none() && self.stored_reaction(message.id, target, "").await? != previous {
+                continue;
+            }
+            self.storage
+                .set_reaction(message.id, target, "", emoji.as_deref())
+                .await?;
+            kept.push(dispatch);
+        }
+        Ok(kept)
+    }
+
+    /// `reactor`'s stored reaction on `message`'s copy at `endpoint`.
+    pub(crate) async fn stored_reaction(
+        &self,
+        message: MessageId,
+        endpoint: EndpointId,
+        reactor: &str,
+    ) -> Result<Option<String>, CoreError> {
+        Ok(self
+            .storage
+            .reactions_at(message, endpoint)
+            .await?
+            .into_iter()
+            .find(|reaction| reaction.reactor == reactor)
+            .map(|reaction| reaction.emoji))
     }
 
     /// Surface a delivery/read receipt on the message's other copies. The
@@ -649,7 +706,8 @@ where
     }
 }
 
-/// One reactor's reaction change as a connector reported it.
+/// One reactor's reaction change: as a connector reported it, or from the
+/// owner's lone-emoji reply (plan 081).
 pub(crate) struct ReactionChange {
     pub(crate) reactor: String,
     pub(crate) reactor_name: Option<String>,
@@ -657,11 +715,46 @@ pub(crate) struct ReactionChange {
     pub(crate) emoji: Option<String>,
     /// The connector's own session account.
     pub(crate) from_me: bool,
+    /// The native id of the owner's reply this reaction is, when it is one.
+    pub(crate) via_reply: Option<String>,
 }
 
+/// The reaction store's key prefix for a reaction made by replying with a
+/// lone emoji, followed by the reply's native id. A reaction set never
+/// reports these, so a diff leaves them alone.
+pub(crate) const REPLY_KEY_PREFIX: &str = "reply:";
+
 impl ReactionChange {
-    /// The reactor's key in the reaction store: `""` for the session account.
-    fn key(&self) -> &str {
-        if self.from_me { "" } else { &self.reactor }
+    /// A reaction the platform reported.
+    pub(crate) fn reported(
+        reactor: String,
+        reactor_name: Option<String>,
+        emoji: Option<String>,
+        from_me: bool,
+    ) -> Self {
+        Self {
+            reactor,
+            reactor_name,
+            emoji,
+            from_me,
+            via_reply: None,
+        }
+    }
+
+    /// The reactor's key in the reaction store: `""` for the session account,
+    /// `reply:<native id>` for a reply.
+    pub(crate) fn key(&self) -> String {
+        match &self.via_reply {
+            Some(reply) => format!("{REPLY_KEY_PREFIX}{reply}"),
+            None if self.from_me => String::new(),
+            None => self.reactor.clone(),
+        }
+    }
+
+    /// Whether the reactor is the owner. A reply reaction is stored only for
+    /// the owner's replies, so it always is.
+    fn by_owner(&self, routing: &RoutingConfig, origin: &Endpoint) -> bool {
+        self.via_reply.is_some()
+            || routing.is_owner(&origin.connector_id, &self.reactor, self.from_me)
     }
 }

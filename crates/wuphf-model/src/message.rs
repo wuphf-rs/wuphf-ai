@@ -102,6 +102,13 @@ pub struct MessageCopy {
     pub native_id: String,
 }
 
+/// One message's copy at one endpoint, by its native id there.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MessageCopyRef {
+    pub endpoint_id: EndpointId,
+    pub native_id: String,
+}
+
 /// One reactor's reaction in an [`EventKind::ReactionSet`].
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ReactorReaction {
@@ -212,6 +219,11 @@ pub struct NewMessage {
     /// it carried one. `None` never turns a known timer off.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub disappearing: Option<DisappearingTimer>,
+    /// The author as the connector's `owner_ids` name accounts, when that
+    /// differs from `author_id` (a Telegram user's plain id). Checked against
+    /// `owner_ids`; not kept on the stored message.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub author_account: Option<String>,
 }
 
 /// The kind of inbound event a connector reports for a chat.

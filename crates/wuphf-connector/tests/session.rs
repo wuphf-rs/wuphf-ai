@@ -173,6 +173,7 @@ fn wa_event(native_id: &str, text: &str) -> Event {
             reply_to_native_id: None,
             timestamp_ms: 1,
             disappearing: None,
+            author_account: None,
         }),
     }
 }
@@ -376,6 +377,7 @@ async fn inbound_event_frames_are_forwarded_to_the_core() {
                     timestamp_ms: 1,
                     sender_name: None,
                     disappearing: None,
+                    sender_account: None,
                 },
             )),
         })

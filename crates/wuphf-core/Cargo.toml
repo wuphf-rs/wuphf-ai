@@ -5,6 +5,7 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
+emojis.workspace = true
 sha2.workspace = true
 thiserror.workspace = true
 wuphf-model.workspace = true

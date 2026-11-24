@@ -329,6 +329,7 @@ mod tests {
                 reply_to_native_id: None,
                 timestamp_ms: 100,
                 disappearing: None,
+                author_account: None,
             }),
         }
     }

@@ -263,6 +263,7 @@ fn input_from_proto(
                 reply_to_native_id: event.reply_to_platform_message_id,
                 timestamp_ms: event.timestamp_ms,
                 disappearing: event.disappearing.map(timer_from_proto),
+                author_account: event.sender_account,
             }),
         })),
         Some(pb::client_frame::Body::MessageEdit(event)) => Ok(ConnectorInput::event(Event {
@@ -855,6 +856,7 @@ mod tests {
                 participant: Some("alice@lid".into()),
                 authored_by_bridge: false,
             },
+            confirm: None,
         };
         let pb::server_frame::Body::Reaction(reaction) = body(dispatch(react, None)) else {
             panic!("a reaction is a Reaction frame");
@@ -1242,6 +1244,7 @@ mod tests {
                 seconds: 86_400,
                 setting_timestamp: None,
             }),
+            sender_account: None,
         });
         let InboundWork::Event(event) = work(frame) else {
             panic!("a create is an event");

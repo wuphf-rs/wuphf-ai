@@ -408,6 +408,8 @@ fn normalize(
             timestamp_ms: info.timestamp.timestamp_millis(),
             sender_name: sender_name(info, names.sender.as_deref()),
             disappearing: message_timer(info, message),
+            // WhatsApp names its owner as the session account, not by owner_ids.
+            sender_account: None,
         },
     )))
 }

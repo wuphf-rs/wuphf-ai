@@ -687,6 +687,7 @@ async fn grpc_transport_delivers_dispatch_to_registered_connector() {
                     timestamp_ms: 1,
                     sender_name: None,
                     disappearing: None,
+                    sender_account: None,
                 },
             )),
         })
@@ -770,6 +771,7 @@ fn source_event(
             reply_to_native_id: reply_to.map(str::to_owned),
             timestamp_ms: 1,
             disappearing: None,
+            author_account: None,
         }),
     }
 }
@@ -1016,6 +1018,7 @@ async fn observer_service_sends_media_ids_and_tags_the_client() {
                     reply_to_native_id: None,
                     timestamp_ms: 50,
                     disappearing: None,
+                    author_account: None,
                 }),
             },
             Platform::WhatsApp,
@@ -1557,6 +1560,7 @@ async fn a_reported_timer_reaches_the_whatsapp_send_over_grpc() {
                     timestamp_ms: 1,
                     sender_name: None,
                     disappearing: None,
+                    sender_account: None,
                 },
             )),
         })

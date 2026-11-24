@@ -49,6 +49,9 @@ where
             if let Some(ack) = self.delivery_ack_for(&dispatch).await? {
                 dispatches.push(ack);
             }
+            if let Some(signal) = self.reply_confirmation(&dispatch).await? {
+                dispatches.push(signal);
+            }
             dispatches.extend(self.resume_provisioned(&routing, &dispatch).await?);
         }
         Ok(dispatches)

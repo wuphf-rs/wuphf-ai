@@ -246,6 +246,12 @@ func (n Normalizer) normalize(
 		if name := chatTitle(entities, from); name != "" {
 			event.SenderName = &name
 		}
+		// The sender as owner_ids name users, so the core can tell the
+		// owner's messages (a lone-emoji reply is their reaction, plan 081).
+		if user, ok := from.(*tg.PeerUser); ok {
+			account := reactorID(user)
+			event.SenderAccount = &account
+		}
 	}
 	if topicID, ok := topicRootID(message); ok {
 		thread := strconv.Itoa(topicID)

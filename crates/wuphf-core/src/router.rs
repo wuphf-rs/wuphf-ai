@@ -178,6 +178,7 @@ where
                 emoji: emoji.clone(),
                 by_owner,
                 target_author: MessageAuthor::default(),
+                confirm: None,
             })
             .await?;
         for dispatch in &mut dispatches {

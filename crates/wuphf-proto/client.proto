@@ -27,6 +27,11 @@ message MessageCreateEvent {
   // known timer off; when the chat's timer is unknown and the connector
   // declares supports_disappearing_timers, the core records it as off.
   optional DisappearingTimer disappearing = 12;
+  // The sender as the connector's owner_ids name accounts, when that differs
+  // from `sender` (a Telegram user's plain id, where `sender` is
+  // telegram:user:N). The core checks it against owner_ids, for instance to
+  // turn the owner's lone-emoji reply into a reaction (plan 081).
+  optional string sender_account = 13;
 }
 
 // One chat's properties as the platform reported them. An absent field was not

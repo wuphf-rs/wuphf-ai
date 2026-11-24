@@ -915,6 +915,7 @@ fn sample_dispatches() -> Vec<Dispatch> {
                 emoji: Some("👍".into()),
                 by_owner: false,
                 target_author: MessageAuthor::default(),
+                confirm: None,
             },
             DispatchState::Pending,
         ),

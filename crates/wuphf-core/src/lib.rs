@@ -15,6 +15,7 @@ mod ingest;
 mod notes;
 mod notify;
 mod profile;
+mod reply_reaction;
 mod resolve;
 mod router;
 mod send;
@@ -152,12 +153,8 @@ where
                 emoji,
                 from_me,
             } => {
-                let change = ingest::ReactionChange {
-                    reactor,
-                    reactor_name,
-                    emoji,
-                    from_me,
-                };
+                let change =
+                    ingest::ReactionChange::reported(reactor, reactor_name, emoji, from_me);
                 self.ingest_reaction(&routing, &origin, native_id, change)
                     .await
             }

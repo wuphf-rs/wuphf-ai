@@ -98,6 +98,7 @@ code).
 | 078 | wuphf-misc's settings in /wuphf: plugins declare their own settings (`plugin_settings.<id>`) | P2 | M | 040, 050 | DONE (migration 0020; live panel test pending the owner; see notes) |
 | 079 | Health checks: probes of rule chats, health pauses that hold messages, tools, notices, a Health page, `wuphf-server health` | P1 | L | botconf 018 (page only) | IN PROGRESS |
 | 080 | The owner's Telegram reactions as their own reaction on WhatsApp and Instagram (reactions stored; Instagram owner-only) | P2 | M–L | — | DONE (migration 0023; live test pending the owner; see notes) |
+| 081 | A lone-emoji reply from the owner is a reaction (any emoji, not only Telegram's set) | P2 | S–M | 080 | IN PROGRESS |
 
 Status values: TODO | IN PROGRESS | DONE | BLOCKED (with one-line reason) |
 REJECTED (with one-line rationale).
