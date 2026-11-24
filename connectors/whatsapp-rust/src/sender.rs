@@ -11,12 +11,12 @@ use std::future::Future;
 use std::sync::Arc;
 
 use tracing::warn;
-use whatsapp_rust::Jid;
 use whatsapp_rust::types::message::AddressingMode;
 use whatsapp_rust::wacore::proto_helpers::{
     MessageBuilderExt, MessageExt, build_quote_context_with_info,
 };
 use whatsapp_rust::waproto::whatsapp as wa;
+use whatsapp_rust::{Jid, Server};
 use wuphf_connector::settings::Live;
 use wuphf_connector::{Delivery, Failure, MediaClient, MediaConverter, Sender, SessionError};
 use wuphf_proto::connector as pb;
@@ -139,7 +139,14 @@ impl<C: WaClient, M: CoreMedia, S: StickerConverter> WhatsAppSender<C, M, S> {
         match &dispatch.reply_context {
             Some(reply) => Ok(Some(build_quote_context_with_info(
                 reply.platform_message_id.clone(),
-                &self.quoted_author(reply, mode).await?,
+                &self
+                    .message_author(
+                        reply.authored_by_bridge,
+                        reply.participant.as_deref(),
+                        &reply.sender,
+                        mode,
+                    )
+                    .await?,
                 chat,
                 chat,
                 // A typed stub of the parent's media, so the preview shows a
@@ -153,25 +160,25 @@ impl<C: WaClient, M: CoreMedia, S: StickerConverter> WhatsAppSender<C, M, S> {
         }
     }
 
-    /// Who WhatsApp is told wrote the quoted message (Go `quotedAuthor`):
-    /// WhatsApp links a quote by its id and author together, so the wrong
-    /// author shows the wrong name and leaves the reply unlinked. A copy the
-    /// bridge received here (a message someone in the chat wrote, quoted by an
-    /// owner send such as wuphf-misc's) names its author in this platform's
+    /// Who WhatsApp is told wrote a message a quote or a reaction names (Go
+    /// `messageAuthor`): WhatsApp links a quote by its id and author together,
+    /// and a reaction by its key's author, so the wrong author shows the
+    /// wrong name and leaves it unlinked. A copy the bridge received here (a
+    /// message someone in the chat wrote) names its author in this platform's
     /// canonical ids: the group participant, else the chat peer, put into the
     /// chat's form. A copy the bridge sent was written by our own account,
     /// which a LID-addressed chat knows by its LID.
-    async fn quoted_author(
+    async fn message_author(
         &self,
-        reply: &pb::ReplyContext,
+        authored_by_bridge: bool,
+        participant: Option<&str>,
+        sender: &str,
         mode: Option<AddressingMode>,
     ) -> Result<Jid, Failure> {
-        if !reply.authored_by_bridge {
-            let author = reply
-                .participant
-                .as_deref()
+        if !authored_by_bridge {
+            let author = participant
                 .filter(|author| !author.is_empty())
-                .unwrap_or(&reply.sender);
+                .unwrap_or(sender);
             if let Ok(author) = author.parse::<Jid>() {
                 return Ok(self
                     .addresses
@@ -180,7 +187,34 @@ impl<C: WaClient, M: CoreMedia, S: StickerConverter> WhatsAppSender<C, M, S> {
             }
         }
         self.addresses.own(&self.client, mode).ok_or_else(|| {
-            Failure::permanent("outbound WhatsApp reply requires a paired account JID")
+            Failure::permanent("naming our own WhatsApp message requires a paired account JID")
+        })
+    }
+
+    /// The key a reaction names its message by, shaped as WhatsApp's own
+    /// (the library's `MessageContext::message_key`): our own message is
+    /// `from_me`, and someone else's in a group carries its author.
+    async fn reaction_key(
+        &self,
+        dispatch: &pb::ReactionDispatch,
+        chat: &Jid,
+        mode: Option<AddressingMode>,
+    ) -> Result<wa::MessageKey, Failure> {
+        let author = self
+            .message_author(
+                dispatch.target_authored_by_bridge,
+                dispatch.target_participant.as_deref(),
+                &dispatch.target_sender,
+                mode,
+            )
+            .await?;
+        let own = self.addresses.own(&self.client, mode);
+        let from_me = own.is_some_and(|own| own.user == author.user);
+        Ok(wa::MessageKey {
+            remote_jid: Some(chat.to_string()),
+            from_me: Some(from_me),
+            id: Some(dispatch.target_platform_message_id.clone()),
+            participant: (!from_me && chat.server == Server::Group).then(|| author.to_string()),
         })
     }
 
@@ -401,6 +435,20 @@ impl<C: WaClient, M: CoreMedia, S: StickerConverter> Sender for WhatsAppSender<C
         Ok(dispatch.target_chat_id)
     }
 
+    /// The owner's reaction, set as this account's (the owner's); anyone
+    /// else's is not the owner's to make, so it is acknowledged without
+    /// sending (plan 080). An empty emoji removes the reaction. The target id
+    /// is returned unchanged.
+    async fn apply_reaction(&self, dispatch: pb::ReactionDispatch) -> Result<String, Failure> {
+        if !dispatch.by_owner {
+            return Ok(dispatch.target_platform_message_id);
+        }
+        let (chat, mode) = self.target(&dispatch.target_chat_id).await?;
+        let key = self.reaction_key(&dispatch, &chat, mode).await?;
+        self.client.react(chat, key, dispatch.emoji).await?;
+        Ok(dispatch.target_platform_message_id)
+    }
+
     /// Revoking our own (bridge-authored) copy; the target id is returned
     /// unchanged for the acknowledgement.
     async fn delete_message(&self, dispatch: pb::MessageDeleteDispatch) -> Result<String, Failure> {
@@ -441,6 +489,7 @@ mod tests {
         uploads: Mutex<Vec<(Vec<u8>, OutboundMedia)>>,
         edits: Mutex<Vec<(Jid, String, wa::Message)>>,
         revokes: Mutex<Vec<(Jid, String)>>,
+        reactions: Mutex<Vec<(Jid, wa::MessageKey, String)>>,
         actions: Mutex<Vec<ChatAction>>,
         /// The send (0-based) that fails, transiently.
         fail_send_at: Option<usize>,
@@ -466,6 +515,11 @@ mod tests {
 
         async fn revoke(&self, to: Jid, id: String) -> Result<(), Failure> {
             self.revokes.lock().unwrap().push((to, id));
+            Ok(())
+        }
+
+        async fn react(&self, to: Jid, key: wa::MessageKey, emoji: String) -> Result<(), Failure> {
+            self.reactions.lock().unwrap().push((to, key, emoji));
             Ok(())
         }
 
@@ -1171,6 +1225,89 @@ mod tests {
                 .as_deref(),
             Some("1999@s.whatsapp.net")
         );
+    }
+
+    /// The owner's reaction on `id` in `chat`, the reacted copy written by
+    /// `participant` (received) or by the bridge (`None`).
+    fn owner_reaction(chat: &str, participant: Option<&str>, emoji: &str) -> pb::ReactionDispatch {
+        pb::ReactionDispatch {
+            target_chat_id: chat.into(),
+            target_platform_message_id: "wa-7".into(),
+            emoji: emoji.into(),
+            by_owner: true,
+            target_sender: chat.into(),
+            target_participant: participant.map(str::to_owned),
+            target_authored_by_bridge: participant.is_none(),
+            ..pb::ReactionDispatch::default()
+        }
+    }
+
+    fn reactions(sender: &TestSender) -> Vec<(Jid, wa::MessageKey, String)> {
+        sender.client.reactions.lock().unwrap().clone()
+    }
+
+    #[tokio::test]
+    async fn the_owners_reaction_names_a_received_group_message_by_its_author() {
+        let sender = sender(addressed(), FakeMedia::default());
+        let id = sender
+            .apply_reaction(owner_reaction(
+                "123@g.us",
+                Some("1555@s.whatsapp.net"),
+                "❤️",
+            ))
+            .await
+            .unwrap();
+        assert_eq!(id, "wa-7");
+        let [(chat, key, emoji)] = reactions(&sender).try_into().unwrap();
+        assert_eq!(chat.to_string(), "123@g.us");
+        assert_eq!(emoji, "❤️");
+        // The LID-addressed group knows the author by its LID.
+        assert_eq!(
+            key,
+            wa::MessageKey {
+                remote_jid: Some("123@g.us".into()),
+                from_me: Some(false),
+                id: Some("wa-7".into()),
+                participant: Some("9@lid".into()),
+            }
+        );
+    }
+
+    #[tokio::test]
+    async fn the_owners_reaction_on_a_bridge_copy_is_from_me() {
+        let sender = sender(addressed(), FakeMedia::default());
+        sender
+            .apply_reaction(owner_reaction("456@g.us", None, "👍"))
+            .await
+            .unwrap();
+        let [(_, key, _)] = reactions(&sender).try_into().unwrap();
+        assert_eq!(key.from_me, Some(true));
+        assert_eq!(key.participant, None);
+    }
+
+    #[tokio::test]
+    async fn the_owners_reaction_in_a_dm_names_no_participant() {
+        let sender = sender(fake(), FakeMedia::default());
+        sender
+            .apply_reaction(owner_reaction(DM, Some(DM), ""))
+            .await
+            .unwrap();
+        let [(chat, key, emoji)] = reactions(&sender).try_into().unwrap();
+        assert_eq!(chat.to_string(), DM);
+        assert_eq!(emoji, "", "an empty emoji removes the reaction");
+        assert_eq!(key.from_me, Some(false));
+        assert_eq!(key.participant, None);
+    }
+
+    #[tokio::test]
+    async fn someone_elses_reaction_sends_nothing() {
+        let sender = sender(fake(), FakeMedia::default());
+        let dispatch = pb::ReactionDispatch {
+            by_owner: false,
+            ..owner_reaction(GROUP, Some(DM), "😂")
+        };
+        assert_eq!(sender.apply_reaction(dispatch).await.unwrap(), "wa-7");
+        assert!(reactions(&sender).is_empty());
     }
 
     #[tokio::test]

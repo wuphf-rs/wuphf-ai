@@ -82,6 +82,15 @@ pub trait WaClient: Account + LidStore + Send + Sync + 'static {
     /// Revoke our message `id` in `to`.
     fn revoke(&self, to: Jid, id: String) -> impl Future<Output = Result<(), Failure>> + Send;
 
+    /// React as our account to the message `key` names in `to`; an empty
+    /// `emoji` removes our reaction.
+    fn react(
+        &self,
+        to: Jid,
+        key: wa::MessageKey,
+        emoji: String,
+    ) -> impl Future<Output = Result<(), Failure>> + Send;
+
     /// Encrypt and upload `bytes` to WhatsApp and build the message that
     /// carries them.
     fn upload(
@@ -151,6 +160,15 @@ impl WaClient for LiveClient {
         self.linked
             .get()?
             .revoke_message(to, id, RevokeType::Sender)
+            .await
+            .map_err(transient)
+            .map(|_| ())
+    }
+
+    async fn react(&self, to: Jid, key: wa::MessageKey, emoji: String) -> Result<(), Failure> {
+        self.linked
+            .get()?
+            .send_reaction(to, key, &emoji)
             .await
             .map_err(transient)
             .map(|_| ())
