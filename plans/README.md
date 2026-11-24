@@ -91,6 +91,10 @@ code).
 | 071 | Poll votes and button presses both ways: vote store, live tallies, owner presses act on WhatsApp | P1 | L | 068–070 | TODO |
 | 072 | Telegram polls, locations, venues, contacts to WhatsApp; the owner's Telegram vote as their WhatsApp vote | P2 | M | 068, 071 | TODO |
 | 073 | The Go WhatsApp connector (whatsmeow) gets structured content, votes and button presses, both ways | P1 | L | 068, 071 (after 069, 072) | TODO |
+| 074 | The core's data operations behind Storage (unlink/relink/take over, delete history, purge media, forget, dispatch retry/drop), the audit log, notices | P1 | L | — | TODO |
+| 075 | The data panel in /wuphf (botconf DataSource), /wuphf in a topic opens its conversation, `wuphf-server data` | P1 | L | botconf 018, 074 | TODO |
+| 076 | Pause / resume one chat: the `paused_chats` runtime setting | P2 | S–M | 074 | TODO |
+| 077 | Merge two address forms of one chat; split a wrong merge (nothing moves) | P2 | M–L | 074, 075 | TODO |
 
 Status values: TODO | IN PROGRESS | DONE | BLOCKED (with one-line reason) |
 REJECTED (with one-line rationale).
