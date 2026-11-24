@@ -322,12 +322,47 @@ pub trait PanelTokens: Send + Sync + 'static {
     async fn purge_panel_tokens(&self, now_ms: i64) -> StorageResult<u64>;
 }
 
-/// What a connector declared about its runtime settings when it last
-/// registered: the botconf descriptor of its settings, the JSON Schema of its
-/// section and its own file values (the section's base).
+/// Who declared a runtime settings section: a connector when it registers
+/// (plan 040), or a plugin such as wuphf-misc (plan 078).
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub enum SettingsOwner {
+    Connector(ConnectorId),
+    /// A plugin's id (e.g. `misc`).
+    Plugin(String),
+}
+
+impl SettingsOwner {
+    /// The owner's kind as stored: `connector` or `plugin`.
+    pub fn kind(&self) -> &'static str {
+        match self {
+            Self::Connector(_) => "connector",
+            Self::Plugin(_) => "plugin",
+        }
+    }
+
+    pub fn id(&self) -> &str {
+        match self {
+            Self::Connector(connector) => &connector.0,
+            Self::Plugin(plugin) => plugin,
+        }
+    }
+
+    /// The owner from its stored kind and id; `None` for an unknown kind.
+    pub fn from_parts(kind: &str, id: String) -> Option<Self> {
+        match kind {
+            "connector" => Some(Self::Connector(ConnectorId(id))),
+            "plugin" => Some(Self::Plugin(id)),
+            _ => None,
+        }
+    }
+}
+
+/// What a connector or a plugin last declared about its runtime settings: the
+/// botconf descriptor of its settings, the JSON Schema of its section and its
+/// own file values (the section's base).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SettingsDeclaration {
-    pub connector_id: ConnectorId,
+    pub owner: SettingsOwner,
     /// A `botconf.v1.DescribeResponse`, serialized with protobuf.
     pub descriptor: Vec<u8>,
     pub json_schema: String,
@@ -335,17 +370,19 @@ pub struct SettingsDeclaration {
     pub base_json: String,
 }
 
-/// Each connector's last settings declaration, so its section exists before
-/// it reconnects. Not part of [`Storage`]: routing never reads it.
+/// Each connector's and plugin's last settings declaration, so its section
+/// exists before it reconnects. Not part of [`Storage`]: routing never reads
+/// it.
 #[async_trait]
 pub trait SettingsDeclarations: Send + Sync + 'static {
-    /// Store `declaration`, replacing the connector's previous one.
+    /// Store `declaration`, replacing its owner's previous one.
     async fn put_settings_declaration(
         &self,
         declaration: &SettingsDeclaration,
         updated_at_ms: i64,
     ) -> StorageResult<()>;
-    /// Every stored declaration, ordered by connector id.
+    /// Every stored declaration, ordered by owner (connectors first, each
+    /// kind by id).
     async fn settings_declarations(&self) -> StorageResult<Vec<SettingsDeclaration>>;
 }
 

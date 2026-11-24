@@ -12,6 +12,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 "connector.proto",
                 "observer.proto",
                 "functions.proto",
+                "plugin.proto",
             ],
             &["."],
         )?;

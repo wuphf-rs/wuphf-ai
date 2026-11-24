@@ -1,5 +1,5 @@
-// Package settings lets a connector declare its runtime settings to the core
-// and follow the values the core pushes back (plan 040).
+// Package settings lets a connector or a plugin declare its runtime settings
+// to the core and follow the values the core pushes back (plans 040, 078).
 //
 // A connector keeps the settings that can change while it runs in one struct
 // (its Runtime config), loaded from its TOML file as before. Declare describes
@@ -41,6 +41,15 @@ const Namespace = "connector_settings"
 // Prefix is the key of a connector's settings section.
 func Prefix(connectorID string) string {
 	return Namespace + "." + connectorID
+}
+
+// PluginNamespace is where the core keeps plugins' settings (wuphf-misc's):
+// `plugin_settings.<plugin id>`.
+const PluginNamespace = "plugin_settings"
+
+// PluginPrefix is the key of a plugin's settings section.
+func PluginPrefix(pluginID string) string {
+	return PluginNamespace + "." + pluginID
 }
 
 // Live holds a connector's current runtime settings. Readers call Load once
@@ -151,12 +160,7 @@ type Follower interface {
 	Watch(ctx context.Context, actor *botconf.Actor, prefixes ...string) <-chan botconf.Event
 }
 
-// Watch follows the connector's section and stores each pushed value in live,
-// until ctx ends. After every (re)connect the core sends the whole section, so
-// the value starts again from base and the pushed values are laid over it;
-// later events carry only what changed. onChange, when set, runs after each
-// swap with the old and the new value. A value that does not decode into T is
-// reported through onError (when set) and skipped.
+// Watch follows the connector's section (see WatchSection).
 func Watch[T any](
 	ctx context.Context,
 	follower Follower,
@@ -166,7 +170,25 @@ func Watch[T any](
 	onChange func(old, new T),
 	onError func(error),
 ) {
-	prefix := Prefix(connectorID)
+	WatchSection(ctx, follower, Prefix(connectorID), base, live, onChange, onError)
+}
+
+// WatchSection follows the section at prefix (a connector's or a plugin's)
+// and stores each pushed value in live, until ctx ends. After every
+// (re)connect the core sends the whole section, so the value starts again
+// from base and the pushed values are laid over it; later events carry only
+// what changed. onChange, when set, runs after each swap with the old and the
+// new value. A value that does not decode into T is reported through onError
+// (when set) and skipped.
+func WatchSection[T any](
+	ctx context.Context,
+	follower Follower,
+	prefix string,
+	base T,
+	live *Live[T],
+	onChange func(old, new T),
+	onError func(error),
+) {
 	for event := range follower.Watch(ctx, nil, prefix) {
 		current := live.Load()
 		if event.Initial {

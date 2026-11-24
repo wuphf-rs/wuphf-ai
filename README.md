@@ -152,8 +152,8 @@ example` rewrites the core's).
 
 The core's settings live in two places: its config file and the overrides in
 its database (changed from a settings panel or `wuphf-server settings`),
-every connector's included (`connector_settings.<id>`). One backup holds
-both:
+every connector's included (`connector_settings.<id>`), and wuphf-misc's
+(`plugin_settings.misc`). One backup holds both:
 
 ```sh
 wuphf-server export -o wuphf-backup.toml                 # no token values

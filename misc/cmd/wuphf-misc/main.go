@@ -10,18 +10,24 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"slices"
+	"time"
 
 	"github.com/propheci/botconf/go/tui"
+	"github.com/rs/zerolog"
 	"github.com/wuphf-rs/wuphf-ai/connectors/shared/chatdir"
 	"github.com/wuphf-rs/wuphf-ai/connectors/shared/coreclient"
 	"github.com/wuphf-rs/wuphf-ai/connectors/shared/logging"
+	"github.com/wuphf-rs/wuphf-ai/connectors/shared/settings"
 	"github.com/wuphf-rs/wuphf-ai/connectors/shared/setup"
 	"github.com/wuphf-rs/wuphf-ai/connectors/shared/version"
 	"github.com/wuphf-rs/wuphf-ai/misc/internal/config"
 	"github.com/wuphf-rs/wuphf-ai/misc/internal/misc"
 	wuphfpb "github.com/wuphf-rs/wuphf-ai/proto/go/connector/v1"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/status"
 )
 
 // validate is setup's check of a candidate config: what wuphf-misc checks at
@@ -71,21 +77,18 @@ func main() {
 	}
 	defer connection.Close()
 
-	features, closeFeatures, err := buildFeatures(cfg, logger)
+	features, err := buildFeatures(cfg, logger)
 	if err != nil {
 		exit(err)
 	}
-	defer closeFeatures()
-	if len(features) == 0 {
-		exit(errors.New("no feature is enabled; enable one in the config"))
-	}
-	for _, feature := range features {
-		logger.Info().Str("feature", feature.Name()).Msg("feature enabled")
-	}
+	defer features.Close()
+	base := cfg.Runtime.WithDefaults()
+	logEnabled(logger, base)
 
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer cancel()
-	runner := misc.NewRunner(wuphfpb.NewObserverTransportClient(connection), features, cfg.ReconnectDelay(), logger)
+	go followSettings(ctx, wuphfpb.NewPluginTransportClient(connection), cfg, observerToken, base, features, logger)
+	runner := misc.NewRunner(wuphfpb.NewObserverTransportClient(connection), features.list, cfg.ReconnectDelay(), logger)
 	if err := runner.Run(ctx); err != nil && !errors.Is(err, context.Canceled) {
 		exit(err)
 	}
@@ -94,4 +97,78 @@ func main() {
 func exit(err error) {
 	fmt.Fprintf(os.Stderr, "wuphf-misc: %v\n", err)
 	os.Exit(1)
+}
+
+// declareTimeout bounds one attempt at declaring the settings to the core.
+const declareTimeout = 10 * time.Second
+
+// followSettings declares wuphf-misc's runtime settings to the core and
+// applies every change to features until ctx ends. While the core cannot be
+// reached it tries again; when the core refuses the declaration (a core
+// without plugin settings, or no observer token), wuphf-misc runs on its
+// file's values.
+func followSettings(
+	ctx context.Context,
+	declarer settings.Declarer,
+	cfg config.File,
+	observerToken string,
+	base config.Runtime,
+	features *features,
+	logger zerolog.Logger,
+) {
+	var connection *settings.Connection[config.Runtime]
+	for connection == nil {
+		attempt, cancel := context.WithTimeout(ctx, declareTimeout)
+		connected, err := settings.ConnectPlugin(attempt, declarer, cfg.CoreAddress, observerToken, cfg.Plugin(), base, logger)
+		cancel()
+		switch {
+		case err == nil:
+			connection = connected
+		case ctx.Err() != nil:
+			return
+		case retryable(err):
+			logger.Debug().Err(err).Msg("core not reachable to declare the settings; retrying")
+			select {
+			case <-time.After(cfg.ReconnectDelay()):
+			case <-ctx.Done():
+				return
+			}
+		default:
+			logger.Warn().Err(err).Msg("the core refused wuphf-misc's settings: running on the config file's values, which a change from the settings panel cannot reach")
+			return
+		}
+	}
+	defer connection.Close()
+	logger.Info().Str("section", settings.PluginPrefix(cfg.Plugin())).Msg("settings declared; following changes from the settings panel")
+	connection.Follow(ctx, func(old, new config.Runtime) {
+		if old.LogLevel != new.LogLevel {
+			logging.SetLevel(new.LogLevel)
+		}
+		features.Configure(new)
+		if !slices.Equal(enabledFeatures(old), enabledFeatures(new)) {
+			logEnabled(logger, new)
+		}
+	})
+}
+
+// retryable reports whether declaring may work later: the core is down or
+// still starting.
+func retryable(err error) bool {
+	switch status.Code(err) {
+	case codes.Unavailable, codes.DeadlineExceeded:
+		return true
+	}
+	return false
+}
+
+// logEnabled says which features runtime turns on.
+func logEnabled(logger zerolog.Logger, runtime config.Runtime) {
+	enabled := enabledFeatures(runtime)
+	if len(enabled) == 0 {
+		logger.Info().Msg("no feature is enabled; enable one in the config or the settings panel")
+		return
+	}
+	for _, name := range enabled {
+		logger.Info().Str("feature", name).Msg("feature enabled")
+	}
 }

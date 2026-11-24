@@ -7,4 +7,4 @@ module=github.com/wuphf-rs/wuphf-ai/proto/go
 protoc \
   --go_out=../../proto/go --go_opt=module="$module" \
   --go-grpc_out=../../proto/go --go-grpc_opt=module="$module" \
-  common.proto media.proto client.proto server.proto connector.proto functions.proto observer.proto
+  common.proto media.proto client.proto server.proto connector.proto functions.proto observer.proto plugin.proto

@@ -224,7 +224,9 @@ These change while everything runs, without a restart:
 - the core's `rules`, `notify` and `chat_state`;
 - each connector's runtime keys (`log_level`, `[rendering]`,
   `[sticker_metadata]`, `media_convert_timeout_ms`), under
-  `connector_settings.<connector id>`.
+  `connector_settings.<connector id>`;
+- wuphf-misc's `log_level` and every `[instagram]` option (turn the
+  downloader on, pick its chats by name), under `plugin_settings.misc`.
 
 A change is checked like the file and stored in the database as an override.
 `unset` returns to the file's value. Ways to change them:

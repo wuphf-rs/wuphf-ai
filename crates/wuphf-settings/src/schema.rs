@@ -41,6 +41,10 @@ pub struct WuphfSchema {
 /// entries, and a path into an array element is not a settings key.
 pub const CONNECTOR_SETTINGS: &str = "connector_settings";
 
+/// Where plugins' own runtime settings live: `plugin_settings.<id>` (plan
+/// 078). Plugins (wuphf-misc) are not in the core's configuration.
+pub const PLUGIN_SETTINGS: &str = "plugin_settings";
+
 pub type SettingsStore = botconf::SettingsStore<WuphfSchema>;
 pub type Snapshot = botconf::Snapshot<WuphfSchema>;
 
@@ -71,6 +75,12 @@ impl botconf::Schema for WuphfSchema {
             return Err(format!(
                 "remove [{CONNECTOR_SETTINGS}] from the core configuration: each connector \
                  declares its own settings, based on its own config file"
+            ));
+        }
+        if config.plugin_settings.is_some() {
+            return Err(format!(
+                "remove [{PLUGIN_SETTINGS}] from the core configuration: each plugin \
+                 (wuphf-misc) declares its own settings, based on its own config file"
             ));
         }
         let mut connectors = Vec::new();
@@ -120,10 +130,11 @@ impl botconf::Schema for WuphfSchema {
         })
     }
 
-    /// Connectors register their own sections below this prefix when they
-    /// connect (see `wuphf_runtime::connector_settings`).
+    /// Connectors register their own sections below the first when they
+    /// connect (see `wuphf_runtime::connector_settings`), plugins below the
+    /// second (`wuphf_runtime::plugin_settings`).
     fn dynamic_namespaces(&self) -> Vec<&'static str> {
-        vec![CONNECTOR_SETTINGS]
+        vec![CONNECTOR_SETTINGS, PLUGIN_SETTINGS]
     }
 
     /// The keys that may change while the core runs: the options marked

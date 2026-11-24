@@ -1,6 +1,7 @@
 //! `wuphf-server export` / `import`: one backup of the core's settings, its
-//! config file and every stored override (its own runtime keys and every
-//! connector's, `connector_settings.<id>`), restored offline (see
+//! config file and every stored override (its own runtime keys, every
+//! connector's, `connector_settings.<id>`, and every plugin's,
+//! `plugin_settings.<id>`), restored offline (see
 //! `botconf::export`). `wuphf-server settings export` / `import` do the same
 //! through a running core, without secrets.
 //!

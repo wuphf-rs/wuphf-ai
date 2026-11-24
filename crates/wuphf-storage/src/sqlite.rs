@@ -4,8 +4,8 @@
 use crate::shared::{acknowledged_copy, release_blocked};
 use crate::{
     ChatProfileStore, DispatchStore, MediaStore, MessageStore, ObservationStore, PanelTokens,
-    ProvisioningStash, SettingsDeclaration, SettingsDeclarations, SettingsOverrides, StorageError,
-    StorageResult, StoredSetting, TopologyStore,
+    ProvisioningStash, SettingsDeclaration, SettingsDeclarations, SettingsOverrides, SettingsOwner,
+    StorageError, StorageResult, StoredSetting, TopologyStore,
 };
 use async_trait::async_trait;
 use sqlx::migrate::Migrator;
@@ -1017,14 +1017,15 @@ impl SettingsDeclarations for SqliteStorage {
         updated_at_ms: i64,
     ) -> StorageResult<()> {
         sqlx::query(
-            "INSERT INTO connector_settings_declarations
-               (connector_id, descriptor, json_schema, base_json, updated_at_ms)
-             VALUES (?, ?, ?, ?, ?)
-             ON CONFLICT(connector_id) DO UPDATE SET
+            "INSERT INTO settings_declarations
+               (owner_kind, owner_id, descriptor, json_schema, base_json, updated_at_ms)
+             VALUES (?, ?, ?, ?, ?, ?)
+             ON CONFLICT(owner_kind, owner_id) DO UPDATE SET
                descriptor = excluded.descriptor, json_schema = excluded.json_schema,
                base_json = excluded.base_json, updated_at_ms = excluded.updated_at_ms",
         )
-        .bind(&declaration.connector_id.0)
+        .bind(declaration.owner.kind())
+        .bind(declaration.owner.id())
         .bind(&declaration.descriptor)
         .bind(&declaration.json_schema)
         .bind(&declaration.base_json)
@@ -1036,18 +1037,22 @@ impl SettingsDeclarations for SqliteStorage {
 
     async fn settings_declarations(&self) -> StorageResult<Vec<SettingsDeclaration>> {
         let rows = sqlx::query(
-            "SELECT connector_id, descriptor, json_schema, base_json
-             FROM connector_settings_declarations ORDER BY connector_id",
+            "SELECT owner_kind, owner_id, descriptor, json_schema, base_json
+             FROM settings_declarations ORDER BY owner_kind, owner_id",
         )
         .fetch_all(&self.pool)
         .await?;
+        // The table's CHECK admits only the kinds SettingsOwner knows.
         Ok(rows
             .into_iter()
-            .map(|row| SettingsDeclaration {
-                connector_id: ConnectorId(row.get("connector_id")),
-                descriptor: row.get("descriptor"),
-                json_schema: row.get("json_schema"),
-                base_json: row.get("base_json"),
+            .filter_map(|row| {
+                let kind: String = row.get("owner_kind");
+                Some(SettingsDeclaration {
+                    owner: SettingsOwner::from_parts(&kind, row.get("owner_id"))?,
+                    descriptor: row.get("descriptor"),
+                    json_schema: row.get("json_schema"),
+                    base_json: row.get("base_json"),
+                })
             })
             .collect())
     }

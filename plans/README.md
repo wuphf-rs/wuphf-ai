@@ -95,6 +95,7 @@ code).
 | 075 | The data panel in /wuphf (botconf DataSource), /wuphf in a topic opens its conversation, `wuphf-server data` | P1 | L | botconf 018, 074 | TODO |
 | 076 | Pause / resume one chat: the `paused_chats` runtime setting | P2 | S–M | 074 | TODO |
 | 077 | Merge two address forms of one chat; split a wrong merge (nothing moves) | P2 | M–L | 074, 075 | TODO |
+| 078 | wuphf-misc's settings in /wuphf: plugins declare their own settings (`plugin_settings.<id>`) | P2 | M | 040, 050 | DONE (migration 0020; live panel test pending the owner; see notes) |
 
 Status values: TODO | IN PROGRESS | DONE | BLOCKED (with one-line reason) |
 REJECTED (with one-line rationale).
@@ -1884,3 +1885,29 @@ From the 2026-10-22 remote-functions design:
   - all three assertions, and the removed-option message;
   - the derived core TOML loads in `wuphf-server settings list` (dev
     binary).
+- **078 (2026-11-24).** wuphf-misc's settings are in `/wuphf` ("misc
+  (plugin)") and `wuphf-server settings`, at `plugin_settings.misc`.
+  - Core: `PluginTransport.DeclareSettings` (`plugin.proto`) behind the
+    observer token (`any_token_auth` with only it, so none set refuses).
+    `declared_settings` holds what connectors' and plugins' sections share
+    (wire to botconf, the schema validator, restore, declare);
+    `plugin_settings` refuses only connection keys (`core_address`,
+    `plugin_id`, `token_env`, `*_token_env`) and restores every stored
+    plugin declaration. `[plugin_settings]` in the core's file is refused.
+  - Storage: migration 0020 moves 0018's table into
+    `settings_declarations(owner_kind, owner_id, …)`;
+    `SettingsDeclaration.owner` is a `SettingsOwner`. The 0018 test now runs
+    only up to 0020.
+  - Go: `settings.ConnectPlugin` (a `Declarer`, so the package dials no
+    gRPC itself) and `WatchSection`. wuphf-misc embeds `config.Runtime`
+    (`log_level`, `[instagram]`), builds every feature disabled or not, and
+    `instagram.Feature.Configure` swaps an immutable settings value per
+    change (a new `max_concurrent` gets a new slot channel; running fetches
+    finish on the old one). An enabled downloader without chats warns
+    instead of failing startup (it crash-looped a NixOS unit); no feature
+    enabled no longer exits. The declaration retries while the core is
+    `UNAVAILABLE`; another refusal leaves the file's values.
+  - Nix: wuphf-misc's `vendorHash` changed (new indirect deps).
+  - Tests: storage (owner keys, migration 0020), runtime (section, refused
+    keys and ids, restart, gRPC auth), Go (ConnectPlugin, live reconfigure,
+    concurrency change, retry codes). Not yet seen in a live `/wuphf` panel.

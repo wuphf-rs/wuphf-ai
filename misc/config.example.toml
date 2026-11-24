@@ -1,8 +1,14 @@
 # wuphf-misc
 #
 # Features that are not bridging. wuphf-misc follows the core's live messages
-# through the observer service and replies through it. A change to this file
-# needs a restart.
+# through the observer service and replies through it.
+#
+# Runtime settings (log_level and every [instagram] option) can also change
+# while wuphf-misc runs: it declares them to the core, which keeps any change
+# (made from its settings panel or `wuphf-server settings`, under
+# `plugin_settings.<plugin_id>`) and pushes it back here. The values in this
+# file are the base; unsetting a change returns to them. The other options need
+# a restart.
 
 # The core's gRPC address.
 # Required.
@@ -18,21 +24,27 @@ observer_token_env = "WUPHF_OBSERVER_TOKEN"
 # sets [functions] invoke_token_env.
 # invoke_token_env = "WUPHF_INVOKE_TOKEN"
 
-# How much wuphf-misc logs (WUPHF_LOG_LEVEL wins). Empty means info.
-# One of: trace, debug, info, warn, error.
-log_level = "info"
+# The id wuphf-misc's settings have in the core: they live at
+# plugin_settings.<id> and the settings panel shows them as "<id> (plugin)".
+# Empty means misc.
+# plugin_id = "misc"
 
 # Pause before resubscribing after the message stream ends, in milliseconds; 0
 # means 2000.
 # reconnect_delay_ms = 2000
 
+# How much wuphf-misc logs (WUPHF_LOG_LEVEL wins). Empty means info.
+# One of: trace, debug, info, warn, error.
+log_level = "info"
+
 [instagram]
 
-# Instagram downloader: when someone posts an Instagram post or reel link in one
-# of chats, reply to it with the post's video or photos (a carousel's every
-# item). Messages you send count too, from your phone or the TUI; wuphf-misc's
-# own replies never do. Edits do not. Links sent while wuphf-misc is down are
-# not answered.
+# Reply to an Instagram post or reel link in one of the chats with the post's
+# video or photos
+#
+# A carousel's every item. Messages you send count too, from your phone or the
+# TUI; wuphf-misc's own replies never do. Edits do not. Links sent while
+# wuphf-misc is down are not answered.
 #
 # The fetch runs on the Instagram connector's logged-in account, through the
 # core's function broker: enable the Instagram connector's [functions] section
@@ -40,24 +52,29 @@ log_level = "info"
 # Instagram request on that account, so keep the limits low.
 enabled = false
 
+# The chats whose Instagram links are answered
+#
 # Chat references, as in the core's rules: connector:chat, or
-# connector:chat#thread for one thread only. Required when enabled.
+# connector:chat#thread for one thread only. While none is listed, the
+# downloader answers nowhere.
 chats = ["whatsapp-main:120363000000000000@g.us"]
 
 # Add "@author: " and up to 200 characters of the post's text to the reply.
 # Default: true.
 caption = true
 
-# Reply "Could not download this post." when a fetch fails; else a failure is
-# only logged.
+# Reply "Could not download this post." when a fetch fails
+#
+# Otherwise a failure is only logged.
 reply_on_failure = false
 
 # The same post in the same chat is answered once in this many hours.
 # Default: 24.
 dedup_hours = 24
 
-# At most this many fetches a minute, over every chat; more are skipped and
-# logged.
+# At most this many fetches a minute, over every chat
+#
+# More are skipped and logged.
 # Default: 10.
 max_per_minute = 10
 
@@ -65,7 +82,8 @@ max_per_minute = 10
 # Default: 2.
 max_concurrent = 2
 
-# One fetch's time limit, in seconds, waiting for the Instagram connector
-# included.
+# One fetch's time limit, in seconds
+#
+# Waiting for the Instagram connector included.
 # Default: 60.
 call_timeout_seconds = 60

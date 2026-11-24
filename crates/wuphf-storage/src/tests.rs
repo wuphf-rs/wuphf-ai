@@ -1204,37 +1204,53 @@ async fn purge_removes_only_expired_tokens<S: PanelTokens>(storage: S) {
     assert_eq!(storage.purge_panel_tokens(200).await.unwrap(), 0);
 }
 
-fn declaration(connector: &str, base_json: &str) -> SettingsDeclaration {
+fn declaration(owner: SettingsOwner, base_json: &str) -> SettingsDeclaration {
     SettingsDeclaration {
-        connector_id: ConnectorId(connector.into()),
+        owner,
         descriptor: vec![0x0a, 0x00, 0xff],
         json_schema: r#"{"type": "object"}"#.into(),
         base_json: base_json.into(),
     }
 }
 
-#[tokio::test]
-async fn memory_settings_declarations_replace_by_connector() {
-    settings_declarations_replace_by_connector(InMemoryStorage::default()).await;
+fn connector(id: &str) -> SettingsOwner {
+    SettingsOwner::Connector(ConnectorId(id.into()))
 }
 
 #[tokio::test]
-async fn sqlite_settings_declarations_replace_by_connector() {
-    settings_declarations_replace_by_connector(temp_sqlite().await).await;
+async fn memory_settings_declarations_replace_by_owner() {
+    settings_declarations_replace_by_owner(InMemoryStorage::default()).await;
 }
 
-/// A connector's new declaration replaces its old one; declarations load in
-/// connector order, the descriptor bytes intact.
-async fn settings_declarations_replace_by_connector<S: SettingsDeclarations>(storage: S) {
-    let whatsapp = declaration("whatsapp-main", r#"{"log_level": "info"}"#);
-    let telegram = declaration("telegram-main", r#"{"log_level": "info"}"#);
-    let telegram2 = declaration("telegram-main", r#"{"log_level": "debug"}"#);
-    for (stored, at) in [(&whatsapp, 1), (&telegram, 2), (&telegram2, 3)] {
+#[tokio::test]
+async fn sqlite_settings_declarations_replace_by_owner() {
+    settings_declarations_replace_by_owner(temp_sqlite().await).await;
+}
+
+/// An owner's new declaration replaces its old one; a plugin and a connector
+/// with the same id are two owners. Declarations load connectors first, each
+/// kind by id, the descriptor bytes intact.
+async fn settings_declarations_replace_by_owner<S: SettingsDeclarations>(storage: S) {
+    let plugin = declaration(
+        SettingsOwner::Plugin("misc".into()),
+        r#"{"log_level": "info"}"#,
+    );
+    let same_id = declaration(connector("misc"), r#"{"log_level": "warn"}"#);
+    let whatsapp = declaration(connector("whatsapp-main"), r#"{"log_level": "info"}"#);
+    let telegram = declaration(connector("telegram-main"), r#"{"log_level": "info"}"#);
+    let telegram2 = declaration(connector("telegram-main"), r#"{"log_level": "debug"}"#);
+    for (stored, at) in [
+        (&plugin, 1),
+        (&whatsapp, 2),
+        (&same_id, 3),
+        (&telegram, 4),
+        (&telegram2, 5),
+    ] {
         storage.put_settings_declaration(stored, at).await.unwrap();
     }
     assert_eq!(
         storage.settings_declarations().await.unwrap(),
-        [telegram2, whatsapp]
+        [same_id, telegram2, whatsapp, plugin]
     );
 }
 

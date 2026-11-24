@@ -342,6 +342,26 @@ nothing about them beyond offering what the live session declared; a
 The SDKs take a commands handler beside the sender (`Options.commands` in
 Rust, `Options.Commands` in Go).
 
+### A plugin's own settings
+
+A plugin (wuphf-misc: a client of the observer and function services, neither
+a connector nor a provider) declares its settings with one call,
+`PluginTransport.DeclareSettings` (`plugin.proto`), authenticated with the
+observer token and refused (`UNAUTHENTICATED`) when the core has none. The
+request carries a `plugin_id` (lowercase letters, digits, `-` and `_`) and the
+same `ConnectorSettingsDeclaration` a connector sends. The core keeps the
+section at `plugin_settings.<plugin id>`, and the plugin follows it with
+`Watch` on that prefix, also with the observer token.
+
+- **Any key but the connection's.** The core does not know a plugin's
+  features, so it does not limit the keys as it does for connectors; only
+  `core_address`, `plugin_id`, `token_env` and `*_token_env` (at any depth)
+  are refused, with `INVALID_ARGUMENT`.
+- **Kept across restarts**, as a connector's: every stored plugin declaration
+  is registered at startup. The core's configuration may not hold
+  `[plugin_settings]`.
+- Go plugins use `settings.ConnectPlugin` in `connectors/shared/settings`.
+
 ## Connectors
 
 - **Telegram** (`connectors/telegram`, `gotd/td`) — registers with forum-topic

@@ -99,5 +99,6 @@ secret.
 - `wuphf-tui --server http://127.0.0.1:50051 --token <observer_token>`:
   browse every captured chat and send as the owner.
 - `wuphf-misc`: when someone posts an Instagram post or reel link in a chat
-  you choose, it replies with the video or photos. More:
+  you choose, it replies with the video or photos. Its settings are in
+  `/wuphf` under "misc (plugin)". More:
   [wuphf-misc README](../../misc/README.md).

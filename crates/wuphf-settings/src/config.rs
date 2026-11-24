@@ -161,6 +161,11 @@ pub struct Configuration {
     #[serde(default, skip_serializing)]
     #[botconf(skip)]
     pub(crate) connector_settings: Option<serde::de::IgnoredAny>,
+    // `[plugin_settings]`, refused the same way: a plugin's base is its own
+    // file.
+    #[serde(default, skip_serializing)]
+    #[botconf(skip)]
+    pub(crate) plugin_settings: Option<serde::de::IgnoredAny>,
 }
 
 fn default_max_media_bytes() -> usize {

@@ -15,6 +15,7 @@ use clap::Subcommand;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use wuphf_runtime::connector_settings::ConnectorSettings;
+use wuphf_runtime::plugin_settings::PluginSettings;
 use wuphf_settings::{Configuration, SettingsStorage, SettingsStore, WuphfSchema};
 use wuphf_storage::SqliteStorage;
 
@@ -58,8 +59,8 @@ pub(crate) enum SettingsSubcommand {
 
 /// The core's database and the settings store over it, built from the config
 /// file and the environment exactly as `serve` builds them, without starting
-/// any server. Connectors' stored settings declarations are restored, so their
-/// sections can be edited while they are down.
+/// any server. Connectors' and plugins' stored settings declarations are
+/// restored, so their sections can be edited while they are down.
 pub(crate) async fn open(
     path: &Path,
     schema: WuphfSchema,
@@ -81,6 +82,10 @@ pub(crate) async fn open(
         .restore()
         .await
         .context("failed to restore connector settings declarations")?;
+    PluginSettings::new(Arc::clone(&settings), storage.clone())
+        .restore()
+        .await
+        .context("failed to restore plugin settings declarations")?;
     Ok((storage, settings))
 }
 

@@ -1,0 +1,31 @@
+syntax = "proto3";
+
+package wuphf.connector.v1;
+
+option go_package = "github.com/wuphf-rs/wuphf-ai/proto/go/connector/v1;wuphfpb";
+
+import "common.proto";
+
+// Plugins: clients of the core that are neither connectors nor providers
+// (wuphf-misc). They read and send through ObserverTransport and call
+// functions through FunctionTransport; here they declare their own runtime
+// settings (plan 078). Authenticated with the observer token; refused when
+// the core has none.
+service PluginTransport {
+  // Declare (or replace) the plugin's runtime settings. The core keeps them
+  // at `plugin_settings.<plugin_id>`, stores and validates every change, and
+  // the plugin follows its section through botconf.v1.Settings `Watch`.
+  // INVALID_ARGUMENT for a bad declaration.
+  rpc DeclareSettings(DeclarePluginSettingsRequest) returns (DeclarePluginSettingsResponse);
+}
+
+message DeclarePluginSettingsRequest {
+  // Lowercase letters, digits, '-' and '_' (e.g. "misc").
+  string plugin_id = 1;
+  // As a connector's: keys are relative to the plugin's section. The
+  // client's connection keys (`core_address`, `plugin_id`, `*_token_env`)
+  // cannot be declared.
+  ConnectorSettingsDeclaration settings = 2;
+}
+
+message DeclarePluginSettingsResponse {}

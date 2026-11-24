@@ -10,6 +10,7 @@ use wuphf_proto::connector::function_transport_client::FunctionTransportClient;
 use wuphf_proto::connector::function_transport_server::FunctionTransportServer;
 use wuphf_proto::connector::media_transport_server::MediaTransportServer;
 use wuphf_proto::connector::observer_transport_server::ObserverTransportServer;
+use wuphf_proto::connector::plugin_transport_server::PluginTransportServer;
 use wuphf_proto::connector::provider_transport_server::ProviderTransportServer;
 use wuphf_runtime::{
     Runtime,
@@ -20,6 +21,7 @@ use wuphf_runtime::{
     grpc::GrpcConnectorService,
     media::GrpcMediaService,
     observer_service::{GrpcObserverService, bearer_auth},
+    plugin_settings::{GrpcPluginService, PluginSettings},
     settings_auth::settings_server,
 };
 use wuphf_settings::{LiveRouting, WuphfSchema};
@@ -180,6 +182,8 @@ async fn serve(path: PathBuf) -> Result<()> {
         Arc::clone(&settings),
         storage.clone(),
     ));
+    // Plugins (wuphf-misc) declare theirs through the plugin service.
+    let plugin_settings = Arc::new(PluginSettings::new(Arc::clone(&settings), storage.clone()));
     let snapshot = settings.current();
     let configuration = &snapshot.config;
     let derived = &snapshot.derived;
@@ -213,6 +217,19 @@ async fn serve(path: PathBuf) -> Result<()> {
     );
     // New releases are told to the owner through the notice targets.
     update::spawn_check(&configuration.updates, &path, runtime.owner_sender());
+    // Plugins declare their settings with the observer token, which the
+    // settings service treats as the owner; with none set, nothing is
+    // accepted (as settings access is refused).
+    let plugin_service = PluginTransportServer::with_interceptor(
+        GrpcPluginService::new(plugin_settings),
+        any_token_auth(
+            observer_token
+                .iter()
+                .filter(|token| !token.is_empty())
+                .cloned()
+                .collect(),
+        ),
+    );
     let observer_service = ObserverTransportServer::with_interceptor(
         GrpcObserverService::new(observer).with_sender(runtime.owner_sender()),
         bearer_auth(observer_token),
@@ -254,6 +271,7 @@ async fn serve(path: PathBuf) -> Result<()> {
             any_token_auth(media_tokens),
         ))
         .add_service(observer_service)
+        .add_service(plugin_service)
         // No interceptor: the service's authorizer checks the token itself,
         // since it must know which connector presented it.
         .add_service(settings_service)

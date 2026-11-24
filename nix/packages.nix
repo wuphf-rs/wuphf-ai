@@ -176,7 +176,7 @@ let
   wuphf-misc = go {
     binary = "wuphf-misc";
     module = "misc";
-    vendorHash = "sha256-YxU9nLml8CXSOGP2qP7T+3qlA+rGjjHvABE2uMj502Y=";
+    vendorHash = "sha256-T4H/LbDxcWCOdC7xBJzpGtwKcRk1lv8+RnAT/e/f+1E=";
     description = "wuphf-misc: features that are not bridging";
   };
 in

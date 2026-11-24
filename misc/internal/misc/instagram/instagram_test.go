@@ -79,16 +79,19 @@ const (
 	post  = "https://www.instagram.com/p/Cpost1/"
 )
 
+// newFeature is the feature enabled with cfg, in the default chats unless cfg
+// lists some.
 func newFeature(t *testing.T, cfg config.Instagram, invoker Invoker) *Feature {
 	t.Helper()
+	return New(enabled(cfg), invoker, zerolog.Nop())
+}
+
+func enabled(cfg config.Instagram) config.Instagram {
+	cfg.Enabled = true
 	if cfg.Chats == nil {
 		cfg.Chats = []string{"whatsapp-main:" + group, "telegram-main:-100123#42"}
 	}
-	feature, err := New(cfg, invoker, zerolog.Nop())
-	if err != nil {
-		t.Fatal(err)
-	}
-	return feature
+	return cfg
 }
 
 func message(native, connector, chat, thread, text string) misc.Message {
@@ -289,16 +292,6 @@ func TestCaptionSwitchAndLength(t *testing.T) {
 	}
 }
 
-func TestNewRejectsABadChat(t *testing.T) {
-	t.Parallel()
-	if _, err := New(config.Instagram{Enabled: true, Chats: []string{"no-colon"}}, &fakeInvoker{}, zerolog.Nop()); err == nil {
-		t.Fatal("New accepted a chat that is not a reference")
-	}
-	if _, err := New(config.Instagram{Enabled: true}, &fakeInvoker{}, zerolog.Nop()); err == nil {
-		t.Fatal("New accepted no chats")
-	}
-}
-
 // blockingInvoker holds every call until release closes, counting how many
 // run at once.
 type blockingInvoker struct {
@@ -346,5 +339,76 @@ func TestAtMostMaxConcurrentFetches(t *testing.T) {
 	handlers.Wait()
 	if invoker.most != 2 || len(sender.replies) != 4 {
 		t.Fatalf("most at once = %d, replies = %d", invoker.most, len(sender.replies))
+	}
+}
+
+func TestSettingsChangeForTheNextMessage(t *testing.T) {
+	t.Parallel()
+	invoker := &fakeInvoker{results: map[string]fakeResult{reel: reelResult(), post: reelResult()}}
+	// Off, and with no chats: answers nothing (and builds nonetheless).
+	feature := New(config.Instagram{}, invoker, zerolog.Nop())
+	sender := &fakeSender{}
+	feature.Handle(context.Background(), message("1", "whatsapp-main", group, "", reel), sender)
+
+	// Turned on from the panel, with a chat.
+	feature.Configure(config.Instagram{Enabled: true, Chats: []string{"whatsapp-main:" + group}})
+	feature.Handle(context.Background(), message("2", "whatsapp-main", group, "", reel), sender)
+	// Another chat replaces it.
+	feature.Configure(config.Instagram{Enabled: true, Chats: []string{"whatsapp-airtel:" + group}})
+	feature.Handle(context.Background(), message("3", "whatsapp-main", group, "", post), sender)
+	// And off again.
+	feature.Configure(config.Instagram{Enabled: false, Chats: []string{"whatsapp-airtel:" + group}})
+	feature.Handle(context.Background(), message("4", "whatsapp-airtel", group, "", post), sender)
+
+	if len(sender.replies) != 1 || sender.replies[0].to != "2" {
+		t.Fatalf("replies = %+v, want only message 2's", sender.replies)
+	}
+}
+
+func TestConfigureSkipsABadChat(t *testing.T) {
+	t.Parallel()
+	invoker := &fakeInvoker{results: map[string]fakeResult{reel: reelResult()}}
+	feature := newFeature(t, config.Instagram{Chats: []string{"no-colon", "whatsapp-main:" + group}}, invoker)
+	sender := &fakeSender{}
+	feature.Handle(context.Background(), message("1", "whatsapp-main", group, "", reel), sender)
+	if len(sender.replies) != 1 {
+		t.Fatalf("replies = %+v", sender.replies)
+	}
+}
+
+func TestANewConcurrencyLimitAppliesToNewFetches(t *testing.T) {
+	t.Parallel()
+	invoker := &blockingInvoker{started: make(chan struct{}, 8), release: make(chan struct{})}
+	feature := newFeature(t, config.Instagram{MaxConcurrent: 1}, invoker)
+	sender := &fakeSender{}
+	var handlers sync.WaitGroup
+	handle := func(index int) {
+		link := "https://www.instagram.com/p/C" + string(rune('a'+index)) + "/"
+		handlers.Go(func() {
+			feature.Handle(context.Background(), message(link, "whatsapp-main", group, "", link), sender)
+		})
+	}
+	handle(0)
+	<-invoker.started
+	// Unchanged, the limit is kept: a second fetch waits.
+	feature.Configure(enabled(config.Instagram{MaxConcurrent: 1}))
+	handle(1)
+	select {
+	case <-invoker.started:
+		t.Fatal("a second fetch started under a limit of one")
+	case <-time.After(50 * time.Millisecond):
+	}
+	// Raised to three: new fetches start, the one waiting on the old limit
+	// still waits for it.
+	feature.Configure(enabled(config.Instagram{MaxConcurrent: 3}))
+	handle(2)
+	handle(3)
+	for range 2 {
+		<-invoker.started
+	}
+	close(invoker.release)
+	handlers.Wait()
+	if len(sender.replies) != 4 {
+		t.Fatalf("replies = %d", len(sender.replies))
 	}
 }

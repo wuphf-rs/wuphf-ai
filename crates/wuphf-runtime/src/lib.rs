@@ -15,11 +15,13 @@ pub mod auth;
 pub mod connector;
 pub mod connector_commands;
 pub mod connector_settings;
+mod declared_settings;
 pub mod grpc;
 pub mod media;
 pub mod observation;
 pub mod observer_service;
 pub mod owner_send;
+pub mod plugin_settings;
 pub mod settings_auth;
 
 pub use observation::Observer;

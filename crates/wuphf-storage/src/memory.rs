@@ -49,9 +49,9 @@ struct State {
     /// Settings-panel button handles: key to (action, expiry in ms), mirroring
     /// the SQLite `panel_tokens` table.
     panel_tokens: HashMap<String, (String, i64)>,
-    /// Connector settings declarations by connector id, mirroring the SQLite
-    /// `connector_settings_declarations` table (the write time is not kept).
-    settings_declarations: BTreeMap<String, SettingsDeclaration>,
+    /// Settings declarations by owner kind and id, mirroring the SQLite
+    /// `settings_declarations` table (the write time is not kept).
+    settings_declarations: BTreeMap<(&'static str, String), SettingsDeclaration>,
     /// Chat profiles by connector and native chat id, mirroring the SQLite
     /// `chat_profiles` table.
     chat_profiles: HashMap<(ConnectorId, String), ChatProfile>,
@@ -820,11 +820,10 @@ impl SettingsDeclarations for InMemoryStorage {
         declaration: &SettingsDeclaration,
         _updated_at_ms: i64,
     ) -> StorageResult<()> {
-        self.state
-            .write()
-            .await
-            .settings_declarations
-            .insert(declaration.connector_id.0.clone(), declaration.clone());
+        self.state.write().await.settings_declarations.insert(
+            (declaration.owner.kind(), declaration.owner.id().to_owned()),
+            declaration.clone(),
+        );
         Ok(())
     }
 

@@ -31,7 +31,13 @@ async fn database_before(version: i64) -> SqlitePool {
         .connect_with(options)
         .await
         .unwrap();
-    let earlier = Migrator {
+    migrator_before(version).run(&pool).await.unwrap();
+    pool
+}
+
+/// The migrations before `version`.
+fn migrator_before(version: i64) -> Migrator {
+    Migrator {
         migrations: MIGRATOR
             .iter()
             .filter(|migration| migration.version < version)
@@ -39,9 +45,7 @@ async fn database_before(version: i64) -> SqlitePool {
             .collect::<Vec<_>>()
             .into(),
         ..Migrator::DEFAULT
-    };
-    earlier.run(&pool).await.unwrap();
-    pool
+    }
 }
 
 /// Assert the `payload` of the row in `table` whose `key` column is `id` is
@@ -343,6 +347,7 @@ async fn migration_0016_reshapes_stored_rules_and_notify() {
 
 /// 0018 only adds a table: a database from before it keeps its settings, and
 /// the new table takes a declaration with binary descriptor bytes intact.
+/// (0020 replaces the table; see its own test.)
 #[tokio::test]
 async fn migration_0018_adds_connector_settings_declarations() {
     let pool = database_before(18).await;
@@ -353,7 +358,7 @@ async fn migration_0018_adds_connector_settings_declarations() {
     .execute(&pool)
     .await
     .unwrap();
-    MIGRATOR.run(&pool).await.unwrap();
+    migrator_before(20).run(&pool).await.unwrap();
 
     let descriptor = vec![0x0a_u8, 0x00, 0xff, 0x80];
     sqlx::query(
@@ -407,6 +412,76 @@ async fn migration_0019_adds_chat_profiles() {
             ..ChatProfile::new(ConnectorId("whatsapp-main".into()), "1@s.whatsapp.net")
         }]
     );
+}
+
+/// 0020 moves connectors' declarations into the owner-keyed table: each row
+/// becomes a connector's declaration, its descriptor bytes and base intact,
+/// and plugins' declarations can be stored next to them.
+#[tokio::test]
+async fn migration_0020_keeps_connector_settings_declarations() {
+    let pool = database_before(20).await;
+    let descriptor = vec![0x0a_u8, 0x00, 0xff, 0x80];
+    sqlx::query(
+        "INSERT INTO connector_settings_declarations
+           (connector_id, descriptor, json_schema, base_json, updated_at_ms)
+         VALUES ('telegram-main', ?, '{\"type\":\"object\"}', '{\"log_level\":\"info\"}', 2)",
+    )
+    .bind(&descriptor)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    MIGRATOR.run(&pool).await.unwrap();
+
+    sqlx::query(
+        "INSERT INTO settings_declarations
+           (owner_kind, owner_id, descriptor, json_schema, base_json, updated_at_ms)
+         VALUES ('plugin', 'telegram-main', x'', '{}', '{}', 3)",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    let rows = sqlx::query(
+        "SELECT owner_kind, owner_id, descriptor, json_schema, base_json, updated_at_ms
+         FROM settings_declarations ORDER BY owner_kind",
+    )
+    .fetch_all(&pool)
+    .await
+    .unwrap();
+    let rows: Vec<_> = rows
+        .iter()
+        .map(|row| {
+            (
+                row.get::<String, _>("owner_kind"),
+                row.get::<String, _>("owner_id"),
+                row.get::<Vec<u8>, _>("descriptor"),
+                row.get::<String, _>("json_schema"),
+                row.get::<String, _>("base_json"),
+                row.get::<i64, _>("updated_at_ms"),
+            )
+        })
+        .collect();
+    let owned = |kind: &str, id: &str| (kind.to_owned(), id.to_owned());
+    assert_eq!(
+        rows.iter()
+            .map(|row| (row.0.clone(), row.1.clone()))
+            .collect::<Vec<_>>(),
+        [
+            owned("connector", "telegram-main"),
+            owned("plugin", "telegram-main")
+        ]
+    );
+    assert_eq!(rows[0].2, descriptor);
+    assert_eq!(rows[0].3, r#"{"type":"object"}"#);
+    assert_eq!(rows[0].4, r#"{"log_level":"info"}"#);
+    assert_eq!(rows[0].5, 2);
+    let old = sqlx::query(
+        "SELECT name FROM sqlite_master WHERE name = 'connector_settings_declarations'",
+    )
+    .fetch_optional(&pool)
+    .await
+    .unwrap();
+    assert!(old.is_none(), "the old table is dropped");
 }
 
 /// An observed row stored before `sent_by` existed decodes with no client, and

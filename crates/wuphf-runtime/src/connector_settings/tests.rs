@@ -3,9 +3,14 @@ use crate::RuntimeChannels;
 use crate::auth::ConnectorTokens;
 use crate::connector::ConnectorHub;
 use crate::connector_commands::ConnectorCommands;
+use crate::declared_settings::kind_from_wire;
 use crate::grpc::GrpcConnectorService;
+use botconf::Kind;
 use botconf::SettingsError;
+use botconf_grpc::proto;
 use botconf_panel::{Limits, Page, Panel, Viewer};
+use prost::Message;
+use serde_json::Value;
 use serde_json::json;
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -131,7 +136,7 @@ const SCHEMA: &str = r#"{
 
 fn declaration_of(settings: Vec<proto::SettingDescriptor>) -> SettingsDeclaration {
     SettingsDeclaration {
-        connector_id: ConnectorId(TG.into()),
+        owner: SettingsOwner::Connector(ConnectorId(TG.into())),
         descriptor: proto::DescribeResponse {
             settings,
             sections: Vec::new(),
@@ -264,7 +269,7 @@ async fn unconfigured_connectors_cannot_declare() {
     let store = store().await;
     let settings = ConnectorSettings::new(Arc::clone(&store), Arc::new(InMemoryStorage::default()));
     let mut declaration = declaration();
-    declaration.connector_id = ConnectorId("ghost".into());
+    declaration.owner = SettingsOwner::Connector(ConnectorId("ghost".into()));
     let error = settings.declare(declaration).await.unwrap_err();
     assert!(error.contains("not configured"), "{error}");
 }
@@ -659,7 +664,7 @@ async fn the_telegram_connectors_declaration_is_accepted() {
     let fixture: Value = serde_json::from_str(TELEGRAM_FIXTURE).unwrap();
     let field = |name: &str| fixture[name].as_str().unwrap().to_owned();
     let declaration = SettingsDeclaration {
-        connector_id: ConnectorId(TG.into()),
+        owner: SettingsOwner::Connector(ConnectorId(TG.into())),
         descriptor: base64_decode(&field("descriptor_base64")),
         json_schema: field("json_schema"),
         base_json: field("base_json"),

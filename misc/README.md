@@ -40,16 +40,37 @@ function `instagram.fetch_media@1`. To enable it:
 2. In the core's config, uncomment the matching `[[functions.providers]]`
    entry (`id = "instagram-main"`, `functions = ["instagram.fetch_media"]`).
 3. Set `WUPHF_PROVIDER_INSTAGRAM_TOKEN` to one random value for both.
-4. In wuphf-misc's config, set `[instagram] enabled = true` and list the
-   chats.
+4. Turn it on and list the chats: in the settings panel (below), or in
+   wuphf-misc's config with `[instagram] enabled = true` and `chats`.
 
 Chats are chat references, as in the core's rules: `connector:chat`, or
 `connector:chat#thread` for one thread only. Use the chat id the TUI shows
-for the chat (for a WhatsApp group, its `…@g.us` id).
+for the chat (for a WhatsApp group, its `…@g.us` id); the panel picks them by
+name. While none is listed, the downloader answers nowhere.
 
 **Account risk.** Every fetch is an Instagram request on the connector's
 account. Instagram can limit or block accounts that fetch much; keep
 `max_per_minute` low and the chat list short.
+
+## Settings panel
+
+`log_level` and every `[instagram]` option can change while wuphf-misc runs.
+At startup it declares them to the core (`PluginTransport.DeclareSettings`,
+with the observer token), which keeps them at `plugin_settings.misc`
+(`plugin_id` names another id). Change them:
+
+- **In Telegram:** `/wuphf` → "misc (plugin)": switch the downloader on, pick
+  its chats by name, set the limits.
+- **From a terminal:** `wuphf-server settings --config FILE set
+  plugin_settings.misc.instagram.enabled true`, then `settings reload`.
+
+A change applies to the next message. The config file's values are the base:
+unsetting a change returns to them. The other options (`core_address`, the
+token variables, `plugin_id`, `reconnect_delay_ms`) need a restart. While the
+core cannot be reached, wuphf-misc keeps trying to declare; a core that
+refuses (an older core, or one without an observer token) leaves it on its
+file's values. wuphf-misc runs with no feature enabled, waiting for one to be
+turned on.
 
 ## Run
 

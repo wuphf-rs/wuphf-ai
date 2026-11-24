@@ -155,13 +155,21 @@ log level, the sticker conversion timeout) when they register: a botconf
 descriptor, a JSON Schema and their file values. The core registers each as a
 botconf section at `connector_settings.<id>` (`connector_settings` in
 `wuphf-runtime`), validates changes with the schema (the `jsonschema` crate),
-remembers the declaration in `connector_settings_declarations` so the section
-exists before the connector reconnects, and pushes changes back through
-`Watch`, which a connector may follow for its own section without an actor.
+remembers the declaration in `settings_declarations` so the section exists
+before the connector reconnects, and pushes changes back through `Watch`,
+which a connector may follow for its own section without an actor.
 The Go connectors do this through `connectors/shared/settings`, the Rust ones
 through the connector SDK's `settings` module (`crates/wuphf-connector`),
 which talks to the service through `botconf-proto` only.
 See docs/connector-protocol.md, "A connector's own settings".
+
+Plugins (wuphf-misc) declare theirs the same way, through
+`PluginTransport.DeclareSettings` with the observer token, into
+`plugin_settings.<id>` (`plugin_settings` in `wuphf-runtime`). The core does
+not know a plugin's features, so it refuses only the plugin's connection keys
+(`core_address`, `plugin_id`, `*_token_env`), and restores every stored
+plugin declaration at startup. The shared conversion of a declaration into a
+section is `declared_settings`.
 
 ## Data Flow
 
