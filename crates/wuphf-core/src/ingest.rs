@@ -230,14 +230,26 @@ where
 
     /// Persist routed dispatches and return the ones ready to send, with a count
     /// of the blocked ones. Blocked dispatches are saved and surface later, when
-    /// the message they wait for is acknowledged.
+    /// the message they wait for is acknowledged; dispatches into a paused
+    /// direction are held (plan 079) and counted as blocked.
     pub(crate) async fn save_dispatches(
         &self,
         dispatches: Vec<Dispatch>,
     ) -> Result<(Vec<Dispatch>, usize), CoreError> {
+        let pauses = self.health_pauses();
+        let mut conversations = std::collections::HashMap::new();
         let mut pending = Vec::new();
         let mut blocked = 0;
         for dispatch in dispatches {
+            if dispatch.is_pending()
+                && let Some(pause) = self
+                    .pause_for(&pauses, &dispatch, &mut conversations)
+                    .await?
+            {
+                self.hold(&dispatch, &pause).await?;
+                blocked += 1;
+                continue;
+            }
             self.storage.enqueue_dispatch(&dispatch).await?;
             if dispatch.is_pending() {
                 pending.push(dispatch);

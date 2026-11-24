@@ -204,7 +204,16 @@ where
     /// immediately, and the resulting dispatches returned for delivery.
     pub async fn recover_provisioning(&self) -> Result<Vec<Dispatch>, CoreError> {
         let routing = self.routing.routing();
-        let pending = self.storage.pending_dispatches().await?;
+        let mut pending = self.storage.pending_dispatches().await?;
+        // A held thread creation is still its conversation's provisioning
+        // (plan 079): its stash waits for the release.
+        pending.extend(
+            self.storage
+                .held_dispatches()
+                .await?
+                .into_iter()
+                .map(|held| held.dispatch),
+        );
         {
             let mut provisioning = self.provisioning.lock().unwrap();
             for dispatch in &pending {

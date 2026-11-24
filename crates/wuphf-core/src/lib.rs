@@ -1,15 +1,16 @@
-use std::collections::{HashMap, HashSet};
-use std::sync::{Arc, Mutex};
+use std::collections::{BTreeSet, HashMap, HashSet};
+use std::sync::{Arc, Mutex, RwLock};
 use thiserror::Error;
 use wuphf_model::{
-    ConnectorId, ConversationId, DispatchId, EndpointId, Event, EventKind, IgnoreReason,
-    IngestOutcome, MediaId, MessageId, NoticeKind, Platform,
+    ConnectorId, ConversationId, DispatchId, EndpointId, Event, EventKind, HealthPause,
+    IgnoreReason, IngestOutcome, MediaId, MessageId, NoticeKind, Platform,
 };
 use wuphf_storage::{Storage, StorageError};
 
 mod acknowledge;
 mod chat_state;
 mod config;
+mod hold;
 mod ingest;
 mod notes;
 mod notify;
@@ -21,6 +22,7 @@ mod send;
 pub use config::{
     ChatStateSettings, MatchedRule, RoutingConfig, RoutingConfigError, RoutingSource,
 };
+pub use hold::Released;
 use router::Router;
 pub use router::RouterError;
 
@@ -40,6 +42,9 @@ pub struct Core<S> {
     /// [`Core::notify_owners`]. Deliberately in memory: a restart re-notifies
     /// about a connector that is still down.
     notices: Mutex<HashMap<ConnectorId, NoticeKind>>,
+    /// The directions of rules held by the health checks (plan 079), set by
+    /// the runtime. See [`Core::set_health_pauses`].
+    health_pauses: RwLock<Arc<BTreeSet<HealthPause>>>,
 }
 
 /// A conversation's in-flight thread provisioning: the dispatches whose
@@ -60,6 +65,7 @@ where
             storage,
             provisioning: Mutex::new(HashMap::new()),
             notices: Mutex::new(HashMap::new()),
+            health_pauses: RwLock::default(),
         }
     }
 

@@ -9,6 +9,7 @@ use wuphf_model::{
 use wuphf_storage::{
     ChatProfileStore, InMemoryStorage, MediaStore, MessageStore, ObservationStore, TopologyStore,
 };
+use wuphf_storage::{DispatchStore, HealthStore};
 
 const WHATSAPP: &str = "whatsapp-main";
 const TELEGRAM: &str = "telegram-main";
@@ -3568,4 +3569,188 @@ async fn a_migrated_chat_s_profile_is_read_from_its_new_form_first() {
     // timer known only under the old form fills the gap.
     assert_eq!(profile.title.as_deref(), Some("[G] New"));
     assert_eq!(profile.disappearing, Some(DisappearingTimer::new(604_800)));
+}
+
+// ---- health pauses (plan 079) ----
+
+fn forward_pause() -> HealthPause {
+    HealthPause {
+        rule: RuleId("wa-mirror".into()),
+        direction: wuphf_model::FlowDirection::Forward,
+        connector: ConnectorId(TELEGRAM.into()),
+        chat_id: "-1001234567".into(),
+    }
+}
+
+fn back_pause() -> HealthPause {
+    HealthPause {
+        rule: RuleId("wa-mirror".into()),
+        direction: wuphf_model::FlowDirection::Back,
+        connector: ConnectorId(WHATSAPP.into()),
+        chat_id: "111@g.us".into(),
+    }
+}
+
+fn routed(outcome: IngestOutcome) -> (Vec<Dispatch>, usize) {
+    match outcome {
+        IngestOutcome::Routed {
+            dispatches,
+            blocked,
+            ..
+        } => (dispatches, blocked),
+        other => panic!("expected a routed outcome, got {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn a_paused_target_holds_the_thread_creation_and_stashes_the_rest() {
+    let storage = Arc::new(InMemoryStorage::default());
+    let core = core_over(Arc::clone(&storage), vec![mirror_rule()]);
+    core.set_health_pauses(BTreeSet::from([forward_pause()]));
+
+    // The first message would create the topic (its info card): held, not sent.
+    let (dispatches, blocked) = routed(
+        core.ingest(event(WHATSAPP, "111@g.us", "wa-1", None))
+            .await
+            .unwrap(),
+    );
+    assert!(dispatches.is_empty());
+    assert_eq!(blocked, 1);
+    let held = storage.held_dispatches().await.unwrap();
+    assert_eq!(held.len(), 1);
+    assert!(held[0].dispatch.to.create_thread.is_some());
+    assert!(storage.pending_dispatches().await.unwrap().is_empty());
+
+    // A second message waits for that topic, as while it is being created,
+    // instead of creating one of its own.
+    assert!(matches!(
+        core.ingest(event(WHATSAPP, "111@g.us", "wa-2", None))
+            .await
+            .unwrap(),
+        IngestOutcome::Deferred { .. }
+    ));
+
+    // Releasing sends the topic creation; its acknowledgement replays the
+    // stashed message into the new topic.
+    core.set_health_pauses(BTreeSet::new());
+    let released = core.release_held(&forward_pause(), 0).await.unwrap();
+    assert_eq!(released.dropped, 0);
+    assert_eq!(released.dispatches.len(), 1);
+    let card = &released.dispatches[0];
+    assert_eq!(
+        &storage.pending_dispatches().await.unwrap(),
+        std::slice::from_ref(card)
+    );
+    let replayed = core
+        .acknowledge_dispatch(DispatchAck {
+            dispatch_id: card.id,
+            native_id: "tg-card".into(),
+            thread_id: Some("777".into()),
+        })
+        .await
+        .unwrap();
+    assert!(replayed.iter().any(|dispatch| {
+        matches!(dispatch.action, Action::Send { .. })
+            && dispatch.to.address.thread_id.as_deref() == Some("777")
+    }));
+}
+
+#[tokio::test]
+async fn a_held_thread_creation_survives_a_restart() {
+    let storage = Arc::new(InMemoryStorage::default());
+    let core = core_over(Arc::clone(&storage), vec![mirror_rule()]);
+    core.set_health_pauses(BTreeSet::from([forward_pause()]));
+    routed(
+        core.ingest(event(WHATSAPP, "111@g.us", "wa-1", None))
+            .await
+            .unwrap(),
+    );
+
+    // A new core recovers the held creation as the conversation's
+    // provisioning, so its stash is not replayed as if it had settled.
+    let restarted = core_over(Arc::clone(&storage), vec![mirror_rule()]);
+    restarted.set_health_pauses(BTreeSet::from([forward_pause()]));
+    assert!(restarted.recover_provisioning().await.unwrap().is_empty());
+    assert!(matches!(
+        restarted
+            .ingest(event(WHATSAPP, "111@g.us", "wa-2", None))
+            .await
+            .unwrap(),
+        IngestOutcome::Deferred { .. }
+    ));
+}
+
+#[tokio::test]
+async fn release_drops_what_was_held_before_the_cutoff() {
+    let storage = Arc::new(InMemoryStorage::default());
+    let core = core_over(Arc::clone(&storage), vec![mirror_rule()]);
+    core.set_health_pauses(BTreeSet::from([forward_pause()]));
+    routed(
+        core.ingest(event(WHATSAPP, "111@g.us", "wa-1", None))
+            .await
+            .unwrap(),
+    );
+    core.ingest(event(WHATSAPP, "111@g.us", "wa-2", None))
+        .await
+        .unwrap();
+
+    // Everything is older than a cutoff in the future: both messages, stashed
+    // behind the topic's info card, are dropped; the card that creates the
+    // topic is kept (later messages need the topic).
+    let released = core.release_held(&forward_pause(), i64::MAX).await.unwrap();
+    assert_eq!(released.dropped, 2);
+    assert_eq!(released.dispatches.len(), 1);
+    assert!(released.dispatches[0].to.create_thread.is_some());
+}
+
+#[tokio::test]
+async fn a_back_pause_holds_replies_but_not_the_mirror() {
+    let core = core(vec![mirror_rule()]);
+    // Provision the topic first.
+    let (dispatches, _) = routed(
+        core.ingest(event(WHATSAPP, "111@g.us", "wa-1", None))
+            .await
+            .unwrap(),
+    );
+    core.acknowledge_dispatch(DispatchAck {
+        dispatch_id: dispatches[0].id,
+        native_id: "tg-card".into(),
+        thread_id: Some("777".into()),
+    })
+    .await
+    .unwrap();
+    core.set_health_pauses(BTreeSet::from([back_pause()]));
+
+    // A reply typed in the topic goes back to WhatsApp: held.
+    let (dispatches, blocked) = routed(
+        core.ingest(event_in(TELEGRAM, "-1001234567", Some("777"), "tg-9", None))
+            .await
+            .unwrap(),
+    );
+    assert!(dispatches.is_empty());
+    assert_eq!(blocked, 1);
+    // A new WhatsApp message still mirrors into the topic.
+    let (dispatches, _) = routed(
+        core.ingest(event(WHATSAPP, "111@g.us", "wa-3", None))
+            .await
+            .unwrap(),
+    );
+    assert_eq!(dispatches.len(), 1);
+    assert_eq!(dispatches[0].to.connector_id, ConnectorId(TELEGRAM.into()));
+}
+
+#[tokio::test]
+async fn an_owner_message_outside_the_rules_is_never_held() {
+    let core = core(vec![mirror_rule()]);
+    core.set_health_pauses(BTreeSet::from([HealthPause {
+        rule: RuleId("wa-mirror".into()),
+        direction: wuphf_model::FlowDirection::Forward,
+        connector: ConnectorId(WHATSAPP.into()),
+        chat_id: "999@g.us".into(),
+    }]));
+    let outcome = core
+        .send_owner_message(owner_message("999@g.us", "hi", None))
+        .await
+        .unwrap();
+    assert_eq!(outcome.direct.to.address.chat_id, "999@g.us");
 }
