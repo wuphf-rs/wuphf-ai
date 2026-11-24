@@ -18,6 +18,7 @@ tonic.workspace = true
 tracing.workspace = true
 uuid.workspace = true
 wuphf-core.workspace = true
+wuphf-health.workspace = true
 wuphf-model.workspace = true
 wuphf-proto.workspace = true
 wuphf-settings.workspace = true

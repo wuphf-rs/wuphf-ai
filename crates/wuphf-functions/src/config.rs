@@ -4,7 +4,7 @@
 //! which the hub and services consult for authorization, deadlines and limits.
 
 use serde::{Deserialize, Serialize};
-use std::collections::{BTreeMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::fmt;
 use std::time::Duration;
 use thiserror::Error;
@@ -389,6 +389,19 @@ impl Functions {
                 .iter()
                 .any(|pattern| pattern.matches(name))
         })
+    }
+
+    /// The function names configured exactly (not by a `*` pattern): the
+    /// ones the core expects some provider to offer.
+    pub(crate) fn named_functions(&self) -> BTreeSet<String> {
+        self.providers
+            .iter()
+            .flat_map(|provider| &provider.patterns)
+            .filter_map(|pattern| match pattern {
+                Pattern::Exact(name) => Some(name.clone()),
+                _ => None,
+            })
+            .collect()
     }
 
     /// Whether some configured provider may register `name`. A call to a name

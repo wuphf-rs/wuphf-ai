@@ -50,6 +50,11 @@ fn token(provider_id: &str) -> String {
 /// Serve both broker services on an ephemeral local port; returns its URI.
 /// Every provider's token is `secret-<id>`.
 async fn start(config: FunctionsConfig) -> String {
+    start_with_handle(config).await.0
+}
+
+/// As [`start`], also returning the hub's handle.
+async fn start_with_handle(config: FunctionsConfig) -> (String, crate::FunctionHubHandle) {
     let tokens: Vec<(String, String)> = config
         .providers
         .iter()
@@ -71,11 +76,12 @@ async fn start(config: FunctionsConfig) -> String {
                 Arc::clone(&functions),
             )))
             .add_service(ProviderTransportServer::new(GrpcProviderService::new(
-                handle, functions,
+                handle.clone(),
+                functions,
             )))
             .serve_with_incoming(TcpListenerStream::new(listener)),
     );
-    format!("http://{address}")
+    (format!("http://{address}"), handle)
 }
 
 fn function(name: &str, major: u32) -> pb::FunctionRef {
@@ -109,13 +115,23 @@ impl Provider {
         token: &str,
         functions: Vec<pb::FunctionDeclaration>,
     ) -> Result<Self, Status> {
+        Self::connect_with_tools(uri, provider_id, token, functions, Vec::new()).await
+    }
+
+    async fn connect_with_tools(
+        uri: &str,
+        provider_id: &str,
+        token: &str,
+        functions: Vec<pb::FunctionDeclaration>,
+        tools: Vec<pb::ToolStatus>,
+    ) -> Result<Self, Status> {
         let (frames, receiver) = mpsc::channel(16);
         frames
             .send(pb::ProviderClientFrame {
                 body: Some(pb::provider_client_frame::Body::Hello(pb::ProviderHello {
                     provider_id: provider_id.into(),
                     functions,
-                    tools: Vec::new(),
+                    tools,
                 })),
             })
             .await
@@ -901,4 +917,56 @@ fn grpc_timeout_header_parses() {
         assert_eq!(parse(malformed), None, "{malformed:?}");
     }
     assert_eq!(grpc_timeout(&tonic::metadata::MetadataMap::new()), None);
+}
+
+/// A provider missing a tool registers without the function: a call to it
+/// fails at once, and the hub reports the tool and the missing function.
+#[tokio::test]
+async fn a_withheld_function_fails_at_once_and_is_reported() {
+    let (uri, handle) = start_with_handle(config(&[("convert", &["media.convert"])])).await;
+    assert_eq!(
+        handle.unavailable_functions(Duration::ZERO),
+        ["media.convert"]
+    );
+    let ffmpeg = pb::ToolStatus {
+        name: "ffmpeg".into(),
+        available: false,
+        needed_for: "animated stickers".into(),
+    };
+    let _provider = Provider::connect_with_tools(
+        &uri,
+        "convert",
+        &token("convert"),
+        Vec::new(),
+        vec![ffmpeg.clone()],
+    )
+    .await
+    .unwrap();
+    tokio::time::timeout(PATIENCE, async {
+        while !handle.provider_tools().contains_key("convert") {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("the provider registers");
+    assert_eq!(handle.provider_tools()["convert"], [ffmpeg]);
+
+    let mut client = caller(&uri).await;
+    let started = Instant::now();
+    let status = client
+        .invoke(invoke_request("media.convert", "{}"))
+        .await
+        .unwrap_err();
+    assert_eq!(status.code(), Code::Unavailable, "{status:?}");
+    assert!(started.elapsed() < Duration::from_secs(1));
+    assert_eq!(
+        handle.unavailable_functions(Duration::ZERO),
+        ["media.convert"]
+    );
+    // Not missing for long enough yet.
+    assert!(
+        handle
+            .unavailable_functions(Duration::from_secs(3600))
+            .is_empty()
+    );
 }

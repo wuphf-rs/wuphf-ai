@@ -182,7 +182,7 @@ fn an_admin_only_source_pauses_back_only() {
     assert_eq!(pause.direction, FlowDirection::Back);
     assert_eq!(pause.connector, id(WA));
     assert!(problems[0].text.contains("only admins can send"));
-    assert!(problems[0].text.contains("Replies"));
+    assert!(problems[0].text.ends_with('.'));
 }
 
 #[test]

@@ -12,8 +12,8 @@
 //! for the next provider.
 
 use crate::config::{FunctionKey, Functions};
-use std::collections::{BTreeSet, HashMap, VecDeque};
-use std::sync::Arc;
+use std::collections::{BTreeMap, BTreeSet, HashMap, VecDeque};
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use tokio::sync::{mpsc, oneshot};
 use tracing::{debug, info, warn};
@@ -66,7 +66,14 @@ pub(crate) enum CallFailure {
 #[derive(Debug)]
 pub(crate) enum InvokeRejection {
     NotServable,
-    QueueFull { limit: usize },
+    /// The provider configured for it is connected but did not offer it (a
+    /// tool it needs is missing, plan 079): fail at once.
+    Withheld {
+        provider_id: String,
+    },
+    QueueFull {
+        limit: usize,
+    },
     Stopped,
 }
 
@@ -95,9 +102,22 @@ pub(crate) enum AbandonReport {
     Unknown,
 }
 
+/// What the health checks read of the hub (plan 079), kept current by the
+/// hub task so it can be read without a round trip.
+#[derive(Default)]
+struct Wiring {
+    /// The tools each connected provider reported.
+    tools: BTreeMap<String, Vec<pb::ToolStatus>>,
+    /// For each function the core expects (named in the config, or offered
+    /// by some provider since startup) that no connected provider offers
+    /// now: since when.
+    missing_since: BTreeMap<String, Instant>,
+}
+
 #[derive(Clone)]
 pub struct FunctionHubHandle {
     commands: mpsc::Sender<Command>,
+    wiring: Arc<Mutex<Wiring>>,
     /// Unbounded so [`abandon`](Self::abandon) never blocks; it runs from `Drop`.
     abandons: mpsc::UnboundedSender<CallId>,
 }
@@ -106,6 +126,7 @@ enum Command {
     Register {
         provider_id: String,
         functions: Vec<pb::FunctionDeclaration>,
+        tools: Vec<pb::ToolStatus>,
         output: mpsc::Sender<pb::ProviderServerFrame>,
         reply: oneshot::Sender<Result<SessionTicket, RegisterRejection>>,
     },
@@ -138,12 +159,14 @@ impl FunctionHubHandle {
         &self,
         provider_id: String,
         functions: Vec<pb::FunctionDeclaration>,
+        tools: Vec<pb::ToolStatus>,
         output: mpsc::Sender<pb::ProviderServerFrame>,
     ) -> Result<SessionTicket, RegisterRejection> {
         let (reply, receiver) = oneshot::channel();
         self.send(Command::Register {
             provider_id,
             functions,
+            tools,
             output,
             reply,
         })
@@ -179,6 +202,23 @@ impl FunctionHubHandle {
         receiver.await.unwrap_or(AbandonReport::Unknown)
     }
 
+    /// The tools each connected provider reported, by provider id.
+    pub fn provider_tools(&self) -> BTreeMap<String, Vec<pb::ToolStatus>> {
+        self.wiring.lock().unwrap().tools.clone()
+    }
+
+    /// The functions no connected provider has offered for at least `for_at_least`.
+    pub fn unavailable_functions(&self, for_at_least: Duration) -> Vec<String> {
+        self.wiring
+            .lock()
+            .unwrap()
+            .missing_since
+            .iter()
+            .filter(|(_, since)| since.elapsed() >= for_at_least)
+            .map(|(name, _)| name.clone())
+            .collect()
+    }
+
     pub(crate) async fn list(&self) -> Vec<pb::FunctionStatus> {
         let (reply, receiver) = oneshot::channel();
         self.send(Command::List { reply }).await;
@@ -194,6 +234,9 @@ impl FunctionHubHandle {
 
 pub struct FunctionHub {
     functions: Arc<Functions>,
+    wiring: Arc<Mutex<Wiring>>,
+    /// Every function name some provider offered since startup.
+    offered: BTreeSet<String>,
     commands: mpsc::Receiver<Command>,
     abandons: mpsc::UnboundedReceiver<CallId>,
     sessions: HashMap<String, Session>,
@@ -208,6 +251,7 @@ struct Session {
     seq: u64,
     output: mpsc::Sender<pb::ProviderServerFrame>,
     keys: Vec<FunctionKey>,
+    tools: Vec<pb::ToolStatus>,
 }
 
 struct Owner {
@@ -243,9 +287,20 @@ impl FunctionHub {
     pub fn new(functions: Arc<Functions>) -> (Self, FunctionHubHandle) {
         let (commands_tx, commands) = mpsc::channel(256);
         let (abandons_tx, abandons) = mpsc::unbounded_channel();
+        let started = Instant::now();
+        let wiring = Arc::new(Mutex::new(Wiring {
+            tools: BTreeMap::new(),
+            missing_since: functions
+                .named_functions()
+                .into_iter()
+                .map(|name| (name, started))
+                .collect(),
+        }));
         (
             Self {
                 functions,
+                wiring: Arc::clone(&wiring),
+                offered: BTreeSet::new(),
                 commands,
                 abandons,
                 sessions: HashMap::new(),
@@ -257,6 +312,7 @@ impl FunctionHub {
             },
             FunctionHubHandle {
                 commands: commands_tx,
+                wiring,
                 abandons: abandons_tx,
             },
         )
@@ -282,10 +338,12 @@ impl FunctionHub {
             Command::Register {
                 provider_id,
                 functions,
+                tools,
                 output,
                 reply,
             } => {
-                let _ = reply.send(self.register(provider_id, functions, output));
+                let _ = reply.send(self.register(provider_id, functions, tools, output));
+                self.refresh_wiring();
             }
             Command::Invoke { call, reply } => {
                 let _ = reply.send(self.invoke(call));
@@ -298,6 +356,7 @@ impl FunctionHub {
                     .is_some_and(|session| session.seq == ticket.seq)
                 {
                     self.drop_session(&ticket.provider_id);
+                    self.refresh_wiring();
                 }
             }
             Command::Abandon { id, reply } => {
@@ -313,6 +372,7 @@ impl FunctionHub {
         &mut self,
         provider_id: String,
         declarations: Vec<pb::FunctionDeclaration>,
+        tools: Vec<pb::ToolStatus>,
         output: mpsc::Sender<pb::ProviderServerFrame>,
     ) -> Result<SessionTicket, RegisterRejection> {
         let keys = self.validate(&provider_id, &declarations)?;
@@ -360,6 +420,7 @@ impl FunctionHub {
                 seq,
                 output,
                 keys: keys.clone(),
+                tools,
             },
         );
         info!(provider = %provider_id, functions = %listed, "provider session registered");
@@ -375,11 +436,6 @@ impl FunctionHub {
         provider_id: &str,
         declarations: &[pb::FunctionDeclaration],
     ) -> Result<Vec<FunctionKey>, RegisterRejection> {
-        if declarations.is_empty() {
-            return Err(RegisterRejection::Invalid(
-                "a provider must declare at least one function".into(),
-            ));
-        }
         let mut keys = Vec::with_capacity(declarations.len());
         for declaration in declarations {
             let key = FunctionKey::from_proto(declaration.function.clone())
@@ -409,6 +465,17 @@ impl FunctionHub {
         let name = call.key.name.as_str();
         if !self.functions.is_servable(name) {
             return Err(InvokeRejection::NotServable);
+        }
+        // Its provider is here but did not offer it: waiting would not help.
+        if !self.owners.contains_key(&call.key)
+            && let Some(provider_id) = self
+                .sessions
+                .keys()
+                .find(|provider| self.functions.may_register(provider, name))
+        {
+            return Err(InvokeRejection::Withheld {
+                provider_id: provider_id.clone(),
+            });
         }
         let suggested = self
             .owners
@@ -628,6 +695,30 @@ impl FunctionHub {
 
     /// End a provider's session: its functions lose their owner, idempotent
     /// in-flight calls go back to the front of their queue and the rest fail.
+    /// Bring the health checks' view up to date with the sessions.
+    fn refresh_wiring(&mut self) {
+        let owned: BTreeSet<&str> = self.owners.keys().map(|key| key.name.as_str()).collect();
+        self.offered
+            .extend(owned.iter().map(|name| (*name).to_owned()));
+        let mut wiring = self.wiring.lock().unwrap();
+        wiring.tools = self
+            .sessions
+            .iter()
+            .map(|(provider, session)| (provider.clone(), session.tools.clone()))
+            .collect();
+        let expected = self.functions.named_functions();
+        for name in expected.iter().chain(&self.offered) {
+            if owned.contains(name.as_str()) {
+                wiring.missing_since.remove(name);
+            } else {
+                wiring
+                    .missing_since
+                    .entry(name.clone())
+                    .or_insert_with(Instant::now);
+            }
+        }
+    }
+
     fn drop_session(&mut self, provider_id: &str) {
         let Some(session) = self.sessions.remove(provider_id) else {
             return;

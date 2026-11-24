@@ -1,5 +1,6 @@
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
+use std::collections::BTreeMap;
 use std::{path::PathBuf, sync::Arc, time::Duration};
 use tonic::transport::Server;
 use wuphf_core::Core;
@@ -8,6 +9,7 @@ use wuphf_proto::connector as pb;
 use wuphf_proto::connector::connector_transport_server::ConnectorTransportServer;
 use wuphf_proto::connector::function_transport_client::FunctionTransportClient;
 use wuphf_proto::connector::function_transport_server::FunctionTransportServer;
+use wuphf_proto::connector::health_transport_server::HealthTransportServer;
 use wuphf_proto::connector::media_transport_server::MediaTransportServer;
 use wuphf_proto::connector::observer_transport_server::ObserverTransportServer;
 use wuphf_proto::connector::plugin_transport_server::PluginTransportServer;
@@ -18,7 +20,9 @@ use wuphf_runtime::{
     connector::ConnectorHub,
     connector_settings::ConnectorSettings,
     grpc::GrpcConnectorService,
+    health::{GrpcHealthService, HealthMonitor, Wiring},
     live_sessions::LiveSessions,
+    live_sessions::tool_from_wire,
     media::GrpcMediaService,
     observer_service::{GrpcObserverService, bearer_auth},
     plugin_settings::{GrpcPluginService, PluginSettings},
@@ -27,6 +31,7 @@ use wuphf_runtime::{
 use wuphf_settings::{LiveRouting, WuphfSchema};
 
 mod backup;
+mod health;
 mod settings;
 mod setup;
 mod update;
@@ -47,6 +52,19 @@ enum Command {
     Serve {
         #[arg(long, default_value = "config/example.toml")]
         config: PathBuf,
+    },
+    /// The open health problems (plan 079): read from the database, so it
+    /// works while the core is down, or checked again by a running core with
+    /// --run (WUPHF_OBSERVER_TOKEN). Exits 1 while a problem not ignored is
+    /// open.
+    Health {
+        #[arg(long, default_value = "config/example.toml")]
+        config: PathBuf,
+        /// Ask the running core to probe and check now.
+        #[arg(long)]
+        run: bool,
+        #[arg(long, default_value = "http://127.0.0.1:50051")]
+        address: String,
     },
     /// Inspect the remote functions registered with a running core.
     Functions {
@@ -126,6 +144,16 @@ async fn main() -> Result<()> {
     }
     match command {
         Command::Serve { config } => serve(config).await,
+        Command::Health {
+            config,
+            run,
+            address,
+        } => {
+            if health::run(&config, run, address).await? {
+                std::process::exit(1);
+            }
+            Ok(())
+        }
         Command::Functions {
             command: FunctionsCommand::List { address },
         } => list_functions(address).await,
@@ -199,20 +227,26 @@ async fn serve(path: PathBuf) -> Result<()> {
         .observer_token
         .as_ref()
         .map(|token| token.expose().to_owned());
+    // For the services behind the observer token that refuse everything when
+    // it is unset (plugins, health).
+    let observer_token_value = observer_token.clone();
     // Settings go through the core's settings service: connectors acting for
     // their owners, and the observer token as the owner.
-    // The commands live connector sessions declare, offered on their sections
-    // in the settings panel and run on their sessions.
-    let commands = Arc::new(LiveSessions::default());
+    // The live connector sessions: the commands they declare, offered on their
+    // sections in the settings panel, and the health probes (plan 079).
+    let sessions = Arc::new(LiveSessions::default());
     let settings_service = settings_server(
         Arc::clone(&settings),
         Arc::clone(&storage),
         Arc::clone(&connector_tokens),
         observer_token.clone(),
-        Arc::clone(&commands),
+        Arc::clone(&sessions),
     );
     let (runtime, channels, observer) = Runtime::channelled(
-        Arc::new(Core::new(storage, LiveRouting::new(Arc::clone(&settings)))),
+        Arc::new(Core::new(
+            Arc::clone(&storage),
+            LiveRouting::new(Arc::clone(&settings)),
+        )),
         128,
     );
     // New releases are told to the owner through the notice targets.
@@ -252,8 +286,32 @@ async fn serve(path: PathBuf) -> Result<()> {
         .map(str::to_owned)
         .collect();
     let (function_hub, function_handle) = FunctionHub::new(Arc::clone(&functions));
+    // The health checks (plan 079): what the stored problems pause is held
+    // before anything is routed.
+    let health = HealthMonitor::new(
+        Arc::clone(&storage),
+        Arc::clone(&sessions),
+        runtime.owner_sender(),
+        Arc::clone(&settings),
+        Some(Arc::new(FunctionWiring(function_handle.clone()))),
+    );
+    health
+        .restore()
+        .await
+        .context("restore the health pauses")?;
+    let health_service = HealthTransportServer::with_interceptor(
+        GrpcHealthService::new(Arc::clone(&health)),
+        any_token_auth(
+            observer_token_value
+                .iter()
+                .filter(|token| !token.is_empty())
+                .cloned()
+                .collect(),
+        ),
+    );
     let (hub, handle) = ConnectorHub::new(channels, connectors);
     let runtime_task = tokio::spawn(runtime.run());
+    let health_task = health.spawn();
     let hub_task = tokio::spawn(hub.run());
     let function_task = tokio::spawn(function_hub.run());
     tracing::info!(listen = %configuration.listen, "wuphf connector gRPC server listening");
@@ -264,7 +322,7 @@ async fn serve(path: PathBuf) -> Result<()> {
         .add_service(ConnectorTransportServer::new(
             GrpcConnectorService::new(handle, connector_tokens)
                 .with_settings(connector_settings)
-                .with_commands(commands),
+                .with_commands(sessions),
         ))
         .add_service(MediaTransportServer::with_interceptor(
             media_service,
@@ -272,6 +330,7 @@ async fn serve(path: PathBuf) -> Result<()> {
         ))
         .add_service(observer_service)
         .add_service(plugin_service)
+        .add_service(health_service)
         // No interceptor: the service's authorizer checks the token itself,
         // since it must know which connector presented it.
         .add_service(settings_service)
@@ -289,6 +348,7 @@ async fn serve(path: PathBuf) -> Result<()> {
         result = runtime_task => result??,
     }
     hub_task.abort();
+    health_task.abort();
     function_task.abort();
     Ok(())
 }
@@ -337,4 +397,24 @@ async fn list_functions(address: String) -> Result<()> {
         );
     }
     Ok(())
+}
+
+/// The functions hub as the health checks read it: the providers' tools and
+/// the functions no connected provider has offered for as long as a
+/// connector may be away.
+struct FunctionWiring(wuphf_functions::FunctionHubHandle);
+
+impl Wiring for FunctionWiring {
+    fn provider_tools(&self) -> BTreeMap<String, Vec<wuphf_model::ToolStatus>> {
+        self.0
+            .provider_tools()
+            .into_iter()
+            .map(|(provider, tools)| (provider, tools.into_iter().map(tool_from_wire).collect()))
+            .collect()
+    }
+
+    fn unavailable_functions(&self) -> Vec<String> {
+        let grace = u64::try_from(wuphf_health::OFFLINE_AFTER_MS).unwrap_or_default();
+        self.0.unavailable_functions(Duration::from_millis(grace))
+    }
 }

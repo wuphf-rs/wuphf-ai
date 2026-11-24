@@ -7,11 +7,13 @@
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use std::collections::BTreeSet;
 use thiserror::Error;
 use tokio::sync::{mpsc, oneshot};
-use wuphf_core::{Core, CoreError};
+use wuphf_core::{Core, CoreError, Released};
 use wuphf_model::{
-    Action, Dispatch, OWNER_AUTHOR, ObservedDirection, ObservedMessage, OwnerMessage, Platform,
+    Action, Dispatch, HealthPause, OWNER_AUTHOR, ObservedDirection, ObservedMessage, OwnerMessage,
+    Platform,
 };
 use wuphf_storage::Storage;
 
@@ -93,6 +95,25 @@ where
             self.inject(dispatch).await?;
         }
         Ok(sent)
+    }
+
+    /// Hold dispatches into `pauses` from now on (plan 079).
+    pub fn set_health_pauses(&self, pauses: BTreeSet<HealthPause>) {
+        self.core.set_health_pauses(pauses);
+    }
+
+    /// Send what `pause` held, in order, dropping what was held before
+    /// `cutoff_ms` (see [`Core::release_held`]).
+    pub async fn release_held(
+        &self,
+        pause: &HealthPause,
+        cutoff_ms: i64,
+    ) -> Result<Released, OwnerSendError> {
+        let released = self.core.release_held(pause, cutoff_ms).await?;
+        for dispatch in &released.dispatches {
+            self.inject(dispatch.clone()).await?;
+        }
+        Ok(released)
     }
 
     /// The observation-log row for an owner message, complete except for the native

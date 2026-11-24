@@ -91,6 +91,9 @@ impl FunctionTransport for GrpcFunctionService {
                 InvokeRejection::NotServable => {
                     Status::not_found(format!("no configured provider may serve {key}"))
                 }
+                InvokeRejection::Withheld { provider_id } => Status::unavailable(format!(
+                    "{provider_id} is connected but does not offer {key} now (a tool it needs may be missing)"
+                )),
                 InvokeRejection::QueueFull { limit } => Status::resource_exhausted(format!(
                     "{key} already has {limit} calls waiting for a provider"
                 )),
@@ -243,7 +246,7 @@ impl ProviderTransport for GrpcProviderService {
         let (output, output_rx) = mpsc::channel(capacity);
         let ticket = self
             .hub
-            .register(provider_id.clone(), hello.functions, output)
+            .register(provider_id.clone(), hello.functions, hello.tools, output)
             .await
             .map_err(|rejection| match rejection {
                 RegisterRejection::Invalid(message) => Status::invalid_argument(message),

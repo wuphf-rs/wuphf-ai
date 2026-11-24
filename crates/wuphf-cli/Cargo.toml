@@ -19,6 +19,7 @@ uuid.workspace = true
 wuphf-connector.workspace = true
 wuphf-core.workspace = true
 wuphf-functions.workspace = true
+wuphf-health.workspace = true
 wuphf-model.workspace = true
 wuphf-proto.workspace = true
 wuphf-runtime.workspace = true

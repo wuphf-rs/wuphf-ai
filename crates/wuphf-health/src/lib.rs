@@ -20,13 +20,13 @@
 //! problem.
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
+use wuphf_model::{
+    ChatAddress, ChatFacts, ChatFilter, ChatRef, Connector, ConnectorId, Fact, FlowDirection,
+    HealthPause, Problem, Rule, RuleId, RuleKind, Severity, Subject, ToolStatus,
+};
 
 /// Facts or titles per connector and chat id.
 pub type ByChat<T> = BTreeMap<(ConnectorId, String), T>;
-use wuphf_model::{
-    ChatAddress, ChatFacts, ChatFilter, ChatRef, Connector, ConnectorId, Fact, FlowDirection,
-    HealthPause, Problem, Rule, RuleId, RuleKind, Severity, ToolStatus,
-};
 
 /// How long a connector may be away before it is a problem.
 pub const OFFLINE_AFTER_MS: i64 = 15 * 60 * 1000;
@@ -177,10 +177,6 @@ pub fn evaluate(observed: &Observed<'_>) -> Vec<Problem> {
                         End::Destination { .. } => FlowDirection::Forward,
                         End::Source => FlowDirection::Back,
                     };
-                    text.push_str(match direction {
-                        FlowDirection::Forward => ". Messages into it are held until it is fixed.",
-                        FlowDirection::Back => ". Replies to it are held until it is fixed.",
-                    });
                     Severity::Pause(HealthPause {
                         rule: rule.id.clone(),
                         direction,
@@ -188,15 +184,20 @@ pub fn evaluate(observed: &Observed<'_>) -> Vec<Problem> {
                         chat_id: chat.chat_id.clone(),
                     })
                 } else {
-                    text.push('.');
                     Severity::Warn
                 };
+                text.push('.');
                 let key = chat_key(check.key, &rule.id, connector, &chat.chat_id);
+                let subject = Subject::Chat {
+                    connector: connector.clone(),
+                    chat_id: chat.chat_id.clone(),
+                };
                 problems.insert(
                     key.clone(),
                     Problem {
                         key,
                         severity,
+                        subject,
                         text,
                     },
                 );
@@ -211,15 +212,16 @@ pub fn evaluate(observed: &Observed<'_>) -> Vec<Problem> {
                 text.push_str(&format!(", so {} do not work", tool.needed_for));
             }
             text.push('.');
-            warn(&mut problems, key, text);
+            warn(&mut problems, key, Subject::Process(process.clone()), text);
         }
     }
     for (connector, minutes) in observed.offline {
         warn(
             &mut problems,
             format!("connector-offline:{connector}"),
+            Subject::Wiring,
             format!(
-                "{connector} has not been connected for {minutes} minutes; what it should send waits."
+                "{connector} has not been connected for {minutes} minutes; messages for it wait."
             ),
         );
     }
@@ -227,6 +229,7 @@ pub fn evaluate(observed: &Observed<'_>) -> Vec<Problem> {
         warn(
             &mut problems,
             format!("function-unavailable:{function}"),
+            Subject::Wiring,
             format!("No connected provider offers {function}; calls to it fail at once."),
         );
     }
@@ -237,6 +240,7 @@ pub fn evaluate(observed: &Observed<'_>) -> Vec<Problem> {
                 "unknown-chat:{setting}:{}:{}",
                 chat.connector_id, chat.address.chat_id
             ),
+            Subject::Wiring,
             format!(
                 "{setting} names {}:{}, a chat {} has never reported.",
                 chat.connector_id, chat.address.chat_id, chat.connector_id
@@ -246,12 +250,13 @@ pub fn evaluate(observed: &Observed<'_>) -> Vec<Problem> {
     problems.into_values().collect()
 }
 
-fn warn(problems: &mut BTreeMap<String, Problem>, key: String, text: String) {
+fn warn(problems: &mut BTreeMap<String, Problem>, key: String, subject: Subject, text: String) {
     problems.insert(
         key.clone(),
         Problem {
             key,
             severity: Severity::Warn,
+            subject,
             text,
         },
     );

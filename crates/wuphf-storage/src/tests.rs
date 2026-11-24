@@ -1586,6 +1586,7 @@ fn problem(key: &str) -> StoredProblem {
         problem: Problem {
             key: key.into(),
             severity: wuphf_model::Severity::Pause(pause("-100")),
+            subject: wuphf_model::Subject::Wiring,
             text: format!("{key} text"),
         },
         since_ms: 5,

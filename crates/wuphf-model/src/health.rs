@@ -94,6 +94,23 @@ pub enum Severity {
     Warn,
 }
 
+/// What a problem is about, which says when it can be re-checked: a chat
+/// only when its connector answers a probe about it, a process only while
+/// it is connected. Until then the problem stands (an unknown neither
+/// pauses nor resumes).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Subject {
+    Chat {
+        connector: ConnectorId,
+        chat_id: String,
+    },
+    /// A connector or provider, by id (its tools).
+    Process(String),
+    /// The configuration and what is connected, re-checked every time.
+    Wiring,
+}
+
 /// Something wrong the owner should know about.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Problem {
@@ -101,6 +118,7 @@ pub struct Problem {
     /// `<check>:<what>…`, e.g. `target-not-forum:mirror:telegram-main:-100`.
     pub key: String,
     pub severity: Severity,
+    pub subject: Subject,
     /// What the owner reads.
     pub text: String,
 }

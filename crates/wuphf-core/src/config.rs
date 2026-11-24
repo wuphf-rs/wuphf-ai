@@ -4,8 +4,8 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use thiserror::Error;
 use wuphf_model::{
-    AddressSet, ChatRef, ChatStatePolicy, ChatStatePolicyOverride, Connector, ConnectorId,
-    Conversation, Rule, RuleEnd, RuleId,
+    AddressSet, ChatRef, ChatStateDirection, ChatStatePolicy, ChatStatePolicyOverride, Connector,
+    ConnectorId, Conversation, Rule, RuleEnd, RuleId,
 };
 
 /// The rule set plus connector metadata that drives address resolution and
@@ -156,6 +156,21 @@ impl RoutingConfig {
             ));
         }
         Ok(())
+    }
+
+    /// Every rule, in config order.
+    pub fn rules(&self) -> &[Rule] {
+        &self.rules
+    }
+
+    /// Whether pins cross between chats anywhere: globally or in an override.
+    pub fn pins_synced(&self) -> bool {
+        self.chat_state.global.pin != ChatStateDirection::Off
+            || self
+                .chat_state
+                .overrides
+                .iter()
+                .any(|(_, policy)| policy.pin.is_some_and(|pin| pin != ChatStateDirection::Off))
     }
 
     pub fn rule(&self, id: &RuleId) -> Option<&Rule> {
