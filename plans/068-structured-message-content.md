@@ -2,7 +2,7 @@
 
 > **Executor instructions**: as plan 058. Build limits: one build at a time,
 > capped jobs, `nice`; never build on battery (`/sys/class/power_supply/AC/online`
-> = 0 → stop and report). Read the whole plan series (068–072) before starting.
+> = 0 → stop and report). Read the whole plan series (068–073) before starting.
 
 ## Status
 
@@ -13,7 +13,7 @@
 - **Effort**: L
 - **Risk**: MED. It adds a field to the logical message and the dispatch
   contract, and both are additive.
-- **Depends on**: none. It is the base of 069–072.
+- **Depends on**: none. It is the base of 069–073.
 - **Category**: model / core / proto
 
 ## The series
@@ -25,6 +25,7 @@
 | 070 | Telegram rendering: native location and contact, the poll tally card, pressable buttons through the helper bot |
 | 071 | Votes and button presses: the vote store, live tallies, a press or vote on Telegram becomes the owner's on WhatsApp |
 | 072 | Telegram → WhatsApp: Telegram polls, locations, venues and contacts as native WhatsApp messages, the owner's Telegram vote as their WhatsApp vote |
+| 073 | The Go WhatsApp connector (whatsmeow): 069, 071 and 072's connector work, through whatsmeow's poll and message-secret helpers |
 
 ## Design decisions (settled with the owner, 2026-11-24)
 
@@ -65,8 +66,8 @@
    declaring that kind. To anyone else it sends a **text fallback** composed
    in one place, `wuphf-core/src/content_text.rs`, next to `notes.rs`. The
    fallback is appended to the message's text; attachments are kept. Instagram
-   and the Go WhatsApp connector render everything through the fallback
-   unchanged.
+   renders everything through the fallback unchanged; the Go WhatsApp
+   connector does too until plan 073.
 4. **Proto:** `MessageCreateEvent.content = 13` and `MessageCreateDispatch.content
    = 15`, a `Content` message with a `oneof` mirroring the model. An edit
    carries content too: `MessageEditEvent.content`,

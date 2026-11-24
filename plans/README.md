@@ -90,6 +90,7 @@ code).
 | 070 | Telegram renders locations, contacts, events, poll tally cards, pressable buttons (helper bot inline) | P1 | L | 068 | TODO |
 | 071 | Poll votes and button presses both ways: vote store, live tallies, owner presses act on WhatsApp | P1 | L | 068–070 | TODO |
 | 072 | Telegram polls, locations, venues, contacts to WhatsApp; the owner's Telegram vote as their WhatsApp vote | P2 | M | 068, 071 | TODO |
+| 073 | The Go WhatsApp connector (whatsmeow) gets structured content, votes and button presses, both ways | P1 | L | 068, 071 (after 069, 072) | TODO |
 
 Status values: TODO | IN PROGRESS | DONE | BLOCKED (with one-line reason) |
 REJECTED (with one-line rationale).

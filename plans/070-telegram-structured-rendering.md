@@ -41,8 +41,11 @@ buttons: a stored random key, like the panel's `TokenStore`.
 - **The card must be editable later** (tallies, and an edited message). An
   inline-sent message is edited by the bot through its `inline_message_id`,
   which the bot learns from `chosen_inline_result`. That needs inline feedback
-  turned on for the helper bot (`/setinlinefeedback` in @BotFather, to 100%).
-  Step 1 proves this before anything else.
+  set to **Enabled** for the helper bot (`/setinlinefeedback` in @BotFather).
+  The sampled settings, 1/10, 1/100 and 1/1000, report only that share of
+  inline sends, which would leave most cards uneditable. Step 1 proves
+  editing works before anything else, and the helper check below flags any
+  setting other than Enabled.
 - **The helper's inline mode must be on** (`/setinline`). On 2026-11-24 the
   server's helper had it off, so stickers fell back to a label message
   (`BOT_INLINE_DISABLED`). When the helper connects, the connector checks both
