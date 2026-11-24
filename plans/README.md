@@ -98,7 +98,7 @@ code).
 | 078 | wuphf-misc's settings in /wuphf: plugins declare their own settings (`plugin_settings.<id>`) | P2 | M | 040, 050 | DONE (migration 0020; live panel test pending the owner; see notes) |
 | 079 | Health checks: probes of rule chats, health pauses that hold messages, tools, notices, a Health page, `wuphf-server health` | P1 | L | botconf 018 (page only) | IN PROGRESS |
 | 080 | The owner's Telegram reactions as their own reaction on WhatsApp and Instagram (reactions stored; Instagram owner-only) | P2 | M–L | — | DONE (migration 0023; live test pending the owner; see notes) |
-| 081 | A lone-emoji reply from the owner is a reaction (any emoji, not only Telegram's set) | P2 | S–M | 080 | IN PROGRESS |
+| 081 | A lone-emoji reply from the owner is a reaction (any emoji, not only Telegram's set) | P2 | S–M | 080 | DONE (live test pending the owner; see notes) |
 
 Status values: TODO | IN PROGRESS | DONE | BLOCKED (with one-line reason) |
 REJECTED (with one-line rationale).
@@ -1956,3 +1956,30 @@ From the 2026-10-22 remote-functions design:
   - clippy (workspace and whatsapp-rust), `go vet` and fmt are clean.
   - The pre-commit hook caught the stale vendor hashes after the proto
     change; all five were updated in `2bcdf97`.
+- **081 (2026-11-25).** The owner's lone-emoji reply is their reaction
+  (`44d9ad7`..this commit). Live test pending the owner.
+  - Core: `reply_reaction.rs`.
+    - A new message is a reply reaction when it replies to a stored message,
+      has no attachments, its trimmed text is one emoji (`emojis::get`,
+      fully qualified, U+FE0F optional), and its author is an owner.
+    - `MessageCreateEvent.sender_account` (Telegram: the plain user id),
+      checked against `owner_ids`; not stored on the message.
+    - The reply is stored with its received copy but not routed. Its
+      reaction is a `reply:<native id>` row on the parent's copy, which also
+      marks the message for later edits and deletes. Reaction sets ignore
+      those rows.
+    - `Action::React.confirm` names the reply; acknowledging the reaction
+      queues a delivered receipt (👍) on it. With WhatsApp and Instagram both
+      in a conversation it is signalled twice, which is harmless.
+  - `reaction_changed`: an owner's clear goes only to targets still showing
+    the cleared reaction. The latest owner reaction, native or reply, wins
+    there. This also applies to 080's native clears.
+  - Once edited to anything but a lone emoji, the reply is an ordinary
+    message that was never sent: editing it back later does not react again.
+  - Tests:
+    - core +9 (7 flow, 2 emoji detection);
+    - Telegram +1 (the sender account).
+    Mutation: dropping the clear filter fails the latest-wins test.
+    Workspace 522 tests, whatsapp-rust 178, clippy and vet clean.
+  - Deps: `emojis` 0.9 in wuphf-core (vendored through `Cargo.lock`).
+    The proto field moved every Go `vendorHash`.

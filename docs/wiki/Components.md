@@ -55,7 +55,8 @@ what it does when wuphf sends to it.
 | Settings panel in chat | `/wuphf` | — | — | — |
 
 "Yours" means only your own reactions are applied, as your account; anyone
-else's is shown on Telegram only. A connector that can't apply something (a
+else's is shown on Telegram only. In Telegram, replying to a message with a lone
+emoji reacts with it, so any emoji works. A connector that can't apply something (a
 read receipt on WhatsApp) acknowledges it, so nothing piles up.
 
 ### Telegram

@@ -39,6 +39,13 @@ connection dies silently; the SDKs keep retrying with backoff until then.
 - `MessageCreateEvent` — raw `chat_id`, optional `thread_id`/`chat_title`,
   `platform_message_id`, `sender`, optional `participant`/`sender_name`,
   text/attachments, optional native `reply_to_platform_message_id`.
+  `sender_account` names the sender as the connector's `owner_ids` name
+  accounts, when that differs from `sender` (Telegram: the plain user id).
+  The owner's reply whose whole text is one emoji is their reaction on the
+  replied-to message, not a message (plan 081): the core routes a
+  `ReactionDispatch`, and marks the reply delivered once it is applied.
+  Editing the reply to another lone emoji changes the reaction; deleting it,
+  or editing it to anything else, clears it.
   `disappearing` is the chat's timer as the message carried it (WhatsApp:
   `ContextInfo.expiration`, the owner's own messages included), set only when
   greater than 0. A message without one never turns a known timer off; when

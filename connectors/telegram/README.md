@@ -28,6 +28,10 @@ Implemented:
   reports a message's whole set of reactions; it must be an account other
   than the owner's, since its own reactions (the 👍/👀 above) are never
   reported. A bot session hears of reactions only as an admin of the group
+- a reply whose whole text is one emoji, from the owner, is their reaction on
+  the replied-to message, so any emoji works, not only Telegram's set. It is
+  not sent as a message; it gets 👍 once applied. Edit it to change the
+  reaction, delete it to remove it
 - pin, mute and archive synced with the source chat as a pinned, muted or
   closed topic (mute needs a user session: a bot's notify settings mean
   nothing)
