@@ -102,7 +102,8 @@ func (c Connector) Run(ctx context.Context) error {
 	stickers := NewInlineStickers(c.logger)
 	// Owners can also open the panel by messaging the helper bot privately.
 	chats := NewHelperChats(c.cfg.Panel.CommandName(), c.logger)
-	dispatcher := NewNormalizer(peers, inputs, codec).WithPanel(panel).Dispatcher()
+	reactions := NewReactions(peers, c.logger)
+	dispatcher := NewNormalizer(peers, inputs, codec).WithPanel(panel).WithReactions(reactions).Dispatcher()
 	// Presses of the settings panel's buttons (bot sessions). A bot also labels
 	// stickers with an inline button (see sendSticker); pressing it does
 	// nothing, but an unanswered press leaves the client spinning, so it is
@@ -121,6 +122,7 @@ func (c Connector) Run(ctx context.Context) error {
 		SessionStorage: &session.FileStorage{Path: c.cfg.SessionFile},
 		UpdateHandler:  dispatcher,
 	})
+	reactions.SetAPI(client.API())
 	// A user session with a panel bot token shows the settings panel through
 	// a helper bot (runHelper), a second client in this process; either
 	// session ending ends the connector, so reconnecting stays in one place.
@@ -136,8 +138,9 @@ func (c Connector) Run(ctx context.Context) error {
 	}
 	group.Go(func() error {
 		return client.Run(ctx, func(ctx context.Context) error {
-			return c.serve(ctx, client, peers, panel, stickers, panelClient, helperReady, startHelper, func(ctx context.Context, bot bool) error {
-				sender := NewSender(client.API(), peers, media, converter, runtime.Live, bot).WithInlineStickers(stickers)
+			return c.serve(ctx, client, peers, panel, stickers, panelClient, helperReady, startHelper, func(ctx context.Context, self *tg.User) error {
+				reactions.SetSelf(self.ID)
+				sender := NewSender(client.API(), peers, media, converter, runtime.Live, self.Bot).WithInlineStickers(stickers)
 				return coreclient.New(coreclient.Options{
 					CoreAddress:         c.cfg.CoreAddress,
 					Token:               coreToken,
@@ -166,7 +169,7 @@ func (c Connector) serve(
 	panelClient *botconf.Client,
 	helperReady <-chan *gotd.Client,
 	startHelper func(),
-	bridge func(ctx context.Context, bot bool) error,
+	bridge func(ctx context.Context, self *tg.User) error,
 ) error {
 	if err := c.authenticate(ctx, client); err != nil {
 		return err
@@ -203,7 +206,7 @@ func (c Connector) serve(
 			go c.attachHelper(ctx, client.API(), panel, stickers, panelClient, session, helperReady)
 		}
 	}
-	return bridge(ctx, self.Bot)
+	return bridge(ctx, self)
 }
 
 // prepareAddressing readies the peer cache for the session's kind. A user

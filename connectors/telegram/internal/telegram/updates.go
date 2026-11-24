@@ -20,6 +20,8 @@ type Normalizer struct {
 	// are not mirrored either.
 	panel PanelRouter
 	taken *takenMessages
+	// reactions, when set, reports other accounts' reactions (plan 080).
+	reactions *Reactions
 }
 
 // PanelRouter takes the messages that drive the settings panel: the panel
@@ -35,6 +37,12 @@ func NewNormalizer(
 	media MediaCodec,
 ) Normalizer {
 	return Normalizer{peers: peers, inputs: inputs, media: media}
+}
+
+// WithReactions returns the normalizer reporting reactions through reactions.
+func (n Normalizer) WithReactions(reactions *Reactions) Normalizer {
+	n.reactions = reactions
+	return n
 }
 
 // WithPanel returns the normalizer with router taking the settings panel's
@@ -74,6 +82,18 @@ func (n Normalizer) Dispatcher() tg.UpdateDispatcher {
 	dispatcher.OnEditChannelMessage(func(ctx context.Context, entities tg.Entities, update *tg.UpdateEditChannelMessage) error {
 		return n.handleEdit(ctx, entities, update.Message)
 	})
+	if n.reactions != nil {
+		dispatcher.OnMessageReactions(func(ctx context.Context, entities tg.Entities, update *tg.UpdateMessageReactions) error {
+			n.peers.Observe(entities)
+			frame, ok := n.reactions.messageReactions(ctx, entities, update)
+			return n.send(ctx, frame, ok)
+		})
+		dispatcher.OnBotMessageReaction(func(ctx context.Context, entities tg.Entities, update *tg.UpdateBotMessageReaction) error {
+			n.peers.Observe(entities)
+			frame, ok := n.reactions.botReaction(ctx, entities, update)
+			return n.send(ctx, frame, ok)
+		})
+	}
 	// Only channel/supergroup deletes carry their peer; plain UpdateDeleteMessages
 	// omits the chat, so a deleted DM/basic-group message cannot be resolved and
 	// is not mirrored.
@@ -81,6 +101,19 @@ func (n Normalizer) Dispatcher() tg.UpdateDispatcher {
 		return n.handleDelete(ctx, fmt.Sprintf("telegram:channel:%d", update.ChannelID), update.Messages)
 	})
 	return dispatcher
+}
+
+// send passes a frame to the core, when there is one.
+func (n Normalizer) send(ctx context.Context, frame *wuphfpb.ClientFrame, ok bool) error {
+	if !ok {
+		return nil
+	}
+	select {
+	case n.inputs <- frame:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }
 
 // handleDelete reports each revoked message so the core can mirror the deletion
