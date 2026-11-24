@@ -85,6 +85,11 @@ code).
 | 065 | Nix packages for every binary, a NixOS module (`services.wuphf.<part>`), and a Cachix cache built by CI | P2 | M | 064 | DONE (see notes) |
 | 066 | A Docker image of each release (every binary, signature-checked), a compose setup with mounted config and data directories, GHCR on release tags | P2 | M | 064, 065 | DONE (see notes) |
 | 067 | NixOS module by id: `services.wuphf.connectors.<id>` and `.providers.<id>`, the core's entries derived, one token file each | P2 | M | 065 | DONE (see notes) |
+| 068 | Structured message content (polls, buttons, locations, contacts, events) in the model and the core, with a text fallback | P1 | L | — | TODO |
+| 069 | whatsapp-rust inbound polls, buttons, lists, templates, interactive, locations, contacts, events | P1 | M–L | 068 | TODO |
+| 070 | Telegram renders locations, contacts, events, poll tally cards, pressable buttons (helper bot inline) | P1 | L | 068 | TODO |
+| 071 | Poll votes and button presses both ways: vote store, live tallies, owner presses act on WhatsApp | P1 | L | 068–070 | TODO |
+| 072 | Telegram polls, locations, venues, contacts to WhatsApp; the owner's Telegram vote as their WhatsApp vote | P2 | M | 068, 071 | TODO |
 
 Status values: TODO | IN PROGRESS | DONE | BLOCKED (with one-line reason) |
 REJECTED (with one-line rationale).
