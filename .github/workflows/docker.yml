@@ -1,0 +1,76 @@
+# Builds the Docker image of one release (deploy/docker/Dockerfile: its
+# binaries, checked against the signed SHA256SUMS) for linux/amd64 and
+# linux/arm64, and pushes it to ghcr.io/<owner>/wuphf as X.Y.Z, X.Y and
+# latest (a prerelease gets only its own tag).
+#
+# release.yml calls it once a release is published. By hand, it builds the
+# image of a release already published, as after a change to the Dockerfile.
+name: docker
+
+on:
+  workflow_call:
+    inputs:
+      tag:
+        description: "The release tag (v0.2.0)"
+        required: true
+        type: string
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "The release tag (v0.2.0)"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: docker-${{ inputs.tag }}
+  cancel-in-progress: false
+
+jobs:
+  image:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      # latest follows the newest release: rebuilding an older one by hand
+      # leaves it where it is (as does a prerelease, which is never "latest").
+      - id: version
+        env:
+          TAG: ${{ inputs.tag }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          newest="$(gh release view --repo "$GITHUB_REPOSITORY" --json tagName --jq .tagName)"
+          echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
+          echo "latest=$([ "$newest" = "$TAG" ] && echo true || echo false)" >> "$GITHUB_OUTPUT"
+      # The arm64 image's apt-get runs under QEMU; the binaries are the
+      # release's, nothing is compiled.
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+      - id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository_owner }}/wuphf
+          tags: |
+            type=semver,pattern={{version}},value=${{ inputs.tag }}
+            type=semver,pattern={{major}}.{{minor}},value=${{ inputs.tag }}
+          flavor: latest=${{ steps.version.outputs.latest }}
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: deploy/docker/Dockerfile
+          platforms: linux/amd64,linux/arm64
+          build-args: |
+            VERSION=${{ steps.version.outputs.version }}
+            REPOSITORY=${{ github.repository }}
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

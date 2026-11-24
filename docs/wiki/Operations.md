@@ -107,6 +107,32 @@ units:
   services.wuphf.packages = pkgs.wuphf-packages;
   ```
 
+## With Docker
+
+`ghcr.io/wuphf-rs/wuphf` holds every binary of a release (tags `0.2.0`,
+`0.2`, `latest`; amd64 and arm64). `deploy/docker/compose.yaml` runs the
+core plus the parts named in `COMPOSE_PROFILES`. The
+[Docker guide](../../deploy/docker/README.md) is the full procedure. In
+short:
+
+```sh
+cd deploy/docker && cp .env.example .env    # version, parts, PUID/PGID
+docker compose run --rm -it --no-deps core \
+    wuphf-server setup --config /etc/wuphf/core.toml --env-file /etc/wuphf/core.env
+docker compose run --rm -it whatsapp \
+    wuphf-whatsapp setup --config /etc/wuphf/whatsapp.toml --env-file /etc/wuphf/whatsapp.env
+docker compose up -d
+```
+
+- Two host directories hold everything. `config/` holds `<part>.toml` and
+  `<part>.env`. `data/<part>/` is that part's state and working directory,
+  and `data/chats/` is the shared chat directory. Both are owned by
+  `PUID:PGID`.
+- The other parts reach the core at `core:50051`. Set `observer_token`,
+  because the core listens on the compose network.
+- **Updates:** a new `WUPHF_VERSION`, then `docker compose pull && docker
+  compose up -d`. The image's release check is off.
+
 ## Updates
 
 Every binary reports one project version (`wuphf-server --version`). A

@@ -5,6 +5,8 @@
 #
 # Needs the secret MINISIGN_SECRET_KEY: the contents of the secret key made
 # with `minisign -G -W -p release/minisign.pub -s <file>` (see release/README.md).
+#
+# Once published, docker.yml builds and pushes the release's Docker image.
 name: release
 
 on:
@@ -103,3 +105,13 @@ jobs:
           case "$GITHUB_REF_NAME" in *-*) prerelease=(--prerelease) ;; esac
           gh release create "$GITHUB_REF_NAME" dist/* --repo "$GITHUB_REPOSITORY" \
             --title "wuphf $GITHUB_REF_NAME" --generate-notes "${prerelease[@]}"
+
+  # The Docker image of this release, from the binaries just published.
+  docker:
+    needs: publish
+    permissions:
+      contents: read
+      packages: write
+    uses: ./.github/workflows/docker.yml
+    with:
+      tag: ${{ github.ref_name }}

@@ -22,6 +22,7 @@ misc/                wuphf-misc
 proto/go/            generated Go bindings
 migrations/          SQLite migrations
 deploy/systemd/      units
+deploy/docker/       the image (from a release) and compose
 scripts/             dev session, builds, releases
 plans/               the plan behind each feature
 ```

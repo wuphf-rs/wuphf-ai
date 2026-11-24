@@ -1,0 +1,120 @@
+# wuphf with Docker Compose: the core and the parts you choose, from the one
+# image of a release (README.md here). Run from this directory:
+#
+#   cp .env.example .env      # the version, your uid, the parts to run
+#   docker compose up -d
+#
+# Two host directories hold everything (both set in .env):
+#   WUPHF_CONFIG (./config)  <part>.toml and <part>.env for every part
+#   WUPHF_DATA   (./data)    <part>/ per part: its session, database, files;
+#                            chats/: the chat directory the setups share
+# A part's data directory is its working directory, so the relative paths in
+# the example configs work unchanged. Missing directories are created on the
+# first start and given to PUID:PGID.
+
+name: wuphf
+
+x-part: &part
+  image: ghcr.io/wuphf-rs/wuphf:${WUPHF_VERSION:-latest}
+  restart: unless-stopped
+  environment: &environment
+    PUID: ${PUID:-1000}
+    PGID: ${PGID:-1000}
+  # The connectors and the provider save their session only on SIGINT.
+  stop_signal: SIGINT
+  stop_grace_period: 30s
+  # Read-only outside its data, the chat directory and the config (setup
+  # writes it). The entrypoint needs these capabilities to give the data to
+  # PUID and drop to it; the part itself runs with none.
+  read_only: true
+  tmpfs: [/tmp]
+  security_opt: [no-new-privileges:true]
+  cap_drop: [ALL]
+  cap_add: [CHOWN, DAC_OVERRIDE, FOWNER, SETUID, SETGID, SETPCAP]
+  depends_on: [core]
+
+services:
+  core:
+    <<: *part
+    command: [wuphf-server, serve, --config, /etc/wuphf/core.toml]
+    environment:
+      <<: *environment
+      # Inside the compose network, for the parts; overrides `listen` in
+      # core.toml.
+      WUPHF_CORE_LISTEN: 0.0.0.0:50051
+    env_file: [{ path: "${WUPHF_CONFIG:-./config}/core.env", required: false }]
+    working_dir: /var/lib/wuphf/core
+    volumes:
+      - ${WUPHF_CONFIG:-./config}:/etc/wuphf
+      - ${WUPHF_DATA:-./data}/core:/var/lib/wuphf/core
+      - ${WUPHF_DATA:-./data}/chats:/var/lib/wuphf/chats
+    # For wuphf-tui and `wuphf-server settings reload` on this host only.
+    ports: ["127.0.0.1:${WUPHF_CORE_PORT:-50051}:50051"]
+    stop_signal: SIGTERM
+    depends_on: []
+
+  telegram:
+    <<: *part
+    profiles: [telegram]
+    command: [wuphf-telegram, --config, /etc/wuphf/telegram.toml]
+    env_file: [{ path: "${WUPHF_CONFIG:-./config}/telegram.env", required: false }]
+    working_dir: /var/lib/wuphf/telegram
+    volumes:
+      - ${WUPHF_CONFIG:-./config}:/etc/wuphf
+      - ${WUPHF_DATA:-./data}/telegram:/var/lib/wuphf/telegram
+      - ${WUPHF_DATA:-./data}/chats:/var/lib/wuphf/chats
+
+  whatsapp:
+    <<: *part
+    profiles: [whatsapp]
+    command: [wuphf-whatsapp, --config, /etc/wuphf/whatsapp.toml]
+    env_file: [{ path: "${WUPHF_CONFIG:-./config}/whatsapp.env", required: false }]
+    working_dir: /var/lib/wuphf/whatsapp
+    volumes:
+      - ${WUPHF_CONFIG:-./config}:/etc/wuphf
+      - ${WUPHF_DATA:-./data}/whatsapp:/var/lib/wuphf/whatsapp
+      - ${WUPHF_DATA:-./data}/chats:/var/lib/wuphf/chats
+
+  whatsapp-rust:
+    <<: *part
+    profiles: [whatsapp-rust]
+    command: [wuphf-whatsapp-rust, --config, /etc/wuphf/whatsapp-rust.toml]
+    env_file: [{ path: "${WUPHF_CONFIG:-./config}/whatsapp-rust.env", required: false }]
+    working_dir: /var/lib/wuphf/whatsapp-rust
+    volumes:
+      - ${WUPHF_CONFIG:-./config}:/etc/wuphf
+      - ${WUPHF_DATA:-./data}/whatsapp-rust:/var/lib/wuphf/whatsapp-rust
+      - ${WUPHF_DATA:-./data}/chats:/var/lib/wuphf/chats
+
+  instagram:
+    <<: *part
+    profiles: [instagram]
+    command: [wuphf-instagram, --config, /etc/wuphf/instagram.toml]
+    env_file: [{ path: "${WUPHF_CONFIG:-./config}/instagram.env", required: false }]
+    working_dir: /var/lib/wuphf/instagram
+    volumes:
+      - ${WUPHF_CONFIG:-./config}:/etc/wuphf
+      - ${WUPHF_DATA:-./data}/instagram:/var/lib/wuphf/instagram
+      - ${WUPHF_DATA:-./data}/chats:/var/lib/wuphf/chats
+
+  mediaconv:
+    <<: *part
+    profiles: [mediaconv]
+    command: [wuphf-mediaconv, --config, /etc/wuphf/mediaconv.toml]
+    env_file: [{ path: "${WUPHF_CONFIG:-./config}/mediaconv.env", required: false }]
+    working_dir: /var/lib/wuphf/mediaconv
+    volumes:
+      - ${WUPHF_CONFIG:-./config}:/etc/wuphf
+      - ${WUPHF_DATA:-./data}/mediaconv:/var/lib/wuphf/mediaconv
+
+  misc:
+    <<: *part
+    profiles: [misc]
+    command: [wuphf-misc, --config, /etc/wuphf/misc.toml]
+    env_file: [{ path: "${WUPHF_CONFIG:-./config}/misc.env", required: false }]
+    working_dir: /var/lib/wuphf/misc
+    volumes:
+      - ${WUPHF_CONFIG:-./config}:/etc/wuphf
+      - ${WUPHF_DATA:-./data}/misc:/var/lib/wuphf/misc
+      - ${WUPHF_DATA:-./data}/chats:/var/lib/wuphf/chats
+    stop_grace_period: 90s

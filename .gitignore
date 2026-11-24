@@ -46,3 +46,7 @@ config.local.toml
 
 /vendor/
 /connectors/whatsapp-rust/target/
+
+# Docker Compose: its settings (deploy/docker/.env.example).
+/deploy/docker/.env
+/deploy/docker/data/

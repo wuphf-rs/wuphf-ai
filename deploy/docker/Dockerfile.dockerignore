@@ -1,0 +1,4 @@
+# The build context is the repository; the image copies only these.
+*
+!release/minisign.pub
+!deploy/docker/entrypoint.sh

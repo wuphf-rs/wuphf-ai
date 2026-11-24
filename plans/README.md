@@ -83,6 +83,7 @@ code).
 | 061 | Settings backup: `wuphf-server export` / `import` (config + every stored override, connectors' included; secrets only with a flag), online `wuphf settings export` / `import` | P1 | M | botconf 016, 059; after 062, 063 | DONE |
 | 064 | Versions, releases and `wuphf-server update` (every binary, third-party sources, release or source builds, signed checksums, a scheduled check that tells the owner) | P1 | L | — | DONE (see notes) |
 | 065 | Nix packages for every binary, a NixOS module (`services.wuphf.<part>`), and a Cachix cache built by CI | P2 | M | 064 | DONE (see notes) |
+| 066 | A Docker image of each release (every binary, signature-checked), a compose setup with mounted config and data directories, GHCR on release tags | P2 | M | 064, 065 | DONE (see notes) |
 
 Status values: TODO | IN PROGRESS | DONE | BLOCKED (with one-line reason) |
 REJECTED (with one-line rationale).
@@ -1818,3 +1819,36 @@ From the 2026-10-22 remote-functions design:
   released `wuphf-server update` checking, installing a missing binary,
   updating an old one and rolling back; the aarch64 assets are ARM ELF; the
   0.2.0 packages of both systems are in the cache.
+
+- **066 (2026-11-24).** `deploy/docker/Dockerfile` packages one release:
+  it downloads the eight binaries for the build's architecture and installs
+  them only once `SHA256SUMS.minisig` verifies against
+  `release/minisign.pub`, its trusted comment is `wuphf vX.Y.Z`, and every
+  sum matches. The base is `debian:trixie-slim` with ffmpeg 7.1,
+  ImageMagick 7.1 (decodes animated WebP), webpmux and tini. The
+  entrypoint takes ownership (for `PUID:PGID`) only of the mounted
+  directories, then drops every capability before `tini`. The core's
+  release check is off by env, and `WUPHF_CHAT_DIRECTORY` is set.
+  `deploy/docker/compose.yaml` runs the core plus profiles. On the owner's
+  ask, everything is in two host directories: `config/` and `data/<part>/`
+  (with `data/chats/` shared). The root filesystem is read-only, and the
+  connectors stop on SIGINT. `.github/workflows/docker.yml` is reusable:
+  `release.yml` calls it after `publish`, or it runs by hand with a tag.
+  It pushes amd64 and arm64 images as `X.Y.Z` and `X.Y`, plus `latest`
+  only for the newest release.
+  Verified locally:
+  - The v0.2.0 amd64 build: all eight binaries report `0.2.0`.
+  - A wrong `minisign.pub` fails the build.
+  - ImageMagick decodes all 5 frames of an animated WebP.
+  - In compose, the core starts with `listen` from env; mediaconv
+    registers through `core:50051`.
+  - Docker-created data directories end up owned by `PUID`. `tini` and the
+    part run as uid 1000 with `CapEff` 0.
+  - mediaconv stops on SIGINT in 0.3s.
+  - The core's setup TUI renders under `docker compose run`. `settings
+    list` and `settings export` work against the running core.
+  - actionlint and shellcheck pass.
+
+  Pending:
+  - The arm64 image and the GHCR push are untested until the workflow runs.
+  - The owner makes the GHCR package public after its first push.

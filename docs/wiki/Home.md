@@ -39,6 +39,8 @@ Connectors are thin pipes, one per account. The core decides everything.
 - [Architecture](../architecture.md): the identity, routing and storage model.
 - [Connector protocol](../connector-protocol.md): the gRPC contract every
   connector speaks.
+- [Docker](../../deploy/docker/README.md): the image, compose, data
+  directories, first logins.
 - [systemd deployment](../../deploy/systemd/README.md): units, layout, first
   logins.
 - [Releases](../../release/README.md): making a release and the signing key.

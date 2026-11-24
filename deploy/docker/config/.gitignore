@@ -1,0 +1,4 @@
+# Every part's <part>.toml and <part>.env (README.md, "Configure"). Kept out
+# of git: the env files hold the tokens.
+*
+!.gitignore
