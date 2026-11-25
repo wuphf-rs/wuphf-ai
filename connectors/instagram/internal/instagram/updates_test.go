@@ -119,7 +119,7 @@ func newTestDirectory() (*ThreadDirectory, *stubThreads) {
 func newTestNormalizer(broker MediaBroker, doer HTTPDoer, fetcher MediaFetcher) (*Normalizer, chan *wuphfpb.ClientFrame) {
 	ch := make(chan *wuphfpb.ClientFrame, 16)
 	threads, _ := newTestDirectory()
-	return NewNormalizer(ch, NewMediaCodec(broker, doer, fetcher), threads, testOwnUserID, zerolog.Nop()), ch
+	return NewNormalizer(ch, NewMediaCodec(broker, doer, fetcher), threads, nil, testOwnUserID, zerolog.Nop()), ch
 }
 
 func decodeDelta(t *testing.T, raw string) *slidetypes.Delta {
@@ -191,7 +191,7 @@ func TestHandleCreateResolvesUnknownThreadOnce(t *testing.T) {
 	t.Parallel()
 	threads, fetcher := newTestDirectory()
 	ch := make(chan *wuphfpb.ClientFrame, 16)
-	n := NewNormalizer(ch, NewMediaCodec(&stubBroker{}, &stubDoer{}, nil), threads, testOwnUserID, zerolog.Nop())
+	n := NewNormalizer(ch, NewMediaCodec(&stubBroker{}, &stubDoer{}, nil), threads, nil, testOwnUserID, zerolog.Nop())
 	text := `{"__typename":"SlideMessageText","text_body":"hi"}`
 	handle(t, n, messageDelta(dmShortID, "mid.1", peerID, text))
 	handle(t, n, messageDelta(dmShortID, "mid.2", peerID, text))
@@ -378,7 +378,7 @@ func TestHandleIgnoresUnbridgedDeltas(t *testing.T) {
 func TestHandleReturnsContextErrorWhenInputBlocked(t *testing.T) {
 	t.Parallel()
 	threads, _ := newTestDirectory()
-	n := NewNormalizer(make(chan *wuphfpb.ClientFrame), NewMediaCodec(&stubBroker{}, &stubDoer{}, nil), threads, testOwnUserID, zerolog.Nop())
+	n := NewNormalizer(make(chan *wuphfpb.ClientFrame), NewMediaCodec(&stubBroker{}, &stubDoer{}, nil), threads, nil, testOwnUserID, zerolog.Nop())
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	delta := decodeDelta(t, messageDelta(groupShortID, "mid.1", peerID, `{"__typename":"SlideMessageText","text_body":"hi"}`))

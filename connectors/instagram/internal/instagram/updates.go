@@ -3,6 +3,7 @@ package instagramconnector
 import (
 	"cmp"
 	"context"
+	"encoding/json"
 	"errors"
 	"strconv"
 	"sync"
@@ -27,6 +28,9 @@ type Normalizer struct {
 	inputs  chan<- *wuphfpb.ClientFrame
 	media   MediaCodec
 	threads *ThreadDirectory
+	// comments looks up the post a forwarded comment was left on; nil leaves
+	// forwarded comments as the comment and a note.
+	comments CommentResolver
 	// ownUserID is the logged-in account's user id, used to label the account
 	// owner's own messages as "Me" so a direct chat's two sides stay
 	// distinguishable on the mirror.
@@ -44,11 +48,12 @@ type reactionTarget struct {
 	senderID  int64
 }
 
-func NewNormalizer(inputs chan<- *wuphfpb.ClientFrame, media MediaCodec, threads *ThreadDirectory, ownUserID int64, logger zerolog.Logger) *Normalizer {
+func NewNormalizer(inputs chan<- *wuphfpb.ClientFrame, media MediaCodec, threads *ThreadDirectory, comments CommentResolver, ownUserID int64, logger zerolog.Logger) *Normalizer {
 	return &Normalizer{
 		inputs:          inputs,
 		media:           media,
 		threads:         threads,
+		comments:        comments,
 		ownUserID:       ownUserID,
 		logger:          logger,
 		reactionTargets: map[string]reactionTarget{},
@@ -139,6 +144,18 @@ func (n *Normalizer) emitCreate(ctx context.Context, threadKey int64, message *s
 		n.threads.RecordUser(&message.Sender.UserDict)
 	}
 	body := bodyOf(message)
+	if body.unresolvedShare != nil {
+		n.logUnresolvedShare(message.ID, body.unresolvedShare)
+	}
+	if body.comment != nil {
+		if err := n.resolveComment(ctx, threadKey, message.ID, &body); err != nil {
+			if ctx.Err() != nil {
+				return ctx.Err()
+			}
+			n.logger.Warn().Err(err).Str("message_id", message.ID).
+				Msg("forwarded comment's post not looked up; bridged as the comment and a note")
+		}
+	}
 	var attachments []*wuphfpb.Attachment
 	if len(body.media) > 0 {
 		fetched, err := n.media.fetchAll(ctx, body.media)
@@ -150,7 +167,10 @@ func (n *Normalizer) emitCreate(ctx context.Context, threadKey int64, message *s
 			// and drop the media.
 			n.logger.Err(err).Str("message_id", message.ID).Msg("dropping Instagram attachments after download failure")
 		} else {
-			attachments = fetched
+			attachments = fetched.attachments
+		}
+		for _, link := range fetched.links {
+			body.text = appendLine(body.text, link)
 		}
 	}
 	if body.text == "" && len(attachments) == 0 {
@@ -181,6 +201,40 @@ func (n *Normalizer) emitCreate(ctx context.Context, threadKey int64, message *s
 	return n.send(ctx, &wuphfpb.ClientFrame{
 		Body: &wuphfpb.ClientFrame_MessageCreate{MessageCreate: event},
 	})
+}
+
+// resolveComment looks up the post a forwarded comment was left on and, when
+// found, ends the text with the post's link and points the cover at the post
+// so its full media is downloaded instead. On any failure the body is left as
+// the comment, the note and the cover.
+func (n *Normalizer) resolveComment(ctx context.Context, threadKey int64, messageID string, body *messageBody) error {
+	if n.comments == nil {
+		return nil
+	}
+	longID, err := n.threads.LongID(ctx, threadKey)
+	if err != nil {
+		return err
+	}
+	target, err := n.comments.ResolveComment(ctx, longID, messageID)
+	if err != nil {
+		return err
+	}
+	body.text = body.comment.text(target.link.canonical())
+	for i := range body.media {
+		body.media[i].share = &shareMedia{mediaID: target.mediaID, shortcode: target.link.shortcode}
+	}
+	return nil
+}
+
+// logUnresolvedShare records a share the connector could not resolve to a
+// post or reel, with its full content, so a new share shape can be supported.
+func (n *Normalizer) logUnresolvedShare(messageID string, xma *slidetypes.XMAContent) {
+	raw, err := json.Marshal(xma)
+	if err != nil {
+		return
+	}
+	n.logger.Info().Str("message_id", messageID).Str("typename", xma.Typename).
+		RawJSON("xma", raw).Msg("Instagram share without a resolvable post or reel; bridged as its text and preview")
 }
 
 func (n *Normalizer) emitEdit(ctx context.Context, threadKey int64, edit *slidetypes.EditMessageEvent) error {
