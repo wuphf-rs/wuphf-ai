@@ -360,7 +360,12 @@ where
             None => None,
         };
         let title = conversation.title.as_deref().unwrap_or(provision_title);
-        let card = notes::info_card(title, profile.as_ref(), avatar);
+        let card = notes::info_card(
+            title,
+            &conversation.source.connector_id,
+            profile.as_ref(),
+            avatar,
+        );
 
         // Discard the routed dispatches (none was saved): the stashed message
         // is routed again once the thread exists.

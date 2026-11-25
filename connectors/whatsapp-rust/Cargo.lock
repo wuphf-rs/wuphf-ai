@@ -341,8 +341,8 @@ dependencies = [
 
 [[package]]
 name = "botconf"
-version = "0.17.0"
-source = "git+https://github.com/propheci/botconf?tag=v0.17.0#9474c6ccbeee23cb10ba58d916bab92349f0bfe5"
+version = "0.18.0"
+source = "git+https://github.com/propheci/botconf?tag=v0.18.0#1fa384ec84a0396daaa4e435f514bda593f1d59a"
 dependencies = [
  "arc-swap",
  "botconf-derive",
@@ -357,8 +357,8 @@ dependencies = [
 
 [[package]]
 name = "botconf-derive"
-version = "0.17.0"
-source = "git+https://github.com/propheci/botconf?tag=v0.17.0#9474c6ccbeee23cb10ba58d916bab92349f0bfe5"
+version = "0.18.0"
+source = "git+https://github.com/propheci/botconf?tag=v0.18.0#1fa384ec84a0396daaa4e435f514bda593f1d59a"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -367,8 +367,8 @@ dependencies = [
 
 [[package]]
 name = "botconf-proto"
-version = "0.17.0"
-source = "git+https://github.com/propheci/botconf?tag=v0.17.0#9474c6ccbeee23cb10ba58d916bab92349f0bfe5"
+version = "0.18.0"
+source = "git+https://github.com/propheci/botconf?tag=v0.18.0#1fa384ec84a0396daaa4e435f514bda593f1d59a"
 dependencies = [
  "prost",
  "tonic",
@@ -377,8 +377,8 @@ dependencies = [
 
 [[package]]
 name = "botconf-tui"
-version = "0.17.0"
-source = "git+https://github.com/propheci/botconf?tag=v0.17.0#9474c6ccbeee23cb10ba58d916bab92349f0bfe5"
+version = "0.18.0"
+source = "git+https://github.com/propheci/botconf?tag=v0.18.0#1fa384ec84a0396daaa4e435f514bda593f1d59a"
 dependencies = [
  "botconf",
  "crossterm",
@@ -1000,7 +1000,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e35d6e78f4cebb90e51d543db8fe41528851d6deeef6ef21ebd4bfdc1e784776"
 dependencies = [
  "libc",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -2542,7 +2542,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -2954,7 +2954,7 @@ dependencies = [
  "getrandom 0.4.3",
  "once_cell",
  "rustix",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

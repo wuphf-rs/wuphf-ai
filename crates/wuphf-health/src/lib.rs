@@ -328,8 +328,10 @@ fn chat_checks(
             key: "target-not-forum",
             fact: |facts| facts.forum,
             pauses: true,
-            text: |_, chat| {
-                format!("{chat} has no topics (turn on Topics in the group's settings)")
+            text: |connector, chat| {
+                format!(
+                    "{chat} on {connector} has no topics (turn on Topics in the group's settings)"
+                )
             },
         });
         if caps.supports_topic_create {

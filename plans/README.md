@@ -99,6 +99,7 @@ code).
 | 079 | Health checks: probes of rule chats, health pauses that hold messages, tools, notices, a Health page, `wuphf-server health` | P1 | L | botconf 018 (page only) | DONE (migration 0022; botconf `v0.17.0`; live test pending the owner; see notes) |
 | 080 | The owner's Telegram reactions as their own reaction on WhatsApp and Instagram (reactions stored; Instagram owner-only) | P2 | M–L | — | DONE (migration 0023; live test pending the owner; see notes) |
 | 081 | A lone-emoji reply from the owner is a reaction (any emoji, not only Telegram's set) | P2 | S–M | 080 | DONE (live test pending the owner; see notes) |
+| 082 | Chat pickers search and page through every chat (botconf `v0.18.0`); chat names say their connector, and the info card names the source connector | P1 | S–M | botconf 019 | DONE (live test pending the owner; see notes) |
 
 Status values: TODO | IN PROGRESS | DONE | BLOCKED (with one-line reason) |
 REJECTED (with one-line rationale).
@@ -1956,6 +1957,30 @@ From the 2026-10-22 remote-functions design:
   - clippy (workspace and whatsapp-rust), `go vet` and fmt are clean.
   - The pre-commit hook caught the stale vendor hashes after the proto
     change; all five were updated in `2bcdf97`.
+- **082 (2026-11-25).** Chat pickers reach every chat, and chat names say
+  their connector. Live test pending the owner.
+  - botconf `v0.18.0` (its plan 019): reference questions page (8 at a time,
+    ◀ / ▶), mark chosen ones ✅ / 🔘, take a typed name that matches several
+    as a search, and offer candidates for single references too
+    (`Action::PickRef`).
+  - `WuphfNames`:
+    - `candidates_page` over the observed chats (most recent first),
+      connectors and rules; `candidates` is its first page.
+    - A chat's name is `<title> · <connector>`. A button cuts a title over
+      28 characters, so the connector stays visible.
+  - The info card gains `🔌 <connector>` (the source chat's), and the health
+    check "has no topics" names its connector.
+  - Deviation: the full list still comes from `list_observed_chats` and is
+    filtered in memory, as before. One owner's chats number in the
+    thousands at most, and the panel moves at human speed. A storage-side
+    search can come later behind `ObservationStore` if needed.
+  - Tests:
+    - runtime +1 (two connectors told apart, long titles cut, untitled
+      chats); the candidates test now pages;
+    - the name and info card expectations updated.
+    Workspace 531 tests; clippy and fmt clean. whatsapp-rust: lock
+    updated (`cargo metadata --locked` ok), not built, since it uses only
+    `botconf` and `botconf-tui`, which are unchanged but for the version.
 - **081 (2026-11-25).** The owner's lone-emoji reply is their reaction
   (`44d9ad7`..this commit). Live test pending the owner.
   - Core: `reply_reaction.rs`.

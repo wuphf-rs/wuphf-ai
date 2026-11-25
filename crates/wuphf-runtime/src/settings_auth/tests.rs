@@ -223,7 +223,7 @@ async fn chat_names_come_from_the_observation_log() {
         chat_name(&names, "whatsapp-main:120363@g.us")
             .await
             .as_deref(),
-        Some("Family")
+        Some("Family · whatsapp-main")
     );
 }
 
@@ -246,7 +246,7 @@ async fn chat_names_follow_linked_addresses() {
         chat_name(&names, "whatsapp-main:12345@s.whatsapp.net")
             .await
             .as_deref(),
-        Some("Mom")
+        Some("Mom · whatsapp-main")
     );
 }
 
@@ -281,7 +281,7 @@ async fn thread_names_come_from_their_conversation() {
         .unwrap();
 
     let name = chat_name(&names, "telegram-main:telegram:channel:1#7").await;
-    assert_eq!(name.as_deref(), Some("Family"));
+    assert_eq!(name.as_deref(), Some("Family · telegram-main"));
 
     // With the container's own title known too, both parts show.
     storage
@@ -297,7 +297,7 @@ async fn thread_names_come_from_their_conversation() {
         .await
         .unwrap();
     let name = chat_name(&names, "telegram-main:telegram:channel:1#7").await;
-    assert_eq!(name.as_deref(), Some("Mirrors › Family"));
+    assert_eq!(name.as_deref(), Some("Mirrors › Family · telegram-main"));
 }
 
 #[tokio::test]
@@ -349,8 +349,74 @@ async fn chat_candidates_are_recent_and_filtered() {
     );
     let family = names.candidates(domains::CHAT, "fam", 10).await;
     assert_eq!(family.len(), 1);
-    assert_eq!(family[0].1.short, "Family");
+    assert_eq!(family[0].1.short, "Family · whatsapp-main");
     assert_eq!(names.candidates(domains::CHAT, "", 1).await.len(), 1);
+
+    // The panel pages through them all.
+    assert_eq!(
+        ids(names.candidates_page(domains::CHAT, "", 1, 10).await),
+        ["whatsapp-main:work@g.us", "whatsapp-main:old@g.us"]
+    );
+    assert_eq!(
+        ids(names.candidates_page(domains::CHAT, "", 2, 1).await),
+        ["whatsapp-main:old@g.us"]
+    );
+    assert!(
+        names
+            .candidates_page(domains::CHAT, "", 3, 10)
+            .await
+            .is_empty()
+    );
+}
+
+#[tokio::test]
+async fn chat_labels_tell_connectors_apart() {
+    let (names, storage) = names().await;
+    // The same group seen on two connectors.
+    for connector in ["whatsapp-main", "telegram-main"] {
+        storage
+            .log_observed(
+                ObservedMessage {
+                    connector_id: ConnectorId(connector.into()),
+                    ..observed("family@g.us", connector, 1)
+                },
+                Some("Family".into()),
+            )
+            .await
+            .unwrap();
+    }
+    let mut labels: Vec<_> = names
+        .candidates(domains::CHAT, "family", 10)
+        .await
+        .into_iter()
+        .map(|(_, name)| name.short)
+        .collect();
+    labels.sort();
+    assert_eq!(labels, ["Family · telegram-main", "Family · whatsapp-main"]);
+
+    // A long title is cut on buttons, so the connector still shows; the full
+    // name keeps it whole. A chat without a title shows its id, which names
+    // its connector.
+    let long = "A family group with a very long name indeed";
+    storage
+        .log_observed(observed("long@g.us", "l1", 2), Some(long.into()))
+        .await
+        .unwrap();
+    storage
+        .log_observed(observed("untitled@g.us", "u1", 3), None)
+        .await
+        .unwrap();
+    let name = names
+        .name(
+            domains::CHAT,
+            &Value::String("whatsapp-main:long@g.us".into()),
+        )
+        .await
+        .unwrap();
+    assert_eq!(name.full, format!("{long} · whatsapp-main"));
+    assert_eq!(name.short, "A family group with a very… · whatsapp-main");
+    let untitled = names.candidates(domains::CHAT, "untitled", 10).await;
+    assert_eq!(untitled[0].1.short, "whatsapp-main:untitled@g.us");
 }
 
 #[tokio::test]

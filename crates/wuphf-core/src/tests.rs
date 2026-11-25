@@ -2963,7 +2963,8 @@ async fn a_new_mirror_topic_starts_with_an_info_card() {
     };
     assert_eq!(
         text,
-        "ℹ️ Title\n📝 Weekend plans\n⏳ Disappearing messages: 7 days\n👥 12 participants"
+        "ℹ️ Title\n🔌 whatsapp-main\n📝 Weekend plans\n⏳ Disappearing messages: 7 days\n👥 12 \
+         participants"
     );
     assert_eq!(attachments, &vec![photo]);
 

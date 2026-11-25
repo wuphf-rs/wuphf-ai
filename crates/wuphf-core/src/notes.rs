@@ -3,7 +3,7 @@
 //! place the wording lives.
 
 use crate::profile::ProfileChanges;
-use wuphf_model::{Attachment, ChatProfile, ParticipantChange, ParticipantChangeKind};
+use wuphf_model::{Attachment, ChatProfile, ConnectorId, ParticipantChange, ParticipantChangeKind};
 
 /// One system note: text, and the photo it shows (an avatar).
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -47,14 +47,16 @@ fn timer_line(seconds: u32) -> String {
     format!("⏳ Disappearing messages: {}", timer_text(seconds))
 }
 
-/// The info card: the title line, then (each only when known) the
+/// The info card: the title line, the source chat's connector (the same chat
+/// can be on two accounts of one platform), then (each only when known) the
 /// description, the timer and the participant count; the avatar attached.
 pub(crate) fn info_card(
     title: &str,
+    connector: &ConnectorId,
     profile: Option<&ChatProfile>,
     avatar: Option<Attachment>,
 ) -> Note {
-    let mut lines = vec![format!("ℹ️ {title}")];
+    let mut lines = vec![format!("ℹ️ {title}"), format!("🔌 {connector}")];
     if let Some(profile) = profile {
         if let Some(description) = profile
             .description
@@ -182,15 +184,22 @@ mod tests {
             ..ChatProfile::new(ConnectorId("whatsapp".into()), "1@g.us")
         };
         let avatar = photo();
-        let card = info_card("[G] Family", Some(&profile), Some(avatar.clone()));
+        let whatsapp = ConnectorId("whatsapp-2".into());
+        let card = info_card(
+            "[G] Family",
+            &whatsapp,
+            Some(&profile),
+            Some(avatar.clone()),
+        );
         assert_eq!(
             card.text,
-            "ℹ️ [G] Family\n📝 Weekend plans\n⏳ Disappearing messages: 7 days\n👥 12 participants"
+            "ℹ️ [G] Family\n🔌 whatsapp-2\n📝 Weekend plans\n⏳ Disappearing messages: 7 \
+             days\n👥 12 participants"
         );
         assert_eq!(card.attachments, vec![avatar]);
 
-        let bare = info_card("[P] Alice", None, None);
-        assert_eq!(bare.text, "ℹ️ [P] Alice");
+        let bare = info_card("[P] Alice", &whatsapp, None, None);
+        assert_eq!(bare.text, "ℹ️ [P] Alice\n🔌 whatsapp-2");
         assert!(bare.attachments.is_empty());
     }
 

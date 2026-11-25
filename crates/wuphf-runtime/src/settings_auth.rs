@@ -301,7 +301,14 @@ where
         Some(format!("{id} ({})", connector.platform))
     }
 
-    async fn chat_candidates(&self, query: &str, limit: usize) -> Vec<(Value, Name)> {
+    /// The known chats matching `query` (in their id or title), most recent
+    /// first, from the `offset`th: at most `limit`.
+    async fn chat_candidates(
+        &self,
+        query: &str,
+        offset: usize,
+        limit: usize,
+    ) -> Vec<(Value, Name)> {
         let chats = match self.storage.list_observed_chats().await {
             Ok(chats) => chats,
             Err(error) => {
@@ -322,6 +329,7 @@ where
             .into_iter()
             .filter(|chat| configured(&chat.connector_id))
             .filter_map(|chat| {
+                let connector = chat.connector_id.clone();
                 let id = ChatRef {
                     connector_id: chat.connector_id,
                     address: ChatAddress::new(chat.chat_id, None),
@@ -334,19 +342,83 @@ where
                         .as_ref()
                         .is_some_and(|title| title.to_lowercase().contains(&query));
                 matches.then(|| {
-                    let label = chat.title.unwrap_or_else(|| id.clone());
-                    (Value::String(id), name(label))
+                    // The id names its connector already.
+                    let label = match chat.title {
+                        Some(title) => chat_label(&title, &connector),
+                        None => name(id.clone()),
+                    };
+                    (Value::String(id), label)
                 })
             })
+            .skip(offset)
             .take(limit)
             .collect()
     }
+
+    /// One page of the references of `domain` matching `query`.
+    async fn candidates_from(
+        &self,
+        domain: &str,
+        query: &str,
+        offset: usize,
+        limit: usize,
+    ) -> Vec<(Value, Name)> {
+        let snapshot = self.store.current();
+        let query_lower = query.to_lowercase();
+        let keep = |id: &str| query.is_empty() || id.to_lowercase().contains(&query_lower);
+        match domain {
+            domains::CHAT => self.chat_candidates(query, offset, limit).await,
+            // In configuration order.
+            domains::CONNECTOR => snapshot
+                .config
+                .connectors
+                .iter()
+                .filter(|connector| keep(&connector.id))
+                .skip(offset)
+                .take(limit)
+                .map(|connector| {
+                    let label = format!("{} ({})", connector.id, connector.platform);
+                    (Value::String(connector.id.clone()), name(label))
+                })
+                .collect(),
+            domains::RULE => {
+                let mut ids: Vec<&String> = snapshot.config.rules.keys().collect();
+                ids.sort();
+                ids.into_iter()
+                    .filter(|id| keep(id))
+                    .skip(offset)
+                    .take(limit)
+                    .map(|id| (Value::String(id.clone()), name(id.clone())))
+                    .collect()
+            }
+            _ => Vec::new(),
+        }
+    }
 }
+
+/// How much of a chat's title a button shows: cut there, so that the
+/// connector after it still shows.
+const BUTTON_TITLE_CHARS: usize = 28;
 
 fn name(label: String) -> Name {
     Name {
         short: label.clone(),
         full: label,
+    }
+}
+
+/// A chat's name with its connector, since one chat can be on two accounts
+/// of a platform: `Family · whatsapp-main`. On buttons a long title is cut.
+fn chat_label(title: &str, connector: &ConnectorId) -> Name {
+    let short = if title.chars().count() > BUTTON_TITLE_CHARS {
+        let cut: String = title.chars().take(BUTTON_TITLE_CHARS - 1).collect();
+        format!("{}…", cut.trim_end())
+    } else {
+        title.to_owned()
+    };
+    Name {
+        full: format!("{title} · {connector}"),
+        short: format!("{short} · {connector}"),
     }
 }
 
@@ -364,7 +436,7 @@ where
                 domains::CHAT => {
                     let chat = ChatRef::from_str(id).ok()?;
                     match self.chat_name(&chat).await {
-                        Ok(found) => found.map(name),
+                        Ok(found) => found.map(|title| chat_label(&title, &chat.connector_id)),
                         Err(error) => {
                             warn!(%error, chat = id, "settings panel: failed to name a chat");
                             None
@@ -382,36 +454,17 @@ where
         query: &'a str,
         limit: usize,
     ) -> BoxFuture<'a, Vec<(Value, Name)>> {
-        Box::pin(async move {
-            let snapshot = self.store.current();
-            let query_lower = query.to_lowercase();
-            let keep = |id: &str| query.is_empty() || id.to_lowercase().contains(&query_lower);
-            match domain {
-                domains::CHAT => self.chat_candidates(query, limit).await,
-                // In configuration order.
-                domains::CONNECTOR => snapshot
-                    .config
-                    .connectors
-                    .iter()
-                    .filter(|connector| keep(&connector.id))
-                    .take(limit)
-                    .map(|connector| {
-                        let label = format!("{} ({})", connector.id, connector.platform);
-                        (Value::String(connector.id.clone()), name(label))
-                    })
-                    .collect(),
-                domains::RULE => {
-                    let mut ids: Vec<&String> = snapshot.config.rules.keys().collect();
-                    ids.sort();
-                    ids.into_iter()
-                        .filter(|id| keep(id))
-                        .take(limit)
-                        .map(|id| (Value::String(id.clone()), name(id.clone())))
-                        .collect()
-                }
-                _ => Vec::new(),
-            }
-        })
+        Box::pin(self.candidates_from(domain, query, 0, limit))
+    }
+
+    fn candidates_page<'a>(
+        &'a self,
+        domain: &'a str,
+        query: &'a str,
+        offset: usize,
+        limit: usize,
+    ) -> BoxFuture<'a, Vec<(Value, Name)>> {
+        Box::pin(self.candidates_from(domain, query, offset, limit))
     }
 }
 
