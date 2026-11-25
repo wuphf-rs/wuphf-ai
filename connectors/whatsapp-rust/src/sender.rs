@@ -218,6 +218,51 @@ impl<C: WaClient, M: CoreMedia, S: StickerConverter> WhatsAppSender<C, M, S> {
         })
     }
 
+    /// The owner's reaction on someone's story, sent the way WhatsApp's own
+    /// quick reactions are (Go `reactToStory`): an emoji message in the
+    /// poster's DM, quoting the story. A send to status@broadcast would reach
+    /// everyone who sees the owner's stories. A cleared reaction, or one on
+    /// the owner's own story, sends nothing.
+    async fn react_to_story(
+        &self,
+        dispatch: pb::ReactionDispatch,
+        status: &Jid,
+        mode: Option<AddressingMode>,
+    ) -> Result<String, Failure> {
+        let story_id = dispatch.target_platform_message_id;
+        let poster = dispatch
+            .target_participant
+            .as_deref()
+            .filter(|poster| !poster.is_empty())
+            .unwrap_or(&dispatch.target_sender);
+        if dispatch.emoji.is_empty() || dispatch.target_authored_by_bridge || poster.is_empty() {
+            return Ok(story_id);
+        }
+        let poster: Jid = poster.parse().map_err(|error| {
+            Failure::permanent(format!("parse story poster {poster:?}: {error}"))
+        })?;
+        if is_status_broadcast(&poster) {
+            return Ok(story_id);
+        }
+        let poster = poster.to_non_ad();
+        let (dm, _) = self.target(&poster.to_string()).await?;
+        let quoted = self
+            .addresses
+            .in_mode(&self.identity, &self.client, &poster, mode)
+            .await;
+        let context = build_quote_context_with_info(
+            story_id.clone(),
+            &quoted,
+            status,
+            &dm,
+            &wa::Message::text(""),
+        );
+        let mut message = wa::Message::text(&dispatch.emoji);
+        message.set_context_info(context);
+        self.client.send(dm, message).await?;
+        Ok(story_id)
+    }
+
     /// The message for one attachment: downloaded from the core (a failure is
     /// transient: the core redelivers), then uploaded to WhatsApp.
     async fn attachment_message(
@@ -339,6 +384,21 @@ fn group_failure(error: Failure, index: usize) -> Failure {
     ))
 }
 
+/// WhatsApp's story feed (Go `isStatusBroadcast`). A send to it is posted as
+/// a story to every contact the status privacy allows, so the sender never
+/// does that for a dispatch (plan 083): the core keeps the chat receive-only,
+/// and this is the backstop if it ever does not.
+fn is_status_broadcast(jid: &Jid) -> bool {
+    jid.server == Server::Broadcast && jid.user == "status"
+}
+
+/// The permanent failure for a dispatch that would post to status@broadcast.
+fn refuse_status_post(operation: &str) -> Failure {
+    Failure::permanent(format!(
+        "refusing to {operation} status@broadcast: that would post a story to your contacts"
+    ))
+}
+
 /// A target chat that does not parse can never succeed on retry, so it is
 /// permanent and the core dead-letters the dispatch.
 fn parse_chat(chat_id: &str) -> Result<Jid, Failure> {
@@ -352,6 +412,9 @@ impl<C: WaClient, M: CoreMedia, S: StickerConverter> Sender for WhatsAppSender<C
         // One value for the whole dispatch (Go `pin`).
         let runtime = self.runtime.load();
         let (chat, mode) = self.target(&dispatch.target_chat_id).await?;
+        if is_status_broadcast(&chat) {
+            return Err(refuse_status_post("send to"));
+        }
         let context = self.reply_context(&dispatch, &chat, mode).await?;
         // Every part of a content send carries the chat's timer, so it
         // disappears like the rest of the chat instead of showing "will not
@@ -399,6 +462,9 @@ impl<C: WaClient, M: CoreMedia, S: StickerConverter> Sender for WhatsAppSender<C
     /// edit API returns is the target id itself.
     async fn edit_message(&self, dispatch: pb::MessageEditDispatch) -> Result<String, Failure> {
         let (chat, _) = self.target(&dispatch.target_chat_id).await?;
+        if is_status_broadcast(&chat) {
+            return Err(refuse_status_post("edit on"));
+        }
         let text = dispatch.text.unwrap_or_default();
         self.client
             .edit(
@@ -444,6 +510,9 @@ impl<C: WaClient, M: CoreMedia, S: StickerConverter> Sender for WhatsAppSender<C
             return Ok(dispatch.target_platform_message_id);
         }
         let (chat, mode) = self.target(&dispatch.target_chat_id).await?;
+        if is_status_broadcast(&chat) {
+            return self.react_to_story(dispatch, &chat, mode).await;
+        }
         let key = self.reaction_key(&dispatch, &chat, mode).await?;
         self.client.react(chat, key, dispatch.emoji).await?;
         Ok(dispatch.target_platform_message_id)
@@ -1575,5 +1644,99 @@ mod tests {
         }
         // The change applies from the next dispatch.
         assert!(sender.runtime.load().rendering.attachments_as_files);
+    }
+
+    // ---- Plan 083: status@broadcast ----
+
+    const STATUS: &str = "status@broadcast";
+    const POSTER: &str = "1555@s.whatsapp.net";
+
+    /// A send or an edit to status@broadcast would post a story to every
+    /// contact: refused as permanent, nothing sent.
+    #[tokio::test]
+    async fn sends_and_edits_to_status_broadcast_are_refused() {
+        let sender = sender(fake(), FakeMedia::default());
+        let send = pb::MessageCreateDispatch {
+            target_chat_id: STATUS.into(),
+            ..text("lol")
+        };
+        assert!(matches!(
+            sender.send_message(send).await,
+            Err(Failure::Permanent(_))
+        ));
+        let edit = pb::MessageEditDispatch {
+            target_chat_id: STATUS.into(),
+            target_platform_message_id: "s-1".into(),
+            text: Some("lol".into()),
+            ..Default::default()
+        };
+        assert!(matches!(
+            sender.edit_message(edit).await,
+            Err(Failure::Permanent(_))
+        ));
+        assert!(sender.client.sends.lock().unwrap().is_empty());
+        assert!(sender.client.edits.lock().unwrap().is_empty());
+    }
+
+    /// Revoking a story (the owner's own) still goes out.
+    #[tokio::test]
+    async fn a_delete_on_status_broadcast_revokes() {
+        let sender = sender(fake(), FakeMedia::default());
+        let delete = pb::MessageDeleteDispatch {
+            target_chat_id: STATUS.into(),
+            target_platform_message_id: "s-1".into(),
+            ..Default::default()
+        };
+        sender.delete_message(delete).await.unwrap();
+        let revokes = sender.client.revokes.lock().unwrap();
+        assert_eq!(revokes[0].0.to_string(), STATUS);
+        assert_eq!(revokes[0].1, "s-1");
+    }
+
+    fn story_reaction(emoji: &str) -> pb::ReactionDispatch {
+        pb::ReactionDispatch {
+            target_chat_id: STATUS.into(),
+            target_platform_message_id: "story-1".into(),
+            target_sender: POSTER.into(),
+            target_participant: Some(POSTER.into()),
+            by_owner: true,
+            emoji: emoji.into(),
+            ..Default::default()
+        }
+    }
+
+    /// The owner's reaction on a story goes to the poster's DM as an emoji
+    /// quoting the story, never to status@broadcast.
+    #[tokio::test]
+    async fn a_story_reaction_is_an_emoji_in_the_posters_dm() {
+        let sender = sender(fake(), FakeMedia::default());
+        let id = sender.apply_reaction(story_reaction("❤️")).await.unwrap();
+        assert_eq!(id, "story-1");
+        assert!(sender.client.reactions.lock().unwrap().is_empty());
+        let sends = sender.client.sends.lock().unwrap();
+        assert_eq!(sends.len(), 1);
+        let (to, message) = &sends[0];
+        assert_eq!(to.to_string(), POSTER);
+        assert_eq!(message.text_content(), Some("❤️"));
+        let quote = context(message);
+        assert_eq!(quote.stanza_id.as_deref(), Some("story-1"));
+        assert_eq!(quote.participant.as_deref(), Some(POSTER));
+        assert_eq!(quote.remote_jid.as_deref(), Some(STATUS));
+    }
+
+    /// Clearing a story reaction, or reacting to the owner's own story,
+    /// sends nothing and is acknowledged.
+    #[tokio::test]
+    async fn story_reactions_that_send_nothing() {
+        let own = pb::ReactionDispatch {
+            target_authored_by_bridge: true,
+            ..story_reaction("❤️")
+        };
+        for dispatch in [story_reaction(""), own] {
+            let sender = sender(fake(), FakeMedia::default());
+            assert_eq!(sender.apply_reaction(dispatch).await.unwrap(), "story-1");
+            assert!(sender.client.sends.lock().unwrap().is_empty());
+            assert!(sender.client.reactions.lock().unwrap().is_empty());
+        }
     }
 }

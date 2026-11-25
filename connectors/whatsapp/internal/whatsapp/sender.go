@@ -103,6 +103,9 @@ func (s Sender) SendMessage(ctx context.Context, dispatch *wuphfpb.MessageCreate
 	if err != nil {
 		return "", "", err
 	}
+	if isStatusBroadcast(chat) {
+		return "", "", refuseStatusPost("send to")
+	}
 	// A system note (an info card, a change to the chat) is the bridge
 	// speaking: it quotes nothing.
 	var contextInfo *waE2E.ContextInfo
@@ -208,6 +211,9 @@ func (s Sender) EditMessage(ctx context.Context, dispatch *wuphfpb.MessageEditDi
 	if err != nil {
 		return "", err
 	}
+	if isStatusBroadcast(chat) {
+		return "", refuseStatusPost("edit on")
+	}
 	edit := s.client.BuildEdit(chat, types.MessageID(dispatch.GetTargetPlatformMessageId()), textMessage(dispatch.GetText()))
 	if _, err := s.client.SendMessage(ctx, chat, edit); err != nil {
 		return "", fmt.Errorf("edit WhatsApp message: %w", err)
@@ -242,6 +248,9 @@ func (s Sender) ApplyReaction(ctx context.Context, dispatch *wuphfpb.ReactionDis
 	chat, mode, err := s.target(ctx, dispatch.GetTargetChatId())
 	if err != nil {
 		return "", err
+	}
+	if isStatusBroadcast(chat) {
+		return s.reactToStory(ctx, dispatch, mode)
 	}
 	author, err := s.messageAuthor(ctx, dispatch.GetTargetAuthoredByBridge(), dispatch.GetTargetParticipant(), dispatch.GetTargetSender(), mode)
 	if err != nil {
