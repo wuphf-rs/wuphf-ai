@@ -78,33 +78,53 @@ func shareRef(xma *slidetypes.XMAContent) *shareMedia {
 
 // layeredXMATypename is the share Instagram sends for a comment forwarded from
 // a post or reel: the commenter as title, the comment as subtitle, and the
-// post's cover as preview. It names neither the post nor its link, so the
-// mirror can only show the comment and the cover.
+// post's cover as preview. The web API names neither the post nor its link;
+// the app API does, so the normalizer looks the post up there.
 const layeredXMATypename = "SlideMessageLayeredXMA"
 
-// forwardedCommentNotice ends a forwarded comment's text: the post it was
-// left on cannot be linked.
+// forwardedCommentNotice ends a forwarded comment's text when its post could
+// not be looked up.
 const forwardedCommentNotice = "[forwarded comment: open Instagram to view the %s]"
 
-// forwardedCommentText renders a forwarded comment, or reports false when the
-// share is not one (or names its post, so it bridges as a normal share).
-func forwardedCommentText(xma *slidetypes.XMAContent) (string, bool) {
-	if xma.Typename != layeredXMATypename || xma.TargetURL != "" || xma.TargetID != "" {
-		return "", false
+// forwardedComment is a comment forwarded from a post or reel.
+type forwardedComment struct {
+	// prefix is the text the sender typed with the share, if any.
+	prefix    string
+	commenter string
+	comment   string
+	// post is "reel" or "post", from the cover's decoration.
+	post string
+}
+
+// parseForwardedComment reports whether a share is a forwarded comment. A
+// layered share that names its post bridges as a normal share instead.
+func parseForwardedComment(content *slidetypes.MessageContentXMA) (*forwardedComment, bool) {
+	xma := content.XMA
+	if xma == nil || xma.Typename != layeredXMATypename || xma.TargetURL != "" || xma.TargetID != "" {
+		return nil, false
 	}
 	commenter := xma.TitleText
 	if commenter == "" {
 		commenter = xma.XMATitle
 	}
 	if commenter == "" || xma.SubtitleText == "" {
-		return "", false
+		return nil, false
 	}
 	post := "post"
 	if previewDecoration(xma) == "REEL" {
 		post = "reel"
 	}
-	text := commenter + " commented on a " + post + ":\n" + xma.SubtitleText
-	return appendLine(text, fmt.Sprintf(forwardedCommentNotice, post)), true
+	return &forwardedComment{prefix: content.XMATextBody, commenter: commenter, comment: xma.SubtitleText, post: post}, true
+}
+
+// text renders the comment, ending with the post's link, or with a note that
+// the post is only on Instagram when link is "".
+func (c *forwardedComment) text(link string) string {
+	text := appendLine(c.prefix, c.commenter+" commented on a "+c.post+":\n"+c.comment)
+	if link == "" {
+		link = fmt.Sprintf(forwardedCommentNotice, c.post)
+	}
+	return appendLine(text, link)
 }
 
 func previewDecoration(xma *slidetypes.XMAContent) string {

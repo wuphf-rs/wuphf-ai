@@ -1,9 +1,12 @@
 package instagramconnector
 
 import (
+	"context"
 	"encoding/json"
+	"strings"
 	"testing"
 
+	"github.com/rs/zerolog"
 	wuphfpb "github.com/wuphf-rs/wuphf-ai/proto/go/connector/v1"
 	"go.mau.fi/mautrix-meta/pkg/instameow/slidetypes"
 	"go.mau.fi/mautrix-meta/pkg/messagix/responses"
@@ -90,6 +93,73 @@ func TestHandleForwardedReelComment(t *testing.T) {
 	}
 	if len(doer.requests) != 1 || doer.requests[0] != "https://cdn/cover.jpg" || broker.uploaded[0].GetKind() != wuphfpb.Attachment_KIND_IMAGE {
 		t.Fatalf("requests = %v kind = %v, want the reel's cover", doer.requests, broker.uploaded[0].GetKind())
+	}
+}
+
+// stubComments answers comment lookups with one canned result and records
+// what was asked.
+type stubComments struct {
+	target commentTarget
+	err    error
+	asked  [][2]string
+}
+
+func (s *stubComments) ResolveComment(_ context.Context, threadLongID, messageID string) (commentTarget, error) {
+	s.asked = append(s.asked, [2]string{threadLongID, messageID})
+	return s.target, s.err
+}
+
+func newCommentNormalizer(broker MediaBroker, doer HTTPDoer, fetcher MediaFetcher, comments CommentResolver) (*Normalizer, chan *wuphfpb.ClientFrame) {
+	ch := make(chan *wuphfpb.ClientFrame, 16)
+	threads, _ := newTestDirectory()
+	return NewNormalizer(ch, NewMediaCodec(broker, doer, fetcher), threads, comments, testOwnUserID, zerolog.Nop()), ch
+}
+
+func TestHandleForwardedReelCommentResolvesTheReel(t *testing.T) {
+	t.Parallel()
+	doer := &stubDoer{}
+	fetcher := &postFetcher{response: post(videoItem("https://cdn/reel.mp4"))}
+	broker := &stubBroker{}
+	comments := &stubComments{target: commentTarget{
+		link:    shareLink{kind: "reel", shortcode: "DgHVFxWsY-a"},
+		mediaID: "4037288346529140634",
+	}}
+	n, ch := newCommentNormalizer(broker, doer, fetcher, comments)
+	handle(t, n, messageDelta(groupShortID, "mid.1", peerID, forwardedCommentContent))
+
+	create := drain(ch)[0].GetMessageCreate()
+	want := "gujrat_lions.1 commented on a reel:\nCart 🛒 nahi hoga tempo 🚚 me add Kiya hoga 😂\n" +
+		"https://www.instagram.com/reel/DgHVFxWsY-a/"
+	if create.GetText() != want {
+		t.Fatalf("text = %q, want %q", create.GetText(), want)
+	}
+	// The thread is named by its long id, as the app API addresses it.
+	if len(comments.asked) != 1 || comments.asked[0] != [2]string{"long-42", "mid.1"} {
+		t.Fatalf("resolver asked %v", comments.asked)
+	}
+	if len(fetcher.asked) != 1 || fetcher.asked[0] != [2]string{"4037288346529140634", "DgHVFxWsY-a"} {
+		t.Fatalf("FetchMedia asked %v", fetcher.asked)
+	}
+	if len(doer.requests) != 1 || doer.requests[0] != "https://cdn/reel.mp4" || broker.uploaded[0].GetKind() != wuphfpb.Attachment_KIND_VIDEO {
+		t.Fatalf("requests = %v kind = %v, want the reel video", doer.requests, broker.uploaded[0].GetKind())
+	}
+}
+
+// A failed lookup leaves the comment, the note and the cover.
+func TestHandleForwardedReelCommentLookupFailureKeepsNote(t *testing.T) {
+	t.Parallel()
+	doer := &stubDoer{}
+	fetcher := &postFetcher{}
+	broker := &stubBroker{}
+	n, ch := newCommentNormalizer(broker, doer, fetcher, &stubComments{err: errCommentNotFound})
+	handle(t, n, messageDelta(groupShortID, "mid.1", peerID, forwardedCommentContent))
+
+	create := drain(ch)[0].GetMessageCreate()
+	if !strings.HasSuffix(create.GetText(), "[forwarded comment: open Instagram to view the reel]") {
+		t.Fatalf("text = %q", create.GetText())
+	}
+	if len(fetcher.asked) != 0 || len(doer.requests) != 1 || doer.requests[0] != "https://cdn/cover.jpg" {
+		t.Fatalf("FetchMedia asked %v requests = %v, want only the cover", fetcher.asked, doer.requests)
 	}
 }
 

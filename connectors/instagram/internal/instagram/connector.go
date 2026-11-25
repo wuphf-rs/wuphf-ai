@@ -108,7 +108,10 @@ func (c Connector) Run(ctx context.Context) error {
 	ig.threads = NewThreadDirectory(client, ownUserID)
 	ig.threads.RecordMailbox(mailbox)
 	codec := NewMediaCodec(media, http.DefaultClient, client)
-	ig.normalizer = NewNormalizer(inputs, codec, ig.threads, ownUserID, logger)
+	// Forwarded comments name their post only on the app API, read with the
+	// same session.
+	comments := NewAppAPI(http.DefaultClient, client.GetCookies)
+	ig.normalizer = NewNormalizer(inputs, codec, ig.threads, comments, ownUserID, logger)
 	logger.Info().Msg("Instagram account loaded")
 
 	if c.cfg.Functions != nil {

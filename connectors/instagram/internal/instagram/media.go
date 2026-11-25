@@ -177,6 +177,9 @@ type messageBody struct {
 	// unresolvedShare is a share with neither a target link nor anything
 	// found to fetch; it is logged so a new share shape can be diagnosed.
 	unresolvedShare *slidetypes.XMAContent
+	// comment is set for a forwarded comment, whose post the normalizer
+	// looks up before downloading; text then holds its fallback rendering.
+	comment *forwardedComment
 }
 
 // viewOnceNotice stands in for view-once media Instagram withholds from the
@@ -318,8 +321,9 @@ func animatedRef(animated *slidetypes.AnimatedAttachment) (mediaRef, bool) {
 // comments). The text the sender typed comes first, then the share's title,
 // subtitle and public link. A post or reel is bridged as its media, resolved
 // to full quality when possible; a link only as text plus its preview image. A
-// forwarded comment names no post, so it bridges as the comment, a note that
-// the post is only on Instagram, and the post's cover.
+// forwarded comment names no post here: it is rendered as the comment, a note
+// that the post is only on Instagram, and the post's cover, and the normalizer
+// swaps in the post's link and media when the app API names the post.
 func xmaBody(content *slidetypes.MessageContentXMA) messageBody {
 	xma := content.XMA
 	if xma == nil {
@@ -327,8 +331,8 @@ func xmaBody(content *slidetypes.MessageContentXMA) messageBody {
 	}
 	share := shareRef(xma)
 	var body messageBody
-	if comment, ok := forwardedCommentText(xma); ok {
-		body.text = appendLine(content.XMATextBody, comment)
+	if comment, ok := parseForwardedComment(content); ok {
+		body.text, body.comment = comment.text(""), comment
 	} else {
 		text := appendLine(content.XMATextBody, cmp.Or(xma.TitleText, xma.XMATitle, xma.CaptionBodyText))
 		text = appendLine(text, xma.SubtitleText)
