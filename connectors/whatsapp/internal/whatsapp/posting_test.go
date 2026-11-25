@@ -71,8 +71,8 @@ func TestThePostingSnapshot(t *testing.T) {
 		"status@broadcast": {Messages: false, Reactions: true, PrivateReplies: true, Posts: true},
 		"1@g.us":           {Messages: false, Reactions: true},
 		"2@g.us":           {Messages: true, Reactions: true},
-		"3@newsletter":     {Messages: false, Reactions: true},
-		"4@newsletter":     {Messages: true, Reactions: true},
+		"3@newsletter":     {Messages: false, Reactions: false},
+		"4@newsletter":     {Messages: false, Reactions: false, Posts: true},
 	}
 	for chat, posting := range want {
 		g := got[chat]

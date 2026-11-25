@@ -706,6 +706,7 @@ fn chat_update_from_proto(update: pb::ChatUpdate) -> Result<ChatUpdate, WireErro
             private_replies: posting.private_replies,
             posts: posting.posts,
             audience: posting.audience,
+            post_edits: posting.post_edits,
         }),
     })
 }

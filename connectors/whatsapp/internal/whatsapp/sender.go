@@ -20,6 +20,7 @@ import (
 type SendClient interface {
 	SendMessage(context.Context, types.JID, *waE2E.Message, ...whatsmeow.SendRequestExtra) (whatsmeow.SendResponse, error)
 	Upload(context.Context, []byte, whatsmeow.MediaType) (whatsmeow.UploadResponse, error)
+	UploadNewsletter(context.Context, []byte, whatsmeow.MediaType) (whatsmeow.UploadResponse, error)
 	BuildEdit(types.JID, types.MessageID, *waE2E.Message) *waE2E.Message
 	BuildRevoke(chat, sender types.JID, id types.MessageID) *waE2E.Message
 	BuildReaction(chat, sender types.JID, id types.MessageID, reaction string) *waE2E.Message
@@ -50,6 +51,9 @@ type Sender struct {
 	// without one. Nil when the connector does not declare
 	// supports_disappearing_timers: sends then carry only what the core sent.
 	timers *timerSource
+	// channel is set while one channel post is sent (plan 085): its media is
+	// uploaded unencrypted, and the upload's handle goes with the send.
+	channel *channelUpload
 }
 
 func NewSender(client SendClient, media MediaBroker, converter StickerConverter, addressing Addressing, runtime *settings.Live[config.Runtime]) Sender {
@@ -102,6 +106,10 @@ func (s Sender) SendMessage(ctx context.Context, dispatch *wuphfpb.MessageCreate
 	chat, mode, err := s.target(ctx, dispatch.GetTargetChatId())
 	if err != nil {
 		return "", "", err
+	}
+	if isChannel(chat) {
+		id, err := s.postToChannel(ctx, dispatch, chat)
+		return id, "", err
 	}
 	if isStatusBroadcast(chat) {
 		// Only an explicit post (plan 084) goes to the story feed.
@@ -256,6 +264,11 @@ func (s Sender) ApplyReaction(ctx context.Context, dispatch *wuphfpb.ReactionDis
 	}
 	if isStatusBroadcast(chat) {
 		return s.reactToStory(ctx, dispatch, mode)
+	}
+	if isChannel(chat) {
+		// A channel post is reacted to by a server id the bridge does not keep
+		// (plan 085): the core sends none, and this sends nothing.
+		return dispatch.GetTargetPlatformMessageId(), nil
 	}
 	author, err := s.messageAuthor(ctx, dispatch.GetTargetAuthoredByBridge(), dispatch.GetTargetParticipant(), dispatch.GetTargetSender(), mode)
 	if err != nil {
@@ -436,7 +449,7 @@ func (s Sender) attachmentMessage(
 	}
 	switch kind {
 	case wuphfpb.Attachment_KIND_IMAGE:
-		uploaded, err := s.client.Upload(ctx, bytes, whatsmeow.MediaImage)
+		uploaded, err := s.uploadMedia(ctx, bytes, whatsmeow.MediaImage)
 		if err != nil {
 			return nil, fmt.Errorf("upload WhatsApp image: %w", err)
 		}
@@ -453,7 +466,7 @@ func (s Sender) attachmentMessage(
 	case wuphfpb.Attachment_KIND_FILE:
 		return s.documentMessage(ctx, bytes, mimeType, attachment.GetFileName(), caption)
 	case wuphfpb.Attachment_KIND_VIDEO:
-		uploaded, err := s.client.Upload(ctx, bytes, whatsmeow.MediaVideo)
+		uploaded, err := s.uploadMedia(ctx, bytes, whatsmeow.MediaVideo)
 		if err != nil {
 			return nil, fmt.Errorf("upload WhatsApp video: %w", err)
 		}
@@ -471,7 +484,7 @@ func (s Sender) attachmentMessage(
 			FileLength:    &uploaded.FileLength,
 		}}, nil
 	case wuphfpb.Attachment_KIND_AUDIO:
-		uploaded, err := s.client.Upload(ctx, bytes, whatsmeow.MediaAudio)
+		uploaded, err := s.uploadMedia(ctx, bytes, whatsmeow.MediaAudio)
 		if err != nil {
 			return nil, fmt.Errorf("upload WhatsApp audio: %w", err)
 		}
@@ -514,7 +527,7 @@ func (s Sender) stickerMessage(
 	if mimeType == "image/webp" {
 		data = applyStickerMetadata(ctx, data, s.settings().StickerMetadata())
 	}
-	uploaded, err := s.client.Upload(ctx, data, whatsmeow.MediaImage)
+	uploaded, err := s.uploadMedia(ctx, data, whatsmeow.MediaImage)
 	if err != nil {
 		return nil, fmt.Errorf("upload WhatsApp sticker: %w", err)
 	}
@@ -548,7 +561,7 @@ func (s Sender) documentMessage(
 	data []byte,
 	mimeType, fileName, caption string,
 ) (*waE2E.Message, error) {
-	uploaded, err := s.client.Upload(ctx, data, whatsmeow.MediaDocument)
+	uploaded, err := s.uploadMedia(ctx, data, whatsmeow.MediaDocument)
 	if err != nil {
 		return nil, fmt.Errorf("upload WhatsApp file: %w", err)
 	}
@@ -605,7 +618,7 @@ func textExceedsLimit(text string, limit uint32) bool {
 // textFileMessage delivers an over-length message as a plain-text document so
 // the platform's per-message length cap does not truncate or reject it.
 func (s Sender) textFileMessage(ctx context.Context, text string) (*waE2E.Message, error) {
-	uploaded, err := s.client.Upload(ctx, []byte(text), whatsmeow.MediaDocument)
+	uploaded, err := s.uploadMedia(ctx, []byte(text), whatsmeow.MediaDocument)
 	if err != nil {
 		return nil, fmt.Errorf("upload WhatsApp text file: %w", err)
 	}

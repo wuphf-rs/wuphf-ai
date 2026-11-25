@@ -4310,6 +4310,7 @@ async fn report_receive_only(core: &Core<InMemoryStorage>) {
                 private_replies: false,
                 posts: false,
                 audience: None,
+                post_edits: false,
             }),
             ..ChatUpdate::new(GROUP)
         }],
@@ -4566,6 +4567,7 @@ async fn story_feed() -> Core<InMemoryStorage> {
                 private_replies: true,
                 posts: false,
                 audience: None,
+                post_edits: false,
             }),
             ..ChatUpdate::new(STATUS)
         }],
@@ -4659,6 +4661,28 @@ async fn a_quote_of_another_chat_named_by_the_event_resolves_there_only() {
 /// The Status feed mirrored into topic 100, taking posts, with the owner's
 /// message "tg-mine" typed there (and refused, 083).
 async fn story_topic() -> Core<InMemoryStorage> {
+    posting_topic(
+        STATUS,
+        "100",
+        wuphf_model::ChatPosting {
+            messages: false,
+            reactions: true,
+            private_replies: true,
+            posts: true,
+            audience: Some("My contacts".into()),
+            post_edits: false,
+        },
+    )
+    .await
+}
+
+/// WhatsApp `chat` mirrored into topic `thread` with `posting`, and the
+/// owner's message "tg-mine" typed there (and refused, 083).
+async fn posting_topic(
+    chat: &str,
+    thread: &str,
+    posting: wuphf_model::ChatPosting,
+) -> Core<InMemoryStorage> {
     let rule = Rule {
         id: RuleId("wa-all".into()),
         flow: RuleKind::ManyToOne {
@@ -4672,21 +4696,15 @@ async fn story_topic() -> Core<InMemoryStorage> {
     core.update_chats(
         &ConnectorId(WHATSAPP.into()),
         vec![ChatUpdate {
-            posting: Some(wuphf_model::ChatPosting {
-                messages: false,
-                reactions: true,
-                private_replies: true,
-                posts: true,
-                audience: Some("My contacts".into()),
-            }),
-            ..ChatUpdate::new(STATUS)
+            posting: Some(posting),
+            ..ChatUpdate::new(chat)
         }],
         true,
     )
     .await
     .unwrap();
-    mirror_into_topic(&core, STATUS, BOB, "wa-story", "100", "tg-story").await;
-    let refused = owner_in_topic(&core, "100", "tg-mine", "my story", None).await;
+    mirror_into_topic(&core, chat, BOB, "wa-story", thread, "tg-story").await;
+    let refused = owner_in_topic(&core, thread, "tg-mine", "my story", None).await;
     assert!(matches!(refused[0].action, Action::Refuse { .. }));
     core
 }
@@ -4881,6 +4899,7 @@ async fn stories_core(stories: crate::StoriesSettings) -> Core<InMemoryStorage> 
                 private_replies: true,
                 posts: false,
                 audience: None,
+                post_edits: false,
             }),
             ..ChatUpdate::new(STATUS)
         }],
@@ -4984,4 +5003,82 @@ async fn story_copies_stay_while_expiry_is_off() {
             .unwrap()
             .is_empty()
     );
+}
+
+// ---- Plan 085: channels ----
+
+const CHANNEL: &str = "120363000000000001@newsletter";
+
+/// An owned channel mirrored into topic 300: it takes posts and their edits.
+async fn channel_topic() -> Core<InMemoryStorage> {
+    posting_topic(
+        CHANNEL,
+        "300",
+        wuphf_model::ChatPosting {
+            messages: false,
+            reactions: false,
+            private_replies: false,
+            posts: true,
+            audience: None,
+            post_edits: true,
+        },
+    )
+    .await
+}
+
+/// `/post!`s the owner's "tg-mine" in `thread` and acknowledges the post as
+/// "wa-posted"; the dispatches of editing "tg-mine" afterwards.
+async fn post_then_edit(core: &Core<InMemoryStorage>, thread: &str) -> Vec<Dispatch> {
+    let posted = owner_in_topic(core, thread, "tg-cmd", "/post!", Some("tg-mine")).await;
+    assert_eq!(posted.len(), 1, "{posted:#?}");
+    assert!(matches!(posted[0].action, Action::Post { .. }));
+    core.acknowledge_dispatch(DispatchAck {
+        dispatch_id: posted[0].id,
+        native_id: "wa-posted".into(),
+        thread_id: None,
+    })
+    .await
+    .unwrap();
+    let edit = edit_event(
+        TELEGRAM,
+        MIRROR_CHAT,
+        Some(thread),
+        "tg-mine",
+        Some("fixed"),
+    );
+    routed(core.ingest(edit).await.unwrap()).0
+}
+
+#[tokio::test]
+async fn an_edit_of_a_channel_post_edits_the_post() {
+    let core = channel_topic().await;
+    let dispatches = post_then_edit(&core, "300").await;
+    assert_eq!(dispatches.len(), 1, "{dispatches:#?}");
+    assert_eq!(dispatches[0].to.address.chat_id, CHANNEL);
+    assert!(matches!(
+        &dispatches[0].action,
+        Action::Edit { native_id, .. } if native_id == "wa-posted"
+    ));
+}
+
+#[tokio::test]
+async fn an_edit_of_a_story_is_refused() {
+    let core = story_topic().await;
+    let dispatches = post_then_edit(&core, "100").await;
+    assert_eq!(dispatches.len(), 1, "{dispatches:#?}");
+    assert!(matches!(
+        &dispatches[0].action,
+        Action::Refuse { native_id, reason, .. }
+            if native_id == "tg-mine" && reason.contains("cannot edit a post")
+    ));
+}
+
+#[tokio::test]
+async fn a_plain_message_in_a_channel_topic_is_refused() {
+    let core = channel_topic().await;
+    let dispatches = owner_in_topic(&core, "300", "tg-hi", "hello followers", None).await;
+    assert!(matches!(
+        &dispatches[0].action,
+        Action::Refuse { native_id, .. } if native_id == "tg-hi"
+    ));
 }

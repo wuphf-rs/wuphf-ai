@@ -27,6 +27,9 @@ type stubSendClient struct {
 	revokedKey types.MessageID
 	patches    []appstate.PatchInfo
 	reaction   *stubReaction
+	// newsletterUpload: the last upload was a channel's (unencrypted).
+	newsletterUpload bool
+	extra            []whatsmeow.SendRequestExtra
 }
 
 // stubReaction is what BuildReaction was asked for.
@@ -36,7 +39,8 @@ type stubReaction struct {
 	emoji        string
 }
 
-func (s *stubSendClient) SendMessage(_ context.Context, to types.JID, message *waE2E.Message, _ ...whatsmeow.SendRequestExtra) (whatsmeow.SendResponse, error) {
+func (s *stubSendClient) SendMessage(_ context.Context, to types.JID, message *waE2E.Message, extra ...whatsmeow.SendRequestExtra) (whatsmeow.SendResponse, error) {
+	s.extra = extra
 	s.sent = message
 	s.sentTo = to
 	return whatsmeow.SendResponse{ID: "sent-id"}, nil
@@ -65,6 +69,11 @@ func (s *stubSendClient) SendAppState(_ context.Context, patch appstate.PatchInf
 func (s *stubSendClient) Upload(_ context.Context, bytes []byte, media whatsmeow.MediaType) (whatsmeow.UploadResponse, error) {
 	s.uploaded, s.media = bytes, media
 	return whatsmeow.UploadResponse{URL: "url", DirectPath: "path", FileLength: uint64(len(bytes))}, nil
+}
+
+func (s *stubSendClient) UploadNewsletter(_ context.Context, bytes []byte, media whatsmeow.MediaType) (whatsmeow.UploadResponse, error) {
+	s.uploaded, s.media, s.newsletterUpload = bytes, media, true
+	return whatsmeow.UploadResponse{URL: "url", DirectPath: "path", FileLength: uint64(len(bytes)), Handle: "handle-1"}, nil
 }
 
 type stubBroker struct {

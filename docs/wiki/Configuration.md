@@ -77,7 +77,7 @@ Your own stories (plan 084): reply `/status` to a message in a WhatsApp
 Status topic, or write `/status <text>`. The settings panel opens on a
 preview (who sees it, as your phone's status privacy says) with ✅ Post and
 ✖️ Cancel; `/status!` posts at once. `/wuphf` in the Status topic offers
-"📢 Post a status" too. Only `whatsapp-main` posts stories for now.
+"📢 Write a post" too. Only `whatsapp-main` posts stories for now.
 
 ```toml
 [stories]

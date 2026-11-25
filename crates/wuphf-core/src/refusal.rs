@@ -34,6 +34,7 @@ pub(crate) struct SourcePolicy {
     accepts_messages: bool,
     accepts_reactions: bool,
     accepts_posts: bool,
+    accepts_post_edits: bool,
     keeps_deletes: bool,
     title: String,
 }
@@ -90,6 +91,25 @@ where
         if !into_source(&conversation, &dispatch.to) {
             return Ok(Screened::Pass(dispatch));
         }
+        // An edit of a message posted there on purpose (plan 085): the source
+        // either edits posts (a channel) or cannot (a story).
+        if let Action::Edit { message, native_id } = &dispatch.action
+            && !policy.accepts_messages
+            && policy.accepts_posts
+            && !native_id.is_empty()
+            && self
+                .storage
+                .is_sent_copy(dispatch.to.endpoint_id, native_id)
+                .await?
+        {
+            if policy.accepts_post_edits {
+                return Ok(Screened::Pass(dispatch));
+            }
+            let reason = format!("Not edited: {} cannot edit a post.", policy.title);
+            return Ok(Screened::Refused(
+                self.refusal_for(message.id, &dispatch, reason).await?,
+            ));
+        }
         match &dispatch.action {
             Action::Send { message, .. } | Action::Edit { message, .. }
                 if !policy.accepts_messages =>
@@ -139,6 +159,9 @@ where
             accepts_posts: profile
                 .as_ref()
                 .is_some_and(|profile| profile.accepts_posts()),
+            accepts_post_edits: profile
+                .as_ref()
+                .is_some_and(|profile| profile.accepts_post_edits()),
             keeps_deletes: routing.keeps_mirror_deletes(&conversation.source.connector_id),
             title: conversation
                 .title

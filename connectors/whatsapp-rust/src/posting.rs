@@ -36,6 +36,7 @@ pub(crate) fn status_posting() -> pb::ChatPosting {
         // No posts: see the sender (plan 084).
         posts: false,
         audience: None,
+        post_edits: false,
     }
 }
 
@@ -50,18 +51,23 @@ pub(crate) fn group_posting(metadata: &GroupMetadata, own: &[String]) -> pb::Cha
         private_replies: false,
         posts: false,
         audience: None,
+        post_edits: false,
     }
 }
 
-/// What this account may do in a channel: post only as its owner or an
-/// admin; react as anyone.
-pub(crate) fn newsletter_posting(role: Option<&NewsletterRole>) -> pb::ChatPosting {
+/// What this account may do in a channel (plan 085): nothing. A channel post
+/// reaches every follower, so it goes only as an explicit post, which this
+/// connector does not make yet (Go `newsletterPosting` does); and reactions
+/// name a post by a server id the bridge does not keep. The role is kept for
+/// when it does.
+pub(crate) fn newsletter_posting(_role: Option<&NewsletterRole>) -> pb::ChatPosting {
     pb::ChatPosting {
-        messages: matches!(role, Some(NewsletterRole::Owner | NewsletterRole::Admin)),
-        reactions: true,
+        messages: false,
+        reactions: false,
         private_replies: false,
         posts: false,
         audience: None,
+        post_edits: false,
     }
 }
 
@@ -172,11 +178,15 @@ mod tests {
     }
 
     #[test]
-    fn a_channel_takes_posts_from_its_owner_or_admins() {
-        assert!(newsletter_posting(Some(&NewsletterRole::Owner)).messages);
-        assert!(newsletter_posting(Some(&NewsletterRole::Admin)).messages);
-        assert!(!newsletter_posting(Some(&NewsletterRole::Subscriber)).messages);
-        assert!(!newsletter_posting(None).messages);
+    fn a_channel_is_receive_only_here() {
+        for role in [
+            Some(&NewsletterRole::Owner),
+            Some(&NewsletterRole::Subscriber),
+            None,
+        ] {
+            let posting = newsletter_posting(role);
+            assert!(!posting.messages && !posting.reactions && !posting.posts);
+        }
     }
 
     #[test]

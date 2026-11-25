@@ -1,5 +1,5 @@
 //! The panel's post pages (plan 084, on botconf's data pages): a pending
-//! post's preview with ✅ Post / ✖️ Cancel, and "📢 Post a status" for a topic
+//! post's preview with ✅ Post / ✖️ Cancel, and "📢 Write a post" for a topic
 //! whose source takes posts. Both open by where the panel was opened: the
 //! core asks the topic's connector to open the panel there after a `/status`.
 //!
@@ -248,7 +248,7 @@ impl<S: Storage> PostPages<S> {
             body,
             actions: vec![DataAction {
                 id: WRITE.into(),
-                label: "📢 Post a status".into(),
+                label: "📢 Write a post".into(),
                 kind: DataActionKind::Ask {
                     prompt: "Type the status. It is posted as soon as you send it.".into(),
                     input: InputKind::Text,
@@ -416,6 +416,7 @@ mod tests {
                     private_replies: true,
                     posts: true,
                     audience: Some("My contacts".into()),
+                    post_edits: false,
                 }),
                 ..ChatUpdate::new(STATUS)
             }],

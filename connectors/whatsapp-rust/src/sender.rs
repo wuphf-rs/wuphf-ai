@@ -429,6 +429,14 @@ impl<C: WaClient, M: CoreMedia, S: StickerConverter> Sender for WhatsAppSender<C
             }
             return Err(refuse_status_post("send to"));
         }
+        if chat.server == Server::Newsletter {
+            // A channel post reaches every follower (plan 085): this
+            // connector reports channels as taking nothing, and refuses
+            // anything sent there anyway.
+            return Err(Failure::permanent(
+                "this connector does not post to channels: post from whatsapp-main",
+            ));
+        }
         let context = self.reply_context(&dispatch, &chat, mode).await?;
         // Every part of a content send carries the chat's timer, so it
         // disappears like the rest of the chat instead of showing "will not

@@ -86,6 +86,9 @@ message ChatPosting {
   // Who sees a post, as the platform's setting says ("My contacts", "My
   // contacts except 3"), when known.
   optional string audience = 5;
+  // An edit of a message already posted there goes through (plan 085: a
+  // channel post). Off for a story: WhatsApp cannot edit one.
+  bool post_edits = 6;
 }
 
 // The chat's picture. `id` is the platform's picture id; empty means the

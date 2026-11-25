@@ -107,6 +107,13 @@ impl ChatProfile {
             .is_some_and(|posting| posting.private_replies)
     }
 
+    /// Whether an edit of a post here goes through (plan 085).
+    pub fn accepts_post_edits(&self) -> bool {
+        self.posting
+            .as_ref()
+            .is_some_and(|posting| posting.post_edits)
+    }
+
     /// Whether this account may post here on purpose (plan 084): a story, a
     /// channel post. Only when the connector reported it.
     pub fn accepts_posts(&self) -> bool {
@@ -137,6 +144,10 @@ pub struct ChatPosting {
     /// "My contacts except 3"), when known.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub audience: Option<String>,
+    /// An edit of a message already posted here goes through (plan 085: a
+    /// channel post). Off for a story: WhatsApp cannot edit one.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub post_edits: bool,
 }
 
 impl ChatPosting {
@@ -148,6 +159,7 @@ impl ChatPosting {
             private_replies: false,
             posts: false,
             audience: None,
+            post_edits: false,
         }
     }
 }

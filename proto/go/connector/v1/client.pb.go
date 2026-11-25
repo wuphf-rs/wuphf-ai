@@ -590,7 +590,10 @@ type ChatPosting struct {
 	Posts bool `protobuf:"varint,4,opt,name=posts,proto3" json:"posts,omitempty"`
 	// Who sees a post, as the platform's setting says ("My contacts", "My
 	// contacts except 3"), when known.
-	Audience      *string `protobuf:"bytes,5,opt,name=audience,proto3,oneof" json:"audience,omitempty"`
+	Audience *string `protobuf:"bytes,5,opt,name=audience,proto3,oneof" json:"audience,omitempty"`
+	// An edit of a message already posted there goes through (plan 085: a
+	// channel post). Off for a story: WhatsApp cannot edit one.
+	PostEdits     bool `protobuf:"varint,6,opt,name=post_edits,json=postEdits,proto3" json:"post_edits,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -658,6 +661,13 @@ func (x *ChatPosting) GetAudience() string {
 		return *x.Audience
 	}
 	return ""
+}
+
+func (x *ChatPosting) GetPostEdits() bool {
+	if x != nil {
+		return x.PostEdits
+	}
+	return false
 }
 
 // The chat's picture. `id` is the platform's picture id; empty means the
@@ -2155,13 +2165,15 @@ const file_client_proto_rawDesc = "" +
 	"\x05_muteB\v\n" +
 	"\t_archivedB\n" +
 	"\n" +
-	"\b_posting\"\xb4\x01\n" +
+	"\b_posting\"\xd3\x01\n" +
 	"\vChatPosting\x12\x1a\n" +
 	"\bmessages\x18\x01 \x01(\bR\bmessages\x12\x1c\n" +
 	"\treactions\x18\x02 \x01(\bR\treactions\x12'\n" +
 	"\x0fprivate_replies\x18\x03 \x01(\bR\x0eprivateReplies\x12\x14\n" +
 	"\x05posts\x18\x04 \x01(\bR\x05posts\x12\x1f\n" +
-	"\baudience\x18\x05 \x01(\tH\x00R\baudience\x88\x01\x01B\v\n" +
+	"\baudience\x18\x05 \x01(\tH\x00R\baudience\x88\x01\x01\x12\x1d\n" +
+	"\n" +
+	"post_edits\x18\x06 \x01(\bR\tpostEditsB\v\n" +
 	"\t_audience\"I\n" +
 	"\n" +
 	"ChatAvatar\x12\x0e\n" +
