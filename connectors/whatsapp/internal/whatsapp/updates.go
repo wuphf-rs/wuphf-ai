@@ -114,7 +114,19 @@ func (n Normalizer) canonical(ctx context.Context, jid types.JID) types.JID {
 	return n.identity.Canonical(ctx, jid)
 }
 
+// Handle normalizes one WhatsApp message event. A broadcast-list message is
+// handled in each direct chat it belongs to (see broadcastCopies).
 func (n Normalizer) Handle(ctx context.Context, message *events.Message) error {
+	copies, broadcast := broadcastCopies(message)
+	for _, copy := range copies {
+		if err := n.handle(ctx, copy, broadcast); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (n Normalizer) handle(ctx context.Context, message *events.Message, broadcast bool) error {
 	// The chat is canonicalized once and threaded through every frame below so
 	// creates, edits, and deletes for one peer always carry the same chat id no
 	// matter which address form WhatsApp used for this particular message.
@@ -174,6 +186,9 @@ func (n Normalizer) Handle(ctx context.Context, message *events.Message) error {
 	event, ok, err := n.normalize(ctx, message)
 	if err != nil || !ok {
 		return err
+	}
+	if broadcast {
+		tagBroadcast(event)
 	}
 	// The first time this process sees the chat, its current state goes
 	// ahead of the message, so a mirror topic the message creates starts

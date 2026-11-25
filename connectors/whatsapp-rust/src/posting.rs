@@ -19,6 +19,12 @@ pub(crate) fn is_status_broadcast(jid: &Jid) -> bool {
     jid.server == Server::Broadcast && jid.user == "status"
 }
 
+/// A broadcast list (not the story feed): its messages belong in the direct
+/// chat with each person (plan 085).
+pub(crate) fn is_broadcast_list(jid: &Jid) -> bool {
+    jid.server == Server::Broadcast && !is_status_broadcast(jid)
+}
+
 /// The story feed's posting: no messages (a story is posted only on
 /// purpose), reactions (sent to the poster's DM), and a story is quoted only
 /// in its poster's chat.
@@ -148,6 +154,13 @@ mod tests {
         assert!(!posting.messages && posting.reactions && posting.private_replies);
         assert!(is_status_broadcast(&"status@broadcast".parse().unwrap()));
         assert!(!is_status_broadcast(&"123@broadcast".parse().unwrap()));
+    }
+
+    #[test]
+    fn a_broadcast_list_is_not_the_story_feed() {
+        assert!(is_broadcast_list(&"1700000000@broadcast".parse().unwrap()));
+        assert!(!is_broadcast_list(&"status@broadcast".parse().unwrap()));
+        assert!(!is_broadcast_list(&"123@g.us".parse().unwrap()));
     }
 
     #[test]

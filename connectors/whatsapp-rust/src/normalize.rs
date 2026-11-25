@@ -24,6 +24,11 @@ use crate::disappearing::{
 };
 use crate::identity::{Identity, MigrationGate, migrations_for};
 use crate::media;
+use crate::posting::is_broadcast_list;
+
+/// Follows the sender's name on a message that came through a broadcast list
+/// (plan 085; Go `broadcastTag`).
+const BROADCAST_TAG: &str = "[broadcast]";
 use crate::names::ChatTitles;
 
 /// Maps inbound WhatsApp messages onto core event frames and queues them for
@@ -76,7 +81,19 @@ impl Normalizer {
         }
     }
 
-    pub async fn handle(&self, ctx: MessageContext) {
+    pub async fn handle(&self, mut ctx: MessageContext) {
+        // A broadcast-list message belongs in the direct chat with the person
+        // (plan 085; Go `broadcastCopies`). whatsapp-rust does not say whom
+        // the owner's own broadcast went to, so that one is not placed.
+        let broadcast = is_broadcast_list(&ctx.info.source.chat);
+        if broadcast {
+            if ctx.info.source.is_from_me {
+                return;
+            }
+            ctx.info.source.chat = ctx.info.source.sender.to_non_ad();
+            ctx.info.source.is_group = false;
+            ctx.info.source.broadcast_list_owner = None;
+        }
         let (client, info) = (&*ctx.client, &ctx.info);
         // Before the title is resolved, so the newest push name names the chat.
         // The owner's own messages carry the owner's push name: never stored.
@@ -134,8 +151,15 @@ impl Normalizer {
                 }
             }
         }
+        let mut sender_name = self.sender_display_name(client, info).await;
+        if broadcast {
+            sender_name = Some(match sender_name {
+                Some(name) => format!("{name} {BROADCAST_TAG}"),
+                None => BROADCAST_TAG.to_owned(),
+            });
+        }
         let names = Names {
-            sender: self.sender_display_name(client, info).await,
+            sender: sender_name,
             mentions: self.mentions(client, &ctx.message).await,
             chat_id: Some(chat_id.clone()),
             sender_id: Some(sender),
