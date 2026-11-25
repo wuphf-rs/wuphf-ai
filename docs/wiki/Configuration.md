@@ -73,6 +73,19 @@ to a story reaches its poster as an emoji in their DM). By default, deleting
 your message's mirror copy deletes the message on the source too; list a
 source connector in `mirror_deletes_kept` to keep it there.
 
+Your own stories (plan 084): reply `/status` to a message in a WhatsApp
+Status topic, or write `/status <text>`. The settings panel opens on a
+preview (who sees it, as your phone's status privacy says) with ✅ Post and
+✖️ Cancel; `/status!` posts at once. `/wuphf` in the Status topic offers
+"📢 Post a status" too. Only `whatsapp-main` posts stories for now.
+
+```toml
+[stories]
+mirror = true          # mirror stories at all
+muted = ["whatsapp-main:15550001111@s.whatsapp.net"]  # skip their stories
+expire_copies = false  # delete mirror copies 24 h after a story was posted
+```
+
 ### `[[connectors]]`: who may connect
 
 One entry per connector you run:
@@ -233,8 +246,8 @@ chats = ["whatsapp-main:120363012345678901@g.us"]
 
 These change while everything runs, without a restart:
 
-- the core's `rules`, `notify`, `receive_only`, `mirror_deletes_kept` and
-  `chat_state`;
+- the core's `rules`, `notify`, `receive_only`, `mirror_deletes_kept`,
+  `chat_state` and `stories`;
 - each connector's runtime keys (`log_level`, `[rendering]`,
   `[sticker_metadata]`, `media_convert_timeout_ms`), under
   `connector_settings.<connector id>`;

@@ -101,7 +101,7 @@ code).
 | 081 | A lone-emoji reply from the owner is a reaction (any emoji, not only Telegram's set) | P2 | S–M | 080 | DONE (live test pending the owner; see notes) |
 | 082 | Chat pickers search and page through every chat (botconf `v0.18.0`); chat names say their connector, and the info card names the source connector | P1 | S–M | botconf 019 | DONE (live test pending the owner; see notes) |
 | 083 | Receive-only chats (Status, channels you don't own, admin-only groups) refuse sends with 👎 + a note; story reactions as DM emoji replies; replies quoting another chat; per-connector mirror-delete toggle; senders never post to `status@broadcast` | P1 | L | — (081) | DONE (no migration; live test pending the owner; see notes) |
-| 084 | Post your own WhatsApp stories from Telegram (`/status`, `/status!`, note button, panel; preview + confirm); story mutes; story-copy expiry | P2 | L | 083 | TODO |
+| 084 | Post your own WhatsApp stories from Telegram (`/status`, `/status!`, note button, panel; preview + confirm); story mutes; story-copy expiry | P2 | L | 083 | DONE (migration 0024; botconf go/v0.18.0; live test pending the owner; see notes) |
 | 085 | WhatsApp channels (mirror, post to owned, edits/deletes, polled reaction counts as a footer), communities, broadcast-list tag | P2 | L | 083, 084, 086 | TODO |
 | 086 | Telegram edits that no longer fit as text swap the copy in place (spilled `.txt`, too long, long captions) | P2 | S–M | — | TODO |
 
@@ -2084,3 +2084,40 @@ From the 2026-10-22 remote-functions design:
   - Tests: core +11, storage +2, Telegram +3, WhatsApp Go +6, whatsapp-rust
     +9. Workspace 546, whatsapp-rust 187; clippy and vet clean. Every Go
     `vendorHash` moved (proto).
+- **084 (2026-11-26).** Posting stories, story mutes and expiry, done in
+  five commits (`99c8e3f`, `e23cb74`, `c723447`, `48b069c` and its docs
+  commit) plus botconf `go/v0.18.0` (`c47d330`). Migration 0024. Live test
+  pending the owner.
+  - Steps 1–2: `/status`, `/status!`, `/post`, `/post!` (core `posts.rs`,
+    like 081's lone emoji): only an owner id's, only in a mirror topic, only
+    for a source whose `ChatPosting.posts` is on. The posted message is the
+    one replied to (the command's text as its caption) or the command's own
+    text. `Action::Post` → `MessageCreateDispatch.post`; 083's screen lets a
+    post through only where the source takes posts, and its ack gives the
+    owner's message 👍 like a send. Without `!` the core keeps a pending post
+    (in memory, 10 min) and dispatches `OpenPanelDispatch` to the topic.
+  - Step 3: whatsapp-main posts a `post` send to `status@broadcast` (a text
+    status in WhatsApp's default look, or each attachment as a media status)
+    and reports Status with `posts` and `audience` (from `GetStatusPrivacy`'s
+    first option, the one whatsmeow sends to).
+  - Step 4: `runtime::post_pages` (`post/<id>`: the preview with ✅ Post /
+    ✖️ Cancel; `compose/<connector:chat#thread>`: "📢 Post a status") and
+    `DataPages`, which keeps the Health page at the root. The Telegram
+    connector opens the panel for `OpenPanelDispatch` and names the topic
+    in the panel's context (botconf `go/v0.18.0`, `WithContext`).
+  - Step 5: `[stories]` (`mirror`, `muted`, `expire_copies`), runtime.
+    Muted stories are dropped before storage (`IgnoreReason::Muted`).
+    Every stored story gets a row in `message_expiries`; the server sweeps
+    every 10 minutes and, with `expire_copies` on, deletes the mirror copies
+    (never the source) and marks the story deleted.
+  - Deviations:
+    - **whatsapp-rust takes no posts**: its status API needs an explicit
+      recipient list and it reads no story privacy, so it reports no
+      `posts` for Status and refuses a `post` with a clear reason.
+    - **No Post button on 083's refusal note**; the panel offers "Post a
+      status" instead, and `/status` replies post a refused message.
+    - **Links** go out as text statuses (no preview card), as planned.
+    - Pending posts are in memory: a restart forgets them.
+  - Tests: core +12, storage +3 (one a migration test), runtime +3,
+    WhatsApp Go +5, Telegram +4, botconf go +1. Workspace 565,
+    whatsapp-rust 187; clippy and vet clean. Every Go `vendorHash` moved.

@@ -77,6 +77,12 @@ connection dies silently; the SDKs keep retrying with backoff until then.
     owner with a `MessageRefusedDispatch`. `private_replies`: a message there
     may be quoted only in its author's direct chat (a story); anywhere else
     the reply is refused. Never a note.
+    `posts` (plan 084): the account may post there on purpose (WhatsApp
+    Status, when the connector can post stories); `audience` says who sees
+    a post ("My contacts except 3"), as of the last report. A chat with
+    `private_replies` is a story feed: the core's `stories` settings drop
+    muted stories before they are stored, and can expire their mirror
+    copies 24 hours after they were posted.
   - `avatar { id, media_id }`: `id` is the platform's picture id, empty when the
     picture was removed. `media_id` names the picture the connector uploaded to
     the core's media store first; leave the whole `avatar` out when the picture
@@ -187,6 +193,18 @@ connection dies silently; the SDKs keep retrying with backoff until then.
   The WhatsApp senders also refuse any send or edit to `status@broadcast` as
   permanent (a story to every contact), and send the owner's reaction on a
   story as an emoji in the poster's DM quoting it.
+- `MessageCreateDispatch.post` (plan 084) — the owner posts this on purpose:
+  `/status` or `/post` typed in a mirror topic (by an owner id), with `!` at
+  once, otherwise after ✅ on a preview. The only send a connector makes into
+  a chat whose posting takes posts but no messages; it quotes nothing and
+  carries no timer. Its copy at the source is the post: deleting the
+  message later deletes it.
+- `OpenPanelDispatch` (plan 084) — open the settings panel in the target
+  chat or topic for `actor` (an owner id), as if they had typed the panel
+  command there; the core opens it on the pending post's preview. The
+  connector names where a panel command was typed (the core's chat id and
+  the topic) in the panel's context. Acknowledge with the target chat id; a
+  connector without a panel acknowledges it unchanged (both SDKs' default).
 - `ReplyContext.chat_id` — the chat the quoted copy lives in at the target
   platform, when it is not the target chat (a group message quoted in a DM, a
   story quoted in its poster's DM). WhatsApp puts it in
