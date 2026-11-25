@@ -15,7 +15,7 @@ use thiserror::Error;
 use wuphf_model::{
     AddressLink, Alias, ChatAddress, ChatProfile, ConnectorId, Conversation, ConversationId,
     DedupKey, Dispatch, DispatchId, Endpoint, EndpointId, HealthPause, MediaBlob, MediaId, Message,
-    MessageCopy, MessageId, ObservedChat, ObservedMessage, Problem, RuleId,
+    MessageCopy, MessageId, ObservedChat, ObservedMessage, Problem, ReactionCount, RuleId,
 };
 
 #[derive(Debug, Error)]
@@ -450,6 +450,14 @@ pub struct StoredReaction {
     pub emoji: String,
 }
 
+/// A post's anonymous reaction counts as last read (plan 085), on the copy
+/// at `endpoint`, in the order the core composes them.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct StoredSummary {
+    pub endpoint: EndpointId,
+    pub counts: Vec<ReactionCount>,
+}
+
 /// The reactions on each copy of a message (plan 080): the last reaction
 /// each reactor has there, so a platform that reports a message's reactions
 /// as a whole can be diffed, and a repeated or echoed reaction ignored.
@@ -468,6 +476,14 @@ pub trait ReactionStore: Send + Sync + 'static {
         endpoint: EndpointId,
         reactor: &str,
         emoji: Option<&str>,
+    ) -> StorageResult<()>;
+    /// The reaction counts last read for `message` (plan 085), if any.
+    async fn reaction_summary(&self, message: MessageId) -> StorageResult<Option<StoredSummary>>;
+    /// Keep `summary` as the counts last read for `message`.
+    async fn put_reaction_summary(
+        &self,
+        message: MessageId,
+        summary: &StoredSummary,
     ) -> StorageResult<()>;
 }
 

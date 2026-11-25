@@ -40,6 +40,7 @@ pub(crate) fn status_posting() -> pb::ChatPosting {
         posts: false,
         audience: None,
         post_edits: false,
+        summaries: false,
     }
 }
 
@@ -55,6 +56,7 @@ pub(crate) fn group_posting(metadata: &GroupMetadata, own: &[String]) -> pb::Cha
         posts: false,
         audience: None,
         post_edits: false,
+        summaries: false,
     }
 }
 
@@ -71,6 +73,7 @@ pub(crate) fn newsletter_posting(_role: Option<&NewsletterRole>) -> pb::ChatPost
         posts: false,
         audience: None,
         post_edits: false,
+        summaries: false,
     }
 }
 

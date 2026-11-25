@@ -54,14 +54,15 @@ func groupPosting(info *types.GroupInfo, pn, lid types.JID) *wuphfpb.ChatPosting
 // newsletterPosting is what this account may do in a channel (plan 085): as
 // its owner or an admin, post on purpose (a post reaches every follower) and
 // edit its posts; plain messages never. Reactions are not sent: WhatsApp
-// names a channel post by a server id the bridge does not keep.
+// names a channel post by a server id the bridge does not keep. Its posts'
+// reaction counts are read when the core polls (summaries).
 func newsletterPosting(channel *types.NewsletterMetadata) *wuphfpb.ChatPosting {
 	role := types.NewsletterRole("")
 	if channel.ViewerMeta != nil {
 		role = channel.ViewerMeta.Role
 	}
 	owns := role == types.NewsletterRoleOwner || role == types.NewsletterRoleAdmin
-	return &wuphfpb.ChatPosting{Messages: false, Reactions: false, Posts: owns, PostEdits: owns}
+	return &wuphfpb.ChatPosting{Messages: false, Reactions: false, Posts: owns, PostEdits: owns, Summaries: true}
 }
 
 // Snapshot reports the story feed, every joined group (with its community

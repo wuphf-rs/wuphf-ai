@@ -97,6 +97,7 @@ where
             }
             EventKind::Reaction { .. }
             | EventKind::ReactionSet { .. }
+            | EventKind::ReactionSummary { .. }
             | EventKind::Receipt { .. } => None,
         };
         if let Some(observed) = captured {

@@ -333,6 +333,12 @@ impl Client {
                 });
                 Ok(())
             }
+            // No Rust connector reports reaction counts (plan 085): it reports
+            // no chat with `summaries`, so this is never asked of it.
+            Some(pb::server_frame::Body::RefreshReactions(refresh)) => {
+                warn!(chat = %refresh.chat_id, "asked for reaction counts this connector does not report");
+                Ok(())
+            }
             Some(pb::server_frame::Body::Rejected(rejected)) => {
                 Err(SessionError::Rejected(rejected.reason))
             }

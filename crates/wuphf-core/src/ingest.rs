@@ -283,7 +283,7 @@ where
     /// logical message. `Ok(None)` means the copy is unknown (the caller drops
     /// the event as `Unmatched`); a copy that maps to a message that is somehow
     /// no longer stored is the per-operation `missing` error.
-    async fn message_for_copy(
+    pub(crate) async fn message_for_copy(
         &self,
         endpoint: EndpointId,
         native_id: &str,
@@ -503,10 +503,12 @@ where
                 .await;
         }
 
-        let routed = self
+        let mut routed = self
             .with_routing(routing)
             .route_edit(&message, origin_endpoint)
             .await?;
+        // A post with reaction counts keeps its footer (plan 085).
+        self.keep_footers(&message, &mut routed).await?;
         let (dispatches, blocked) = self.save_dispatches(routing, routed).await?;
         Ok(IngestOutcome::Routed {
             message_id,

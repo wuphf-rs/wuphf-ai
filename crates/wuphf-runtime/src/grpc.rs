@@ -2,6 +2,7 @@ use crate::auth::{ConnectorTokens, bearer_token};
 use crate::connector::{ConnectorConnection, ConnectorHubHandle, RegistrationError};
 use crate::connector_settings::{ConnectorSettings, declaration_from_wire};
 use crate::live_sessions::LiveSessions;
+use crate::owner_send::now_ms;
 use std::pin::Pin;
 use std::sync::Arc;
 use thiserror::Error;
@@ -14,7 +15,7 @@ use wuphf_model::{
     Connector, ConnectorCapabilities, ConnectorId, ConnectorInput, ConnectorOutput,
     DisappearingTimer, DispatchAck, DispatchFailed, Event, EventKind, InboundWork, MediaId,
     MuteState, NewMessage, NoticeKind, ParticipantChange, ParticipantChangeKind, Platform,
-    ReactorReaction, ReceiptKind, ReplyContext, ReportedAvatar, SourceAddress,
+    ReactionCount, ReactorReaction, ReceiptKind, ReplyContext, ReportedAvatar, SourceAddress,
 };
 use wuphf_proto::connector as pb;
 use wuphf_proto::connector::connector_transport_server::ConnectorTransport;
@@ -421,6 +422,26 @@ fn input_from_proto(
                     .collect::<Result<_, WireError>>()?,
             },
         })),
+        Some(pb::client_frame::Body::ReactionSummary(event)) => Ok(ConnectorInput::event(Event {
+            source: SourceAddress {
+                connector_id: connector_id.clone(),
+                address: ChatAddress::new(required_string(event.chat_id, "chat_id")?, None),
+                chat_title: None,
+            },
+            payload: EventKind::ReactionSummary {
+                native_id: required_string(event.platform_message_id, "platform_message_id")?,
+                counts: event
+                    .counts
+                    .into_iter()
+                    .map(|count| ReactionCount {
+                        emoji: count.emoji,
+                        count: count.count,
+                    })
+                    .collect(),
+                // The core is clock-free: the summary carries when it arrived.
+                received_at_ms: now_ms(),
+            },
+        })),
         Some(pb::client_frame::Body::Receipt(event)) => {
             let kind = match pb::ReceiptKind::try_from(event.kind)
                 .map_err(|_| WireError("invalid receipt kind".into()))?
@@ -707,6 +728,7 @@ fn chat_update_from_proto(update: pb::ChatUpdate) -> Result<ChatUpdate, WireErro
             posts: posting.posts,
             audience: posting.audience,
             post_edits: posting.post_edits,
+            summaries: posting.summaries,
         }),
         community: update.community.map(|community| ChatCommunity {
             chat_id: community.chat_id,

@@ -1593,6 +1593,18 @@ fn the_runtime_settings_are_the_described_ones() {
                 &yes_no,
                 false
             ),
+            (
+                "channels.counts_poll_minutes",
+                Some("Read reaction counts every"),
+                &crate::schema::MINUTES,
+                false
+            ),
+            (
+                "channels.counts_max_age_days",
+                Some("Update counts for"),
+                &crate::schema::DAYS,
+                false
+            ),
         ]
     );
     assert_eq!(

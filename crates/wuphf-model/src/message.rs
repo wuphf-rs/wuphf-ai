@@ -117,6 +117,14 @@ pub struct ReactorReaction {
     pub emoji: String,
 }
 
+/// How many reacted to a post with one emoji, in an
+/// [`EventKind::ReactionSummary`].
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ReactionCount {
+    pub emoji: String,
+    pub count: u32,
+}
+
 /// Who wrote a message's copy at one endpoint, in the terms a platform that
 /// addresses a message by its author needs (a WhatsApp reaction key). When
 /// the bridge wrote that copy the author is the bridge's own account;
@@ -267,6 +275,15 @@ pub enum EventKind {
     ReactionSet {
         native_id: String,
         reactions: Vec<ReactorReaction>,
+    },
+    /// A post's anonymous reaction counts (plan 085: a WhatsApp channel
+    /// post), read when the core asked. `received_at_ms` is when the bridge
+    /// received them, which keeps the core clock-free: a post older than
+    /// `channels.counts_max_age_days` by then is not updated.
+    ReactionSummary {
+        native_id: String,
+        counts: Vec<ReactionCount>,
+        received_at_ms: i64,
     },
     /// A delivery or read receipt observed on the source platform. Surfaced on
     /// the message's other copies (a 👍 for delivered, 👀 for read in DMs).

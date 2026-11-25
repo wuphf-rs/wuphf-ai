@@ -4311,6 +4311,7 @@ async fn report_receive_only(core: &Core<InMemoryStorage>) {
                 posts: false,
                 audience: None,
                 post_edits: false,
+                summaries: false,
             }),
             ..ChatUpdate::new(GROUP)
         }],
@@ -4568,6 +4569,7 @@ async fn story_feed() -> Core<InMemoryStorage> {
                 posts: false,
                 audience: None,
                 post_edits: false,
+                summaries: false,
             }),
             ..ChatUpdate::new(STATUS)
         }],
@@ -4671,6 +4673,7 @@ async fn story_topic() -> Core<InMemoryStorage> {
             posts: true,
             audience: Some("My contacts".into()),
             post_edits: false,
+            summaries: false,
         },
     )
     .await
@@ -4900,6 +4903,7 @@ async fn stories_core(stories: crate::StoriesSettings) -> Core<InMemoryStorage> 
                 posts: false,
                 audience: None,
                 post_edits: false,
+                summaries: false,
             }),
             ..ChatUpdate::new(STATUS)
         }],
@@ -5021,6 +5025,7 @@ async fn channel_topic() -> Core<InMemoryStorage> {
             posts: true,
             audience: None,
             post_edits: true,
+            summaries: true,
         },
     )
     .await
@@ -5178,4 +5183,167 @@ async fn receive_only_naming_a_community_covers_its_groups() {
             .unwrap(),
     );
     assert_refused(&dispatches, "tg-9");
+}
+
+// ---- Plan 085: reaction counts ----
+
+const DAY_MS: i64 = 24 * 60 * 60 * 1000;
+
+/// The counts of channel post `native_id` (the channel's "wa-story", copied
+/// to Telegram as "tg-story"), as read at `received_at_ms`.
+fn summary(native_id: &str, counts: &[(&str, u32)], received_at_ms: i64) -> Event {
+    Event {
+        source: SourceAddress {
+            connector_id: ConnectorId(WHATSAPP.into()),
+            address: ChatAddress::new(CHANNEL, None),
+            chat_title: None,
+        },
+        payload: EventKind::ReactionSummary {
+            native_id: native_id.into(),
+            counts: counts
+                .iter()
+                .map(|(emoji, count)| wuphf_model::ReactionCount {
+                    emoji: (*emoji).into(),
+                    count: *count,
+                })
+                .collect(),
+            received_at_ms,
+        },
+    }
+}
+
+/// The text of the one edit of Telegram copy `native_id` among `dispatches`.
+fn edited_text(dispatches: &[Dispatch], native_id: &str) -> Option<String> {
+    assert_eq!(dispatches.len(), 1, "{dispatches:#?}");
+    match &dispatches[0].action {
+        Action::Edit {
+            message,
+            native_id: edited,
+        } if edited == native_id => message.text.clone(),
+        other => panic!("expected an edit of {native_id}, got {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn a_channel_posts_counts_become_a_footer_on_its_mirror_copy() {
+    let core = channel_topic().await;
+    let outcome = core
+        .ingest(summary("wa-story", &[("👍", 1), ("❤️", 2)], 1_000))
+        .await
+        .unwrap();
+    let text = edited_text(outcome.dispatches(), "tg-story");
+    assert_eq!(text.as_deref(), Some("hello\n\n❤️ 2 · 👍 1"));
+
+    // The same counts again edit nothing.
+    let again = core
+        .ingest(summary("wa-story", &[("❤️", 2), ("👍", 1)], 2_000))
+        .await
+        .unwrap();
+    assert!(matches!(
+        again,
+        IngestOutcome::Ignored(IgnoreReason::UnchangedSummary)
+    ));
+
+    // No reactions left: the footer goes.
+    let cleared = core.ingest(summary("wa-story", &[], 3_000)).await.unwrap();
+    assert_eq!(
+        edited_text(cleared.dispatches(), "tg-story").as_deref(),
+        Some("hello")
+    );
+}
+
+#[tokio::test]
+async fn a_post_without_reactions_or_past_the_age_limit_is_not_edited() {
+    let core = channel_topic().await;
+    let none = core.ingest(summary("wa-story", &[], 1_000)).await.unwrap();
+    assert!(matches!(
+        none,
+        IngestOutcome::Ignored(IgnoreReason::UnchangedSummary)
+    ));
+    // The post was posted at 1 ms; the default limit is 30 days.
+    let late = core
+        .ingest(summary("wa-story", &[("❤️", 1)], 31 * DAY_MS))
+        .await
+        .unwrap();
+    assert!(matches!(
+        late,
+        IngestOutcome::Ignored(IgnoreReason::UnchangedSummary)
+    ));
+}
+
+#[tokio::test]
+async fn an_edit_of_a_post_keeps_its_footer() {
+    let core = channel_topic().await;
+    core.ingest(summary("wa-story", &[("❤️", 2)], 1_000))
+        .await
+        .unwrap();
+    let edit = edit_event(WHATSAPP, CHANNEL, None, "wa-story", Some("fixed"));
+    let outcome = core.ingest(edit).await.unwrap();
+    assert_eq!(
+        edited_text(outcome.dispatches(), "tg-story").as_deref(),
+        Some("fixed\n\n❤️ 2")
+    );
+}
+
+#[tokio::test]
+async fn a_post_the_owner_wrote_gets_no_footer() {
+    // Posted from Telegram: its Telegram copy is the owner's own message,
+    // and the channel's is WhatsApp's.
+    let core = channel_topic().await;
+    post_then_edit(&core, "300").await;
+    let outcome = core
+        .ingest(summary("wa-posted", &[("❤️", 5)], 2_000))
+        .await
+        .unwrap();
+    assert!(outcome.dispatches().is_empty(), "{outcome:#?}");
+    // Nor does the owner's edit of it carry one to the channel.
+    let edit = edit_event(TELEGRAM, MIRROR_CHAT, Some("300"), "tg-mine", Some("again"));
+    let edits = routed(core.ingest(edit).await.unwrap()).0;
+    assert!(matches!(
+        &edits[0].action,
+        Action::Edit { message, native_id } if native_id == "wa-posted" && message.text.as_deref() == Some("again")
+    ));
+}
+
+#[tokio::test]
+async fn chats_reporting_summaries_are_polled_every_interval() {
+    let core = channel_topic().await;
+    let now = 100 * DAY_MS;
+    let polls = core.due_reaction_polls(now).await.unwrap();
+    assert_eq!(
+        polls,
+        [crate::ReactionPoll {
+            connector_id: ConnectorId(WHATSAPP.into()),
+            chat_id: CHANNEL.into(),
+            since_ms: now - 30 * DAY_MS,
+        }]
+    );
+    core.mark_reaction_polled(&polls[0], now);
+    let minute = 60 * 1000;
+    assert!(
+        core.due_reaction_polls(now + 14 * minute)
+            .await
+            .unwrap()
+            .is_empty()
+    );
+    let next = core.due_reaction_polls(now + 15 * minute).await.unwrap();
+    assert_eq!(next[0].since_ms, now);
+
+    // A chat that stops reporting summaries is not polled.
+    core.update_chats(
+        &ConnectorId(WHATSAPP.into()),
+        vec![ChatUpdate {
+            posting: Some(wuphf_model::ChatPosting::open()),
+            ..ChatUpdate::new(CHANNEL)
+        }],
+        true,
+    )
+    .await
+    .unwrap();
+    assert!(
+        core.due_reaction_polls(now + DAY_MS)
+            .await
+            .unwrap()
+            .is_empty()
+    );
 }

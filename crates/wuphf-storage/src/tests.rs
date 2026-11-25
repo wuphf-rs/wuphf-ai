@@ -1733,6 +1733,45 @@ async fn reactions_round_trip<S: Storage>(storage: S) {
 }
 
 #[tokio::test]
+async fn memory_reaction_summaries_round_trip() {
+    reaction_summaries_round_trip(InMemoryStorage::default()).await;
+}
+
+#[tokio::test]
+async fn sqlite_reaction_summaries_round_trip() {
+    reaction_summaries_round_trip(temp_sqlite().await).await;
+}
+
+/// A message's reaction counts (plan 085) are kept whole and replaced whole.
+async fn reaction_summaries_round_trip<S: Storage>(storage: S) {
+    let message = MessageId::new();
+    assert_eq!(storage.reaction_summary(message).await.unwrap(), None);
+    let count = |emoji: &str, count| ReactionCount {
+        emoji: emoji.into(),
+        count,
+    };
+    let first = StoredSummary {
+        endpoint: EndpointId::new(),
+        counts: vec![count("❤️", 120), count("👍", 34)],
+    };
+    storage.put_reaction_summary(message, &first).await.unwrap();
+    assert_eq!(
+        storage.reaction_summary(message).await.unwrap(),
+        Some(first.clone())
+    );
+
+    let later = StoredSummary {
+        counts: vec![count("❤️", 121)],
+        ..first
+    };
+    storage.put_reaction_summary(message, &later).await.unwrap();
+    assert_eq!(
+        storage.reaction_summary(message).await.unwrap(),
+        Some(later)
+    );
+}
+
+#[tokio::test]
 async fn memory_acknowledging_create_binds_blocked_reaction_author() {
     acknowledging_create_binds_blocked_reaction_author(InMemoryStorage::default()).await;
 }

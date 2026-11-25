@@ -18,6 +18,7 @@ use wuphf_model::{
 use wuphf_storage::Storage;
 
 use crate::Observer;
+use crate::live_sessions::LiveSessions;
 
 /// Accepts owner-authored sends and feeds them into the running delivery loop.
 pub struct OwnerMessageSender<S> {
@@ -152,6 +153,47 @@ where
                     }
                     Err(OwnerSendError::RuntimeStopped) => return,
                     Err(error) => tracing::warn!(%error, "could not expire stories"),
+                }
+            }
+        })
+    }
+
+    /// Ask the connectors for the reaction counts due a poll (plan 085),
+    /// returning how many chats were asked. A chat whose connector is away
+    /// stays due, and is asked once it is back.
+    pub async fn poll_reactions(&self, sessions: &LiveSessions) -> Result<usize, OwnerSendError> {
+        let now = now_ms();
+        let mut asked = 0;
+        for poll in self.core.due_reaction_polls(now).await? {
+            match sessions.refresh_reactions(&poll.connector_id.0, &poll.chat_id, poll.since_ms) {
+                Ok(()) => {
+                    self.core.mark_reaction_polled(&poll, now);
+                    asked += 1;
+                }
+                Err(reason) => {
+                    tracing::debug!(%reason, chat = %poll.chat_id, "reaction counts not polled")
+                }
+            }
+        }
+        Ok(asked)
+    }
+
+    /// Look for reaction-count polls due every `every`, until the task is
+    /// aborted; each chat is polled every `channels.counts_poll_minutes`.
+    pub fn spawn_reaction_polls(
+        &self,
+        sessions: Arc<LiveSessions>,
+        every: std::time::Duration,
+    ) -> tokio::task::JoinHandle<()> {
+        let sender = self.clone();
+        tokio::spawn(async move {
+            let mut ticks = tokio::time::interval(every);
+            loop {
+                ticks.tick().await;
+                match sender.poll_reactions(&sessions).await {
+                    Ok(_) => {}
+                    Err(OwnerSendError::RuntimeStopped) => return,
+                    Err(error) => tracing::warn!(%error, "could not poll reaction counts"),
                 }
             }
         })

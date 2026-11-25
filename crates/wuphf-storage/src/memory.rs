@@ -6,7 +6,7 @@ use crate::{
     ChatProfileStore, DispatchStore, HealthStore, HeldDispatch, MediaStore, MessageStore,
     ObservationStore, PanelTokens, ProvisioningStash, ReactionStore, SettingsDeclaration,
     SettingsDeclarations, SettingsOverrides, StorageError, StorageResult, StoredProblem,
-    StoredReaction, StoredSetting, TopologyStore,
+    StoredReaction, StoredSetting, StoredSummary, TopologyStore,
 };
 use async_trait::async_trait;
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
@@ -68,6 +68,8 @@ struct State {
     reactions: HashMap<(MessageId, EndpointId), BTreeMap<String, String>>,
     /// Story expiries, mirroring `message_expiries`.
     expiries: HashMap<MessageId, i64>,
+    /// Reaction counts, mirroring `reaction_summaries`.
+    summaries: HashMap<MessageId, StoredSummary>,
 }
 
 struct StoredMedia {
@@ -1014,6 +1016,23 @@ impl HealthStore for InMemoryStorage {
 
 #[async_trait]
 impl ReactionStore for InMemoryStorage {
+    async fn reaction_summary(&self, message: MessageId) -> StorageResult<Option<StoredSummary>> {
+        Ok(self.state.read().await.summaries.get(&message).cloned())
+    }
+
+    async fn put_reaction_summary(
+        &self,
+        message: MessageId,
+        summary: &StoredSummary,
+    ) -> StorageResult<()> {
+        self.state
+            .write()
+            .await
+            .summaries
+            .insert(message, summary.clone());
+        Ok(())
+    }
+
     async fn reactions_at(
         &self,
         message: MessageId,

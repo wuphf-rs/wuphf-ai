@@ -91,6 +91,9 @@ type Options struct {
 	// Prober, when set, answers the core's health probes (see Prober). Nil
 	// answers every chat as unknown.
 	Prober Prober
+	// Reactions, when set, reads the reaction counts the core polls for (see
+	// ReactionReader). Nil reads none.
+	Reactions ReactionReader
 	// Tools, when set, reports the external programs the connector runs, at
 	// registration and in every probe's answer.
 	Tools Tools
@@ -453,6 +456,24 @@ func (c Client) runSession(
 					select {
 					case commandResults <- result:
 					case <-ctx.Done():
+					}
+				}()
+			// Reading counts asks the platform: in its own goroutine, its
+			// summaries sent through the same writer as commands.
+			case *wuphfpb.ServerFrame_RefreshReactions:
+				refresh := body.RefreshReactions
+				go func() {
+					frames, err := reactionFrames(ctx, c.opts.Reactions, refresh)
+					if err != nil {
+						c.logger.Warn().Err(err).Str("chat", refresh.GetChatId()).Msg("could not read reaction counts")
+						return
+					}
+					for _, frame := range frames {
+						select {
+						case commandResults <- frame:
+						case <-ctx.Done():
+							return
+						}
 					}
 				}()
 			case *wuphfpb.ServerFrame_Rejected:

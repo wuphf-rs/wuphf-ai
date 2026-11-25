@@ -25,7 +25,7 @@ const FILE_DESCRIPTION: &str = "Every key can be overridden by an environment va
      the first `:`, so chat ids may contain `:`. Inside the chat and the thread, write `#` \
      as `%23` and `%` as `%25`. Connector ids may not contain `:`, `#`, `%` or spaces.\n\n\
      Runtime settings (`notify`, `receive_only`, `mirror_deletes_kept`, `rules`, `chat_state`, \
-     `stories`) can also be changed while the core \
+     `stories`, `channels`) can also be changed while the core \
      runs, from a settings panel or `wuphf-server settings`: stored overrides win over this \
      file, and unsetting one goes back to it.";
 
@@ -179,6 +179,10 @@ pub struct Configuration {
     /// copies are deleted when they expire.
     #[serde(default)]
     pub stories: StoriesConfig,
+    /// WhatsApp channels: how often their posts' reaction counts are read for
+    /// the footer line under each mirrored post.
+    #[serde(default)]
+    pub channels: ChannelsConfig,
     #[serde(default)]
     pub functions: FunctionsConfig,
     #[serde(default)]
@@ -243,6 +247,39 @@ impl Default for StoriesConfig {
 
 fn default_true() -> bool {
     true
+}
+
+/// `[channels]` (plan 085): the reaction counts of a WhatsApp channel's posts
+/// show as a footer line under each mirrored post (`❤️ 120 · 👍 34`), read
+/// every few minutes and edited in only when they change.
+#[derive(Debug, Clone, Deserialize, Serialize, Describe)]
+pub struct ChannelsConfig {
+    /// Minutes between two readings of a channel's reaction counts. 0 reads
+    /// none, and footers stay as they are.
+    #[serde(default = "default_counts_poll_minutes")]
+    #[botconf(runtime, title = "Read reaction counts every", panel = crate::schema::MINUTES)]
+    pub counts_poll_minutes: u32,
+    /// Days after a post was posted that its counts stop updating.
+    #[serde(default = "default_counts_max_age_days")]
+    #[botconf(runtime, title = "Update counts for", panel = crate::schema::DAYS)]
+    pub counts_max_age_days: u32,
+}
+
+impl Default for ChannelsConfig {
+    fn default() -> Self {
+        Self {
+            counts_poll_minutes: default_counts_poll_minutes(),
+            counts_max_age_days: default_counts_max_age_days(),
+        }
+    }
+}
+
+fn default_counts_poll_minutes() -> u32 {
+    15
+}
+
+fn default_counts_max_age_days() -> u32 {
+    30
 }
 
 /// `[chat_state]`: each state's direction, named from the source chat

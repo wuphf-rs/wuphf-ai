@@ -6,7 +6,7 @@ use crate::domains;
 use botconf::{Choices, Field, FixedChoice, Form, Kind, RuntimeSetting};
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
-use wuphf_core::{ChatStateSettings, RoutingConfig, StoriesSettings};
+use wuphf_core::{ChannelsSettings, ChatStateSettings, RoutingConfig, StoriesSettings};
 use wuphf_functions::Functions;
 use wuphf_model::{
     ChatStatePolicy, ChatStatePolicyOverride, Connector, ConnectorCapabilities, ConnectorId,
@@ -131,6 +131,10 @@ impl botconf::Schema for WuphfSchema {
                     .collect(),
                 expire_copies: config.stories.expire_copies,
             })
+            .with_channels(ChannelsSettings {
+                counts_poll_minutes: config.channels.counts_poll_minutes,
+                counts_max_age_days: config.channels.counts_max_age_days,
+            })
             .with_mirror_deletes_kept(
                 config
                     .mirror_deletes_kept
@@ -178,6 +182,10 @@ const DIRECTIONS: &[FixedChoice] = &[
     FixedChoice::new("to_source", "Mirror → source"),
     FixedChoice::new("both", "Both ways"),
 ];
+/// A number of minutes (`channels.counts_poll_minutes`), 0 for never.
+pub(crate) const MINUTES: Kind = Kind::number(0, 24 * 60, "min", &[0, 5, 15, 60], false);
+/// A number of days (`channels.counts_max_age_days`).
+pub(crate) const DAYS: Kind = Kind::number(1, 365, "days", &[7, 30, 90], false);
 pub(crate) const DIRECTION: Kind = Kind::one_of(Choices::fixed(DIRECTIONS), false, false);
 const OPTIONAL_DIRECTION: Kind = Kind::one_of(Choices::fixed(DIRECTIONS), false, true);
 /// An override names its chat (required, so a new one is built in a panel

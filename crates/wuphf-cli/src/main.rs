@@ -339,6 +339,10 @@ async fn serve(path: PathBuf) -> Result<()> {
     let runtime_task = tokio::spawn(runtime.run());
     let health_task = health.spawn();
     let story_task = story_sender.spawn_story_expiry(std::time::Duration::from_secs(10 * 60));
+    // Channel posts' reaction counts (plan 085): due polls are looked for
+    // every minute; each chat is polled every channels.counts_poll_minutes.
+    let reaction_task = story_sender
+        .spawn_reaction_polls(Arc::clone(&sessions), std::time::Duration::from_secs(60));
     let hub_task = tokio::spawn(hub.run());
     let function_task = tokio::spawn(function_hub.run());
     tracing::info!(listen = %configuration.listen, "wuphf connector gRPC server listening");
@@ -377,6 +381,7 @@ async fn serve(path: PathBuf) -> Result<()> {
     hub_task.abort();
     health_task.abort();
     story_task.abort();
+    reaction_task.abort();
     function_task.abort();
     Ok(())
 }

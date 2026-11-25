@@ -22,16 +22,18 @@ mod resolve;
 mod router;
 mod send;
 mod stories;
+mod summaries;
 
 pub use config::{
-    ChatStateSettings, MatchedRule, RoutingConfig, RoutingConfigError, RoutingSource,
-    StoriesSettings,
+    ChannelsSettings, ChatStateSettings, MatchedRule, RoutingConfig, RoutingConfigError,
+    RoutingSource, StoriesSettings,
 };
 pub use hold::Released;
 pub use posts::{PENDING_POST_TTL_MS, PendingPost, PostOutcome};
 use router::Router;
 pub use router::RouterError;
 pub use stories::STORY_LIFETIME_MS;
+pub use summaries::ReactionPoll;
 
 pub struct Core<S> {
     storage: Arc<S>,
@@ -56,6 +58,10 @@ pub struct Core<S> {
     /// command message's id. In memory: a restart forgets them, and the owner
     /// sends the command again.
     posts: Mutex<HashMap<MessageId, PendingPost>>,
+    /// The chats polled for reaction counts, with when each was last polled
+    /// (plan 085). In memory: filled from the posting facts each connector
+    /// reports when it connects.
+    reaction_polls: Mutex<summaries::PollSchedule>,
 }
 
 /// A conversation's in-flight thread provisioning: the dispatches whose
@@ -78,6 +84,7 @@ where
             notices: Mutex::new(HashMap::new()),
             health_pauses: RwLock::default(),
             posts: Mutex::new(HashMap::new()),
+            reaction_polls: Mutex::new(HashMap::new()),
         }
     }
 
@@ -175,6 +182,20 @@ where
             } => {
                 self.ingest_reaction_set(&routing, &origin, native_id, reactions)
                     .await
+            }
+            EventKind::ReactionSummary {
+                native_id,
+                counts,
+                received_at_ms,
+            } => {
+                self.ingest_reaction_summary(
+                    &routing,
+                    origin_endpoint,
+                    native_id,
+                    counts,
+                    received_at_ms,
+                )
+                .await
             }
             EventKind::Receipt {
                 native_id,

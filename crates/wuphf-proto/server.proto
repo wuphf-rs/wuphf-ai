@@ -191,6 +191,7 @@ message ServerFrame {
     ProbeChats probe = 11;
     MessageRefusedDispatch refused = 12;
     OpenPanelDispatch open_panel = 13;
+    RefreshReactions refresh_reactions = 14;
   }
 }
 
@@ -202,6 +203,16 @@ message ServerFrame {
 message ProbeChats {
   string request_id = 1;
   repeated string chat_ids = 2;
+}
+
+// Report the reaction counts of this chat's posts whose counts changed since
+// `since_ms` (Unix ms), as ReactionSummaryEvents (plan 085). Sent every
+// `channels.counts_poll_minutes` for each chat whose posting reports
+// `summaries`. Not a dispatch: never stored or redelivered, and no answer
+// beyond the events; a connector that cannot read the counts now sends none.
+message RefreshReactions {
+  string chat_id = 1;
+  int64 since_ms = 2;
 }
 
 // Run one of the commands the connector declared (Registration.commands),

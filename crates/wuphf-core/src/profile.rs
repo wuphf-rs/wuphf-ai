@@ -250,6 +250,9 @@ where
                 .await;
         }
         let (changes, avatar) = self.merge_report(connector_id, update).await?;
+        if let Some(posting) = &update.posting {
+            self.schedule_summaries(connector_id, &update.chat_id, posting.summaries);
+        }
         let mut dispatches = Vec::new();
         let conversations = self
             .conversations_of_chat(connector_id, &update.chat_id)

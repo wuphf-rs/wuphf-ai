@@ -6,7 +6,7 @@ use crate::{
     ChatProfileStore, DispatchStore, HealthStore, HeldDispatch, MediaStore, MessageStore,
     ObservationStore, PanelTokens, ProvisioningStash, ReactionStore, SettingsDeclaration,
     SettingsDeclarations, SettingsOverrides, SettingsOwner, StorageError, StorageResult,
-    StoredProblem, StoredReaction, StoredSetting, TopologyStore,
+    StoredProblem, StoredReaction, StoredSetting, StoredSummary, TopologyStore,
 };
 use async_trait::async_trait;
 use sqlx::migrate::Migrator;
@@ -1450,6 +1450,41 @@ fn held_from_row(row: sqlx::sqlite::SqliteRow) -> StorageResult<HeldDispatch> {
 
 #[async_trait]
 impl ReactionStore for SqliteStorage {
+    async fn reaction_summary(&self, message: MessageId) -> StorageResult<Option<StoredSummary>> {
+        let row =
+            sqlx::query("SELECT endpoint_id, counts FROM reaction_summaries WHERE message_id = ?")
+                .bind(message.to_string())
+                .fetch_optional(&self.pool)
+                .await?;
+        row.map(|row| {
+            Ok(StoredSummary {
+                endpoint: parse_endpoint_id(row.get("endpoint_id"))?,
+                counts: serde_json::from_str(row.get("counts"))?,
+            })
+        })
+        .transpose()
+    }
+
+    async fn put_reaction_summary(
+        &self,
+        message: MessageId,
+        summary: &StoredSummary,
+    ) -> StorageResult<()> {
+        sqlx::query(
+            "INSERT INTO reaction_summaries (message_id, endpoint_id, counts, updated_at_ms)
+             VALUES (?, ?, ?, ?)
+             ON CONFLICT (message_id) DO UPDATE SET endpoint_id = excluded.endpoint_id,
+             counts = excluded.counts, updated_at_ms = excluded.updated_at_ms",
+        )
+        .bind(message.to_string())
+        .bind(summary.endpoint.to_string())
+        .bind(serde_json::to_string(&summary.counts)?)
+        .bind(wall_clock_ms())
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
     async fn reactions_at(
         &self,
         message: MessageId,

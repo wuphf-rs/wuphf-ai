@@ -1015,3 +1015,19 @@ async fn migration_0024_adds_the_message_expiries_table() {
     sqlx::query(insert).execute(&pool).await.unwrap();
     assert!(sqlx::query(insert).execute(&pool).await.is_err());
 }
+
+/// 0025 only adds the reaction summaries table (plan 085): a database from
+/// before it keeps its dispatches, and the table keeps one row per message.
+#[tokio::test]
+async fn migration_0025_adds_the_reaction_summaries_table() {
+    let pool = database_before(25).await;
+    insert_dispatches(&pool, &DISPATCHES_BEFORE_0019).await;
+
+    MIGRATOR.run(&pool).await.unwrap();
+
+    assert_dispatches(&pool).await;
+    let insert = "INSERT INTO reaction_summaries (message_id, endpoint_id, counts, updated_at_ms) \
+                  VALUES ('m', 'e', '[]', 1)";
+    sqlx::query(insert).execute(&pool).await.unwrap();
+    assert!(sqlx::query(insert).execute(&pool).await.is_err());
+}

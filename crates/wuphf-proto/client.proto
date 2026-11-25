@@ -92,6 +92,9 @@ message ChatPosting {
   // An edit of a message already posted there goes through (plan 085: a
   // channel post). Off for a story: WhatsApp cannot edit one.
   bool post_edits = 6;
+  // The connector reports reaction counts for posts here when asked
+  // (RefreshReactions, plan 085): a WhatsApp channel.
+  bool summaries = 7;
 }
 
 // A community, as a member chat names it: the parent chat's id, which rule
@@ -221,6 +224,23 @@ message ReactionsEvent {
   repeated ReactorReaction reactions = 4;
 }
 
+// A post's reaction counts, anonymous (plan 085: a WhatsApp channel post),
+// sent in answer to a RefreshReactions: one per post whose counts the
+// connector read. The core keeps the counts per message and edits the
+// post's mirror copies with a footer line when they change. An empty list:
+// no reactions.
+message ReactionSummaryEvent {
+  string chat_id = 1;
+  string platform_message_id = 2;
+  repeated ReactionCount counts = 3;
+}
+
+// How many reacted with one emoji.
+message ReactionCount {
+  string emoji = 1;
+  uint32 count = 2;
+}
+
 // One reactor's reaction in a `ReactionsEvent`.
 message ReactorReaction {
   string sender = 1;
@@ -321,6 +341,7 @@ message ClientFrame {
     CommandResult command_result = 12;
     ProbeResult probe_result = 13;
     ReactionsEvent reactions_set = 14;
+    ReactionSummaryEvent reaction_summary = 15;
   }
 }
 

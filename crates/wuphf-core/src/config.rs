@@ -30,6 +30,8 @@ pub struct RoutingConfig {
     mirror_deletes_kept: HashSet<ConnectorId>,
     /// Which stories are mirrored, and whether their copies expire (plan 084).
     stories: StoriesSettings,
+    /// How channel posts' reaction counts are polled (plan 085).
+    channels: ChannelsSettings,
 }
 
 /// The `stories` settings (plan 084). A story is a message of a feed chat: one
@@ -53,6 +55,42 @@ impl Default for StoriesSettings {
             muted: Vec::new(),
             expire_copies: false,
         }
+    }
+}
+
+/// The `channels` settings (plan 085): how often the reaction counts of the
+/// posts in chats that report them (a WhatsApp channel) are polled, and how
+/// old a post may be and still have its counts updated.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ChannelsSettings {
+    /// Minutes between two polls of one chat; 0 polls none.
+    pub counts_poll_minutes: u32,
+    /// Days after it was posted that a post's counts stop updating.
+    pub counts_max_age_days: u32,
+}
+
+impl Default for ChannelsSettings {
+    fn default() -> Self {
+        Self {
+            counts_poll_minutes: 15,
+            counts_max_age_days: 30,
+        }
+    }
+}
+
+impl ChannelsSettings {
+    const MINUTE_MS: i64 = 60 * 1000;
+    const DAY_MS: i64 = 24 * 60 * Self::MINUTE_MS;
+
+    /// The time between two polls of one chat; `None` when polls are off.
+    pub fn poll_every_ms(&self) -> Option<i64> {
+        (self.counts_poll_minutes > 0)
+            .then(|| i64::from(self.counts_poll_minutes) * Self::MINUTE_MS)
+    }
+
+    /// How long after it was posted a post's counts are updated.
+    pub fn max_age_ms(&self) -> i64 {
+        i64::from(self.counts_max_age_days) * Self::DAY_MS
     }
 }
 
@@ -103,6 +141,7 @@ impl RoutingConfig {
             receive_only: Vec::new(),
             mirror_deletes_kept: HashSet::new(),
             stories: StoriesSettings::default(),
+            channels: ChannelsSettings::default(),
         }
     }
 
@@ -176,6 +215,17 @@ impl RoutingConfig {
     /// The `stories` settings.
     pub fn stories(&self) -> &StoriesSettings {
         &self.stories
+    }
+
+    /// Declare how reaction counts are polled.
+    pub fn with_channels(mut self, channels: ChannelsSettings) -> Self {
+        self.channels = channels;
+        self
+    }
+
+    /// The `channels` settings.
+    pub fn channels(&self) -> &ChannelsSettings {
+        &self.channels
     }
 
     /// Whether the owner marked this conversation receive-only, naming its

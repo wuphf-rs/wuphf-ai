@@ -1,7 +1,8 @@
 //! The live connector sessions, and the requests the core makes on them that
 //! are not dispatches: the commands a session declared (plan 058), run from
 //! the settings panel (`RunCommand` → `CommandResult`), and health probes
-//! (plan 079, `ProbeChats` → `ProbeResult`). Nothing here is stored or
+//! (plan 079, `ProbeChats` → `ProbeResult`), and reaction-count polls (plan
+//! 085, `RefreshReactions`, answered by events). Nothing here is stored or
 //! redelivered, so a request to a connector that is not connected is refused.
 //!
 //! The registry also says when sessions come and go ([`SessionEvent`]), when
@@ -252,6 +253,35 @@ impl LiveSessions {
                 Err(format!("{connector} did not answer within {timeout:?}"))
             }
         }
+    }
+
+    /// Ask `connector` for the reaction counts of `chat_id`'s posts that
+    /// changed since `since_ms` (plan 085). Nothing is awaited: the answer
+    /// comes back as reaction summary events.
+    pub fn refresh_reactions(
+        &self,
+        connector: &str,
+        chat_id: &str,
+        since_ms: i64,
+    ) -> Result<(), String> {
+        let frames = {
+            let live = self.live.lock().unwrap();
+            let Some(session) = live.get(connector) else {
+                return Err(format!("{connector} is not connected"));
+            };
+            session.frames.clone()
+        };
+        let frame = pb::ServerFrame {
+            body: Some(pb::server_frame::Body::RefreshReactions(
+                pb::RefreshReactions {
+                    chat_id: chat_id.to_owned(),
+                    since_ms,
+                },
+            )),
+        };
+        frames
+            .try_send(frame)
+            .map_err(|_| format!("{connector} is busy"))
     }
 
     /// A session's answer to a command; one nobody waits for any more is

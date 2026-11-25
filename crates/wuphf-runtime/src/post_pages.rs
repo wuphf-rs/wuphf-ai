@@ -417,6 +417,7 @@ mod tests {
                     posts: true,
                     audience: Some("My contacts".into()),
                     post_edits: false,
+                    summaries: false,
                 }),
                 ..ChatUpdate::new(STATUS)
             }],

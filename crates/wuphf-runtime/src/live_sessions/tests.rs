@@ -198,3 +198,21 @@ fn presence_says_since_when_a_connector_is_away() {
     let _again = registry.attach("wa", Vec::new(), Vec::new());
     assert_eq!(registry.presence().away_since("wa", 0), None);
 }
+
+#[tokio::test]
+async fn a_reaction_poll_is_written_to_the_live_session() {
+    let registry = Arc::new(LiveSessions::default());
+    assert!(registry.refresh_reactions("wa", "1@newsletter", 5).is_err());
+    let mut session = registry.attach("wa", Vec::new(), Vec::new());
+    registry.refresh_reactions("wa", "1@newsletter", 5).unwrap();
+    let frame = session.frames.recv().await.unwrap();
+    assert_eq!(
+        frame.body,
+        Some(pb::server_frame::Body::RefreshReactions(
+            pb::RefreshReactions {
+                chat_id: "1@newsletter".into(),
+                since_ms: 5,
+            }
+        ))
+    );
+}

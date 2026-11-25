@@ -112,6 +112,14 @@ impl ChatProfile {
             .is_some_and(|posting| posting.private_replies)
     }
 
+    /// Whether the connector reports reaction counts for posts here (plan
+    /// 085).
+    pub fn reports_summaries(&self) -> bool {
+        self.posting
+            .as_ref()
+            .is_some_and(|posting| posting.summaries)
+    }
+
     /// Whether an edit of a post here goes through (plan 085).
     pub fn accepts_post_edits(&self) -> bool {
         self.posting
@@ -153,6 +161,10 @@ pub struct ChatPosting {
     /// channel post). Off for a story: WhatsApp cannot edit one.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub post_edits: bool,
+    /// The connector reports reaction counts for posts here when asked
+    /// (plan 085: a WhatsApp channel); the core polls for them.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub summaries: bool,
 }
 
 impl ChatPosting {
@@ -165,6 +177,7 @@ impl ChatPosting {
             posts: false,
             audience: None,
             post_edits: false,
+            summaries: false,
         }
     }
 }

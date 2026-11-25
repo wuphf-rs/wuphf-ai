@@ -11,9 +11,9 @@
 # `:`, `#`, `%` or spaces.
 #
 # Runtime settings (`notify`, `receive_only`, `mirror_deletes_kept`, `rules`,
-# `chat_state`, `stories`) can also be changed while the core runs, from a
-# settings panel or `wuphf-server settings`: stored overrides win over this
-# file, and unsetting one goes back to it.
+# `chat_state`, `stories`, `channels`) can also be changed while the core runs,
+# from a settings panel or `wuphf-server settings`: stored overrides win over
+# this file, and unsetting one goes back to it.
 
 # The address the core's gRPC services listen on (connectors, providers, the
 # observer, the settings service).
@@ -302,6 +302,19 @@ muted = ["whatsapp-main:15550001111@s.whatsapp.net"]
 # does. Off, the mirror keeps them.
 # Default: false.
 # expire_copies = false
+
+# WhatsApp channels: how often their posts' reaction counts are read for the
+# footer line under each mirrored post.
+[channels]
+
+# Minutes between two readings of a channel's reaction counts. 0 reads none, and
+# footers stay as they are.
+# Default: 15.
+# counts_poll_minutes = 15
+
+# Days after a post was posted that its counts stop updating.
+# Default: 30.
+# counts_max_age_days = 30
 
 # Remote functions (see docs/connector-protocol.md, "Remote functions").
 # Providers dial the core and serve named functions; connectors call them. A
