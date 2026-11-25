@@ -103,7 +103,7 @@ code).
 | 083 | Receive-only chats (Status, channels you don't own, admin-only groups) refuse sends with 👎 + a note; story reactions as DM emoji replies; replies quoting another chat; per-connector mirror-delete toggle; senders never post to `status@broadcast` | P1 | L | — (081) | DONE (no migration; live test pending the owner; see notes) |
 | 084 | Post your own WhatsApp stories from Telegram (`/status`, `/status!`, note button, panel; preview + confirm); story mutes; story-copy expiry | P2 | L | 083 | DONE (migration 0024; botconf go/v0.18.0; live test pending the owner; see notes) |
 | 085 | WhatsApp channels (mirror, post to owned, edits/deletes, polled reaction counts as a footer), communities, broadcast-list tag | P2 | L | 083, 084, 086 | TODO |
-| 086 | Telegram edits that no longer fit as text swap the copy in place (spilled `.txt`, too long, long captions) | P2 | S–M | — | TODO |
+| 086 | Telegram edits that no longer fit as text swap the copy in place (spilled `.txt`, too long, long captions) | P2 | S–M | — | DONE (live test pending the owner; see notes) |
 
 Status values: TODO | IN PROGRESS | DONE | BLOCKED (with one-line reason) |
 REJECTED (with one-line rationale).
@@ -2121,3 +2121,20 @@ From the 2026-10-22 remote-functions design:
   - Tests: core +12, storage +3 (one a migration test), runtime +3,
     WhatsApp Go +5, Telegram +4, botconf go +1. Workspace 565,
     whatsapp-rust 187; clippy and vet clean. Every Go `vendorHash` moved.
+- **086 (2026-11-26).** Telegram edits that no longer fit as text, done as
+  planned in one commit. Telegram connector only; no wire change. Live test
+  pending the owner.
+  - `edit_long.go`: an in-place edit reads the copy back
+    (`messages.getMessages` / `channels.getMessages`) and edits it by how it
+    was rendered. Plain text that fits is edited as before; text past
+    `max_message_length` is replaced by `message.txt` in place
+    (`editMessage` with an uploaded document). A spilled copy (a document
+    named `message.txt`) always gets a new file, since Telegram cannot turn
+    media back into text. Media keeps its caption edit up to 1024 UTF-16
+    units; past that the caption is cut (whole characters, "…") and the full
+    text follows as `message.txt` in a reply. A copy that cannot be read back
+    is edited as text, as before.
+  - Repost mode posts an over-long revision as `message.txt` too.
+  - Deviation: each over-long caption edit posts a new reply; earlier ones
+    stay (the connector keeps no record of them).
+  - Tests: Telegram +7.

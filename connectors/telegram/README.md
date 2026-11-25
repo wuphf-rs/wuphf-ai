@@ -20,7 +20,11 @@ Implemented:
   to Telegram's 10), stickers labelled with their sender (below; animated
   ones converted through the core's `media.convert`), replies to the
   Telegram-native parent the core resolves, edits (`edit_mode`: in place or
-  reposted) and deletes (`delete_mode`: revoked or tombstoned)
+  reposted) and deletes (`delete_mode`: revoked or tombstoned). An edit in
+  place reads the copy back first: text edited past `max_message_length`
+  becomes `message.txt`, a copy sent as `message.txt` gets a new file, and a
+  caption past 1024 characters is cut short with the full text in a reply
+  (plan 086)
 - reactions mirrored as a short reply naming the reactor and the emoji;
   delivery shown as 👍 and, in direct chats, reads as 👀
 - reactions made on Telegram reported to the core, which sends the owner's

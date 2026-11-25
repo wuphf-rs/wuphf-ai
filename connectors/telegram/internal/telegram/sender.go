@@ -167,16 +167,23 @@ func (s Sender) EditMessage(ctx context.Context, dispatch *wuphfpb.MessageEditDi
 	if err != nil {
 		return "", coreclient.Permanent(fmt.Errorf("invalid Telegram target message id %q: %w", dispatch.TargetPlatformMessageId, err))
 	}
-	body := attributedText(dispatch.GetSenderName(), dispatch.GetParticipant(), dispatch.GetText())
 	if s.rendering().EditMode == config.EditModeRepost {
-		body = append(body, styling.Italic("\n(edited)"))
-		if _, err := s.sender.To(peer).CloneBuilder().Reply(messageID).StyledText(ctx, body...); err != nil {
+		reply := s.sender.To(peer).CloneBuilder().Reply(messageID)
+		name, participant, text := dispatch.GetSenderName(), dispatch.GetParticipant(), dispatch.GetText()
+		var err error
+		if textExceedsLimit(text, s.rendering().MaxMessageLength) {
+			_, err = s.sendTextAsFile(ctx, reply, name, participant, text+"\n\n(edited)")
+		} else {
+			body := append(attributedText(name, participant, text), styling.Italic("\n(edited)"))
+			_, err = reply.StyledText(ctx, body...)
+		}
+		if err != nil {
 			return "", fmt.Errorf("repost Telegram edit: %w", err)
 		}
 		return dispatch.TargetPlatformMessageId, nil
 	}
-	if _, err := s.sender.To(peer).Edit(messageID).StyledText(ctx, body...); err != nil {
-		return "", fmt.Errorf("edit Telegram message: %w", err)
+	if err := s.editInPlace(ctx, peer, messageID, dispatch); err != nil {
+		return "", err
 	}
 	return dispatch.TargetPlatformMessageId, nil
 }
@@ -360,11 +367,11 @@ func (s Sender) sendTextAsFile(
 	senderName, participant, text string,
 ) (tg.UpdatesClass, error) {
 	content := plainAttributedText(senderName, participant, text)
-	file, err := builder.Upload(message.FromBytes("message.txt", []byte(content))).AsInputFile(ctx)
+	file, err := builder.Upload(message.FromBytes(spillFileName, []byte(content))).AsInputFile(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("upload Telegram text file: %w", err)
 	}
-	return builder.Media(ctx, namedFile(file, "message.txt", "text/plain; charset=utf-8"))
+	return builder.Media(ctx, namedFile(file, spillFileName, spillMime))
 }
 
 // createTopic creates a forum topic in the container and returns its root
