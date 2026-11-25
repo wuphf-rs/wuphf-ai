@@ -257,7 +257,10 @@ async fn registered_connector_receives_dispatch_and_acknowledges() {
 
     harness
         .inbound
-        .send(InboundWork::Event(wa_event("wa-1", "over the sdk")))
+        .send(InboundWork::Event(Box::new(wa_event(
+            "wa-1",
+            "over the sdk",
+        ))))
         .await
         .unwrap();
 
@@ -301,7 +304,7 @@ async fn permanent_failure_dead_letters_the_dispatch() {
 
     harness
         .inbound
-        .send(InboundWork::Event(wa_event("wa-2", "doomed")))
+        .send(InboundWork::Event(Box::new(wa_event("wa-2", "doomed"))))
         .await
         .unwrap();
 

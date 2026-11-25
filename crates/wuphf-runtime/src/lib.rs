@@ -251,7 +251,7 @@ where
     S: Storage,
 {
     match work {
-        InboundWork::Event(event) => Ok(ingest_event(core, observer, event)
+        InboundWork::Event(event) => Ok(ingest_event(core, observer, *event)
             .await?
             .dispatches()
             .to_vec()),

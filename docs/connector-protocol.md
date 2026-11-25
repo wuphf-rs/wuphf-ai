@@ -46,6 +46,11 @@ connection dies silently; the SDKs keep retrying with backoff until then.
   `ReactionDispatch`, and marks the reply delivered once it is applied.
   Editing the reply to another lone emoji changes the reaction; deleting it,
   or editing it to anything else, clears it.
+  `reply_to_chat_id` names the chat the quoted message lives in when it is
+  not the message's own (Telegram: `reply_to_peer_id`, "Reply in another
+  chat"). A quote that names no chat is looked for at the message's own
+  endpoint, then on every other thread of its chat (a forum's other topics):
+  a native id is unique within its chat (plan 083).
   `disappearing` is the chat's timer as the message carried it (WhatsApp:
   `ContextInfo.expiration`, the owner's own messages included), set only when
   greater than 0. A message without one never turns a known timer off; when
@@ -63,6 +68,15 @@ connection dies silently; the SDKs keep retrying with backoff until then.
     sends as `MessageCreateEvent.chat_title` (tags included, e.g. `[G] …`). A
     change renames the mirror thread; it is never a note.
   - `description`: an empty string means the description was cleared.
+  - `posting { messages, reactions, private_replies }`: what this account may
+    do in the chat (plan 083), reported as a snapshot (WhatsApp: on every
+    connect, for `status@broadcast`, every joined group and every followed
+    channel; again when a group turns admin-only or the account is promoted
+    or demoted). The core sends no message or edit into a source chat that
+    takes no messages, nor a reaction into one that takes none, and tells the
+    owner with a `MessageRefusedDispatch`. `private_replies`: a message there
+    may be quoted only in its author's direct chat (a story); anywhere else
+    the reply is refused. Never a note.
   - `avatar { id, media_id }`: `id` is the platform's picture id, empty when the
     picture was removed. `media_id` names the picture the connector uploaded to
     the core's media store first; leave the whole `avatar` out when the picture
@@ -163,6 +177,21 @@ connection dies silently; the SDKs keep retrying with backoff until then.
   (`target_sender`, `target_participant`, `target_authored_by_bridge`), since
   WhatsApp names the reacted message by its author. Acknowledge with the
   target id.
+- `MessageRefusedDispatch` — the bridge did not send the target copy on
+  (plan 083): a message or edit typed into a receive-only chat's topic (one
+  whose `posting` takes no messages, or one listed in the core's
+  `receive_only`), or a story quoted outside its poster's chat. Mark the copy
+  (Telegram: a 👎 reaction, best effort) and post `reason` as a reply note,
+  deleted after `note_ttl_secs` (0 keeps it). Acknowledge with the target id;
+  the core records no copy. Both SDKs acknowledge it unchanged by default.
+  The WhatsApp senders also refuse any send or edit to `status@broadcast` as
+  permanent (a story to every contact), and send the owner's reaction on a
+  story as an emoji in the poster's DM quoting it.
+- `ReplyContext.chat_id` — the chat the quoted copy lives in at the target
+  platform, when it is not the target chat (a group message quoted in a DM, a
+  story quoted in its poster's DM). WhatsApp puts it in
+  `ContextInfo.remoteJid`. Within one connector a reply quoting another
+  conversation keeps its quote this way; across connectors it is dropped.
 - `MessageRetitleDispatch` — `target_chat_id`/`target_thread_id` plus the new
   `title`, sent when a source conversation is renamed so the mirror thread's
   title tracks it. Carries no message; the connector renames the thread and

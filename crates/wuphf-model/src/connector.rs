@@ -97,7 +97,9 @@ impl NoticeKind {
 /// meant to rebind.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum InboundWork {
-    Event(Event),
+    /// Boxed: an event is far larger than the other kinds of work, which
+    /// travel the same channels.
+    Event(Box<Event>),
     /// The platform reported that a chat address changed (e.g. WhatsApp
     /// phone-to-LID). Both addresses remain resolvable; the new one becomes
     /// canonical for outbound sends.
@@ -177,7 +179,7 @@ pub enum ConnectorInput {
 impl ConnectorInput {
     /// A normalized event, the most common frame a connector sends.
     pub fn event(event: Event) -> Self {
-        Self::Work(Box::new(InboundWork::Event(event)))
+        Self::Work(Box::new(InboundWork::Event(Box::new(event))))
     }
 }
 

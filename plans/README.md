@@ -100,7 +100,7 @@ code).
 | 080 | The owner's Telegram reactions as their own reaction on WhatsApp and Instagram (reactions stored; Instagram owner-only) | P2 | M–L | — | DONE (migration 0023; live test pending the owner; see notes) |
 | 081 | A lone-emoji reply from the owner is a reaction (any emoji, not only Telegram's set) | P2 | S–M | 080 | DONE (live test pending the owner; see notes) |
 | 082 | Chat pickers search and page through every chat (botconf `v0.18.0`); chat names say their connector, and the info card names the source connector | P1 | S–M | botconf 019 | DONE (live test pending the owner; see notes) |
-| 083 | Receive-only chats (Status, channels you don't own, admin-only groups) refuse sends with 👎 + a note; story reactions as DM emoji replies; replies quoting another chat; per-connector mirror-delete toggle; senders never post to `status@broadcast` | P1 | L | — (081) | IN PROGRESS |
+| 083 | Receive-only chats (Status, channels you don't own, admin-only groups) refuse sends with 👎 + a note; story reactions as DM emoji replies; replies quoting another chat; per-connector mirror-delete toggle; senders never post to `status@broadcast` | P1 | L | — (081) | DONE (no migration; live test pending the owner; see notes) |
 | 084 | Post your own WhatsApp stories from Telegram (`/status`, `/status!`, note button, panel; preview + confirm); story mutes; story-copy expiry | P2 | L | 083 | TODO |
 | 085 | WhatsApp channels (mirror, post to owned, edits/deletes, polled reaction counts as a footer), communities, broadcast-list tag | P2 | L | 083, 084, 086 | TODO |
 | 086 | Telegram edits that no longer fit as text swap the copy in place (spilled `.txt`, too long, long captions) | P2 | S–M | — | TODO |
@@ -2039,3 +2039,48 @@ From the 2026-10-22 remote-functions design:
       bumps them (and every Go `vendorHash`).
   - Tests: Health pages +7, gRPC end to end +1 (the home screen's entry
     opens the page). Workspace 530, clippy clean.
+- **083 (2026-11-26).** Receive-only chats and Status safety, done as
+  planned in three commits (`1389c5f`, `7f4e63d`, `9968f0b`) and its docs commit.
+  No migration: `ChatProfile.posting` rides the profile's JSON. Live test
+  pending the owner.
+  - Step 1: both WhatsApp senders refuse a send or an edit to
+    `status@broadcast` as permanent (whatsmeow posts it to every status
+    recipient, `getStatusBroadcastRecipients`). A revoke still goes (your
+    own story). A reaction on a story goes as an emoji message in the
+    poster's DM quoting it (`ContextInfo.remoteJid = status@broadcast`),
+    since whatsmeow cannot address only the poster; clearing sends nothing.
+  - Steps 2–3: `ChatPosting { messages, reactions, private_replies }` on
+    `ChatUpdate` and `ChatProfile`. WhatsApp (Go `posting.go`, Rust
+    `posting.rs`) reports a snapshot on every connect: Status, every joined
+    group (`GetJoinedGroups` / `get_participating`), every followed channel
+    (role owner/admin → open); a group again on an announce change or when
+    this account is promoted or demoted. The probes now say Status takes no
+    messages and leave channels unknown. Core `refusal.rs`: every routed
+    dispatch passes `Core::screen` in `save_dispatches` (so stash replays
+    and reply-reactions are screened too); into a conversation's source a
+    Send/Edit is refused when the source takes no messages or is listed in
+    `receive_only`, a React when it takes no reactions, and a Delete is
+    dropped when its connector is in `mirror_deletes_kept`. A refusal is
+    `Action::Refuse` → `MessageRefusedDispatch` to the owner's received copy;
+    Telegram reacts 👎 (no 🚫 in the standard set; asked the owner) and
+    posts the reason as a reply note deleted after 30 s (a timer in the
+    connector: a restart before then leaves it). Runtime settings
+    `receive_only` (chats, domain `wuphf.chat`) and `mirror_deletes_kept`
+    (connectors), validated against the connector list.
+  - Step 4: `MessageCreateEvent.reply_to_chat_id` (Telegram
+    `reply_to_peer_id`, only for another chat); the core resolves a quote at
+    the origin endpoint, then on any thread of the chat
+    (`message_id_for_chat_copy`, both backends, a `json_extract` join in
+    SQLite). `router/cross_chat.rs`: a parent of another conversation never
+    blocks; within one connector the quote is kept with
+    `ReplyContext.chat_id` (WhatsApp `remoteJid`), across connectors it is
+    dropped; a parent whose source has `private_replies` may be quoted only
+    in its author's chat (any address form), else the reply is refused.
+  - Deviations: the mirror-delete toggle is a list of connectors where it
+    is *off* (empty = today's behaviour), so the default needs no entry.
+    `InboundWork::Event` is boxed (the new field pushed it past clippy's
+    variant-size limit). Inbound quotes of another chat (Bob replying to
+    your story) are still not mirrored as quotes (out of scope, as planned).
+  - Tests: core +11, storage +2, Telegram +3, WhatsApp Go +6, whatsapp-rust
+    +9. Workspace 546, whatsapp-rust 187; clippy and vet clean. Every Go
+    `vendorHash` moved (proto).

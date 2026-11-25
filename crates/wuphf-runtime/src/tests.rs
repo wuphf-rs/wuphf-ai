@@ -372,7 +372,7 @@ async fn hub_stamps_the_session_connector_on_all_work() {
     let mut event = wa_event("wa-1", None);
     event.source.connector_id = impostor.clone();
     let work = [
-        InboundWork::Event(event),
+        InboundWork::Event(Box::new(event)),
         InboundWork::Migration {
             connector_id: impostor.clone(),
             old: ChatAddress::new("wa-chat", None),
@@ -727,7 +727,7 @@ fn registration_frame(
 async fn send_event(channels: &RuntimeChannels, event: Event) {
     channels
         .inbound
-        .send(InboundWork::Event(event))
+        .send(InboundWork::Event(Box::new(event)))
         .await
         .unwrap();
 }
@@ -1098,11 +1098,10 @@ fn telegram_dispatch() -> Dispatch {
 }
 
 fn native_id_of(work: &InboundWork) -> &str {
-    let InboundWork::Event(Event {
-        payload: EventKind::NewMessage(message),
-        ..
-    }) = work
-    else {
+    let InboundWork::Event(event) = work else {
+        panic!("expected an event, got {work:?}");
+    };
+    let EventKind::NewMessage(message) = &event.payload else {
         panic!("expected a new message event, got {work:?}");
     };
     &message.native_id

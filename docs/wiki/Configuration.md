@@ -56,10 +56,22 @@ database_url = "sqlite://wuphf.sqlite" # messages, media, settings; relative to 
 # orphan_media_retention_seconds = 86400
 # observer_token = "…"                 # required unless listen is local-only
 notify = ["telegram-main:telegram:user:704338780"]  # where notices go
+# receive_only = ["whatsapp-main:120363000000000000@g.us"]  # nothing sent into these
+# mirror_deletes_kept = ["whatsapp-main"]  # deleting a mirror copy keeps the source message
 ```
 
 Keep `listen` on `127.0.0.1` unless connectors run on other hosts. In that
 case put it behind TLS or a VPN, and set `observer_token`.
+
+Some chats take nothing from the bridge (plan 083). The connectors report
+them: WhatsApp Status (anything posted there would be a story to every
+contact), channels you don't own or admin, and admin-only groups where
+you're not an admin. List more in `receive_only` (the source chat or its
+mirror topic). A message or an edit typed in such a chat's topic gets 👎 and
+a note that deletes itself after 30 seconds; reactions still go (a reaction
+to a story reaches its poster as an emoji in their DM). By default, deleting
+your message's mirror copy deletes the message on the source too; list a
+source connector in `mirror_deletes_kept` to keep it there.
 
 ### `[[connectors]]`: who may connect
 
@@ -221,7 +233,8 @@ chats = ["whatsapp-main:120363012345678901@g.us"]
 
 These change while everything runs, without a restart:
 
-- the core's `rules`, `notify` and `chat_state`;
+- the core's `rules`, `notify`, `receive_only`, `mirror_deletes_kept` and
+  `chat_state`;
 - each connector's runtime keys (`log_level`, `[rendering]`,
   `[sticker_metadata]`, `media_convert_timeout_ms`), under
   `connector_settings.<connector id>`;
