@@ -117,3 +117,48 @@ func TestAQuoteOfAnotherChatNamesIt(t *testing.T) {
 		t.Fatalf("sent %v to %s", client.sent, client.sentTo)
 	}
 }
+
+// An explicit post (plan 084) goes to status@broadcast as a text status in
+// the default look, with no quote and no timer.
+func TestAPostIsATextStatus(t *testing.T) {
+	t.Parallel()
+	client := &stubSendClient{}
+	text := "hello world"
+	id, _, err := statusSender(client).SendMessage(context.Background(), &wuphfpb.MessageCreateDispatch{
+		TargetChatId: "status@broadcast", Text: &text, Post: true,
+	})
+	if err != nil || id != "sent-id" {
+		t.Fatalf("SendMessage() = %q, %v", id, err)
+	}
+	story := client.sent.GetExtendedTextMessage()
+	if client.sentTo != types.StatusBroadcastJID || story.GetText() != text || story.GetBackgroundArgb() == 0 || story.GetContextInfo() != nil {
+		t.Fatalf("posted %v to %s", client.sent, client.sentTo)
+	}
+}
+
+// A photo post is an image status with the text as its caption.
+func TestAPhotoPostIsAnImageStatus(t *testing.T) {
+	t.Parallel()
+	client := &stubSendClient{}
+	text := "look"
+	mime := "image/jpeg"
+	_, _, err := statusSender(client).SendMessage(context.Background(), &wuphfpb.MessageCreateDispatch{
+		TargetChatId: "status@broadcast", Text: &text, Post: true,
+		Attachments: []*wuphfpb.Attachment{{MediaId: "m-1", Kind: wuphfpb.Attachment_KIND_IMAGE, MimeType: &mime}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if image := client.sent.GetImageMessage(); client.sentTo != types.StatusBroadcastJID || image.GetCaption() != "look" {
+		t.Fatalf("posted %v to %s", client.sent, client.sentTo)
+	}
+}
+
+// An empty post can never be posted.
+func TestAnEmptyPostIsRefused(t *testing.T) {
+	t.Parallel()
+	_, _, err := statusSender(&stubSendClient{}).SendMessage(context.Background(), &wuphfpb.MessageCreateDispatch{TargetChatId: "status@broadcast", Post: true})
+	if !errors.As(err, new(coreclient.PermanentError)) {
+		t.Fatalf("error = %v", err)
+	}
+}

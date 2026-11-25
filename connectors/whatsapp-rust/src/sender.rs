@@ -418,6 +418,15 @@ impl<C: WaClient, M: CoreMedia, S: StickerConverter> Sender for WhatsAppSender<C
         let runtime = self.runtime.load();
         let (chat, mode) = self.target(&dispatch.target_chat_id).await?;
         if is_status_broadcast(&chat) {
+            // whatsapp-rust posts a story only to an explicit recipient list,
+            // and reads no status privacy to build one, so this connector
+            // reports no posts for Status (plan 084): an explicit post here is
+            // never routed, but say so if one ever is.
+            if dispatch.post {
+                return Err(Failure::permanent(
+                    "this connector cannot post stories yet: post from whatsapp-main",
+                ));
+            }
             return Err(refuse_status_post("send to"));
         }
         let context = self.reply_context(&dispatch, &chat, mode).await?;

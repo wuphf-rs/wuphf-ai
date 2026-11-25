@@ -17,6 +17,7 @@ type postingDirectory interface {
 	groupDirectory
 	GetJoinedGroups(ctx context.Context) ([]*types.GroupInfo, error)
 	GetSubscribedNewsletters(ctx context.Context) ([]*types.NewsletterMetadata, error)
+	GetStatusPrivacy(ctx context.Context) ([]types.StatusPrivacy, error)
 }
 
 // postingReporter tells the core what this account may do in its chats
@@ -30,11 +31,15 @@ type postingReporter struct {
 	logger     zerolog.Logger
 }
 
-// statusPosting is the story feed's: no messages (a story is posted only on
-// purpose), reactions (sent to the poster's DM), and a story is quoted only
-// in its poster's chat.
-func statusPosting() *wuphfpb.ChatPosting {
-	return &wuphfpb.ChatPosting{Messages: false, Reactions: true, PrivateReplies: true}
+// statusPosting is the story feed's: no messages, but posts (a story is
+// posted only on purpose, plan 084) to `audience`; reactions (sent to the
+// poster's DM); and a story is quoted only in its poster's chat.
+func statusPosting(audience string) *wuphfpb.ChatPosting {
+	posting := &wuphfpb.ChatPosting{Messages: false, Reactions: true, PrivateReplies: true, Posts: true}
+	if audience != "" {
+		posting.Audience = &audience
+	}
+	return posting
 }
 
 // groupPosting is what this account may do in a group: anything, unless the
@@ -61,7 +66,13 @@ func newsletterPosting(channel *types.NewsletterMetadata) *wuphfpb.ChatPosting {
 // channel. A list that cannot be read is skipped (logged): the core keeps
 // what it knew.
 func (r postingReporter) Snapshot(ctx context.Context) error {
-	updates := []*wuphfpb.ChatUpdate{{ChatId: types.StatusBroadcastJID.String(), Posting: statusPosting()}}
+	audience := ""
+	if privacy, err := r.directory.GetStatusPrivacy(ctx); err != nil {
+		r.logger.Warn().Err(err).Msg("could not read the WhatsApp status privacy")
+	} else {
+		audience = statusAudience(privacy)
+	}
+	updates := []*wuphfpb.ChatUpdate{{ChatId: types.StatusBroadcastJID.String(), Posting: statusPosting(audience)}}
 	if groups, err := r.directory.GetJoinedGroups(ctx); err != nil {
 		r.logger.Warn().Err(err).Msg("could not list WhatsApp groups for their posting rights")
 	} else {

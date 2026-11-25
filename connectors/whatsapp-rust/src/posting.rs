@@ -27,6 +27,9 @@ pub(crate) fn status_posting() -> pb::ChatPosting {
         messages: false,
         reactions: true,
         private_replies: true,
+        // No posts: see the sender (plan 084).
+        posts: false,
+        audience: None,
     }
 }
 
@@ -39,6 +42,8 @@ pub(crate) fn group_posting(metadata: &GroupMetadata, own: &[String]) -> pb::Cha
         messages: !metadata.is_announcement || (member && admin),
         reactions: true,
         private_replies: false,
+        posts: false,
+        audience: None,
     }
 }
 
@@ -49,6 +54,8 @@ pub(crate) fn newsletter_posting(role: Option<&NewsletterRole>) -> pb::ChatPosti
         messages: matches!(role, Some(NewsletterRole::Owner | NewsletterRole::Admin)),
         reactions: true,
         private_replies: false,
+        posts: false,
+        audience: None,
     }
 }
 

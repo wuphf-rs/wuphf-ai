@@ -24,6 +24,10 @@ func (f fakePostingDirectory) GetSubscribedNewsletters(context.Context) ([]*type
 	return f.channels, nil
 }
 
+func (f fakePostingDirectory) GetStatusPrivacy(context.Context) ([]types.StatusPrivacy, error) {
+	return []types.StatusPrivacy{{Type: types.StatusPrivacyTypeBlacklist, List: []types.JID{{}, {}, {}}}}, nil
+}
+
 func reporter(directory postingDirectory) (postingReporter, chan *wuphfpb.ClientFrame) {
 	inputs := make(chan *wuphfpb.ClientFrame, 4)
 	return postingReporter{
@@ -64,7 +68,7 @@ func TestThePostingSnapshot(t *testing.T) {
 	}
 	got := postings(t, inputs)
 	want := map[string]*wuphfpb.ChatPosting{
-		"status@broadcast": {Messages: false, Reactions: true, PrivateReplies: true},
+		"status@broadcast": {Messages: false, Reactions: true, PrivateReplies: true, Posts: true},
 		"1@g.us":           {Messages: false, Reactions: true},
 		"2@g.us":           {Messages: true, Reactions: true},
 		"3@newsletter":     {Messages: false, Reactions: true},
@@ -72,7 +76,7 @@ func TestThePostingSnapshot(t *testing.T) {
 	}
 	for chat, posting := range want {
 		g := got[chat]
-		if g == nil || g.Messages != posting.Messages || g.Reactions != posting.Reactions || g.PrivateReplies != posting.PrivateReplies {
+		if g == nil || g.Messages != posting.Messages || g.Reactions != posting.Reactions || g.PrivateReplies != posting.PrivateReplies || g.Posts != posting.Posts {
 			t.Errorf("%s: got %v, want %v", chat, g, posting)
 		}
 	}
@@ -113,5 +117,31 @@ func TestTheProbeKnowsStatusTakesNoMessages(t *testing.T) {
 	facts := probeChat(context.Background(), fakeDirectory{}, "status@broadcast")
 	if facts.GetCanSend() != wuphfpb.Fact_FACT_NO {
 		t.Fatalf("status@broadcast: %v", facts)
+	}
+}
+
+// The story feed's audience is read from the status privacy (plan 084).
+func TestTheSnapshotSaysWhoSeesAStory(t *testing.T) {
+	r, inputs := reporter(fakePostingDirectory{})
+	if err := r.Snapshot(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if audience := postings(t, inputs)["status@broadcast"].GetAudience(); audience != "My contacts except 3" {
+		t.Fatalf("audience = %q", audience)
+	}
+}
+
+func TestStatusAudience(t *testing.T) {
+	cases := map[string][]types.StatusPrivacy{
+		"":                     nil,
+		"My contacts":          {{Type: types.StatusPrivacyTypeContacts}},
+		"My contacts except 2": {{Type: types.StatusPrivacyTypeBlacklist, List: make([]types.JID, 2)}},
+		"Only 1 contact":       {{Type: types.StatusPrivacyTypeWhitelist, List: make([]types.JID, 1)}},
+		"Only 4 contacts":      {{Type: types.StatusPrivacyTypeWhitelist, List: make([]types.JID, 4)}},
+	}
+	for want, privacy := range cases {
+		if got := statusAudience(privacy); got != want {
+			t.Errorf("statusAudience(%v) = %q, want %q", privacy, got, want)
+		}
 	}
 }

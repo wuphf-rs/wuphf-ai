@@ -104,7 +104,12 @@ func (s Sender) SendMessage(ctx context.Context, dispatch *wuphfpb.MessageCreate
 		return "", "", err
 	}
 	if isStatusBroadcast(chat) {
-		return "", "", refuseStatusPost("send to")
+		// Only an explicit post (plan 084) goes to the story feed.
+		if !dispatch.GetPost() {
+			return "", "", refuseStatusPost("send to")
+		}
+		id, err := s.postStatus(ctx, dispatch, chat)
+		return id, "", err
 	}
 	// A system note (an info card, a change to the chat) is the bridge
 	// speaking: it quotes nothing.
