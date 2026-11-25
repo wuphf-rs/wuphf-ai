@@ -17,8 +17,10 @@ use std::collections::HashMap;
 use std::collections::hash_map::Entry;
 use std::sync::Arc;
 
-use wuphf_model::{Action, ChatRef, Conversation, ConversationId, Dispatch, Target};
-use wuphf_storage::Storage;
+use wuphf_model::{
+    Action, ChatRef, Conversation, ConversationId, Dispatch, EndpointId, MessageId, Target,
+};
+use wuphf_storage::{MessageStore, Storage, StorageError, TopologyStore};
 
 use crate::{Core, CoreError, RoutingConfig};
 
@@ -134,39 +136,58 @@ where
         })
     }
 
-    /// The refusal of `refused` (a dispatch of message `message_id`), sent to
-    /// the copy the message was received as: the owner's own message in the
-    /// mirror. `None` when that copy is unknown (an owner send from the TUI).
-    pub(crate) async fn refusal_for(
+    /// The refusal of `refused` (a dispatch of message `message_id`).
+    async fn refusal_for(
         &self,
-        message_id: wuphf_model::MessageId,
+        message_id: MessageId,
         refused: &Dispatch,
         reason: String,
     ) -> Result<Option<Dispatch>, CoreError> {
-        let Some(origin) = self.storage.received_copy(message_id).await? else {
-            return Ok(None);
-        };
-        if origin.endpoint_id == refused.to.endpoint_id {
-            return Ok(None);
-        }
-        let endpoint = self.storage.endpoint(origin.endpoint_id).await?;
-        Ok(Some(Dispatch::new(
-            Target {
-                endpoint_id: origin.endpoint_id,
-                connector_id: endpoint.connector_id.clone(),
-                address: endpoint.address(),
-                create_thread: None,
-            },
+        Ok(refusal_dispatch(
+            &*self.storage,
+            message_id,
             refused.conversation_id,
-            Action::Refuse {
-                message_id,
-                native_id: origin.native_id,
-                reason,
-                note_ttl_secs: REFUSAL_NOTE_TTL_SECS,
-            },
-            None,
-        )))
+            refused.to.endpoint_id,
+            reason,
+        )
+        .await?)
     }
+}
+
+/// The refusal of a message the bridge did not send to `refused_at`, sent to
+/// the copy the message was received as: the owner's own message in the
+/// mirror. `None` when that copy is unknown (an owner send from the TUI) or is
+/// the refused endpoint itself.
+pub(crate) async fn refusal_dispatch<S: MessageStore + TopologyStore>(
+    storage: &S,
+    message_id: MessageId,
+    conversation_id: ConversationId,
+    refused_at: EndpointId,
+    reason: String,
+) -> Result<Option<Dispatch>, StorageError> {
+    let Some(origin) = storage.received_copy(message_id).await? else {
+        return Ok(None);
+    };
+    if origin.endpoint_id == refused_at {
+        return Ok(None);
+    }
+    let endpoint = storage.endpoint(origin.endpoint_id).await?;
+    Ok(Some(Dispatch::new(
+        Target {
+            endpoint_id: origin.endpoint_id,
+            connector_id: endpoint.connector_id.clone(),
+            address: endpoint.address(),
+            create_thread: None,
+        },
+        conversation_id,
+        Action::Refuse {
+            message_id,
+            native_id: origin.native_id,
+            reason,
+            note_ttl_secs: REFUSAL_NOTE_TTL_SECS,
+        },
+        None,
+    )))
 }
 
 /// Whether `target` is the conversation's source chat (as plan 079's health

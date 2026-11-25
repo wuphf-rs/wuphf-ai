@@ -279,6 +279,17 @@ func (s Sender) quotedContext(ctx context.Context, dispatch *wuphfpb.MessageCrea
 		}
 		return nil, nil
 	}
+	// A quote of another chat (plan 083: a group message quoted in a DM, a
+	// story quoted in its poster's DM) names that chat, and its author in
+	// that chat's address form.
+	var remote *string
+	if chatID := reply.GetChatId(); chatID != "" {
+		quotedChat, quotedMode, err := s.target(ctx, chatID)
+		if err != nil {
+			return nil, err
+		}
+		remote, mode = proto.String(quotedChat.String()), quotedMode
+	}
 	participant, err := s.messageAuthor(ctx, reply.GetAuthoredByBridge(), reply.GetParticipant(), reply.GetSender(), mode)
 	if err != nil {
 		return nil, err
@@ -286,6 +297,7 @@ func (s Sender) quotedContext(ctx context.Context, dispatch *wuphfpb.MessageCrea
 	return &waE2E.ContextInfo{
 		StanzaID:      proto.String(reply.GetPlatformMessageId()),
 		Participant:   proto.String(participant),
+		RemoteJID:     remote,
 		QuotedMessage: quotedBody(reply),
 	}, nil
 }

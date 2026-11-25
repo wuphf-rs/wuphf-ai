@@ -129,6 +129,15 @@ pub trait MessageStore: Send + Sync + 'static {
         endpoint_id: EndpointId,
         native_id: &str,
     ) -> StorageResult<Option<MessageId>>;
+    /// The message a copy names on any endpoint of one chat (any thread of a
+    /// Telegram forum: a native id is unique within its chat). Resolves a
+    /// reply that quotes a message in another thread or chat (plan 083).
+    async fn message_id_for_chat_copy(
+        &self,
+        connector_id: &ConnectorId,
+        chat_id: &str,
+        native_id: &str,
+    ) -> StorageResult<Option<MessageId>>;
     async fn copy_at_endpoint(
         &self,
         message_id: MessageId,

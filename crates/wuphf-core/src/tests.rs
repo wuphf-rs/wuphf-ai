@@ -4479,3 +4479,173 @@ fn receive_only_settings_must_name_configured_connectors() {
         Err(crate::RoutingConfigError::UnknownReceiveOnlyConnector(_))
     ));
 }
+
+// ---- Plan 083: replies that quote another chat ----
+
+const BOB: &str = "15550001111@s.whatsapp.net";
+const ALICE: &str = "15550002222@s.whatsapp.net";
+const STATUS: &str = "status@broadcast";
+
+/// Every WhatsApp chat into the one Telegram forum.
+fn mirror_everything() -> Core<InMemoryStorage> {
+    let rule = Rule {
+        id: RuleId("wa-all".into()),
+        flow: RuleKind::ManyToOne {
+            source_connector: ConnectorId(WHATSAPP.into()),
+            source_chats_filter: ChatFilter::All,
+            destination_connector: ConnectorId(TELEGRAM.into()),
+            destination_chat: ChatAddress::new(MIRROR_CHAT, None),
+        },
+    };
+    core(vec![rule])
+}
+
+/// A WhatsApp message by `author` in `chat`, mirrored into a new topic
+/// `thread` as Telegram message `tg_native`.
+async fn mirror_into_topic(
+    core: &Core<InMemoryStorage>,
+    chat: &str,
+    author: &str,
+    wa_native: &str,
+    thread: &str,
+    tg_native: &str,
+) {
+    let mut event = event(WHATSAPP, chat, wa_native, None);
+    if let EventKind::NewMessage(message) = &mut event.payload {
+        message.author_id = author.into();
+        message.participant = Some(author.into());
+    }
+    let (dispatches, _) = routed(core.ingest(event).await.unwrap());
+    let replayed = core
+        .acknowledge_dispatch(DispatchAck {
+            dispatch_id: dispatches[0].id,
+            native_id: format!("card-{thread}"),
+            thread_id: Some(thread.into()),
+        })
+        .await
+        .unwrap();
+    let send = replayed
+        .iter()
+        .find(|dispatch| matches!(dispatch.action, Action::Send { .. }))
+        .expect("the message replays once the topic exists");
+    core.acknowledge_dispatch(DispatchAck {
+        dispatch_id: send.id,
+        native_id: tg_native.into(),
+        thread_id: None,
+    })
+    .await
+    .unwrap();
+}
+
+/// The owner's reply in topic `thread` quoting Telegram message `quoted`.
+async fn reply_in_topic(core: &Core<InMemoryStorage>, thread: &str, quoted: &str) -> Vec<Dispatch> {
+    routed(
+        core.ingest(event_in(
+            TELEGRAM,
+            MIRROR_CHAT,
+            Some(thread),
+            "tg-reply",
+            Some(quoted),
+        ))
+        .await
+        .unwrap(),
+    )
+    .0
+}
+
+async fn story_feed() -> Core<InMemoryStorage> {
+    let core = mirror_everything();
+    core.update_chats(
+        &ConnectorId(WHATSAPP.into()),
+        vec![ChatUpdate {
+            posting: Some(wuphf_model::ChatPosting {
+                messages: false,
+                reactions: true,
+                private_replies: true,
+            }),
+            ..ChatUpdate::new(STATUS)
+        }],
+        true,
+    )
+    .await
+    .unwrap();
+    mirror_into_topic(&core, STATUS, BOB, "wa-story", "100", "tg-story").await;
+    mirror_into_topic(&core, BOB, BOB, "wa-bob", "200", "tg-bob").await;
+    mirror_into_topic(&core, ALICE, ALICE, "wa-alice", "300", "tg-alice").await;
+    core
+}
+
+#[tokio::test]
+async fn quoting_a_story_in_its_posters_topic_is_a_status_reply() {
+    let core = story_feed().await;
+    let dispatches = reply_in_topic(&core, "200", "tg-story").await;
+    assert_eq!(dispatches.len(), 1, "{dispatches:#?}");
+    assert_eq!(dispatches[0].to.address.chat_id, BOB);
+    match &dispatches[0].action {
+        Action::Send {
+            reply: Some(quote), ..
+        } => {
+            assert_eq!(quote.native_id, "wa-story");
+            assert_eq!(quote.chat_id.as_deref(), Some(STATUS));
+            assert!(!quote.authored_by_bridge);
+        }
+        other => panic!("expected a quoting send, got {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn quoting_a_story_anywhere_else_is_refused() {
+    let core = story_feed().await;
+    let dispatches = reply_in_topic(&core, "300", "tg-story").await;
+    assert_eq!(dispatches.len(), 1, "{dispatches:#?}");
+    assert_eq!(dispatches[0].to.connector_id, ConnectorId(TELEGRAM.into()));
+    match &dispatches[0].action {
+        Action::Refuse {
+            native_id, reason, ..
+        } => {
+            assert_eq!(native_id, "tg-reply");
+            assert!(reason.contains("poster"), "{reason}");
+        }
+        other => panic!("expected a refusal, got {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn quoting_a_group_message_in_a_members_dm_keeps_the_quote() {
+    let core = mirror_everything();
+    mirror_into_topic(&core, GROUP, BOB, "wa-group", "100", "tg-group").await;
+    mirror_into_topic(&core, BOB, BOB, "wa-bob", "200", "tg-bob").await;
+    let dispatches = reply_in_topic(&core, "200", "tg-group").await;
+    assert_eq!(dispatches.len(), 1, "{dispatches:#?}");
+    match &dispatches[0].action {
+        Action::Send {
+            reply: Some(quote), ..
+        } => {
+            assert_eq!(quote.native_id, "wa-group");
+            assert_eq!(quote.chat_id.as_deref(), Some(GROUP));
+        }
+        other => panic!("expected a quoting send, got {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn a_quote_of_another_chat_named_by_the_event_resolves_there_only() {
+    let core = mirror_everything();
+    mirror_into_topic(&core, BOB, BOB, "wa-bob", "200", "tg-bob").await;
+    // The same native id in another Telegram chat is not this one.
+    let mut event = event_in(
+        TELEGRAM,
+        MIRROR_CHAT,
+        Some("200"),
+        "tg-reply",
+        Some("tg-bob"),
+    );
+    if let EventKind::NewMessage(message) = &mut event.payload {
+        message.reply_to_chat_id = Some("-100999".into());
+    }
+    let (dispatches, _) = routed(core.ingest(event).await.unwrap());
+    assert!(matches!(
+        &dispatches[0].action,
+        Action::Send { reply: None, .. }
+    ));
+}

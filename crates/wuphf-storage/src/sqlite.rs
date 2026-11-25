@@ -381,6 +381,29 @@ impl MessageStore for SqliteStorage {
             .map_err(Into::into)
     }
 
+    async fn message_id_for_chat_copy(
+        &self,
+        connector_id: &ConnectorId,
+        chat_id: &str,
+        native_id: &str,
+    ) -> StorageResult<Option<MessageId>> {
+        let row = sqlx::query(
+            "SELECT c.payload FROM message_copies c JOIN endpoints e ON e.id = c.endpoint_id \
+             WHERE c.platform_message_id = ? \
+             AND json_extract(e.payload, '$.connector_id') = ? \
+             AND json_extract(e.payload, '$.chat_id') = ? LIMIT 1",
+        )
+        .bind(native_id)
+        .bind(&connector_id.0)
+        .bind(chat_id)
+        .fetch_optional(&self.pool)
+        .await?;
+        row.map(|row| serde_json::from_str::<MessageCopy>(row.get("payload")))
+            .transpose()
+            .map(|copy| copy.map(|copy| copy.message_id))
+            .map_err(Into::into)
+    }
+
     async fn copy_at_endpoint(
         &self,
         message_id: MessageId,

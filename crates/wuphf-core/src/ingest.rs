@@ -48,9 +48,13 @@ where
         // reply linkage rather than failing the whole message.
         let reply_to = match inbound.reply_to_native_id.as_deref() {
             Some(native_id) => {
-                self.storage
-                    .message_id_for_copy(origin_endpoint, native_id)
-                    .await?
+                self.resolve_quote(
+                    &origin,
+                    origin_endpoint,
+                    inbound.reply_to_chat_id.as_deref(),
+                    native_id,
+                )
+                .await?
             }
             None => None,
         };
@@ -213,6 +217,37 @@ where
             .await?;
         let (pending, _) = self.save_dispatches(routing, dispatches).await?;
         Ok(pending)
+    }
+
+    /// The message a new message quotes (plan 083). A quote names its chat
+    /// when it is another chat than the message's own (`quoted_chat`); one
+    /// that names none is looked for at the origin endpoint first, then on
+    /// every other thread of the origin's chat (a Telegram reply quoting a
+    /// message in another forum topic). A native id is unique within a chat.
+    async fn resolve_quote(
+        &self,
+        origin: &Endpoint,
+        origin_endpoint: EndpointId,
+        quoted_chat: Option<&str>,
+        native_id: &str,
+    ) -> Result<Option<MessageId>, CoreError> {
+        let chat = match quoted_chat {
+            Some(chat) if chat != origin.chat_id => chat,
+            _ => {
+                if let Some(message_id) = self
+                    .storage
+                    .message_id_for_copy(origin_endpoint, native_id)
+                    .await?
+                {
+                    return Ok(Some(message_id));
+                }
+                &origin.chat_id
+            }
+        };
+        Ok(self
+            .storage
+            .message_id_for_chat_copy(&origin.connector_id, chat, native_id)
+            .await?)
     }
 
     /// Resolve the copy an inbound edit/delete/reaction/receipt targets to its

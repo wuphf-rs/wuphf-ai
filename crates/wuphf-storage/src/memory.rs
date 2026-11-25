@@ -325,6 +325,25 @@ impl MessageStore for InMemoryStorage {
             .copied())
     }
 
+    async fn message_id_for_chat_copy(
+        &self,
+        connector_id: &ConnectorId,
+        chat_id: &str,
+        native_id: &str,
+    ) -> StorageResult<Option<MessageId>> {
+        let state = self.state.read().await;
+        Ok(state
+            .copy_ids
+            .iter()
+            .find(|((endpoint_id, copy), _)| {
+                copy == native_id
+                    && state.endpoints.get(endpoint_id).is_some_and(|endpoint| {
+                        endpoint.connector_id == *connector_id && endpoint.chat_id == chat_id
+                    })
+            })
+            .map(|(_, message_id)| *message_id))
+    }
+
     async fn copy_at_endpoint(
         &self,
         message_id: MessageId,

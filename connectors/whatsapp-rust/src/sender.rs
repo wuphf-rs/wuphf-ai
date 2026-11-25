@@ -140,22 +140,32 @@ impl<C: WaClient, M: CoreMedia, S: StickerConverter> WhatsAppSender<C, M, S> {
             return Ok(None);
         }
         match &dispatch.reply_context {
-            Some(reply) => Ok(Some(build_quote_context_with_info(
-                reply.platform_message_id.clone(),
-                &self
-                    .message_author(
-                        reply.authored_by_bridge,
-                        reply.participant.as_deref(),
-                        &reply.sender,
-                        mode,
-                    )
-                    .await?,
-                chat,
-                chat,
-                // A typed stub of the parent's media, so the preview shows a
-                // photo rather than empty text.
-                &quoted_body(reply),
-            ))),
+            Some(reply) => {
+                // A quote of another chat (plan 083: a group message quoted
+                // in a DM, a story in its poster's DM) names that chat, and
+                // its author in that chat's address form.
+                let (quoted_chat, mode) = match reply.chat_id.as_deref().filter(|id| !id.is_empty())
+                {
+                    Some(chat_id) => self.target(chat_id).await?,
+                    None => (chat.clone(), mode),
+                };
+                Ok(Some(build_quote_context_with_info(
+                    reply.platform_message_id.clone(),
+                    &self
+                        .message_author(
+                            reply.authored_by_bridge,
+                            reply.participant.as_deref(),
+                            &reply.sender,
+                            mode,
+                        )
+                        .await?,
+                    &quoted_chat,
+                    chat,
+                    // A typed stub of the parent's media, so the preview
+                    // shows a photo rather than empty text.
+                    &quoted_body(reply),
+                )))
+            }
             None if dispatch.reply_to_platform_message_id.is_some() => Err(Failure::permanent(
                 "outbound WhatsApp reply requires quoted-message context",
             )),
@@ -1733,5 +1743,31 @@ mod tests {
             assert!(sender.client.sends.lock().unwrap().is_empty());
             assert!(sender.client.reactions.lock().unwrap().is_empty());
         }
+    }
+
+    /// A reply quoting Bob's story in Bob's DM names status@broadcast as the
+    /// quoted chat, so WhatsApp shows a status reply.
+    #[tokio::test]
+    async fn a_quote_of_another_chat_names_it() {
+        let sender = sender(fake(), FakeMedia::default());
+        let dispatch = pb::MessageCreateDispatch {
+            target_chat_id: POSTER.into(),
+            reply_context: Some(pb::ReplyContext {
+                platform_message_id: "story-1".into(),
+                sender: POSTER.into(),
+                participant: Some(POSTER.into()),
+                chat_id: Some(STATUS.into()),
+                ..Default::default()
+            }),
+            ..text("nice")
+        };
+        sender.send_message(dispatch).await.unwrap();
+        let sends = sender.client.sends.lock().unwrap();
+        let (to, message) = &sends[0];
+        assert_eq!(to.to_string(), POSTER);
+        let quote = context(message);
+        assert_eq!(quote.remote_jid.as_deref(), Some(STATUS));
+        assert_eq!(quote.stanza_id.as_deref(), Some("story-1"));
+        assert_eq!(quote.participant.as_deref(), Some(POSTER));
     }
 }

@@ -263,6 +263,7 @@ func (n Normalizer) normalize(
 	if replyID, ok := replyMessageID(message); ok {
 		reply := strconv.Itoa(replyID)
 		event.ReplyToPlatformMessageId = &reply
+		event.ReplyToChatId = replyChatID(message)
 	}
 	return event, true, nil
 }
@@ -297,6 +298,30 @@ func topicOf(reply tg.MessageReplyHeaderClass) (int, bool) {
 		return rootID, true
 	}
 	return 0, false
+}
+
+// replyChatID is the chat a reply quotes from, when it is another chat than
+// the reply's own ("Reply in another chat", plan 083); nil for the same chat,
+// whatever topic the quoted message is in. Without it the core would look the
+// quoted id up in this chat, where it names some other message.
+func replyChatID(message *tg.Message) *string {
+	reply, ok := message.GetReplyTo()
+	if !ok {
+		return nil
+	}
+	header, ok := reply.(*tg.MessageReplyHeader)
+	if !ok {
+		return nil
+	}
+	peer, ok := header.GetReplyToPeerID()
+	if !ok {
+		return nil
+	}
+	chat := formatPeer(peer)
+	if chat == formatPeer(message.PeerID) {
+		return nil
+	}
+	return &chat
 }
 
 // replyMessageID returns the message a reply quotes, excluding the topic root

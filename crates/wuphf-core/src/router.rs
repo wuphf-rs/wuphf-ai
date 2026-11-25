@@ -6,6 +6,8 @@
 use crate::config::RoutingConfig;
 use crate::notes::Note;
 use crate::profile::target_disappearing;
+use crate::refusal::refusal_dispatch;
+use cross_chat::CrossChatQuote;
 use std::sync::Arc;
 use thiserror::Error;
 use wuphf_model::{
@@ -13,6 +15,8 @@ use wuphf_model::{
     MessageAuthor, MessageId, ReceiptKind, ReplyContext, Rule, RuleKind, Target,
 };
 use wuphf_storage::{ChatProfileStore, MessageStore, StorageError, TopologyStore};
+
+mod cross_chat;
 
 /// Routes against one operation's routing snapshot; the core builds one per
 /// operation (see [`crate::RoutingSource`]).
@@ -105,7 +109,37 @@ where
                                 ReplyContext::quoting(parent, copy.native_id, authored_by_bridge);
                             (Some(reply), None)
                         }
-                        None => (None, Some(parent_id)),
+                        None => {
+                            let parent = self
+                                .storage
+                                .message(parent_id)
+                                .await?
+                                .ok_or(RouterError::MessageNotFound(parent_id))?;
+                            if parent.conversation_id == message.conversation_id {
+                                // The parent reaches this endpoint later.
+                                (None, Some(parent_id))
+                            } else {
+                                // A quote of another chat (plan 083) never
+                                // waits: that parent never reaches this one.
+                                match self.cross_chat_quote(&parent, &endpoint).await? {
+                                    CrossChatQuote::Quote(quote) => (Some(quote), None),
+                                    CrossChatQuote::Plain => (None, None),
+                                    CrossChatQuote::Refuse(reason) => {
+                                        dispatches.extend(
+                                            refusal_dispatch(
+                                                &*self.storage,
+                                                message.id,
+                                                message.conversation_id,
+                                                endpoint_id,
+                                                reason.to_owned(),
+                                            )
+                                            .await?,
+                                        );
+                                        continue;
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
                 None => (None, None),

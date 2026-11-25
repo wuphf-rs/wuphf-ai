@@ -9,6 +9,7 @@ import (
 	"github.com/wuphf-rs/wuphf-ai/connectors/whatsapp/internal/config"
 	wuphfpb "github.com/wuphf-rs/wuphf-ai/proto/go/connector/v1"
 	"go.mau.fi/whatsmeow/types"
+	"google.golang.org/protobuf/proto"
 )
 
 func statusSender(client *stubSendClient) Sender {
@@ -91,5 +92,28 @@ func TestStoryReactionsThatSendNothing(t *testing.T) {
 				t.Fatalf("ApplyReaction() = %q, %v; sent %v", id, err, client.sent)
 			}
 		})
+	}
+}
+
+// A reply quoting Bob's story in Bob's DM names status@broadcast as the
+// quoted chat (plan 083), so WhatsApp shows a status reply.
+func TestAQuoteOfAnotherChatNamesIt(t *testing.T) {
+	t.Parallel()
+	client := &stubSendClient{}
+	poster := "15550001111@s.whatsapp.net"
+	text := "nice"
+	_, _, err := statusSender(client).SendMessage(context.Background(), &wuphfpb.MessageCreateDispatch{
+		TargetChatId: poster, Text: &text,
+		ReplyContext: &wuphfpb.ReplyContext{
+			PlatformMessageId: "story-1", Sender: poster, Participant: &poster,
+			ChatId: proto.String("status@broadcast"),
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	quote := client.sent.GetExtendedTextMessage().GetContextInfo()
+	if client.sentTo.String() != poster || quote.GetRemoteJID() != "status@broadcast" || quote.GetStanzaID() != "story-1" || quote.GetParticipant() != poster {
+		t.Fatalf("sent %v to %s", client.sent, client.sentTo)
 	}
 }

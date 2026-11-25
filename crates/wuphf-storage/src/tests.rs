@@ -1797,3 +1797,58 @@ async fn acknowledging_create_binds_blocked_reaction_author<S: Storage>(storage:
         }
     );
 }
+
+#[tokio::test]
+async fn memory_a_copy_resolves_on_any_thread_of_its_chat() {
+    a_copy_resolves_on_any_thread_of_its_chat(InMemoryStorage::default()).await;
+}
+
+#[tokio::test]
+async fn sqlite_a_copy_resolves_on_any_thread_of_its_chat() {
+    let path = std::env::temp_dir().join(format!("wuphf-chat-copy-{}.sqlite", DispatchId::new()));
+    let url = format!("sqlite://{}", path.display());
+    a_copy_resolves_on_any_thread_of_its_chat(SqliteStorage::connect(&url).await.unwrap()).await;
+}
+
+/// A reply in one forum topic quoting a message in another (plan 083): the
+/// quoted copy resolves by its chat, whatever its thread; not by another chat
+/// or another connector.
+async fn a_copy_resolves_on_any_thread_of_its_chat<S: Storage>(storage: S) {
+    let message_id = MessageId::new();
+    let topic = Endpoint {
+        thread_id: Some("57".into()),
+        ..endpoint(EndpointId::new())
+    };
+    storage.put_endpoint(topic.clone()).await.unwrap();
+    storage.put_message(message(message_id)).await.unwrap();
+    storage
+        .put_received_copy(MessageCopy {
+            message_id,
+            endpoint_id: topic.id,
+            native_id: "42".into(),
+        })
+        .await
+        .unwrap();
+    let found = |connector: &str, chat: &str, native: &str| {
+        let (connector, chat, native) = (
+            ConnectorId(connector.into()),
+            chat.to_owned(),
+            native.to_owned(),
+        );
+        let storage = &storage;
+        async move {
+            storage
+                .message_id_for_chat_copy(&connector, &chat, &native)
+                .await
+                .unwrap()
+        }
+    };
+    let connector = topic.connector_id.0.clone();
+    assert_eq!(
+        found(&connector, &topic.chat_id, "42").await,
+        Some(message_id)
+    );
+    assert_eq!(found(&connector, &topic.chat_id, "43").await, None);
+    assert_eq!(found(&connector, "another-chat", "42").await, None);
+    assert_eq!(found("another-connector", &topic.chat_id, "42").await, None);
+}
