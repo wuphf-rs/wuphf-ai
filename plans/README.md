@@ -100,6 +100,10 @@ code).
 | 080 | The owner's Telegram reactions as their own reaction on WhatsApp and Instagram (reactions stored; Instagram owner-only) | P2 | M–L | — | DONE (migration 0023; live test pending the owner; see notes) |
 | 081 | A lone-emoji reply from the owner is a reaction (any emoji, not only Telegram's set) | P2 | S–M | 080 | DONE (live test pending the owner; see notes) |
 | 082 | Chat pickers search and page through every chat (botconf `v0.18.0`); chat names say their connector, and the info card names the source connector | P1 | S–M | botconf 019 | DONE (live test pending the owner; see notes) |
+| 083 | Receive-only chats (Status, channels you don't own, admin-only groups) refuse sends with 👎 + a note; story reactions as DM emoji replies; replies quoting another chat; per-connector mirror-delete toggle; senders never post to `status@broadcast` | P1 | L | — (081) | IN PROGRESS |
+| 084 | Post your own WhatsApp stories from Telegram (`/status`, `/status!`, note button, panel; preview + confirm); story mutes; story-copy expiry | P2 | L | 083 | TODO |
+| 085 | WhatsApp channels (mirror, post to owned, edits/deletes, polled reaction counts as a footer), communities, broadcast-list tag | P2 | L | 083, 084, 086 | TODO |
+| 086 | Telegram edits that no longer fit as text swap the copy in place (spilled `.txt`, too long, long captions) | P2 | S–M | — | TODO |
 
 Status values: TODO | IN PROGRESS | DONE | BLOCKED (with one-line reason) |
 REJECTED (with one-line rationale).
