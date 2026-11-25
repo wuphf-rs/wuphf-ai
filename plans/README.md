@@ -102,7 +102,7 @@ code).
 | 082 | Chat pickers search and page through every chat (botconf `v0.18.0`); chat names say their connector, and the info card names the source connector | P1 | S–M | botconf 019 | DONE (live test pending the owner; see notes) |
 | 083 | Receive-only chats (Status, channels you don't own, admin-only groups) refuse sends with 👎 + a note; story reactions as DM emoji replies; replies quoting another chat; per-connector mirror-delete toggle; senders never post to `status@broadcast` | P1 | L | — (081) | DONE (no migration; live test pending the owner; see notes) |
 | 084 | Post your own WhatsApp stories from Telegram (`/status`, `/status!`, note button, panel; preview + confirm); story mutes; story-copy expiry | P2 | L | 083 | DONE (migration 0024; botconf go/v0.18.0; live test pending the owner; see notes) |
-| 085 | WhatsApp channels (mirror, post to owned, edits/deletes, polled reaction counts as a footer), communities, broadcast-list tag | P2 | L | 083, 084, 086 | TODO |
+| 085 | WhatsApp channels (mirror, post to owned, edits/deletes, polled reaction counts as a footer), communities, broadcast-list tag | P2 | L | 083, 084, 086 | DONE (migration 0025; live test pending the owner; see notes) |
 | 086 | Telegram edits that no longer fit as text swap the copy in place (spilled `.txt`, too long, long captions) | P2 | S–M | — | DONE (live test pending the owner; see notes) |
 
 Status values: TODO | IN PROGRESS | DONE | BLOCKED (with one-line reason) |
@@ -2121,6 +2121,51 @@ From the 2026-10-22 remote-functions design:
   - Tests: core +12, storage +3 (one a migration test), runtime +3,
     WhatsApp Go +5, Telegram +4, botconf go +1. Workspace 565,
     whatsapp-rust 187; clippy and vet clean. Every Go `vendorHash` moved.
+- **085 (2026-11-26).** WhatsApp channels, communities and broadcast lists,
+  done in five commits (`aa84347`, `fe672df`, `6884855`, `f526b8a` and its
+  docs commit). Migration 0025. Live test pending the owner.
+  - Step 1: a broadcast-list message goes to the sender's DM tagged
+    `[broadcast]` after the sender name; the owner's own phone broadcast goes
+    to the DM of each recipient whatsmeow names.
+  - Step 2: `ChatPosting.post_edits`. A channel reports no messages and no
+    reactions; its owner or an admin gets `posts` and `post_edits`, so 083's
+    screen passes an edit of a message already posted there and refuses one
+    of a story ("cannot edit a post"). whatsapp-main posts with
+    `UploadNewsletter` and the media handle; both senders refuse any other
+    send to a channel as permanent. The compose page reads "📢 Write a
+    post" now (it was "Post a status").
+  - Step 3: `ChatUpdate.community { chat_id, title }`, from the snapshot,
+    a first sighting and link/unlink notifications (both WhatsApp
+    connectors); titles `[G] Community › Group`. The core adds the
+    community to a chat's `AddressSet` as a container, which only rule
+    filters consult, so a filter naming it covers present and future
+    groups, and a group that leaves stops matching. `receive_only` naming
+    it covers its groups; the info card has a 🏘️ line; the chat directory
+    lists communities (`kind = "community"`).
+  - Step 4: `ChatPosting.summaries`; `RefreshReactions { chat_id, since_ms }`
+    (a server frame, not a dispatch) answered by `ReactionSummaryEvent`s.
+    The core keeps the poll schedule in memory (filled from posting
+    snapshots; a restart polls from `counts_max_age_days` ago once), the
+    counts per message in `reaction_summaries`, and edits only the copies
+    the bridge wrote; an edit of the post keeps the footer. The runtime
+    stamps `received_at_ms` on each summary, which keeps the core
+    clock-free. `[channels] counts_poll_minutes` (15; 0 = off) and
+    `counts_max_age_days` (30), runtime. whatsmeow:
+    `GetNewsletterMessageUpdates(since)`, 100 posts per reading.
+  - Deviations:
+    - **whatsapp-rust** mirrors channels, communities and broadcasts but
+      posts to no channel and reads no counts (as with stories). It skips
+      the owner's own phone broadcasts: it does not name their recipients.
+    - **No footer on a post written from Telegram**: its Telegram copy is
+      the owner's own message, which the bridge does not edit.
+    - `RefreshReactions` carries no `request_id` (decision 11 had one):
+      nothing waits for an answer.
+    - An update without a message `id` is skipped. whatsmeow reads it from
+      the update's `id` attribute; check it in the live test.
+  - Tests: core +12 (plus 2 unit), storage +3 (one a migration test),
+    runtime +1, settings updated, WhatsApp Go +14, coreclient +1,
+    whatsapp-rust +5. Workspace 583, whatsapp-rust 192; clippy and vet
+    clean. Every Go `vendorHash` moved (proto).
 - **086 (2026-11-26).** Telegram edits that no longer fit as text, done as
   planned in one commit. Telegram connector only; no wire change. Live test
   pending the owner.

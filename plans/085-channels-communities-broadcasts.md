@@ -8,6 +8,8 @@
 - **Effort**: L
 - **Depends on**: 083, 084 (posting flow), 086 (footer edits on long posts)
 - **Category**: core / storage / settings / connectors (Telegram, both WhatsApp)
+- **State**: DONE 2026-11-26 (see the notes in `plans/README.md`); live test
+  pending the owner.
 
 ## Design decisions (asked of the owner, 2026-11-25)
 
@@ -48,3 +50,17 @@ Planner decisions (2026-11-26; change them in review if wrong):
    footer edits, the runtime's poll timer and `[channels]` settings,
    whatsapp-main's `GetNewsletterMessageUpdates`. Tests.
 5. Docs, notes, dev bins.
+
+## Live test (owner)
+
+1. A broadcast-list message from someone lands in their DM topic as
+   `Name [broadcast]`; your own phone broadcast shows in each recipient's.
+2. A followed channel's topic: typing there gets 👎 and a note; a new post
+   and its edit arrive; within 15 minutes a post with reactions shows
+   `❤️ n · 👍 m` under it, and changes when they do.
+3. A channel you own: `/post! hello` in its topic posts; a photo posted with
+   `/post` (preview, ✅) arrives with its caption; editing your message
+   edits the post.
+4. A community: its groups' topics read `[G] Community › Group`; the info
+   card of a new one names it; `only_chats` with the community's id mirrors
+   a group added to it later.

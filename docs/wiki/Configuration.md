@@ -86,6 +86,32 @@ muted = ["whatsapp-main:15550001111@s.whatsapp.net"]  # skip their stories
 expire_copies = false  # delete mirror copies 24 h after a story was posted
 ```
 
+Channels (plan 085): every followed channel mirrors into its own topic,
+which takes nothing from you. A channel you own or admin takes posts like
+Status does: `/post` or `/post!` in its topic (or "📢 Write a post" in
+`/wuphf`), and editing your message there edits the post. Each mirrored
+post shows its reaction counts as a footer line (`❤️ 120 · 👍 34`), read
+every few minutes and edited in only when they change. Only `whatsapp-main`
+posts to channels and reads the counts.
+
+```toml
+[channels]
+counts_poll_minutes = 15  # how often the counts are read; 0 = never
+counts_max_age_days = 30  # posts older than this keep their last counts
+```
+
+Communities (plan 085): a group in a WhatsApp community is titled
+`[G] Community › Group`, and its info card names the community. Name the
+community (its own id, offered by the setup's chat picker) in a rule's
+`only_chats` or `except_chats`, or in `receive_only`, and it covers every
+group in it, including ones added later.
+
+Broadcast lists (plan 085): a broadcast someone sent you shows in their
+DM's topic, tagged `[broadcast]` after their name. Your own broadcast from
+the phone shows in the DM topic of each person it went to (`whatsapp-rust`
+cannot tell who, so it skips them). Nothing is ever sent to a broadcast
+list.
+
 ### `[[connectors]]`: who may connect
 
 One entry per connector you run:
@@ -247,7 +273,7 @@ chats = ["whatsapp-main:120363012345678901@g.us"]
 These change while everything runs, without a restart:
 
 - the core's `rules`, `notify`, `receive_only`, `mirror_deletes_kept`,
-  `chat_state` and `stories`;
+  `chat_state`, `stories` and `channels`;
 - each connector's runtime keys (`log_level`, `[rendering]`,
   `[sticker_metadata]`, `media_convert_timeout_ms`), under
   `connector_settings.<connector id>`;

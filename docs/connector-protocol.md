@@ -83,6 +83,21 @@ connection dies silently; the SDKs keep retrying with backoff until then.
     `private_replies` is a story feed: the core's `stories` settings drop
     muted stories before they are stored, and can expire their mirror
     copies 24 hours after they were posted.
+    `post_edits` (plan 085): an edit of a message already posted there goes
+    through (a channel post; never a story, which WhatsApp cannot edit).
+    `summaries` (plan 085): the connector reads the posts' reaction counts
+    when asked (`RefreshReactions`); WhatsApp reports it for every
+    channel. A channel takes no messages and no reactions (WhatsApp names a
+    channel post's reaction by a server id the bridge does not keep), and
+    takes posts and their edits only from its owner or an admin.
+  - `community { chat_id, title }` (plan 085): the community (a parent chat
+    grouping chats, as a WhatsApp community does) the chat belongs to: the
+    parent's id and its plain name. An empty `chat_id` says it belongs to
+    none. A rule's chat filter or `receive_only` naming the community covers
+    its member chats, present and future; the info card names it. Report it
+    in the snapshot, on a first sighting and when the chat is linked to or
+    unlinked from one; the display title then reads `[G] Community › Group`.
+    Never a note.
   - `avatar { id, media_id }`: `id` is the platform's picture id, empty when the
     picture was removed. `media_id` names the picture the connector uploaded to
     the core's media store first; leave the whole `avatar` out when the picture
@@ -122,6 +137,13 @@ connection dies silently; the SDKs keep retrying with backoff until then.
   full. The core stores each reactor's last reaction per copy, turns the
   differences into toggles, and ignores a reaction equal to the stored one,
   so a replay or an echo of a reaction it applied does nothing.
+- `ReactionSummaryEvent` (plan 085) — a post's anonymous reaction counts
+  (`counts`: `emoji` and `count`), one per post, sent in answer to a
+  `RefreshReactions`. An empty list means no reactions. The core keeps the
+  counts per message and, when they differ from the last reading, edits the
+  copies the bridge wrote with a footer line under the post's text
+  (`❤️ 120 · 👍 34`, most first); a later edit of the post keeps it. Posts
+  older than `channels.counts_max_age_days` are not updated.
 - `Acknowledgement` — echoes the `dispatch_id`, supplies the resulting native
   `platform_message_id`, and sets `thread_id` only when the dispatch provisioned
   a new thread.
@@ -193,12 +215,17 @@ connection dies silently; the SDKs keep retrying with backoff until then.
   The WhatsApp senders also refuse any send or edit to `status@broadcast` as
   permanent (a story to every contact), and send the owner's reaction on a
   story as an emoji in the poster's DM quoting it.
+  A channel takes only explicit posts: the WhatsApp senders refuse any other
+  send to one as permanent, and send no reaction there.
 - `MessageCreateDispatch.post` (plan 084) — the owner posts this on purpose:
   `/status` or `/post` typed in a mirror topic (by an owner id), with `!` at
   once, otherwise after ✅ on a preview. The only send a connector makes into
   a chat whose posting takes posts but no messages; it quotes nothing and
   carries no timer. Its copy at the source is the post: deleting the
   message later deletes it.
+  In a channel (plan 085) the post goes to every follower (whatsapp-main
+  uploads its media with `UploadNewsletter`); editing the owner's message
+  later edits the post.
 - `OpenPanelDispatch` (plan 084) — open the settings panel in the target
   chat or topic for `actor` (an owner id), as if they had typed the panel
   command there; the core opens it on the pending post's preview. The
@@ -210,6 +237,13 @@ connection dies silently; the SDKs keep retrying with backoff until then.
   story quoted in its poster's DM). WhatsApp puts it in
   `ContextInfo.remoteJid`. Within one connector a reply quoting another
   conversation keeps its quote this way; across connectors it is dropped.
+- `RefreshReactions` (plan 085) — report, as `ReactionSummaryEvent`s, the
+  reaction counts of this chat's posts that changed since `since_ms` (Unix
+  ms). Sent every `channels.counts_poll_minutes` for each mirrored chat whose
+  posting reports `summaries`. Not a dispatch: never stored or redelivered,
+  and answered only by the events. A connector that cannot read the counts
+  now sends none; the core asks again at the next poll (WhatsApp:
+  `GetNewsletterMessageUpdates`).
 - `MessageRetitleDispatch` — `target_chat_id`/`target_thread_id` plus the new
   `title`, sent when a source conversation is renamed so the mirror thread's
   title tracks it. Carries no message; the connector renames the thread and
