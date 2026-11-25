@@ -313,8 +313,8 @@ checksum = "dc0b364ead1874514c8c2855ab558056ebfeb775653e7ae45ff72f28f8f3166c"
 
 [[package]]
 name = "botconf"
-version = "0.16.1"
-source = "git+https://github.com/propheci/botconf?tag=v0.16.1#4018481768ebdd1f9140dae26ef2ef2df285a067"
+version = "0.17.0"
+source = "git+https://github.com/propheci/botconf?tag=v0.17.0#9474c6ccbeee23cb10ba58d916bab92349f0bfe5"
 dependencies = [
  "arc-swap",
  "botconf-derive",
@@ -331,8 +331,8 @@ dependencies = [
 
 [[package]]
 name = "botconf-derive"
-version = "0.16.1"
-source = "git+https://github.com/propheci/botconf?tag=v0.16.1#4018481768ebdd1f9140dae26ef2ef2df285a067"
+version = "0.17.0"
+source = "git+https://github.com/propheci/botconf?tag=v0.17.0#9474c6ccbeee23cb10ba58d916bab92349f0bfe5"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -341,8 +341,8 @@ dependencies = [
 
 [[package]]
 name = "botconf-grpc"
-version = "0.16.1"
-source = "git+https://github.com/propheci/botconf?tag=v0.16.1#4018481768ebdd1f9140dae26ef2ef2df285a067"
+version = "0.17.0"
+source = "git+https://github.com/propheci/botconf?tag=v0.17.0#9474c6ccbeee23cb10ba58d916bab92349f0bfe5"
 dependencies = [
  "botconf",
  "botconf-panel",
@@ -357,8 +357,8 @@ dependencies = [
 
 [[package]]
 name = "botconf-panel"
-version = "0.16.1"
-source = "git+https://github.com/propheci/botconf?tag=v0.16.1#4018481768ebdd1f9140dae26ef2ef2df285a067"
+version = "0.17.0"
+source = "git+https://github.com/propheci/botconf?tag=v0.17.0#9474c6ccbeee23cb10ba58d916bab92349f0bfe5"
 dependencies = [
  "botconf",
  "futures",
@@ -369,8 +369,8 @@ dependencies = [
 
 [[package]]
 name = "botconf-proto"
-version = "0.16.1"
-source = "git+https://github.com/propheci/botconf?tag=v0.16.1#4018481768ebdd1f9140dae26ef2ef2df285a067"
+version = "0.17.0"
+source = "git+https://github.com/propheci/botconf?tag=v0.17.0#9474c6ccbeee23cb10ba58d916bab92349f0bfe5"
 dependencies = [
  "prost",
  "tonic",
@@ -379,8 +379,8 @@ dependencies = [
 
 [[package]]
 name = "botconf-tui"
-version = "0.16.1"
-source = "git+https://github.com/propheci/botconf?tag=v0.16.1#4018481768ebdd1f9140dae26ef2ef2df285a067"
+version = "0.17.0"
+source = "git+https://github.com/propheci/botconf?tag=v0.17.0#9474c6ccbeee23cb10ba58d916bab92349f0bfe5"
 dependencies = [
  "botconf",
  "crossterm",

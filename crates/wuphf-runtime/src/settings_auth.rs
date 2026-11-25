@@ -23,7 +23,10 @@ use crate::live_sessions::{COMMAND_TIMEOUT, LiveSessions};
 use botconf_grpc::proto::Actor;
 use botconf_grpc::proto::settings_server::SettingsServer;
 use botconf_grpc::{Authorizer, Operation, Principal, SettingsService};
-use botconf_panel::{Name, Names, Panel, SectionAction};
+use botconf_panel::{
+    ActOutcome, Context, DataInput, DataPage, DataSource, DataViewer, Name, Names, Panel,
+    SectionAction,
+};
 use serde_json::Value;
 use std::future::Future;
 use std::pin::Pin;
@@ -56,6 +59,7 @@ pub fn settings_server<S>(
     connectors: Arc<ConnectorTokens>,
     observer_token: Option<String>,
     commands: Arc<LiveSessions>,
+    pages: Option<(&str, Arc<dyn DataSource>)>,
 ) -> SettingsServer<SettingsService<WuphfSchema>>
 where
     S: ObservationStore + TopologyStore + PanelTokens,
@@ -67,6 +71,12 @@ where
         Panel::domain,
     );
     let panel = with_commands(panel, commands);
+    // The host's data pages (the Health page, plan 079), behind a home-screen
+    // button.
+    let panel = match pages {
+        Some((title, source)) => panel.data(title, SharedPages(source)),
+        None => panel,
+    };
     SettingsService::new(
         Arc::new(panel),
         WuphfAuthorizer::new(Arc::clone(&settings), connectors, observer_token),
@@ -407,3 +417,34 @@ where
 
 #[cfg(test)]
 mod tests;
+
+/// A shared data source, as the panel takes one.
+struct SharedPages(Arc<dyn DataSource>);
+
+impl DataSource for SharedPages {
+    fn page<'a>(
+        &'a self,
+        viewer: &'a DataViewer,
+        route: &'a str,
+    ) -> BoxFuture<'a, Result<DataPage, String>> {
+        self.0.page(viewer, route)
+    }
+
+    fn act<'a>(
+        &'a self,
+        viewer: &'a DataViewer,
+        route: &'a str,
+        action: &'a str,
+        input: Option<DataInput>,
+    ) -> BoxFuture<'a, Result<ActOutcome, String>> {
+        self.0.act(viewer, route, action, input)
+    }
+
+    fn open<'a>(
+        &'a self,
+        viewer: &'a DataViewer,
+        context: &'a Context,
+    ) -> BoxFuture<'a, Option<String>> {
+        self.0.open(viewer, context)
+    }
+}

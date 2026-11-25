@@ -1171,6 +1171,7 @@ fn viewer() -> botconf_panel::Viewer<'static> {
         limits: &PANEL_LIMITS,
         names: None,
         pickers: false,
+        context: None,
     }
 }
 
@@ -1224,7 +1225,11 @@ async fn fill_in(panel: &Panel<WuphfSchema>, draft: &Screen, title: &str, text: 
         .await
         .ask
         .unwrap_or_else(|| panic!("no question on {}", screen_text(&field)));
-    assert!(ask.question.draft.is_some(), "{:?}", ask.question);
+    assert!(
+        matches!(&ask.question, Question::Setting(question) if question.draft.is_some()),
+        "{:?}",
+        ask.question
+    );
     panel
         .answer(&ask.question, Input::Text(text.into()), &viewer())
         .await

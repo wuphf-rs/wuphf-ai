@@ -40,11 +40,11 @@ fn config_file() -> PathBuf {
     path
 }
 
-struct Fixture {
-    storage: Arc<InMemoryStorage>,
+pub(crate) struct Fixture {
+    pub(crate) storage: Arc<InMemoryStorage>,
     core: Arc<Core<InMemoryStorage>>,
     sessions: Arc<LiveSessions>,
-    monitor: Arc<HealthMonitor<InMemoryStorage>>,
+    pub(crate) monitor: Arc<HealthMonitor<InMemoryStorage>>,
     sent: mpsc::Receiver<Dispatch>,
 }
 
@@ -86,7 +86,7 @@ async fn fixture_over(storage: Arc<InMemoryStorage>) -> Fixture {
     }
 }
 
-async fn fixture() -> Fixture {
+pub(crate) async fn fixture() -> Fixture {
     fixture_over(Arc::new(InMemoryStorage::default())).await
 }
 

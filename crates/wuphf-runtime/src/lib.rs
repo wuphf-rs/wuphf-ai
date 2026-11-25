@@ -17,6 +17,7 @@ pub mod connector_settings;
 mod declared_settings;
 pub mod grpc;
 pub mod health;
+pub mod health_pages;
 pub mod live_sessions;
 pub mod media;
 pub mod observation;

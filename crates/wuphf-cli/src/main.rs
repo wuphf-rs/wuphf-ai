@@ -21,6 +21,7 @@ use wuphf_runtime::{
     connector_settings::ConnectorSettings,
     grpc::GrpcConnectorService,
     health::{GrpcHealthService, HealthMonitor, Wiring},
+    health_pages::{HEALTH_ENTRY, HealthPages},
     live_sessions::LiveSessions,
     live_sessions::tool_from_wire,
     media::GrpcMediaService,
@@ -249,13 +250,6 @@ async fn serve(path: PathBuf) -> Result<()> {
     // The live connector sessions: the commands they declare, offered on their
     // sections in the settings panel, and the health probes (plan 079).
     let sessions = Arc::new(LiveSessions::default());
-    let settings_service = settings_server(
-        Arc::clone(&settings),
-        Arc::clone(&storage),
-        Arc::clone(&connector_tokens),
-        observer_token.clone(),
-        Arc::clone(&sessions),
-    );
     let (runtime, channels, observer) = Runtime::channelled(
         Arc::new(Core::new(
             Arc::clone(&storage),
@@ -313,6 +307,18 @@ async fn serve(path: PathBuf) -> Result<()> {
         .restore()
         .await
         .context("restore the health pauses")?;
+    // The settings panel shows the health checks on its Health page.
+    let settings_service = settings_server(
+        Arc::clone(&settings),
+        Arc::clone(&storage),
+        Arc::clone(&connector_tokens),
+        observer_token_value.clone(),
+        Arc::clone(&sessions),
+        Some((
+            HEALTH_ENTRY,
+            Arc::new(HealthPages::new(Arc::clone(&health))),
+        )),
+    );
     let health_service = HealthTransportServer::with_interceptor(
         GrpcHealthService::new(Arc::clone(&health)),
         any_token_auth(

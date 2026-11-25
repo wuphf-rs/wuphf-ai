@@ -269,8 +269,17 @@ wuphf-server health --config FILE --run    # check now (WUPHF_OBSERVER_TOKEN)
 ```
 
 Both exit 1 while a problem that is not ignored is open. To ignore a check
-you know is wrong, use the Health page in `/wuphf` (it lapses once the check
-passes).
+you know is wrong, use `--ignore KEY` (`--unignore KEY` to undo), or the
+Health page; an ignore lapses once the check passes.
+
+The **Health page** is `/wuphf` → 🩺 Health:
+
+- each open problem, pausing ones first (⏸ pauses, ⚠️ warns, 🔕 ignored),
+  opening its details with 🔕 Ignore until it passes / 🔔 Stop ignoring;
+- ⏸ held messages: per paused direction, how many and the oldest;
+- 📭 dead letters, newest first, ten a page;
+- 🔄 Run checks (it waits a few seconds; a slow probe goes on, and the page
+  shows its result when opened again).
 
 ## Restarts and recovery
 

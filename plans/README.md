@@ -96,7 +96,7 @@ code).
 | 076 | Pause / resume one chat: the `paused_chats` runtime setting | P2 | S–M | 074 | TODO |
 | 077 | Merge two address forms of one chat; split a wrong merge (nothing moves) | P2 | M–L | 074, 075 | TODO |
 | 078 | wuphf-misc's settings in /wuphf: plugins declare their own settings (`plugin_settings.<id>`) | P2 | M | 040, 050 | DONE (migration 0020; live panel test pending the owner; see notes) |
-| 079 | Health checks: probes of rule chats, health pauses that hold messages, tools, notices, a Health page, `wuphf-server health` | P1 | L | botconf 018 (page only) | IN PROGRESS |
+| 079 | Health checks: probes of rule chats, health pauses that hold messages, tools, notices, a Health page, `wuphf-server health` | P1 | L | botconf 018 (page only) | DONE (migration 0022; botconf `v0.17.0`; live test pending the owner; see notes) |
 | 080 | The owner's Telegram reactions as their own reaction on WhatsApp and Instagram (reactions stored; Instagram owner-only) | P2 | M–L | — | DONE (migration 0023; live test pending the owner; see notes) |
 | 081 | A lone-emoji reply from the owner is a reaction (any emoji, not only Telegram's set) | P2 | S–M | 080 | DONE (live test pending the owner; see notes) |
 
@@ -1983,3 +1983,30 @@ From the 2026-10-22 remote-functions design:
     Workspace 522 tests, whatsapp-rust 178, clippy and vet clean.
   - Deps: `emojis` 0.9 in wuphf-core (vendored through `Cargo.lock`).
     The proto field moved every Go `vendorHash`.
+- **079 (2026-11-25).** Health checks, done with step 8 (the Health page)
+  on botconf `v0.17.0` (plan 018, data pages). Live test pending the owner.
+  - Steps 1–7, 9: probes (`ProbeChats` / `ProbeResult`) and tools on every
+    connector; `wuphf-health` evaluates; problems, ignores and held
+    dispatches in storage (migration 0022); per-direction pauses in the
+    core, released in order, dropped after 7 days; notices once per
+    problem and ✅ when cleared; `wuphf-server health [--run] [--ignore
+    KEY | --unignore KEY]`.
+  - Step 8: `wuphf-runtime::health_pages::HealthPages`, a botconf
+    `DataSource` over the monitor.
+    - Routes: `""` (problems, pausing first, then held and dead letters),
+      `problem/<key>` (details, 🔕 Ignore / 🔔 Stop ignoring), `held` (per
+      paused direction: the count and the oldest), `dead?p=N` (ten a
+      page).
+    - 🔄 Run checks waits 8 s. A slow probe goes on in the background, and
+      the page says so.
+    - `settings_server` takes the pages as `Option<(&str, Arc<dyn
+      DataSource>)>`. `serve` builds it after the monitor.
+  - Deviations:
+    - The panel's home screen opens the Health page through botconf's
+      entry button ("🩺 Health ›"), rather than its own section.
+    - Ignoring needs no confirmation: it is not destructive.
+    - The Go connectors keep botconf `go/v0.16.0`: the page needs nothing
+      from them. The new `context` fields are for plan 075, which also
+      bumps them (and every Go `vendorHash`).
+  - Tests: Health pages +7, gRPC end to end +1 (the home screen's entry
+    opens the page). Workspace 530, clippy clean.

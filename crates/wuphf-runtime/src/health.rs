@@ -31,7 +31,7 @@ use wuphf_model::{
 use wuphf_proto::connector as pb;
 use wuphf_proto::connector::health_transport_server::HealthTransport;
 use wuphf_settings::SettingsStore;
-use wuphf_storage::{Storage, StorageError, StoredProblem};
+use wuphf_storage::{HeldDispatch, Storage, StorageError, StoredProblem};
 
 use crate::live_sessions::{LiveSessions, PROBE_TIMEOUT, SessionEvent};
 use crate::owner_send::{OwnerMessageSender, OwnerSendError, now_ms};
@@ -186,6 +186,21 @@ where
             problems: self.storage.health_problems().await?,
             ignored: self.storage.health_ignores().await?,
         })
+    }
+
+    /// The dispatches held for paused directions, in the order they were
+    /// held.
+    pub async fn held(&self) -> Result<Vec<HeldDispatch>, HealthError> {
+        Ok(self.storage.held_dispatches().await?)
+    }
+
+    /// Failed dispatches, newest first: `limit` of them after `offset`.
+    pub async fn dead_letters(
+        &self,
+        offset: usize,
+        limit: usize,
+    ) -> Result<Vec<wuphf_model::Dispatch>, HealthError> {
+        Ok(self.storage.dead_letters(offset, limit).await?)
     }
 
     /// Ignore the problem `key` until it passes once, or stop ignoring it,
@@ -481,4 +496,4 @@ pub fn report_to_wire(report: &HealthReport) -> pb::HealthReport {
 }
 
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;

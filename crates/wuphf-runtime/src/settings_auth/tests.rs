@@ -419,6 +419,15 @@ async fn serve_settings(url: &str) -> Served {
 /// [`serve_settings`] over the config file at `path`, which the store reads
 /// again on every reload, as `serve` does.
 async fn serve_settings_from(url: &str, path: &Path) -> Served {
+    serve_settings_with(url, path, None).await
+}
+
+/// [`serve_settings_from`] with the panel's data pages.
+async fn serve_settings_with(
+    url: &str,
+    path: &Path,
+    pages: Option<(&str, Arc<dyn botconf_panel::DataSource>)>,
+) -> Served {
     let sqlite = Arc::new(SqliteStorage::connect(url).await.unwrap());
     let schema = WuphfSchema::with_env(|name| Some(format!("secret-{name}")));
     let settings = Arc::new(
@@ -437,6 +446,7 @@ async fn serve_settings_from(url: &str, path: &Path) -> Served {
         Arc::new(tokens),
         Some(OBSERVER_TOKEN.into()),
         Arc::default(),
+        pages,
     );
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let address = listener.local_addr().unwrap();
@@ -564,6 +574,7 @@ async fn panel_handles_survive_a_restart() {
                 page: None,
                 limits: Some(tiny_limits()),
                 pickers: false,
+                context: None,
             },
             OBSERVER_TOKEN,
         ))
@@ -603,6 +614,7 @@ async fn panel_requests_need_an_owner() {
         page: None,
         limits: Some(tiny_limits()),
         pickers: false,
+        context: None,
     };
     let refused = client
         .render(with_token(render("111"), TELEGRAM_TOKEN))
@@ -639,6 +651,7 @@ async fn press(client: &mut SettingsClient<Channel>, token: String) -> proto::Ac
                 limits: Some(tiny_limits()),
                 act: Some(act_request::Act::Press(token)),
                 pickers: false,
+                context: None,
             },
             OBSERVER_TOKEN,
         ))
@@ -701,4 +714,53 @@ async fn connector_cannot_follow_more_than_its_own_section() {
         let result = authorizer.authorize(&metadata(Some(TELEGRAM_TOKEN)), None, operation);
         assert_eq!(code(result), tonic::Code::PermissionDenied);
     }
+}
+
+/// The Health page is reached from the panel's home screen, over gRPC as a
+/// front end draws it.
+#[tokio::test]
+async fn the_home_screen_opens_the_health_page() {
+    let fixture = crate::health::tests::fixture().await;
+    let pages: Arc<dyn botconf_panel::DataSource> = Arc::new(
+        crate::health_pages::HealthPages::new(Arc::clone(&fixture.monitor)),
+    );
+    let (mut client, _, _, server) = serve_settings_with(
+        &temp_database(),
+        &config_file(CONFIG),
+        Some((crate::health_pages::HEALTH_ENTRY, pages)),
+    )
+    .await;
+    let request = |page| RenderRequest {
+        actor: None,
+        page,
+        limits: Some(tiny_limits()),
+        pickers: false,
+        context: None,
+    };
+    let home = client
+        .render(with_token(request(None), OBSERVER_TOKEN))
+        .await
+        .unwrap()
+        .into_inner()
+        .screen
+        .unwrap();
+    let entry = home
+        .rows
+        .iter()
+        .flat_map(|row| &row.buttons)
+        .find(|button| button.label == "🩺 Health ›")
+        .expect("the Health entry")
+        .token
+        .clone();
+    let health = press(&mut client, entry).await.screen.unwrap();
+    let text: String = health
+        .text
+        .unwrap()
+        .spans
+        .iter()
+        .map(|span| span.text.as_str())
+        .collect();
+    assert!(text.starts_with("🩺 Health"), "{text}");
+    assert!(text.contains("✅ No open problems."), "{text}");
+    server.abort();
 }
