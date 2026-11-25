@@ -10,7 +10,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use std::collections::BTreeSet;
 use thiserror::Error;
 use tokio::sync::{mpsc, oneshot};
-use wuphf_core::{Core, CoreError, Released};
+use wuphf_core::{Core, CoreError, PostOutcome, Released};
 use wuphf_model::{
     Action, Dispatch, HealthPause, OWNER_AUTHOR, ObservedDirection, ObservedMessage, OwnerMessage,
     Platform,
@@ -95,6 +95,45 @@ where
             self.inject(dispatch).await?;
         }
         Ok(sent)
+    }
+
+    /// The core, for reads the panel's pages make (plan 084's pending posts).
+    pub fn core(&self) -> &Arc<Core<S>> {
+        &self.core
+    }
+
+    /// The owner's ✅ on a pending post (plan 084): post it now.
+    pub async fn confirm_post(
+        &self,
+        id: wuphf_model::MessageId,
+    ) -> Result<PostOutcome, OwnerSendError> {
+        let outcome = self.core.confirm_post(id, now_ms()).await?;
+        self.inject_posted(&outcome).await?;
+        Ok(outcome)
+    }
+
+    /// Post `text` typed in the panel opened in a topic (plan 084).
+    pub async fn compose_post(
+        &self,
+        connector: &wuphf_model::ConnectorId,
+        address: &wuphf_model::ChatAddress,
+        text: &str,
+    ) -> Result<PostOutcome, OwnerSendError> {
+        let outcome = self
+            .core
+            .compose_post(connector, address, text, now_ms())
+            .await?;
+        self.inject_posted(&outcome).await?;
+        Ok(outcome)
+    }
+
+    async fn inject_posted(&self, outcome: &PostOutcome) -> Result<(), OwnerSendError> {
+        if let PostOutcome::Posted(dispatches) = outcome {
+            for dispatch in dispatches {
+                self.inject(dispatch.clone()).await?;
+            }
+        }
+        Ok(())
     }
 
     /// Hold dispatches into `pauses` from now on (plan 079).

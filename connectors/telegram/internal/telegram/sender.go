@@ -46,6 +46,9 @@ type Sender struct {
 	// after runs f once d has passed (time.AfterFunc when nil): the refusal
 	// note's self-deletion, replaced in tests.
 	after func(d time.Duration, f func())
+	// panel opens the settings panel when the core asks (plan 084); nil
+	// without one.
+	panel panelOpener
 }
 
 func NewSender(api *tg.Client, peers *PeerCache, media MediaBroker, converter StickerConverter, runtime *settings.Live[config.Runtime], bot bool) Sender {

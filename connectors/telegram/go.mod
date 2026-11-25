@@ -5,7 +5,7 @@ go 1.26.0
 require (
 	github.com/gotd/td v0.161.0
 	github.com/pelletier/go-toml/v2 v2.4.3
-	github.com/propheci/botconf/go v0.16.0
+	github.com/propheci/botconf/go v0.18.0
 	github.com/rs/zerolog v1.35.1
 	github.com/wuphf-rs/wuphf-ai/connectors/shared v0.0.0
 	github.com/wuphf-rs/wuphf-ai/proto/go v0.0.0

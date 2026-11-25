@@ -140,7 +140,7 @@ func (c Connector) Run(ctx context.Context) error {
 		return client.Run(ctx, func(ctx context.Context) error {
 			return c.serve(ctx, client, peers, panel, stickers, panelClient, helperReady, startHelper, func(ctx context.Context, self *tg.User) error {
 				reactions.SetSelf(self.ID)
-				sender := NewSender(client.API(), peers, media, converter, runtime.Live, self.Bot).WithInlineStickers(stickers)
+				sender := NewSender(client.API(), peers, media, converter, runtime.Live, self.Bot).WithInlineStickers(stickers).WithPanel(panel)
 				return coreclient.New(coreclient.Options{
 					CoreAddress:         c.cfg.CoreAddress,
 					Token:               coreToken,
@@ -197,7 +197,7 @@ func (c Connector) serve(
 		}
 	} else {
 		// Text panels until the helper bot (if any) is up.
-		panel.startUser(panelClient, client.API(), render.NewInlinePanel(panelClient, client.API(), nil, nil, self.ID), session)
+		panel.startUser(panelClient, client.API(), render.NewInlinePanel(panelClient, client.API(), nil, nil, self.ID, render.WithInlineContext(panelContext)), session)
 		switch {
 		case c.credentials.PanelBotToken == "":
 		case c.cfg.Panel.SessionFile == "":
@@ -269,7 +269,7 @@ func (c Connector) attachHelper(ctx context.Context, api *tg.Client, panel *Pane
 		c.logger.Warn().Err(err).Msg("settings panel: the user session cannot reach the helper bot; panels stay text")
 		return
 	}
-	panel.startUser(panelClient, api, render.NewInlinePanel(panelClient, api, helper, botUser, session.self), session)
+	panel.startUser(panelClient, api, render.NewInlinePanel(panelClient, api, helper, botUser, session.self, render.WithInlineContext(panelContext)), session)
 	panel.addNames(helperSelf.Username)
 	stickers.attach(api, helper.API(), botUser, session.self)
 	c.logger.Info().Str("helper", helperSelf.Username).Msg("settings panel uses the helper bot")

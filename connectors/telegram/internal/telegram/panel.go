@@ -75,7 +75,7 @@ func (p *Panel) startBot(client *botconf.Client, api *tg.Client, session panelSe
 	p.start(&botFront{
 		client: client,
 		tgAPI:  api,
-		panel:  render.NewBotPanel(client, api),
+		panel:  render.NewBotPanel(client, api, render.WithContext(panelContext)),
 	}, session)
 }
 

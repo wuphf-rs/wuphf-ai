@@ -27,6 +27,7 @@ use wuphf_runtime::{
     media::GrpcMediaService,
     observer_service::{GrpcObserverService, bearer_auth},
     plugin_settings::{GrpcPluginService, PluginSettings},
+    post_pages::{DataPages, PostPages},
     settings_auth::settings_server,
 };
 use wuphf_settings::{LiveRouting, WuphfSchema};
@@ -307,17 +308,19 @@ async fn serve(path: PathBuf) -> Result<()> {
         .restore()
         .await
         .context("restore the health pauses")?;
-    // The settings panel shows the health checks on its Health page.
+    // The settings panel shows the health checks on its Health page, and a
+    // topic that takes posts opens on its post pages (plan 084).
+    let pages = DataPages::shared(
+        Arc::new(HealthPages::new(Arc::clone(&health))),
+        Arc::new(PostPages::new(runtime.owner_sender())),
+    );
     let settings_service = settings_server(
         Arc::clone(&settings),
         Arc::clone(&storage),
         Arc::clone(&connector_tokens),
         observer_token_value.clone(),
         Arc::clone(&sessions),
-        Some((
-            HEALTH_ENTRY,
-            Arc::new(HealthPages::new(Arc::clone(&health))),
-        )),
+        Some((HEALTH_ENTRY, pages)),
     );
     let health_service = HealthTransportServer::with_interceptor(
         GrpcHealthService::new(Arc::clone(&health)),

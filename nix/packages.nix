@@ -137,7 +137,7 @@ let
   wuphf-telegram = go {
     binary = "wuphf-telegram";
     module = "connectors/telegram";
-    vendorHash = "sha256-W2nWX+Yi06x2UwxjFlEokHO0BcL7uuH4cOs8Jsy0dFs=";
+    vendorHash = "sha256-FmTMfLbYEBuTIOMiISlyQ8hUtaNO/4pROGsdnZBuCAo=";
     description = "wuphf Telegram connector";
   };
   wuphf-whatsapp = go {
