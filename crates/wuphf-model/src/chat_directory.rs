@@ -50,6 +50,9 @@ pub enum DirectoryChatKind {
     Group,
     Direct,
     Channel,
+    /// A chat grouping others (a WhatsApp community, plan 085): naming it in
+    /// a rule's chats covers its members.
+    Community,
 }
 
 impl fmt::Display for DirectoryChatKind {
@@ -58,6 +61,7 @@ impl fmt::Display for DirectoryChatKind {
             Self::Group => "group",
             Self::Direct => "direct",
             Self::Channel => "channel",
+            Self::Community => "community",
         })
     }
 }

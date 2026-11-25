@@ -26,6 +26,7 @@ use wuphf_proto::connector::participant_change::Kind;
 
 use crate::avatars::{self, Avatars};
 use crate::chat_state::{history_state, now_ms, state_report};
+use crate::community;
 use crate::contacts;
 use crate::disappearing::{
     CHAT_UPDATE_BATCH, chat_update_frames, group_action_update, history_updates,
@@ -118,8 +119,26 @@ impl ChatEvents {
     }
 
     /// A group notification's update, with every member and the actor named
-    /// like message senders.
+    /// like message senders. A rename, or a link to or unlink from a
+    /// community (plan 085), reads the group again for its title in its
+    /// community; a rename that cannot be read is titled from the
+    /// notification alone.
     async fn group_update(&self, client: &Client, update: &GroupUpdate) -> Vec<pb::ChatUpdate> {
+        if (matches!(update.action, GroupNotificationAction::Subject { .. })
+            || community::changes_community(&update.action))
+            && let Some((title, community)) = self
+                .titles
+                .groups()
+                .identity(client, &update.group_jid)
+                .await
+        {
+            return vec![pb::ChatUpdate {
+                chat_id: bare_id(&update.group_jid),
+                title,
+                community: Some(community),
+                ..Default::default()
+            }];
+        }
         let actor = actor_jid(
             update.is_lid_addressing_mode,
             update.participant.as_ref(),
@@ -448,12 +467,12 @@ impl Sightings {
 }
 
 /// The snapshot a chat's first sighting reports, under each of `forms`: the
-/// title the message carries, a group's description and member count, and
-/// the picture. Nothing when nothing is known.
+/// title the message carries, a group's description, member count and
+/// community (plan 085), and the picture. Nothing when nothing is known.
 pub fn sighting_updates(
     forms: Vec<String>,
     title: Option<String>,
-    group: Option<&GroupFacts>,
+    group: Option<(&GroupFacts, pb::ChatCommunity)>,
     avatar: Option<pb::ChatAvatar>,
 ) -> Vec<pb::ChatUpdate> {
     if title.is_none() && group.is_none() && avatar.is_none() {
@@ -464,8 +483,9 @@ pub fn sighting_updates(
         .map(|chat_id| pb::ChatUpdate {
             chat_id,
             title: title.clone(),
-            description: group.map(|facts| facts.description.clone()),
-            participant_count: group.map(|facts| facts.participant_count),
+            description: group.as_ref().map(|(facts, _)| facts.description.clone()),
+            participant_count: group.as_ref().map(|(facts, _)| facts.participant_count),
+            community: group.as_ref().map(|(_, community)| community.clone()),
             avatar: avatar.clone(),
             ..Default::default()
         })
@@ -911,6 +931,7 @@ mod tests {
             description: "Our family".into(),
             participant_count: 4,
             disappearing_seconds: 0,
+            community: None,
         };
         let avatar = pb::ChatAvatar {
             id: "pic-1".into(),
@@ -920,7 +941,7 @@ mod tests {
             sighting_updates(
                 vec!["123@g.us".into()],
                 Some("[G] Family".into()),
-                Some(&facts),
+                Some((&facts, community::reported(None))),
                 Some(avatar.clone()),
             ),
             [pb::ChatUpdate {
@@ -928,6 +949,7 @@ mod tests {
                 title: Some("[G] Family".into()),
                 description: Some("Our family".into()),
                 participant_count: Some(4),
+                community: Some(pb::ChatCommunity::default()),
                 avatar: Some(avatar),
                 ..Default::default()
             }]

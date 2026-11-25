@@ -179,11 +179,19 @@ impl RoutingConfig {
     }
 
     /// Whether the owner marked this conversation receive-only, naming its
-    /// source chat or one of its endpoints (as `chat_state` overrides do).
-    pub fn marked_receive_only(&self, conversation: &Conversation, endpoints: &[ChatRef]) -> bool {
-        self.receive_only
-            .iter()
-            .any(|chat| *chat == conversation.source || endpoints.contains(chat))
+    /// source chat, one of its endpoints (as `chat_state` overrides do), or
+    /// the source chat's `community` (plan 085).
+    pub fn marked_receive_only(
+        &self,
+        conversation: &Conversation,
+        endpoints: &[ChatRef],
+        community: Option<&ChatRef>,
+    ) -> bool {
+        self.receive_only.iter().any(|chat| {
+            *chat == conversation.source
+                || endpoints.contains(chat)
+                || community.is_some_and(|community| community == chat)
+        })
     }
 
     /// Whether deleting a mirror copy leaves the message in place on this

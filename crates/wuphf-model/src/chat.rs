@@ -66,6 +66,10 @@ pub struct ChatProfile {
     /// (plan 083). `None` until reported: the chat is then open.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub posting: Option<ChatPosting>,
+    /// The community this chat belongs to (plan 085). `None` when it belongs
+    /// to none, or none was reported.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub community: Option<ChatCommunity>,
 }
 
 impl ChatProfile {
@@ -83,6 +87,7 @@ impl ChatProfile {
             mute: None,
             archived: None,
             posting: None,
+            community: None,
         }
     }
 
@@ -229,6 +234,24 @@ impl ChatStatePolicy {
     }
 }
 
+/// A community (plan 085): a parent chat that groups member chats, as a
+/// WhatsApp community groups its groups. A rule filter or `receive_only` that
+/// names `chat_id` covers every member, present and future. `title` is its
+/// plain name (no tag), for the info card.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ChatCommunity {
+    pub chat_id: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub title: String,
+}
+
+impl ChatCommunity {
+    /// The community's address, as a rule's chat selector names it.
+    pub fn address(&self) -> ChatAddress {
+        ChatAddress::new(self.chat_id.clone(), None)
+    }
+}
+
 /// The chat's picture as the core stores it. `id` is the platform's picture
 /// id; empty means the picture was removed. `media_id` is the picture in the
 /// core's media store, and `hash` the core's SHA-256 (hex) of its bytes: equal
@@ -310,6 +333,10 @@ pub struct ChatUpdate {
     /// What this account may do in the chat (plan 083).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub posting: Option<ChatPosting>,
+    /// The community the chat belongs to (plan 085); an empty `chat_id` says
+    /// it belongs to none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub community: Option<ChatCommunity>,
 }
 
 impl ChatUpdate {

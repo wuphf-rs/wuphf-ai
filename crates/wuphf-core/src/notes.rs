@@ -49,7 +49,8 @@ fn timer_line(seconds: u32) -> String {
 
 /// The info card: the title line, the source chat's connector (the same chat
 /// can be on two accounts of one platform), then (each only when known) the
-/// description, the timer and the participant count; the avatar attached.
+/// community it belongs to, the description, the timer and the participant
+/// count; the avatar attached.
 pub(crate) fn info_card(
     title: &str,
     connector: &ConnectorId,
@@ -58,6 +59,14 @@ pub(crate) fn info_card(
 ) -> Note {
     let mut lines = vec![format!("ℹ️ {title}"), format!("🔌 {connector}")];
     if let Some(profile) = profile {
+        if let Some(community) = &profile.community {
+            let name = if community.title.is_empty() {
+                &community.chat_id
+            } else {
+                &community.title
+            };
+            lines.push(format!("🏘️ Community: {name}"));
+        }
         if let Some(description) = profile
             .description
             .as_deref()
@@ -145,7 +154,9 @@ fn membership_text(change: &ParticipantChange) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use wuphf_model::{AttachmentKind, ChatAvatar, ConnectorId, DisappearingTimer, MediaId};
+    use wuphf_model::{
+        AttachmentKind, ChatAvatar, ChatCommunity, ConnectorId, DisappearingTimer, MediaId,
+    };
 
     #[test]
     fn timer_text_names_days_hours_and_seconds() {
@@ -181,6 +192,10 @@ mod tests {
             description: Some("Weekend plans".into()),
             disappearing: Some(DisappearingTimer::new(604_800)),
             participant_count: Some(12),
+            community: Some(ChatCommunity {
+                chat_id: "9@g.us".into(),
+                title: "Neighbours".into(),
+            }),
             ..ChatProfile::new(ConnectorId("whatsapp".into()), "1@g.us")
         };
         let avatar = photo();
@@ -193,7 +208,7 @@ mod tests {
         );
         assert_eq!(
             card.text,
-            "ℹ️ [G] Family\n🔌 whatsapp-2\n📝 Weekend plans\n⏳ Disappearing messages: 7 \
+            "ℹ️ [G] Family\n🔌 whatsapp-2\n🏘️ Community: Neighbours\n📝 Weekend plans\n⏳ Disappearing messages: 7 \
              days\n👥 12 participants"
         );
         assert_eq!(card.attachments, vec![avatar]);

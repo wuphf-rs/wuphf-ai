@@ -11,6 +11,9 @@ use std::time::{Duration, Instant};
 use tracing::debug;
 use whatsapp_rust::Jid;
 use whatsapp_rust::client::Client;
+use wuphf_proto::connector as pb;
+
+use crate::community;
 
 /// How long a group's facts are trusted before they are fetched again. Like
 /// the Go connector's `titleTTL`: long enough that a busy group is not looked
@@ -28,6 +31,8 @@ pub struct GroupFacts {
     pub participant_count: u32,
     /// The group's disappearing-messages timer; 0 when off.
     pub disappearing_seconds: u32,
+    /// The community the group belongs to (plan 085), when it is in one.
+    pub community: Option<Jid>,
 }
 
 /// Group facts by canonical group JID, fetched on a miss or after the TTL.
@@ -61,17 +66,46 @@ impl GroupDirectory {
             0 => metadata.size.unwrap_or(0),
             listed => u32::try_from(listed).unwrap_or(u32::MAX),
         };
+        let community = community::parent_of(&metadata).cloned();
         let facts = GroupFacts {
             subject: metadata.subject,
             description: metadata.description.unwrap_or_default(),
             participant_count,
             disappearing_seconds: metadata.ephemeral_expiration,
+            community,
         };
         self.entries
             .lock()
             .unwrap()
             .insert(key, (facts.clone(), Instant::now()));
         Some(facts)
+    }
+
+    /// The community of a group with `facts`, named from the community's own
+    /// facts (an unknown name is empty); `None` for a group in none.
+    pub async fn community(&self, client: &Client, facts: &GroupFacts) -> Option<(Jid, String)> {
+        let parent = facts.community.clone()?;
+        let name = Box::pin(self.facts(client, &parent))
+            .await
+            .map(|community| community.subject)
+            .unwrap_or_default();
+        Some((parent, name))
+    }
+
+    /// A group's display title (`[G] Community › Group` in a community) and
+    /// its community as the core is told it.
+    pub async fn identity(
+        &self,
+        client: &Client,
+        jid: &Jid,
+    ) -> Option<(Option<String>, pb::ChatCommunity)> {
+        let facts = self.facts(client, jid).await?;
+        let community = self.community(client, &facts).await;
+        let name = community.as_ref().map(|(_, name)| name.as_str());
+        Some((
+            community::group_title(&facts.subject, name),
+            community::reported(community.as_ref().map(|(jid, name)| (jid, name.as_str()))),
+        ))
     }
 
     /// Drop a group's cached facts, after a notification that may have changed
@@ -103,6 +137,7 @@ mod tests {
             description: "Our family".into(),
             participant_count: 4,
             disappearing_seconds: 604_800,
+            community: None,
         };
         directory
             .entries

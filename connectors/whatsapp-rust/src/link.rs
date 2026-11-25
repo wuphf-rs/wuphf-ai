@@ -18,7 +18,7 @@ use whatsapp_rust::client::Client;
 use whatsapp_rust::pair_code::PairCodeOptions;
 use whatsapp_rust::prelude::*;
 use whatsapp_rust::types::events::Event;
-use whatsapp_rust::{Jid, Server};
+use whatsapp_rust::{GroupMetadata, Jid, Server};
 use wuphf_connector::session_lock::{SessionLock, SessionLockError};
 use wuphf_model::{
     CHAT_DIRECTORY_ENV, ChatAddress, ChatDirectory, ChatRef, ConnectorId, DirectoryChat,
@@ -26,11 +26,13 @@ use wuphf_model::{
 };
 
 use crate::chats::contact_forms;
+use crate::community;
 use crate::config::{Config, LoginMethod};
 use crate::contacts::{self, Contacts};
 use crate::device;
 use crate::identity::Identity;
 use crate::normalize::bare_id;
+use crate::posting;
 
 /// How long a linked session gets to connect.
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(30);
@@ -343,6 +345,31 @@ fn pair_code_due(last: &Mutex<Option<Instant>>, refresh: bool, now: Instant) -> 
     due
 }
 
+/// The joined groups as the directory lists them (plan 085): a community as
+/// one, a group in a community as "Community › Group".
+fn directory_groups<'a>(
+    groups: impl Iterator<Item = &'a GroupMetadata> + Clone,
+) -> Vec<(String, String, DirectoryChatKind)> {
+    let names = posting::group_names(groups.clone());
+    groups
+        .map(|group| {
+            let community = community::parent_of(group)
+                .and_then(|parent| names.get(&bare_id(parent)))
+                .map(String::as_str);
+            let kind = if group.is_parent_group {
+                DirectoryChatKind::Community
+            } else {
+                DirectoryChatKind::Group
+            };
+            (
+                bare_id(&group.id),
+                community::community_name(community, &group.subject),
+                kind,
+            )
+        })
+        .collect()
+}
+
 /// The joined groups, the followed channels and the saved contacts, with the
 /// ids the connector reports to the core; and why the channels could not be
 /// listed, when they could not (the rest is still worth saving).
@@ -351,14 +378,12 @@ async fn fetch(
     client: &Arc<Client>,
     contacts: &Contacts,
 ) -> anyhow::Result<(Vec<DirectoryChat>, Option<String>)> {
-    let mut chats: Vec<(String, String, DirectoryChatKind)> = client
+    let groups = client
         .groups()
         .get_participating()
         .await
-        .context("fetch the groups")?
-        .into_values()
-        .map(|group| (bare_id(&group.id), group.subject, DirectoryChatKind::Group))
-        .collect();
+        .context("fetch the groups")?;
+    let mut chats = directory_groups(groups.values());
     let channels_failed = match client.newsletter().list_subscribed().await {
         Ok(channels) => {
             chats.extend(channels.into_iter().map(|channel| {
@@ -496,6 +521,43 @@ mod tests {
         assert!(
             pair_code_due(&last, false, start + Duration::from_secs(181)),
             "running out"
+        );
+    }
+
+    #[test]
+    fn the_directory_lists_communities_and_titles_their_groups_under_them() {
+        let group =
+            |jid: &str, subject: &str, parent: Option<&str>, is_parent: bool| GroupMetadata {
+                id: jid.parse().unwrap(),
+                subject: subject.into(),
+                parent_group_jid: parent.map(|jid| jid.parse().unwrap()),
+                is_parent_group: is_parent,
+                ..GroupMetadata::default()
+            };
+        let groups = [
+            group("9@g.us", "Neighbours", None, true),
+            group("1@g.us", "Garden", Some("9@g.us"), false),
+            group("2@g.us", "Book club", None, false),
+        ];
+        assert_eq!(
+            directory_groups(groups.iter()),
+            [
+                (
+                    "9@g.us".into(),
+                    "Neighbours".into(),
+                    DirectoryChatKind::Community
+                ),
+                (
+                    "1@g.us".into(),
+                    "Neighbours › Garden".into(),
+                    DirectoryChatKind::Group
+                ),
+                (
+                    "2@g.us".into(),
+                    "Book club".into(),
+                    DirectoryChatKind::Group
+                ),
+            ]
         );
     }
 }

@@ -8,6 +8,7 @@ mod avatars;
 mod chat_state;
 mod chats;
 mod commands;
+mod community;
 mod config;
 mod contacts;
 mod device;

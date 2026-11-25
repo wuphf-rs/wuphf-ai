@@ -30,6 +30,9 @@ const (
 	Group   Kind = "group"
 	Direct  Kind = "direct"
 	Channel Kind = "channel"
+	// Community groups other chats (a WhatsApp community): naming it in a
+	// rule's chats covers its members.
+	Community Kind = "community"
 )
 
 // Directory is one connector's chats.

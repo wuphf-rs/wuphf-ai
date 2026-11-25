@@ -64,8 +64,8 @@ func newsletterPosting(channel *types.NewsletterMetadata) *wuphfpb.ChatPosting {
 	return &wuphfpb.ChatPosting{Messages: false, Reactions: false, Posts: owns, PostEdits: owns}
 }
 
-// Snapshot reports the story feed, every joined group and every followed
-// channel. A list that cannot be read is skipped (logged): the core keeps
+// Snapshot reports the story feed, every joined group (with its community
+// and title, plan 085) and every followed channel. A list that cannot be read is skipped (logged): the core keeps
 // what it knew.
 func (r postingReporter) Snapshot(ctx context.Context) error {
 	audience := ""
@@ -78,11 +78,17 @@ func (r postingReporter) Snapshot(ctx context.Context) error {
 	if groups, err := r.directory.GetJoinedGroups(ctx); err != nil {
 		r.logger.Warn().Err(err).Msg("could not list WhatsApp groups for their posting rights")
 	} else {
+		names := groupNames(groups)
 		for _, group := range groups {
-			updates = append(updates, &wuphfpb.ChatUpdate{
-				ChatId:  r.normalizer.canonical(ctx, group.JID).String(),
-				Posting: groupPosting(group, r.directory.OwnPN(), r.directory.OwnLID()),
-			})
+			update := &wuphfpb.ChatUpdate{
+				ChatId:    r.normalizer.canonical(ctx, group.JID).String(),
+				Posting:   groupPosting(group, r.directory.OwnPN(), r.directory.OwnLID()),
+				Community: groupCommunity(group, names),
+			}
+			if title := groupTitle(group, names); title != "" {
+				update.Title = &title
+			}
+			updates = append(updates, update)
 		}
 	}
 	if channels, err := r.directory.GetSubscribedNewsletters(ctx); err != nil {

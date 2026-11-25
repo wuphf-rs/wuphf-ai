@@ -71,10 +71,7 @@ impl ChatTitles {
     pub async fn title(&self, client: &Client, info: &MessageInfo) -> Option<String> {
         let chat = info.source.chat.to_non_ad();
         match chat.server {
-            Server::Group => {
-                let facts = self.groups.facts(client, &chat).await?;
-                tagged("G", &facts.subject)
-            }
+            Server::Group => self.groups.identity(client, &chat).await?.0,
             Server::Pn | Server::Lid => self.dm_title(client, &chat, info.source.is_from_me).await,
             Server::Newsletter => self.channel_title(client, &chat).await,
             _ => None,

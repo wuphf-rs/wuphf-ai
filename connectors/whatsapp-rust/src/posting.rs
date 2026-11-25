@@ -4,12 +4,15 @@
 //! out each time the session connects; a group goes again when its
 //! admin-only setting or this account's admin role changes.
 
+use std::collections::HashMap;
+
 use tracing::warn;
 use whatsapp_rust::client::Client;
 use whatsapp_rust::wacore::stanza::groups::GroupNotificationAction;
 use whatsapp_rust::{GroupMetadata, Jid, NewsletterRole, Server};
 use wuphf_proto::connector as pb;
 
+use crate::community;
 use crate::normalize::bare_id;
 use crate::probe::{membership, own_users};
 
@@ -86,8 +89,8 @@ pub(crate) fn affects_posting(action: &GroupNotificationAction, own: &[String]) 
     }
 }
 
-/// The posting snapshot: the story feed, every joined group, every followed
-/// channel. A list that cannot be read is skipped (logged): the core keeps
+/// The posting snapshot: the story feed, every joined group (with its
+/// community and title, plan 085), every followed channel. A list that cannot be read is skipped (logged): the core keeps
 /// what it knew.
 pub(crate) async fn snapshot(client: &Client) -> Vec<pb::ChatUpdate> {
     let mut updates = vec![pb::ChatUpdate {
@@ -97,11 +100,24 @@ pub(crate) async fn snapshot(client: &Client) -> Vec<pb::ChatUpdate> {
     }];
     let own = own_users(client);
     match client.groups().get_participating().await {
-        Ok(groups) => updates.extend(groups.into_values().map(|group| pb::ChatUpdate {
-            chat_id: bare_id(&group.id),
-            posting: Some(group_posting(&group, &own)),
-            ..Default::default()
-        })),
+        Ok(groups) => {
+            let names = group_names(groups.values());
+            updates.extend(groups.values().map(|group| {
+                let community = community::parent_of(group).map(|parent| {
+                    (
+                        parent,
+                        names.get(&bare_id(parent)).map_or("", String::as_str),
+                    )
+                });
+                pb::ChatUpdate {
+                    chat_id: bare_id(&group.id),
+                    title: community::group_title(&group.subject, community.map(|(_, name)| name)),
+                    posting: Some(group_posting(group, &own)),
+                    community: Some(community::reported(community)),
+                    ..Default::default()
+                }
+            }));
+        }
         Err(error) => warn!(%error, "could not list WhatsApp groups for their posting rights"),
     }
     match client.newsletter().list_subscribed().await {
@@ -113,6 +129,15 @@ pub(crate) async fn snapshot(client: &Client) -> Vec<pb::ChatUpdate> {
         Err(error) => warn!(%error, "could not list WhatsApp channels for their posting rights"),
     }
     updates
+}
+
+/// Each group's subject by its id, for naming the community of its groups.
+pub(crate) fn group_names<'a>(
+    groups: impl Iterator<Item = &'a GroupMetadata>,
+) -> HashMap<String, String> {
+    groups
+        .map(|group| (bare_id(&group.id), group.subject.clone()))
+        .collect()
 }
 
 /// A group's posting, read again after a notification that affects it.

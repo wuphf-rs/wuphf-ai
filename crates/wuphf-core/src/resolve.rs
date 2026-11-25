@@ -121,12 +121,24 @@ where
     /// arrived on plus the transitive closure of the equivalences the platform
     /// has reported (a chain, since a chat can migrate more than once). See
     /// [`address_forms`].
+    /// Its community, as the connector last reported it, rides along (plan
+    /// 085), so a rule filter naming the community covers it, and stops
+    /// covering it once it leaves.
     pub(crate) async fn address_set(
         &self,
         connector_id: &ConnectorId,
         address: &ChatAddress,
     ) -> Result<AddressSet, CoreError> {
-        Ok(address_forms(&*self.storage, connector_id, address).await?)
+        let forms = address_forms(&*self.storage, connector_id, address).await?;
+        let community = self
+            .storage
+            .chat_profile(connector_id, &address.chat_id)
+            .await?
+            .and_then(|profile| profile.community);
+        Ok(match community {
+            Some(community) => forms.within(community.address()),
+            None => forms,
+        })
     }
 
     /// Make every known form of a chat resolve straight to its endpoint, so

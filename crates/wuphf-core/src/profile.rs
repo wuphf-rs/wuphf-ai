@@ -168,6 +168,16 @@ pub(crate) fn apply(
         changes.stored = true;
     }
 
+    // The community it belongs to: stored, never a note (plan 085); a
+    // change of community renames the thread through the title.
+    if let Some(community) = &update.community {
+        let community = (!community.chat_id.is_empty()).then(|| community.clone());
+        if profile.community != community {
+            profile.community = community;
+            changes.stored = true;
+        }
+    }
+
     changes.participants = update.participant_changes.clone();
     changes
 }
@@ -190,6 +200,7 @@ fn fill_unknown(into: &mut ChatProfile, from: ChatProfile) {
     into.avatar = into.avatar.take().or(from.avatar);
     into.participant_count = into.participant_count.or(from.participant_count);
     into.posting = into.posting.take().or(from.posting);
+    into.community = into.community.take().or(from.community);
 }
 
 impl<S> Core<S>

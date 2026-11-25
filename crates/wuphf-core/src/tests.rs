@@ -5082,3 +5082,100 @@ async fn a_plain_message_in_a_channel_topic_is_refused() {
         Action::Refuse { native_id, .. } if native_id == "tg-hi"
     ));
 }
+
+// ---- Plan 085: communities ----
+
+const COMMUNITY: &str = "999@g.us";
+
+/// Every WhatsApp chat `filter` passes, mirrored into the forum.
+fn community_rule(filter: ChatFilter) -> Rule {
+    Rule {
+        id: RuleId("wa-community".into()),
+        flow: RuleKind::ManyToOne {
+            source_connector: ConnectorId(WHATSAPP.into()),
+            source_chats_filter: filter,
+            destination_connector: ConnectorId(TELEGRAM.into()),
+            destination_chat: ChatAddress::new(MIRROR_CHAT, None),
+        },
+    }
+}
+
+fn naming_the_community() -> Vec<ChatAddress> {
+    vec![ChatAddress::new(COMMUNITY, None)]
+}
+
+/// `group` reported as a member of `community` ("" = of none).
+async fn report_community(core: &Core<InMemoryStorage>, group: &str, community: &str) {
+    core.update_chats(
+        &ConnectorId(WHATSAPP.into()),
+        vec![ChatUpdate {
+            community: Some(wuphf_model::ChatCommunity {
+                chat_id: community.into(),
+                title: "Neighbours".into(),
+            }),
+            ..ChatUpdate::new(group)
+        }],
+        true,
+    )
+    .await
+    .unwrap();
+}
+
+async fn mirrored(core: &Core<InMemoryStorage>, group: &str, native_id: &str) -> bool {
+    !core
+        .ingest(event(WHATSAPP, group, native_id, None))
+        .await
+        .unwrap()
+        .dispatches()
+        .is_empty()
+}
+
+#[tokio::test]
+async fn a_filter_naming_a_community_mirrors_its_groups_only() {
+    let core = core(vec![community_rule(ChatFilter::Only {
+        chats: naming_the_community(),
+    })]);
+    report_community(&core, GROUP, COMMUNITY).await;
+    assert!(mirrored(&core, GROUP, "wa-1").await);
+    assert!(!mirrored(&core, OTHER_GROUP, "wa-2").await);
+}
+
+#[tokio::test]
+async fn a_group_that_leaves_its_community_stops_mirroring() {
+    let core = core(vec![community_rule(ChatFilter::Only {
+        chats: naming_the_community(),
+    })]);
+    report_community(&core, GROUP, COMMUNITY).await;
+    assert!(mirrored(&core, GROUP, "wa-1").await);
+    report_community(&core, GROUP, "").await;
+    assert!(!mirrored(&core, GROUP, "wa-2").await);
+}
+
+#[tokio::test]
+async fn a_deny_list_naming_a_community_excludes_its_groups() {
+    let core = core(vec![community_rule(ChatFilter::Not {
+        chats: naming_the_community(),
+    })]);
+    report_community(&core, GROUP, COMMUNITY).await;
+    assert!(!mirrored(&core, GROUP, "wa-1").await);
+    assert!(mirrored(&core, OTHER_GROUP, "wa-2").await);
+}
+
+#[tokio::test]
+async fn receive_only_naming_a_community_covers_its_groups() {
+    let community = ChatRef {
+        connector_id: ConnectorId(WHATSAPP.into()),
+        address: ChatAddress::new(COMMUNITY, None),
+    };
+    let core = provisioned_mirror(
+        RoutingConfig::new(vec![mirror_rule()], connectors()).with_receive_only(vec![community]),
+    )
+    .await;
+    report_community(&core, GROUP, COMMUNITY).await;
+    let (dispatches, _) = routed(
+        core.ingest(event_in(TELEGRAM, MIRROR_CHAT, Some("777"), "tg-9", None))
+            .await
+            .unwrap(),
+    );
+    assert_refused(&dispatches, "tg-9");
+}

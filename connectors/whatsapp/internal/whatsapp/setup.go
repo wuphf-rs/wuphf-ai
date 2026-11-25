@@ -218,7 +218,8 @@ func waitWithProgress(ctx context.Context, screen tui.Session, l *latch, timeout
 
 // directoryChats are the account's chats as the connector reports them to
 // the core (canonical turns a phone address into its LID when known): the
-// joined groups, the contacts saved in the address book (or businesses; the
+// joined groups (a community's as "Community › Group", the community
+// itself as one, plan 085), the contacts saved in the address book (or businesses; the
 // people only seen in groups are left out, being many) and the followed
 // channels, by title.
 func directoryChats(connectorID string, groups []*types.GroupInfo, contacts map[types.JID]types.ContactInfo,
@@ -236,8 +237,17 @@ func directoryChats(connectorID string, groups []*types.GroupInfo, contacts map[
 		}
 		out = append(out, chatdir.Chat{Chat: chatdir.ChatRef(connectorID, id), Title: title, Kind: kind})
 	}
+	names := groupNames(groups)
 	for _, group := range groups {
-		add(group.JID, group.Name, chatdir.Group)
+		kind := chatdir.Group
+		if group.IsParent {
+			kind = chatdir.Community
+		}
+		community := ""
+		if parent := parentOf(group); !parent.IsEmpty() {
+			community = names(parent)
+		}
+		add(group.JID, communityName(community, group.Name), kind)
 	}
 	for jid, contact := range contacts {
 		if strings.TrimSpace(contact.FullName) == "" && strings.TrimSpace(contact.BusinessName) == "" {

@@ -65,6 +65,9 @@ message ChatUpdate {
   optional bool archived = 11;
   // What this account may do in the chat (plan 083). Absent: unknown, open.
   optional ChatPosting posting = 12;
+  // The community (a parent chat grouping several, as a WhatsApp community
+  // does) this chat belongs to (plan 085). An empty chat_id: none.
+  optional ChatCommunity community = 13;
 }
 
 // What an account may do in a chat. The core refuses to send messages (and
@@ -89,6 +92,14 @@ message ChatPosting {
   // An edit of a message already posted there goes through (plan 085: a
   // channel post). Off for a story: WhatsApp cannot edit one.
   bool post_edits = 6;
+}
+
+// A community, as a member chat names it: the parent chat's id, which rule
+// filters and receive_only may name to cover every member, and its plain
+// name (no tag), for the info card.
+message ChatCommunity {
+  string chat_id = 1;
+  string title = 2;
 }
 
 // The chat's picture. `id` is the platform's picture id; empty means the

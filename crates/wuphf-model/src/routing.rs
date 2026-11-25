@@ -233,10 +233,17 @@ fn unescape_chat_part(part: &str) -> Option<String> {
 /// a rule picks whichever form they know. Matching a rule against the whole set
 /// rather than one string is what makes a chat list agree with the platform no
 /// matter which form the user wrote or the connector reported.
+///
+/// A set may also name the chats this one belongs to (its community, plan
+/// 085). They are not forms of the chat: only a rule's chat filter consults
+/// them ([`ChatFilter::accepts`]), so a filter naming a community covers its
+/// members.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AddressSet {
     primary: ChatAddress,
     alternates: Vec<ChatAddress>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    containers: Vec<ChatAddress>,
 }
 
 impl AddressSet {
@@ -246,6 +253,7 @@ impl AddressSet {
         Self {
             primary,
             alternates: Vec::new(),
+            containers: Vec::new(),
         }
     }
 
@@ -275,6 +283,19 @@ impl AddressSet {
     /// Every form in the set, primary first.
     pub fn iter(&self) -> impl Iterator<Item = &ChatAddress> {
         std::iter::once(&self.primary).chain(self.alternates.iter())
+    }
+
+    /// Record a chat this one belongs to (its community).
+    pub fn within(mut self, container: ChatAddress) -> Self {
+        if !self.containers.contains(&container) {
+            self.containers.push(container);
+        }
+        self
+    }
+
+    /// The chats this one belongs to.
+    pub fn containers(&self) -> &[ChatAddress] {
+        &self.containers
     }
 }
 
@@ -355,10 +376,15 @@ impl ChatFilter {
     /// forms — so a chat cannot slip past a deny list by arriving under the
     /// address the user did not write.
     pub fn accepts(&self, addresses: &AddressSet) -> bool {
+        let listed = |chats: &[ChatAddress]| {
+            chats
+                .iter()
+                .any(|chat| chat.selects(addresses) || addresses.containers().contains(chat))
+        };
         match self {
             ChatFilter::All => true,
-            ChatFilter::Only { chats } => chats.iter().any(|chat| chat.selects(addresses)),
-            ChatFilter::Not { chats } => !chats.iter().any(|chat| chat.selects(addresses)),
+            ChatFilter::Only { chats } => listed(chats),
+            ChatFilter::Not { chats } => !listed(chats),
         }
     }
 }

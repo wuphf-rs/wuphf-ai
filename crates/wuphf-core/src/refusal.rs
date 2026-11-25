@@ -147,7 +147,14 @@ where
                 address: endpoint.address(),
             });
         }
-        let marked = routing.marked_receive_only(conversation, &endpoints);
+        let community = profile
+            .as_ref()
+            .and_then(|profile| profile.community.as_ref())
+            .map(|community| ChatRef {
+                connector_id: conversation.source.connector_id.clone(),
+                address: community.address(),
+            });
+        let marked = routing.marked_receive_only(conversation, &endpoints, community.as_ref());
         Ok(SourcePolicy {
             accepts_messages: !marked
                 && profile

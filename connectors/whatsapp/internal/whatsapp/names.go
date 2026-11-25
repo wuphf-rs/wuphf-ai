@@ -41,11 +41,14 @@ func newChatNamer(client *whatsmeow.Client) *chatNamer {
 	}
 }
 
-// Forget drops the cached title of a chat, so the next lookup resolves it
-// again (after a rename or a contact change).
+// Forget drops the cached title and metadata of a chat, so the next lookup
+// resolves them again (after a rename, a contact change, a group linked to
+// a community; a community's rename reaches its groups' titles once theirs
+// expire).
 func (n *chatNamer) Forget(chat types.JID) {
 	n.mu.Lock()
 	delete(n.titles, chat.String())
+	delete(n.groups, chat.String())
 	n.mu.Unlock()
 }
 
@@ -58,10 +61,7 @@ func (n *chatNamer) GroupInfo(ctx context.Context, group types.JID) *types.Group
 	if ok {
 		return info
 	}
-	n.groupName(ctx, group)
-	n.mu.RLock()
-	defer n.mu.RUnlock()
-	return n.groups[group.String()]
+	return n.fetchGroup(ctx, group)
 }
 
 func (n *chatNamer) ChatTitle(ctx context.Context, chat types.JID) string {
@@ -87,7 +87,7 @@ func (n *chatNamer) ChatTitle(ctx context.Context, chat types.JID) string {
 func (n *chatNamer) resolve(ctx context.Context, chat types.JID) string {
 	switch chat.Server {
 	case types.GroupServer:
-		return tagged("G", n.groupName(ctx, chat))
+		return groupTitle(n.fetchGroup(ctx, chat), n.cachedGroupName(ctx))
 	case types.NewsletterServer:
 		return tagged("C", n.newsletterName(ctx, chat))
 	default:
@@ -105,15 +105,28 @@ func tagged(kind, title string) string {
 	return "[" + kind + "] " + title
 }
 
-func (n *chatNamer) groupName(ctx context.Context, chat types.JID) string {
+// fetchGroup reads a group's metadata now and keeps it; nil when it cannot
+// be read.
+func (n *chatNamer) fetchGroup(ctx context.Context, chat types.JID) *types.GroupInfo {
 	info, err := n.client.GetGroupInfo(ctx, chat)
 	if err != nil || info == nil {
-		return ""
+		return nil
 	}
 	n.mu.Lock()
 	n.groups[chat.String()] = info
 	n.mu.Unlock()
-	return info.Name
+	return info
+}
+
+// cachedGroupName names a group from its kept metadata, read when there is
+// none: a community's name, looked up for each of its groups' titles.
+func (n *chatNamer) cachedGroupName(ctx context.Context) groupNamer {
+	return func(group types.JID) string {
+		if info := n.GroupInfo(ctx, group); info != nil {
+			return info.Name
+		}
+		return ""
+	}
 }
 
 func (n *chatNamer) newsletterName(ctx context.Context, chat types.JID) string {

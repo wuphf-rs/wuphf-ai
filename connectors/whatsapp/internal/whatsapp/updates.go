@@ -700,15 +700,21 @@ func (n Normalizer) sendChatUpdates(ctx context.Context, updates []*wuphfpb.Chat
 }
 
 // HandleGroupInfo reports what a group notification changed: the name (as
-// the tagged display title), the description, the disappearing timer, and
+// the tagged display title), the community it was linked to or unlinked
+// from (plan 085, with the title it now has), the description, the disappearing timer, and
 // each membership change with who made it. One update per notification; a
 // notification that changed none of these reports nothing.
 func (n Normalizer) HandleGroupInfo(ctx context.Context, evt *events.GroupInfo) error {
 	update := &wuphfpb.ChatUpdate{ChatId: n.canonical(ctx, evt.JID).String()}
 	changed := false
-	if evt.Name != nil {
+	community := communityChange(evt)
+	if community != nil {
+		update.Community = community
+		changed = true
+	}
+	if evt.Name != nil || community != nil {
 		n.forgetTitle(evt.JID)
-		if title := tagged("G", evt.Name.Name); title != "" {
+		if title := n.groupTitle(ctx, evt); title != "" {
 			update.Title = &title
 			changed = true
 		}
@@ -751,6 +757,21 @@ func (n Normalizer) HandleGroupInfo(ctx context.Context, evt *events.GroupInfo) 
 		return nil
 	}
 	return n.sendChatUpdates(ctx, []*wuphfpb.ChatUpdate{update}, false)
+}
+
+// groupTitle is the group's display title after a notification: read again
+// (in its community, plan 085), or the notification's new name alone when
+// it cannot be.
+func (n Normalizer) groupTitle(ctx context.Context, evt *events.GroupInfo) string {
+	if n.namer != nil {
+		if title := n.namer.ChatTitle(ctx, evt.JID); title != "" {
+			return title
+		}
+	}
+	if evt.Name != nil {
+		return tagged("G", evt.Name.Name)
+	}
+	return ""
 }
 
 // participantChange reports one membership event. The actor (absent for an

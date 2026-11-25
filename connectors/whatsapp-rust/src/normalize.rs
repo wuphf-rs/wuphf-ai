@@ -19,6 +19,7 @@ use wuphf_proto::connector as pb;
 use crate::addressing::AddressBook;
 use crate::avatars::Avatars;
 use crate::chats::{Sightings, sighting_updates};
+use crate::community;
 use crate::disappearing::{
     CHAT_UPDATE_BATCH, chat_update_frames, ephemeral_setting, message_timer,
 };
@@ -192,13 +193,21 @@ impl Normalizer {
         {
             return;
         }
+        let groups = self.titles.groups();
         let facts = if chat.server == Server::Group {
-            self.titles.groups().facts(client, &chat).await
+            groups.facts(client, &chat).await
         } else {
             None
         };
+        let community = match &facts {
+            Some(facts) => groups.community(client, facts).await,
+            None => None,
+        };
+        let community =
+            community::reported(community.as_ref().map(|(jid, name)| (jid, name.as_str())));
         let avatar = self.avatars.fetch(client, &chat).await;
-        let updates = sighting_updates(vec![chat_id.to_owned()], title, facts.as_ref(), avatar);
+        let group = facts.as_ref().map(|facts| (facts, community));
+        let updates = sighting_updates(vec![chat_id.to_owned()], title, group, avatar);
         for frame in chat_update_frames(updates, CHAT_UPDATE_BATCH, true) {
             if self.inputs.send(frame).await.is_err() {
                 warn!("core session input closed; dropping a WhatsApp chat snapshot");

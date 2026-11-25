@@ -37,8 +37,8 @@ type fetchURL func(ctx context.Context, url string) ([]byte, error)
 
 // chatProfiler reports what a chat looks like: its picture (uploaded to the
 // core's media store) and, the first time this process sees a chat, a
-// snapshot of its title, description, member count and picture, so a new
-// mirror topic's info card has content.
+// snapshot of its title, description, member count, community and picture,
+// so a new mirror topic's info card has content.
 type chatProfiler struct {
 	pictures pictureSource
 	fetch    fetchURL
@@ -155,6 +155,12 @@ func (p *chatProfiler) firstSighting(ctx context.Context, chat types.JID, canoni
 				count = uint32(info.ParticipantCount)
 			}
 			update.ParticipantCount = &count
+			update.Community = groupCommunity(info, func(parent types.JID) string {
+				if community := p.groups.GroupInfo(ctx, parent); community != nil {
+					return community.Name
+				}
+				return ""
+			})
 		}
 	}
 	update.Avatar = p.avatar(ctx, chat)

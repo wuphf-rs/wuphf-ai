@@ -10,11 +10,11 @@ use tokio_stream::{Stream, wrappers::ReceiverStream};
 use tonic::{Request, Response, Status};
 use uuid::Uuid;
 use wuphf_model::{
-    Action, Attachment, AttachmentKind, ChatAddress, ChatPosting, ChatUpdate, Connector,
-    ConnectorCapabilities, ConnectorId, ConnectorInput, ConnectorOutput, DisappearingTimer,
-    DispatchAck, DispatchFailed, Event, EventKind, InboundWork, MediaId, MuteState, NewMessage,
-    NoticeKind, ParticipantChange, ParticipantChangeKind, Platform, ReactorReaction, ReceiptKind,
-    ReplyContext, ReportedAvatar, SourceAddress,
+    Action, Attachment, AttachmentKind, ChatAddress, ChatCommunity, ChatPosting, ChatUpdate,
+    Connector, ConnectorCapabilities, ConnectorId, ConnectorInput, ConnectorOutput,
+    DisappearingTimer, DispatchAck, DispatchFailed, Event, EventKind, InboundWork, MediaId,
+    MuteState, NewMessage, NoticeKind, ParticipantChange, ParticipantChangeKind, Platform,
+    ReactorReaction, ReceiptKind, ReplyContext, ReportedAvatar, SourceAddress,
 };
 use wuphf_proto::connector as pb;
 use wuphf_proto::connector::connector_transport_server::ConnectorTransport;
@@ -707,6 +707,10 @@ fn chat_update_from_proto(update: pb::ChatUpdate) -> Result<ChatUpdate, WireErro
             posts: posting.posts,
             audience: posting.audience,
             post_edits: posting.post_edits,
+        }),
+        community: update.community.map(|community| ChatCommunity {
+            chat_id: community.chat_id,
+            title: community.title,
         }),
     })
 }

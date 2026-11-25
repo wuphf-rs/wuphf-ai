@@ -137,26 +137,26 @@ let
   wuphf-telegram = go {
     binary = "wuphf-telegram";
     module = "connectors/telegram";
-    vendorHash = "sha256-aMyCCUCwnFSmW20HbIu64Zdp3TWk8GFe0+8VgAEUnNc=";
+    vendorHash = "sha256-+KP7mxs/GPPR13YuCPNx8ss5mGFiqKeKa99lbeVuPok=";
     description = "wuphf Telegram connector";
   };
   wuphf-whatsapp = go {
     binary = "wuphf-whatsapp";
     module = "connectors/whatsapp";
-    vendorHash = "sha256-Rfc1x1Sbp8kfSeRVTmaFCvt/0XVDtQXjwFWNX927mkw=";
+    vendorHash = "sha256-okchfULNgnYjNPNjexR7Q1/+SZg2yXXb3drC+AQ9hwA=";
     cgo = true;
     description = "wuphf WhatsApp connector (whatsmeow)";
   };
   wuphf-instagram = go {
     binary = "wuphf-instagram";
     module = "connectors/instagram";
-    vendorHash = "sha256-If9Byzaftd+6MXloZbQURNjq48SIW5tCZG8fkcXr/Gg=";
+    vendorHash = "sha256-8810/uygVvIKOx5QlAUYuX5MFrS1VdP61e7s6OpW0uM=";
     description = "wuphf Instagram connector";
   };
   wuphf-mediaconv = go {
     binary = "wuphf-mediaconv";
     module = "providers/mediaconv";
-    vendorHash = "sha256-ste13VSWav5dyrQmipjKdJr7HozdWCndtkOUhdHbHzQ=";
+    vendorHash = "sha256-1cnzg6oFiMHvktXj6SzDaG0D3HSKlYYGkuKk1BEa+ig=";
     cgo = true;
     description = "wuphf sticker converter (media.convert@1)";
     # It runs ffmpeg and ImageMagick.
@@ -176,7 +176,7 @@ let
   wuphf-misc = go {
     binary = "wuphf-misc";
     module = "misc";
-    vendorHash = "sha256-sxqVGbZgkH/ezRTLAEu+FdtEH7m7svi2leIJVdIXqyQ=";
+    vendorHash = "sha256-lMRvUEElhTzan1biDJ6NjoFIu8ES954ijJ9+OUvV+I0=";
     description = "wuphf-misc: features that are not bridging";
   };
 in
