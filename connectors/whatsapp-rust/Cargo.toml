@@ -16,8 +16,8 @@ version = "0.3.0"
 anyhow = "1"
 # The config file's description (one per option, on the types) and the setup
 # screen; the same release the core pins.
-botconf = { git = "https://github.com/propheci/botconf", tag = "v0.16.1", features = ["derive"] }
-botconf-tui = { git = "https://github.com/propheci/botconf", tag = "v0.16.1" }
+botconf = { git = "https://github.com/propheci/botconf", tag = "v0.17.0", features = ["derive"] }
+botconf-tui = { git = "https://github.com/propheci/botconf", tag = "v0.17.0" }
 clap = { version = "4", features = ["derive"] }
 # The contacts table runs on the session store's diesel pool; pinned to the
 # version that store links (see src/contacts.rs).

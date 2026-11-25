@@ -73,6 +73,9 @@ dev shell). Each check runs only when the commit touches what it checks:
 - formatting: `cargo fmt --check` (the workspace, whatsapp-rust) and `gofmt`;
 - `proto/go` regenerated from the `.proto` files, and every
   `config.example.toml` matching its config type;
+- whatsapp-rust's `Cargo.lock` current (it is a workspace of its own that
+  also builds the core's crates, so a dependency bump needs its lock updated
+  too, or Nix's offline vendoring fails), pinning the same botconf tag;
 - the Go vendor hashes (`scripts/update-vendor-hashes.sh --check`, about a
   minute, fetching modules but compiling nothing).
 

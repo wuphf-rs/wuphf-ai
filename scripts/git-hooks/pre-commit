@@ -6,6 +6,7 @@
 # - formatting: rustfmt (the workspace, whatsapp-rust) and gofmt;
 # - generated code: proto/go matches the .proto files, and every
 #   config.example.toml matches its config type;
+# - whatsapp-rust's Cargo.lock is current and pins the same botconf;
 # - Go vendor hashes in nix/packages.nix (scripts/update-vendor-hashes.sh).
 #
 # Checks that build or fetch are skipped on battery, with a warning: CI
@@ -84,6 +85,18 @@ if touched '^connectors/whatsapp-rust/(src/config\.rs|config\.example\.toml)$'; 
     skip_on_battery "the whatsapp-rust example config" ||
         (cd connectors/whatsapp-rust && RUSTC_BOOTSTRAP=1 CARGO_BUILD_JOBS=1 nice cargo test -q example >/dev/null 2>&1) ||
         fail "whatsapp-rust config.example.toml: run WUPHF_WRITE_EXAMPLES=1 RUSTC_BOOTSTRAP=1 cargo test example there"
+fi
+
+# whatsapp-rust is a workspace of its own that also builds the core's crates
+# (wuphf-connector): its lock must hold what both manifests ask for, or Nix's
+# offline vendoring fails, and it must pin the same botconf.
+if touched '^Cargo\.(toml|lock)$|^crates/.*/Cargo\.toml$|^connectors/whatsapp-rust/Cargo\.(toml|lock)$'; then
+    (cd connectors/whatsapp-rust && cargo metadata --locked --format-version 1 >/dev/null 2>&1) ||
+        fail "connectors/whatsapp-rust/Cargo.lock: run cargo update -p <crate> there (it is out of date)"
+    botconf_tag() { sed -n 's/^botconf = .*tag = "\([^"]*\)".*/\1/p' "$1"; }
+    if [ "$(botconf_tag Cargo.toml)" != "$(botconf_tag connectors/whatsapp-rust/Cargo.toml)" ]; then
+        fail "botconf: connectors/whatsapp-rust/Cargo.toml pins another tag than Cargo.toml"
+    fi
 fi
 
 # Go vendor hashes.
