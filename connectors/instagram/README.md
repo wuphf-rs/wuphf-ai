@@ -11,7 +11,10 @@ Implemented:
   file and refreshed cookies are persisted back to a session file across restarts
 - inbound messages from the realtime (DGW) delta stream, keyed by Instagram
   thread keys (decimal IDs): text, media (photos, videos, albums, voice notes,
-  GIFs, stickers), shared posts/reels (full quality when resolvable), edits,
+  GIFs, stickers), shared posts/reels (full quality when resolvable), forwarded
+  comments (the commenter, the comment and the post's cover, noted as only
+  viewable on Instagram: the web API does not say which post a forwarded
+  comment is from; a share of unknown shape is logged with its content), edits,
   unsends, reactions, and chat titles
 - outbound text (with reply target), edits, unsends and the owner's reactions
   (anyone else's are not set on the owner's account) over Instagram's graphql API, resolving the canonical message id from the send

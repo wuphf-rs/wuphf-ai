@@ -3,6 +3,7 @@ package instagramconnector
 import (
 	"cmp"
 	"context"
+	"encoding/json"
 	"errors"
 	"strconv"
 	"sync"
@@ -139,6 +140,9 @@ func (n *Normalizer) emitCreate(ctx context.Context, threadKey int64, message *s
 		n.threads.RecordUser(&message.Sender.UserDict)
 	}
 	body := bodyOf(message)
+	if body.unresolvedShare != nil {
+		n.logUnresolvedShare(message.ID, body.unresolvedShare)
+	}
 	var attachments []*wuphfpb.Attachment
 	if len(body.media) > 0 {
 		fetched, err := n.media.fetchAll(ctx, body.media)
@@ -150,7 +154,10 @@ func (n *Normalizer) emitCreate(ctx context.Context, threadKey int64, message *s
 			// and drop the media.
 			n.logger.Err(err).Str("message_id", message.ID).Msg("dropping Instagram attachments after download failure")
 		} else {
-			attachments = fetched
+			attachments = fetched.attachments
+		}
+		for _, link := range fetched.links {
+			body.text = appendLine(body.text, link)
 		}
 	}
 	if body.text == "" && len(attachments) == 0 {
@@ -181,6 +188,17 @@ func (n *Normalizer) emitCreate(ctx context.Context, threadKey int64, message *s
 	return n.send(ctx, &wuphfpb.ClientFrame{
 		Body: &wuphfpb.ClientFrame_MessageCreate{MessageCreate: event},
 	})
+}
+
+// logUnresolvedShare records a share the connector could not resolve to a
+// post or reel, with its full content, so a new share shape can be supported.
+func (n *Normalizer) logUnresolvedShare(messageID string, xma *slidetypes.XMAContent) {
+	raw, err := json.Marshal(xma)
+	if err != nil {
+		return
+	}
+	n.logger.Info().Str("message_id", messageID).Str("typename", xma.Typename).
+		RawJSON("xma", raw).Msg("Instagram share without a resolvable post or reel; bridged as its text and preview")
 }
 
 func (n *Normalizer) emitEdit(ctx context.Context, threadKey int64, edit *slidetypes.EditMessageEvent) error {

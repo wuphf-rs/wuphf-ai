@@ -6,8 +6,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"net/url"
-	"regexp"
 	"strings"
 
 	wuphfpb "github.com/wuphf-rs/wuphf-ai/proto/go/connector/v1"
@@ -64,33 +62,66 @@ type mediaRef struct {
 
 // shareMedia identifies a shared post or reel for a full-quality media fetch.
 type shareMedia struct {
-	mediaID   string
+	mediaID string
+	// shortcode is "" when the share named its media only by id.
 	shortcode string
+	// wantsLink is set when the share carried no link of its own: the
+	// fetched item's link is then added to the message text.
+	wantsLink bool
+}
+
+// fetchedMedia is what downloading a message's media produced: the stored
+// attachments, in order, and the post or reel links learned while resolving
+// shares that carried none.
+type fetchedMedia struct {
+	attachments []*wuphfpb.Attachment
+	links       []string
 }
 
 // fetchAll downloads every ref and stores it in the core, preserving order so an
-// album's attachments keep their original sequence.
-func (m MediaCodec) fetchAll(ctx context.Context, refs []mediaRef) ([]*wuphfpb.Attachment, error) {
-	attachments := make([]*wuphfpb.Attachment, 0, len(refs))
+// album's attachments keep their original sequence. On a failed download the
+// links learned so far are still returned, so the text keeps them.
+func (m MediaCodec) fetchAll(ctx context.Context, refs []mediaRef) (fetchedMedia, error) {
+	fetched := fetchedMedia{attachments: make([]*wuphfpb.Attachment, 0, len(refs))}
 	for _, ref := range refs {
+		ref, link := m.resolveShare(ctx, ref)
+		if link != "" {
+			fetched.links = append(fetched.links, link)
+		}
 		attachment, err := m.fetch(ctx, ref)
 		if err != nil {
-			return nil, err
+			return fetchedMedia{links: fetched.links}, err
 		}
-		attachments = append(attachments, attachment)
+		fetched.attachments = append(fetched.attachments, attachment)
 	}
-	return attachments, nil
+	return fetched, nil
 }
 
-func (m MediaCodec) fetch(ctx context.Context, ref mediaRef) (*wuphfpb.Attachment, error) {
-	mediaURL := ref.url
-	if ref.share != nil {
-		if best, kind := m.fetchShareURL(ctx, ref.share); best != "" {
-			mediaURL = best
-			ref.metadata.Kind = kind
-		}
+// resolveShare points a shared post or reel's ref at its full-quality media.
+// It returns the item's link when the share wants one. Quality is
+// best-effort: when the fetch fails the ref keeps its preview.
+func (m MediaCodec) resolveShare(ctx context.Context, ref mediaRef) (mediaRef, string) {
+	if ref.share == nil || m.fetcher == nil {
+		return ref, ""
 	}
-	request, err := http.NewRequestWithContext(ctx, http.MethodGet, mediaURL, nil)
+	response, err := m.fetcher.FetchMedia(ctx, ref.share.mediaID, ref.share.shortcode)
+	if err != nil || response == nil || len(response.Items) == 0 || response.Items[0] == nil {
+		return ref, ""
+	}
+	item := response.Items[0]
+	if best, kind := bestRendition(item); best != "" {
+		ref.url = best
+		ref.metadata.Kind = kind
+	}
+	if !ref.share.wantsLink {
+		return ref, ""
+	}
+	return ref, permalink(item)
+}
+
+// fetch downloads one ref's URL and stores the bytes in the core.
+func (m MediaCodec) fetch(ctx context.Context, ref mediaRef) (*wuphfpb.Attachment, error) {
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, ref.url, nil)
 	if err != nil {
 		return nil, fmt.Errorf("build Instagram media request: %w", err)
 	}
@@ -119,21 +150,6 @@ func (m MediaCodec) fetch(ctx context.Context, ref mediaRef) (*wuphfpb.Attachmen
 	return attachment, nil
 }
 
-// fetchShareURL resolves a shared post or reel to the URL of its largest
-// available rendition, preferring video. Quality is best-effort: any failure
-// returns "" and the caller falls back to the preview rather than losing the
-// message.
-func (m MediaCodec) fetchShareURL(ctx context.Context, share *shareMedia) (string, wuphfpb.Attachment_Kind) {
-	if m.fetcher == nil {
-		return "", 0
-	}
-	response, err := m.fetcher.FetchMedia(ctx, share.mediaID, share.shortcode)
-	if err != nil || response == nil || len(response.Items) == 0 || response.Items[0] == nil {
-		return "", 0
-	}
-	return bestRendition(response.Items[0])
-}
-
 // bestRendition picks an item's largest video, else its largest image.
 func bestRendition(item *responses.Items) (string, wuphfpb.Attachment_Kind) {
 	best, bestArea := "", 0
@@ -158,6 +174,9 @@ func bestRendition(item *responses.Items) (string, wuphfpb.Attachment_Kind) {
 type messageBody struct {
 	text  string
 	media []mediaRef
+	// unresolvedShare is a share with neither a target link nor anything
+	// found to fetch; it is logged so a new share shape can be diagnosed.
+	unresolvedShare *slidetypes.XMAContent
 }
 
 // viewOnceNotice stands in for view-once media Instagram withholds from the
@@ -295,52 +314,42 @@ func animatedRef(animated *slidetypes.AnimatedAttachment) (mediaRef, bool) {
 	return mediaRef{}, false
 }
 
-// mediaShortcodeRegex pulls a post or reel shortcode out of a share's target
-// URL path (/p/<code>/, /reel/<code>/, /reels/<code>/, /tv/<code>/).
-var mediaShortcodeRegex = regexp.MustCompile(`^/(?:p|reels?|tv)/([\w-]+)`)
-
-// xmaBody handles link-style shares (posts, reels, stories, links). The text
-// the sender typed comes first, then the share's title and public link. A post
-// or reel is bridged as its media (resolved to full quality when possible), a
-// link only as text plus its preview image.
+// xmaBody handles link-style shares (posts, reels, stories, links, forwarded
+// comments). The text the sender typed comes first, then the share's title,
+// subtitle and public link. A post or reel is bridged as its media, resolved
+// to full quality when possible; a link only as text plus its preview image. A
+// forwarded comment names no post, so it bridges as the comment, a note that
+// the post is only on Instagram, and the post's cover.
 func xmaBody(content *slidetypes.MessageContentXMA) messageBody {
 	xma := content.XMA
 	if xma == nil {
 		return messageBody{text: content.XMATextBody}
 	}
-	text := appendLine(content.XMATextBody, cmp.Or(xma.TitleText, xma.XMATitle, xma.CaptionBodyText))
-	text = appendLine(text, xma.SubtitleText)
-	text = appendLine(text, xma.TargetURL)
+	share := shareRef(xma)
+	var body messageBody
+	if comment, ok := forwardedCommentText(xma); ok {
+		body.text = appendLine(content.XMATextBody, comment)
+	} else {
+		text := appendLine(content.XMATextBody, cmp.Or(xma.TitleText, xma.XMATitle, xma.CaptionBodyText))
+		text = appendLine(text, xma.SubtitleText)
+		body.text = appendLine(text, xma.TargetURL)
+		if share == nil && xma.TargetURL == "" {
+			body.unresolvedShare = xma
+		}
+	}
 	preview := xma.PreviewImage
 	if preview == nil {
 		preview = xma.XMAPreviewImage
 	}
 	if preview == nil || cmp.Or(preview.URL, preview.FallbackURL) == "" {
-		return messageBody{text: text}
+		return body
 	}
-	return messageBody{text: text, media: []mediaRef{{
+	body.media = []mediaRef{{
 		metadata: &wuphfpb.MediaMetadata{Kind: wuphfpb.Attachment_KIND_IMAGE},
 		url:      cmp.Or(preview.URL, preview.FallbackURL),
-		share:    shareRef(xma),
-	}}}
-}
-
-// shareRef extracts the media id and shortcode a full-quality fetch needs. Only
-// post and reel shares carry both; anything else (stories, links) keeps the
-// preview as the media source.
-func shareRef(xma *slidetypes.XMAContent) *shareMedia {
-	if xma.TargetID == "" || xma.TargetID == "0" {
-		return nil
-	}
-	target, err := url.Parse(xma.TargetURL)
-	if err != nil {
-		return nil
-	}
-	match := mediaShortcodeRegex.FindStringSubmatch(target.Path)
-	if len(match) < 2 {
-		return nil
-	}
-	return &shareMedia{mediaID: xma.TargetID, shortcode: match[1]}
+		share:    share,
+	}}
+	return body
 }
 
 func adminText(fragments []slidetypes.TextFragment) string {
