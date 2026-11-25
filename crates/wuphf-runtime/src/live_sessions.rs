@@ -4,10 +4,11 @@
 //! (plan 079, `ProbeChats` → `ProbeResult`). Nothing here is stored or
 //! redelivered, so a request to a connector that is not connected is refused.
 //!
-//! The registry also says when sessions come and go ([`SessionEvent`]), and
-//! keeps the tools each session reported, for the health checks.
+//! The registry also says when sessions come and go ([`SessionEvent`]), when
+//! each connector was last connected ([`Presence`]), and keeps the tools each
+//! session reported, for the health checks.
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -16,6 +17,8 @@ use tokio::sync::{broadcast, mpsc, oneshot};
 use uuid::Uuid;
 use wuphf_model::ToolStatus;
 use wuphf_proto::connector as pb;
+
+use crate::owner_send::now_ms;
 
 /// How long a press waits for the connector's answer.
 pub const COMMAND_TIMEOUT: Duration = Duration::from_secs(10);
@@ -36,6 +39,10 @@ pub enum SessionEvent {
 /// Every live connector session, by connector id.
 pub struct LiveSessions {
     live: Mutex<HashMap<String, Live>>,
+    /// When each connector's last session ended, written under the `live`
+    /// lock so that a reader of both never sees a connector neither live nor
+    /// gone.
+    left_ms: Mutex<HashMap<String, i64>>,
     sessions: AtomicU64,
     events: broadcast::Sender<SessionEvent>,
 }
@@ -44,9 +51,28 @@ impl Default for LiveSessions {
     fn default() -> Self {
         Self {
             live: Mutex::default(),
+            left_ms: Mutex::default(),
             sessions: AtomicU64::default(),
             events: broadcast::channel(64).0,
         }
+    }
+}
+
+/// Who is connected, and when each connector's last session ended.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Presence {
+    pub connected: BTreeSet<String>,
+    pub left_ms: HashMap<String, i64>,
+}
+
+impl Presence {
+    /// Since when `connector` has been away: `None` while it is connected;
+    /// `never` for one never connected (since startup, say).
+    pub fn away_since(&self, connector: &str, never: i64) -> Option<i64> {
+        if self.connected.contains(connector) {
+            return None;
+        }
+        Some(self.left_ms.get(connector).copied().unwrap_or(never))
     }
 }
 
@@ -114,6 +140,16 @@ impl LiveSessions {
         let mut connected: Vec<_> = self.live.lock().unwrap().keys().cloned().collect();
         connected.sort();
         connected
+    }
+
+    /// Who is connected and when each other connector last was, read at one
+    /// moment.
+    pub fn presence(&self) -> Presence {
+        let live = self.live.lock().unwrap();
+        Presence {
+            connected: live.keys().cloned().collect(),
+            left_ms: self.left_ms.lock().unwrap().clone(),
+        }
     }
 
     /// The tools each live session reported last, by connector id.
@@ -265,6 +301,11 @@ impl Drop for LiveSession {
             .is_some_and(|live| live.session == self.session)
         {
             live.remove(&self.connector);
+            self.registry
+                .left_ms
+                .lock()
+                .unwrap()
+                .insert(self.connector.clone(), now_ms());
             let _ = self
                 .registry
                 .events

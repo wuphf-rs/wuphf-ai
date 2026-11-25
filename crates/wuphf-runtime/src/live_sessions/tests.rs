@@ -179,3 +179,22 @@ async fn sessions_coming_and_going_are_announced() {
             .contains("not connected")
     );
 }
+
+#[test]
+fn presence_says_since_when_a_connector_is_away() {
+    let registry = Arc::new(LiveSessions::default());
+    let before = now_ms();
+    let session = registry.attach("wa", Vec::new(), Vec::new());
+    let live = registry.presence();
+    assert_eq!(live.away_since("wa", 0), None);
+    // Never connected: away since the time given.
+    assert_eq!(live.away_since("tg", 7), Some(7));
+
+    drop(session);
+    let left = registry.presence().away_since("wa", 0).unwrap();
+    assert!(left >= before, "{left} < {before}");
+
+    // Connected again: not away, whenever it last left.
+    let _again = registry.attach("wa", Vec::new(), Vec::new());
+    assert_eq!(registry.presence().away_since("wa", 0), None);
+}

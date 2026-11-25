@@ -26,6 +26,9 @@ const (
 	maxBackoff      = 30 * time.Second
 	maxSendAttempts = 3
 	sendRetryDelay  = 500 * time.Millisecond
+	// maxRetryAfter caps a platform's asked-for wait (RetryAfter), so a very
+	// long one still retries, at that pace, rather than holding the session.
+	maxRetryAfter = 5 * time.Minute
 )
 
 // PermanentError marks a send failure that can never succeed on retry (e.g. an
@@ -71,6 +74,12 @@ type Options struct {
 	// IsPermanent, when set, classifies platform-specific errors as permanent in
 	// addition to the coreclient.Permanent wrapping (e.g. a Telegram RPC 400).
 	IsPermanent func(error) bool
+	// RetryAfter, when set, reads how long the platform asked to wait before
+	// trying again (e.g. a Telegram FLOOD_WAIT). The retry waits that long
+	// (up to five minutes) instead of the short fixed delay, so a rate limit
+	// is waited out instead of ending the session and being redelivered into
+	// the same limit.
+	RetryAfter func(error) (time.Duration, bool)
 	// Settings, when set, declares the connector's runtime settings in the
 	// registration (see the settings package), so the core keeps and pushes
 	// them. Nil declares none, and the core keeps any section declared before.
@@ -187,6 +196,19 @@ func (c Client) isPermanent(err error) bool {
 		return true
 	}
 	return c.opts.IsPermanent != nil && c.opts.IsPermanent(err)
+}
+
+// retryDelay is how long to wait before retrying after err: what the platform
+// asked for (Options.RetryAfter, capped at maxRetryAfter), else sendRetryDelay.
+func (c Client) retryDelay(err error) time.Duration {
+	if c.opts.RetryAfter == nil {
+		return sendRetryDelay
+	}
+	wait, ok := c.opts.RetryAfter(err)
+	if !ok {
+		return sendRetryDelay
+	}
+	return min(max(wait, sendRetryDelay), maxRetryAfter)
 }
 
 // Run maintains a connector session against the core, reconnecting with
@@ -441,7 +463,8 @@ func (c Client) deliver(ctx context.Context, stream wuphfpb.ConnectorTransport_O
 }
 
 // sendWithRetry retries a transient dispatch op a bounded number of times before
-// surfacing the failure to the caller.
+// surfacing the failure to the caller. Between attempts it waits as long as the
+// platform asked (retryDelay).
 func (c Client) sendWithRetry(ctx context.Context, dispatchID string, op sendOp) (string, string, error) {
 	var lastErr error
 	for attempt := 0; attempt < maxSendAttempts; attempt++ {
@@ -449,7 +472,7 @@ func (c Client) sendWithRetry(ctx context.Context, dispatchID string, op sendOp)
 			select {
 			case <-ctx.Done():
 				return "", "", ctx.Err()
-			case <-time.After(sendRetryDelay):
+			case <-time.After(c.retryDelay(lastErr)):
 			}
 		}
 		messageID, threadID, err := op(ctx)

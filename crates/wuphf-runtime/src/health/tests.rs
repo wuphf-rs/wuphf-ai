@@ -273,3 +273,24 @@ async fn a_connector_away_for_long_is_a_warning() {
             .all(|stored| stored.problem.pause().is_none())
     );
 }
+
+#[tokio::test]
+async fn a_session_that_just_ended_is_not_away_since_startup() {
+    // The monitor started long ago, and telegram-main's session ends now.
+    // Checked before its Detached event is handled, it is away since its
+    // session ended, not since startup.
+    let fixture = fixture().await;
+    let sessions = Arc::clone(&fixture.sessions);
+    let monitor = HealthMonitor {
+        started_ms: now_ms() - OFFLINE_AFTER_MS - 60_000,
+        ..Arc::try_unwrap(fixture.monitor).ok().unwrap()
+    };
+    drop(sessions.attach(TG, Vec::new(), Vec::new()));
+    let report = monitor.run().await.unwrap();
+    let keys: Vec<_> = report
+        .problems
+        .iter()
+        .map(|stored| stored.problem.key.as_str())
+        .collect();
+    assert_eq!(keys, ["connector-offline:whatsapp-main"]);
+}

@@ -149,6 +149,7 @@ func (c Connector) Run(ctx context.Context) error {
 					SupportsThreads:     c.cfg.SupportsThreads,
 					SupportsTopicCreate: c.cfg.SupportsTopicCreate,
 					IsPermanent:         telegramPermanent,
+					RetryAfter:          telegramRetryAfter,
 					Settings:            runtime.Declaration,
 					Prober:              NewProber(client.API(), peers),
 				}, c.logger).Run(ctx, sender, inputs)

@@ -86,9 +86,6 @@ struct Observations {
     facts: ByChat<ChatFacts>,
     /// The chats some probe has answered about since startup.
     probed: BTreeSet<(ConnectorId, String)>,
-    /// When each connector's session ended (a connector never connected
-    /// since startup counts from the start).
-    away_since: HashMap<ConnectorId, i64>,
 }
 
 impl<S> HealthMonitor<S>
@@ -138,19 +135,10 @@ where
             let outcome = tokio::select! {
                 event = sessions.recv() => match event {
                     Ok(SessionEvent::Attached(connector)) => {
-                        let connector = ConnectorId(connector);
-                        self.state.lock().unwrap().away_since.remove(&connector);
-                        self.probe(Some(&connector)).await;
+                        self.probe(Some(&ConnectorId(connector))).await;
                         self.check().await
                     }
-                    Ok(SessionEvent::Detached(connector)) => {
-                        self.state
-                            .lock()
-                            .unwrap()
-                            .away_since
-                            .insert(ConnectorId(connector), now_ms());
-                        self.check().await
-                    }
+                    Ok(SessionEvent::Detached(_)) => self.check().await,
                     Err(RecvError::Lagged(_)) => self.run().await.map(drop),
                     Err(RecvError::Closed) => return,
                 },
@@ -264,23 +252,19 @@ where
             tools.extend(wiring.provider_tools());
             unavailable = wiring.unavailable_functions();
         }
-        let connected: BTreeSet<_> = self.sessions.connected().into_iter().collect();
-        let (facts, probed, offline) = {
+        // One read of the registry: a session ending between two reads must
+        // not look away since startup.
+        let presence = self.sessions.presence();
+        let offline: Vec<_> = connectors
+            .iter()
+            .filter_map(|connector| {
+                let away = now - presence.away_since(&connector.id.0, self.started_ms)?;
+                (away >= OFFLINE_AFTER_MS).then(|| (connector.id.clone(), away / 60_000))
+            })
+            .collect();
+        let (facts, probed) = {
             let state = self.state.lock().unwrap();
-            let offline: Vec<_> = connectors
-                .iter()
-                .filter(|connector| !connected.contains(&connector.id.0))
-                .filter_map(|connector| {
-                    let since = state
-                        .away_since
-                        .get(&connector.id)
-                        .copied()
-                        .unwrap_or(self.started_ms);
-                    let away = now - since;
-                    (away >= OFFLINE_AFTER_MS).then(|| (connector.id.clone(), away / 60_000))
-                })
-                .collect();
-            (state.facts.clone(), state.probed.clone(), offline)
+            (state.facts.clone(), state.probed.clone())
         };
         let mut titles = ByChat::new();
         for (connector, chat_id) in facts.keys() {

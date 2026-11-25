@@ -161,3 +161,35 @@ func TestRegistrationCarriesTheDisappearingCapability(t *testing.T) {
 		cancel()
 	}
 }
+
+func TestRetryDelayWaitsAsLongAsThePlatformAsks(t *testing.T) {
+	t.Parallel()
+	limited := errors.New("rate limited")
+	client := Client{opts: Options{RetryAfter: func(err error) (time.Duration, bool) {
+		if errors.Is(err, limited) {
+			return 7 * time.Second, true
+		}
+		return 0, false
+	}}}
+	cases := []struct {
+		name string
+		err  error
+		want time.Duration
+	}{
+		{"asked for", limited, 7 * time.Second},
+		{"not a rate limit", errors.New("transient"), sendRetryDelay},
+	}
+	for _, tc := range cases {
+		if got := client.retryDelay(tc.err); got != tc.want {
+			t.Errorf("%s: retryDelay = %v, want %v", tc.name, got, tc.want)
+		}
+	}
+	// A very long wait is capped; a hook-less client keeps the fixed delay.
+	long := Client{opts: Options{RetryAfter: func(error) (time.Duration, bool) { return time.Hour, true }}}
+	if got := long.retryDelay(limited); got != maxRetryAfter {
+		t.Errorf("capped: retryDelay = %v, want %v", got, maxRetryAfter)
+	}
+	if got := (Client{}).retryDelay(limited); got != sendRetryDelay {
+		t.Errorf("no hook: retryDelay = %v, want %v", got, sendRetryDelay)
+	}
+}
