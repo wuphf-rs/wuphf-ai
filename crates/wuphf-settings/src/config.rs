@@ -24,7 +24,8 @@ const FILE_DESCRIPTION: &str = "Every key can be overridden by an environment va
      (`telegram-main:telegram:channel:2060340733#12`). The connector is everything before \
      the first `:`, so chat ids may contain `:`. Inside the chat and the thread, write `#` \
      as `%23` and `%` as `%25`. Connector ids may not contain `:`, `#`, `%` or spaces.\n\n\
-     Runtime settings (`notify`, `receive_only`, `mirror_deletes_kept`, `rules`, `chat_state`) can also be changed while the core \
+     Runtime settings (`notify`, `receive_only`, `mirror_deletes_kept`, `rules`, `chat_state`, \
+     `stories`) can also be changed while the core \
      runs, from a settings panel or `wuphf-server settings`: stored overrides win over this \
      file, and unsetting one goes back to it.";
 
@@ -174,6 +175,10 @@ pub struct Configuration {
     /// mean nothing).
     #[serde(default)]
     pub chat_state: ChatStateConfig,
+    /// Stories (WhatsApp Status): which are mirrored, and whether their mirror
+    /// copies are deleted when they expire.
+    #[serde(default)]
+    pub stories: StoriesConfig,
     #[serde(default)]
     pub functions: FunctionsConfig,
     #[serde(default)]
@@ -198,6 +203,46 @@ fn default_max_media_bytes() -> usize {
 
 fn default_orphan_media_retention_seconds() -> u64 {
     24 * 60 * 60
+}
+
+/// `[stories]` (plan 084): a story is a message of a chat whose connector
+/// reports that replies to it are private (WhatsApp Status).
+#[derive(Debug, Clone, Deserialize, Serialize, Describe)]
+pub struct StoriesConfig {
+    /// Mirror stories at all. Off, nobody's story is mirrored (stories already
+    /// mirrored stay).
+    #[serde(default = "default_true")]
+    #[botconf(runtime, title = "Mirror stories")]
+    pub mirror: bool,
+    /// People whose stories are not mirrored: their direct chat. A muted
+    /// story is dropped, not stored: unmuting brings back none.
+    #[serde(default)]
+    #[botconf(
+        runtime,
+        title = "Muted stories",
+        domain = "wuphf.chat",
+        example = ["whatsapp-main:15550001111@s.whatsapp.net"],
+    )]
+    pub muted: Vec<ChatTarget>,
+    /// Delete the mirror copies of a story 24 hours after it was posted, as
+    /// WhatsApp does. Off, the mirror keeps them.
+    #[serde(default)]
+    #[botconf(runtime, title = "Expire story copies")]
+    pub expire_copies: bool,
+}
+
+impl Default for StoriesConfig {
+    fn default() -> Self {
+        Self {
+            mirror: true,
+            muted: Vec::new(),
+            expire_copies: false,
+        }
+    }
+}
+
+fn default_true() -> bool {
+    true
 }
 
 /// `[chat_state]`: each state's direction, named from the source chat

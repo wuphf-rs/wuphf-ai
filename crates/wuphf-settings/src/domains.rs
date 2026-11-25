@@ -136,6 +136,7 @@ mod tests {
                 "receive_only",
                 "mirror_deletes_kept",
                 "chat_state.chats.chat",
+                "stories.muted",
             ]
         );
     }

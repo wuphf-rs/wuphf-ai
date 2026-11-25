@@ -1000,3 +1000,18 @@ const DISPATCHES_BEFORE_0019: [&str; 7] = [
     r#"{"id":"00000000-0000-0000-0000-000000000069","state":"Pending","to":{"endpoint_id":"00000000-0000-0000-0000-000000000002","connector_id":"telegram","address":{"chat_id":"-100","thread_id":"7"},"create_thread":null},"conversation_id":"00000000-0000-0000-0000-000000000003","action":{"Receipt":{"message_id":"00000000-0000-0000-0000-000000000001","native_id":"wa-1","kind":"delivered"}}}"#,
     r#"{"id":"00000000-0000-0000-0000-00000000006a","state":"Pending","to":{"endpoint_id":"00000000-0000-0000-0000-000000000002","connector_id":"telegram","address":{"chat_id":"-100","thread_id":"7"},"create_thread":null},"conversation_id":"00000000-0000-0000-0000-000000000003","action":{"Receipt":{"message_id":"00000000-0000-0000-0000-000000000001","native_id":"wa-1","kind":"read"}}}"#,
 ];
+
+/// 0024 only adds the story expiries table: a database from before it keeps
+/// its dispatches, and the table takes one expiry per message.
+#[tokio::test]
+async fn migration_0024_adds_the_message_expiries_table() {
+    let pool = database_before(24).await;
+    insert_dispatches(&pool, &DISPATCHES_BEFORE_0019).await;
+
+    MIGRATOR.run(&pool).await.unwrap();
+
+    assert_dispatches(&pool).await;
+    let insert = "INSERT INTO message_expiries (message_id, expires_at_ms) VALUES ('m', 1)";
+    sqlx::query(insert).execute(&pool).await.unwrap();
+    assert!(sqlx::query(insert).execute(&pool).await.is_err());
+}

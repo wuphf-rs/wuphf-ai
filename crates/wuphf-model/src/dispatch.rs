@@ -260,6 +260,9 @@ pub enum IgnoreReason {
     /// A reaction equal to the one stored for that reactor on that copy: a
     /// replay, or the platform echoing a reaction the bridge applied.
     RedundantReaction,
+    /// A story from a feed the owner does not mirror, or from someone they
+    /// muted (plan 084): dropped before it is stored.
+    Muted,
 }
 
 /// The `author_id` stamped on owner messages. Platforms deliver the message

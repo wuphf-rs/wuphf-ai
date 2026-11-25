@@ -1559,6 +1559,11 @@ fn the_runtime_settings_are_the_described_ones() {
         .collect();
     let notify = Kind::reference(crate::domains::CHAT, true);
     let (rules, overrides) = (Kind::map(None, RULE), Kind::map(None, CHAT_STATE_OVERRIDE));
+    const YES_NO: &[botconf::FixedChoice] = &[
+        botconf::FixedChoice::new("true", "✅ Yes"),
+        botconf::FixedChoice::new("false", "❌ No"),
+    ];
+    let yes_no = Kind::one_of(botconf::Choices::fixed(YES_NO), false, false);
     assert_eq!(
         got,
         [
@@ -1579,6 +1584,14 @@ fn the_runtime_settings_are_the_described_ones() {
                 Some("Chat state overrides"),
                 &overrides,
                 true
+            ),
+            ("stories.mirror", Some("Mirror stories"), &yes_no, false),
+            ("stories.muted", Some("Muted stories"), &notify, false),
+            (
+                "stories.expire_copies",
+                Some("Expire story copies"),
+                &yes_no,
+                false
             ),
         ]
     );

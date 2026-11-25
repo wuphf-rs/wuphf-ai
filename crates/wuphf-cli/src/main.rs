@@ -333,8 +333,12 @@ async fn serve(path: PathBuf) -> Result<()> {
         ),
     );
     let (hub, handle) = ConnectorHub::new(channels, connectors);
+    // Story copies expire 24 hours after the story was posted (plan 084),
+    // when the owner turns stories.expire_copies on.
+    let story_sender = runtime.owner_sender();
     let runtime_task = tokio::spawn(runtime.run());
     let health_task = health.spawn();
+    let story_task = story_sender.spawn_story_expiry(std::time::Duration::from_secs(10 * 60));
     let hub_task = tokio::spawn(hub.run());
     let function_task = tokio::spawn(function_hub.run());
     tracing::info!(listen = %configuration.listen, "wuphf connector gRPC server listening");
@@ -372,6 +376,7 @@ async fn serve(path: PathBuf) -> Result<()> {
     }
     hub_task.abort();
     health_task.abort();
+    story_task.abort();
     function_task.abort();
     Ok(())
 }

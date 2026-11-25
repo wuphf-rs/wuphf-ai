@@ -4856,3 +4856,132 @@ async fn a_post_composed_in_the_panel_goes_to_the_topic_and_the_story() {
     assert_eq!(dispatches[0].to.address.thread_id.as_deref(), Some("100"));
     assert_post(&dispatches[1], "from the panel");
 }
+
+// ---- Plan 084: story mutes and expiry ----
+
+/// Every WhatsApp chat mirrored, with `stories`, and Status a story feed.
+async fn stories_core(stories: crate::StoriesSettings) -> Core<InMemoryStorage> {
+    let rule = Rule {
+        id: RuleId("wa-all".into()),
+        flow: RuleKind::ManyToOne {
+            source_connector: ConnectorId(WHATSAPP.into()),
+            source_chats_filter: ChatFilter::All,
+            destination_connector: ConnectorId(TELEGRAM.into()),
+            destination_chat: ChatAddress::new(MIRROR_CHAT, None),
+        },
+    };
+    let config = RoutingConfig::new(vec![rule], connectors()).with_stories(stories);
+    let core = Core::new(Arc::new(InMemoryStorage::default()), Arc::new(config));
+    core.update_chats(
+        &ConnectorId(WHATSAPP.into()),
+        vec![ChatUpdate {
+            posting: Some(wuphf_model::ChatPosting {
+                messages: false,
+                reactions: true,
+                private_replies: true,
+                posts: false,
+                audience: None,
+            }),
+            ..ChatUpdate::new(STATUS)
+        }],
+        true,
+    )
+    .await
+    .unwrap();
+    core
+}
+
+fn story_by(author: &str, native_id: &str) -> Event {
+    let mut event = event(WHATSAPP, STATUS, native_id, None);
+    if let EventKind::NewMessage(message) = &mut event.payload {
+        message.author_id = author.into();
+        message.participant = Some(author.into());
+    }
+    event
+}
+
+fn muting(chat: &str) -> crate::StoriesSettings {
+    crate::StoriesSettings {
+        muted: vec![ChatRef {
+            connector_id: ConnectorId(WHATSAPP.into()),
+            address: ChatAddress::new(chat, None),
+        }],
+        ..crate::StoriesSettings::default()
+    }
+}
+
+#[tokio::test]
+async fn a_muted_persons_story_is_dropped_but_their_messages_are_not() {
+    let core = stories_core(muting(BOB)).await;
+    assert_eq!(
+        core.ingest(story_by(BOB, "wa-story")).await.unwrap(),
+        IngestOutcome::Ignored(IgnoreReason::Muted)
+    );
+    // Not stored: a later delete of it matches nothing.
+    assert!(matches!(
+        core.ingest(story_by(ALICE, "wa-other")).await.unwrap(),
+        IngestOutcome::Routed { .. }
+    ));
+    let mut dm = event(WHATSAPP, BOB, "wa-dm", None);
+    if let EventKind::NewMessage(message) = &mut dm.payload {
+        message.author_id = BOB.into();
+    }
+    assert!(matches!(
+        core.ingest(dm).await.unwrap(),
+        IngestOutcome::Routed { .. }
+    ));
+}
+
+#[tokio::test]
+async fn with_stories_off_no_story_is_mirrored() {
+    let core = stories_core(crate::StoriesSettings {
+        mirror: false,
+        ..crate::StoriesSettings::default()
+    })
+    .await;
+    assert_eq!(
+        core.ingest(story_by(ALICE, "wa-story")).await.unwrap(),
+        IngestOutcome::Ignored(IgnoreReason::Muted)
+    );
+}
+
+#[tokio::test]
+async fn an_expired_storys_mirror_copy_is_deleted_once() {
+    let core = stories_core(crate::StoriesSettings {
+        expire_copies: true,
+        ..crate::StoriesSettings::default()
+    })
+    .await;
+    mirror_into_topic(&core, STATUS, BOB, "wa-story", "100", "tg-story").await;
+    // The story's timestamp is 1.
+    assert!(
+        core.expire_stories(STORY_LIFETIME_MS)
+            .await
+            .unwrap()
+            .is_empty()
+    );
+    let deletes = core.expire_stories(STORY_LIFETIME_MS + 2).await.unwrap();
+    assert_eq!(deletes.len(), 1, "{deletes:#?}");
+    assert_eq!(deletes[0].to.connector_id, ConnectorId(TELEGRAM.into()));
+    assert!(
+        matches!(&deletes[0].action, Action::Delete { native_id, .. } if native_id == "tg-story")
+    );
+    assert!(
+        core.expire_stories(STORY_LIFETIME_MS + 3)
+            .await
+            .unwrap()
+            .is_empty()
+    );
+}
+
+#[tokio::test]
+async fn story_copies_stay_while_expiry_is_off() {
+    let core = stories_core(crate::StoriesSettings::default()).await;
+    mirror_into_topic(&core, STATUS, BOB, "wa-story", "100", "tg-story").await;
+    assert!(
+        core.expire_stories(STORY_LIFETIME_MS * 2)
+            .await
+            .unwrap()
+            .is_empty()
+    );
+}

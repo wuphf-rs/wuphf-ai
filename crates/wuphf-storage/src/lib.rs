@@ -146,6 +146,12 @@ pub trait MessageStore: Send + Sync + 'static {
     /// The copy of a message at the endpoint it was received on (its origin), if
     /// recorded. Used to target the origin with delivery acks and seen receipts.
     async fn received_copy(&self, message_id: MessageId) -> StorageResult<Option<MessageCopy>>;
+    /// Record when a story's mirror copies are due to go (plan 084).
+    async fn record_expiry(&self, message_id: MessageId, expires_at_ms: i64) -> StorageResult<()>;
+    /// The messages due by `now_ms`, oldest first, at most `limit`.
+    async fn due_expiries(&self, now_ms: i64, limit: usize) -> StorageResult<Vec<MessageId>>;
+    /// Forget a message's expiry once it is handled.
+    async fn forget_expiry(&self, message_id: MessageId) -> StorageResult<()>;
 }
 
 /// Media blobs referenced by message attachments.

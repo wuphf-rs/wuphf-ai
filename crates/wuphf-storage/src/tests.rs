@@ -1852,3 +1852,33 @@ async fn a_copy_resolves_on_any_thread_of_its_chat<S: Storage>(storage: S) {
     assert_eq!(found(&connector, "another-chat", "42").await, None);
     assert_eq!(found("another-connector", &topic.chat_id, "42").await, None);
 }
+
+#[tokio::test]
+async fn memory_story_expiries_come_due_in_order() {
+    story_expiries_come_due_in_order(InMemoryStorage::default()).await;
+}
+
+#[tokio::test]
+async fn sqlite_story_expiries_come_due_in_order() {
+    let path = std::env::temp_dir().join(format!("wuphf-expiry-{}.sqlite", DispatchId::new()));
+    let url = format!("sqlite://{}", path.display());
+    story_expiries_come_due_in_order(SqliteStorage::connect(&url).await.unwrap()).await;
+}
+
+/// Expiries come due oldest first, up to the limit; recording one again moves
+/// it; a forgotten one is gone (plan 084).
+async fn story_expiries_come_due_in_order<S: Storage>(storage: S) {
+    let (early, late, later) = (MessageId::new(), MessageId::new(), MessageId::new());
+    storage.record_expiry(late, 200).await.unwrap();
+    storage.record_expiry(early, 100).await.unwrap();
+    storage.record_expiry(later, 900).await.unwrap();
+    assert_eq!(
+        storage.due_expiries(500, 10).await.unwrap(),
+        vec![early, late]
+    );
+    assert_eq!(storage.due_expiries(500, 1).await.unwrap(), vec![early]);
+    storage.record_expiry(early, 1_000).await.unwrap();
+    assert_eq!(storage.due_expiries(500, 10).await.unwrap(), vec![late]);
+    storage.forget_expiry(late).await.unwrap();
+    assert!(storage.due_expiries(500, 10).await.unwrap().is_empty());
+}

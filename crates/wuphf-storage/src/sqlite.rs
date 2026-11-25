@@ -432,6 +432,40 @@ impl MessageStore for SqliteStorage {
             .transpose()
             .map_err(Into::into)
     }
+
+    async fn record_expiry(&self, message_id: MessageId, expires_at_ms: i64) -> StorageResult<()> {
+        sqlx::query(
+            "INSERT INTO message_expiries (message_id, expires_at_ms) VALUES (?, ?) \
+             ON CONFLICT (message_id) DO UPDATE SET expires_at_ms = excluded.expires_at_ms",
+        )
+        .bind(message_id.to_string())
+        .bind(expires_at_ms)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    async fn due_expiries(&self, now_ms: i64, limit: usize) -> StorageResult<Vec<MessageId>> {
+        let rows = sqlx::query(
+            "SELECT message_id FROM message_expiries WHERE expires_at_ms <= ? \
+             ORDER BY expires_at_ms LIMIT ?",
+        )
+        .bind(now_ms)
+        .bind(limit as i64)
+        .fetch_all(&self.pool)
+        .await?;
+        rows.iter()
+            .map(|row| parse_message_id(row.get("message_id")))
+            .collect()
+    }
+
+    async fn forget_expiry(&self, message_id: MessageId) -> StorageResult<()> {
+        sqlx::query("DELETE FROM message_expiries WHERE message_id = ?")
+            .bind(message_id.to_string())
+            .execute(&self.pool)
+            .await?;
+        Ok(())
+    }
 }
 
 #[async_trait]
@@ -1467,4 +1501,10 @@ impl ReactionStore for SqliteStorage {
         query.execute(&self.pool).await?;
         Ok(())
     }
+}
+
+fn parse_message_id(value: &str) -> StorageResult<MessageId> {
+    uuid::Uuid::parse_str(value)
+        .map(MessageId)
+        .map_err(|err| StorageError::Identifier(err.to_string()))
 }

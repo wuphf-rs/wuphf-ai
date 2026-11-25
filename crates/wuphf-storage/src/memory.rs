@@ -66,6 +66,8 @@ struct State {
     held: Vec<HeldDispatch>,
     /// Reactions by copy, then reactor (ordered), mirroring `reactions`.
     reactions: HashMap<(MessageId, EndpointId), BTreeMap<String, String>>,
+    /// Story expiries, mirroring `message_expiries`.
+    expiries: HashMap<MessageId, i64>,
 }
 
 struct StoredMedia {
@@ -370,6 +372,32 @@ impl MessageStore for InMemoryStorage {
                         .contains(&(copy.endpoint_id, copy.native_id.clone()))
             })
             .map(|(_, copy)| copy.clone()))
+    }
+
+    async fn record_expiry(&self, message_id: MessageId, expires_at_ms: i64) -> StorageResult<()> {
+        self.state
+            .write()
+            .await
+            .expiries
+            .insert(message_id, expires_at_ms);
+        Ok(())
+    }
+
+    async fn due_expiries(&self, now_ms: i64, limit: usize) -> StorageResult<Vec<MessageId>> {
+        let state = self.state.read().await;
+        let mut due: Vec<_> = state
+            .expiries
+            .iter()
+            .filter(|(_, at)| **at <= now_ms)
+            .map(|(id, at)| (*at, *id))
+            .collect();
+        due.sort_by_key(|(at, id)| (*at, id.0));
+        Ok(due.into_iter().take(limit).map(|(_, id)| id).collect())
+    }
+
+    async fn forget_expiry(&self, message_id: MessageId) -> StorageResult<()> {
+        self.state.write().await.expiries.remove(&message_id);
+        Ok(())
     }
 }
 

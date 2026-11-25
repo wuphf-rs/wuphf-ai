@@ -21,14 +21,17 @@ mod reply_reaction;
 mod resolve;
 mod router;
 mod send;
+mod stories;
 
 pub use config::{
     ChatStateSettings, MatchedRule, RoutingConfig, RoutingConfigError, RoutingSource,
+    StoriesSettings,
 };
 pub use hold::Released;
 pub use posts::{PENDING_POST_TTL_MS, PendingPost, PostOutcome};
 use router::Router;
 pub use router::RouterError;
+pub use stories::STORY_LIFETIME_MS;
 
 pub struct Core<S> {
     storage: Arc<S>,

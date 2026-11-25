@@ -42,6 +42,12 @@ where
         {
             return Ok(IngestOutcome::Ignored(IgnoreReason::SentMessageEcho));
         }
+        // A story the owner does not mirror is dropped before it is stored
+        // (plan 084).
+        let story = self.is_feed(&origin).await?;
+        if story && self.story_muted(routing, &origin, &inbound).await? {
+            return Ok(IngestOutcome::Ignored(IgnoreReason::Muted));
+        }
 
         // Resolve the reply parent best-effort: a reply to a message the bridge
         // never saw (sent before startup, or never mirrored) simply loses its
@@ -92,6 +98,9 @@ where
                 native_id: native_id.clone(),
             })
             .await?;
+        if story {
+            self.record_story(&message).await?;
+        }
         // The owner's post command (plan 084) is never routed: it posts, or
         // opens the preview, or is refused.
         if let Some(command) =

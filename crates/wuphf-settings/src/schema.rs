@@ -6,7 +6,7 @@ use crate::domains;
 use botconf::{Choices, Field, FixedChoice, Form, Kind, RuntimeSetting};
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
-use wuphf_core::{ChatStateSettings, RoutingConfig};
+use wuphf_core::{ChatStateSettings, RoutingConfig, StoriesSettings};
 use wuphf_functions::Functions;
 use wuphf_model::{
     ChatStatePolicy, ChatStatePolicyOverride, Connector, ConnectorCapabilities, ConnectorId,
@@ -121,6 +121,16 @@ impl botconf::Schema for WuphfSchema {
                     .map(|chat| chat.0.clone())
                     .collect(),
             )
+            .with_stories(StoriesSettings {
+                mirror: config.stories.mirror,
+                muted: config
+                    .stories
+                    .muted
+                    .iter()
+                    .map(|chat| chat.0.clone())
+                    .collect(),
+                expire_copies: config.stories.expire_copies,
+            })
             .with_mirror_deletes_kept(
                 config
                     .mirror_deletes_kept

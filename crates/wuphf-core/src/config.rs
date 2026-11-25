@@ -28,6 +28,32 @@ pub struct RoutingConfig {
     /// Source connectors whose chats keep a message when its mirror copy is
     /// deleted (plan 083).
     mirror_deletes_kept: HashSet<ConnectorId>,
+    /// Which stories are mirrored, and whether their copies expire (plan 084).
+    stories: StoriesSettings,
+}
+
+/// The `stories` settings (plan 084). A story is a message of a feed chat: one
+/// whose connector reports `private_replies` (WhatsApp Status).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct StoriesSettings {
+    /// Whether stories are mirrored at all.
+    pub mirror: bool,
+    /// People whose stories are not mirrored: their direct chat, under any of
+    /// its address forms.
+    pub muted: Vec<ChatRef>,
+    /// Whether the mirror copies of a story are deleted 24 hours after it was
+    /// posted.
+    pub expire_copies: bool,
+}
+
+impl Default for StoriesSettings {
+    fn default() -> Self {
+        Self {
+            mirror: true,
+            muted: Vec::new(),
+            expire_copies: false,
+        }
+    }
 }
 
 /// The `chat_state` settings: a global policy, and overrides that each name a
@@ -76,6 +102,7 @@ impl RoutingConfig {
             owners: HashMap::new(),
             receive_only: Vec::new(),
             mirror_deletes_kept: HashSet::new(),
+            stories: StoriesSettings::default(),
         }
     }
 
@@ -138,6 +165,17 @@ impl RoutingConfig {
     ) -> Self {
         self.mirror_deletes_kept = connectors.into_iter().collect();
         self
+    }
+
+    /// Declare which stories are mirrored and whether their copies expire.
+    pub fn with_stories(mut self, stories: StoriesSettings) -> Self {
+        self.stories = stories;
+        self
+    }
+
+    /// The `stories` settings.
+    pub fn stories(&self) -> &StoriesSettings {
+        &self.stories
     }
 
     /// Whether the owner marked this conversation receive-only, naming its

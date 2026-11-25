@@ -127,6 +127,36 @@ where
         Ok(outcome)
     }
 
+    /// Delete the mirror copies of the stories that expired (plan 084), when
+    /// `stories.expire_copies` is on, returning how many deletes that took.
+    pub async fn expire_stories(&self) -> Result<usize, OwnerSendError> {
+        let deletes = self.core.expire_stories(now_ms()).await?;
+        let count = deletes.len();
+        for delete in deletes {
+            self.inject(delete).await?;
+        }
+        Ok(count)
+    }
+
+    /// Sweep expired stories every `every`, until the task is aborted.
+    pub fn spawn_story_expiry(&self, every: std::time::Duration) -> tokio::task::JoinHandle<()> {
+        let sender = self.clone();
+        tokio::spawn(async move {
+            let mut ticks = tokio::time::interval(every);
+            loop {
+                ticks.tick().await;
+                match sender.expire_stories().await {
+                    Ok(0) => {}
+                    Ok(count) => {
+                        tracing::info!(count, "deleted the mirror copies of expired stories")
+                    }
+                    Err(OwnerSendError::RuntimeStopped) => return,
+                    Err(error) => tracing::warn!(%error, "could not expire stories"),
+                }
+            }
+        })
+    }
+
     async fn inject_posted(&self, outcome: &PostOutcome) -> Result<(), OwnerSendError> {
         if let PostOutcome::Posted(dispatches) = outcome {
             for dispatch in dispatches {
