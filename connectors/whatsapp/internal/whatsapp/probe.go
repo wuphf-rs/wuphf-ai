@@ -63,6 +63,17 @@ func probeChat(ctx context.Context, account groupDirectory, chatID string) *wuph
 		facts.Detail = err.Error()
 		return facts
 	}
+	switch {
+	case isStatusBroadcast(jid):
+		// The story feed takes no messages from the bridge (plan 083).
+		facts.Exists, facts.Member, facts.CanSend = coreclient.Fact(true), coreclient.Fact(true), coreclient.Fact(false)
+		facts.Detail = "WhatsApp Status takes no messages"
+		return facts
+	case jid.Server == types.NewsletterServer:
+		// Whether a channel takes posts depends on this account's role,
+		// which the posting facts report; the probe does not know it.
+		return facts
+	}
 	if jid.Server != types.GroupServer {
 		// A direct chat is always there to write to.
 		facts.Exists, facts.Member, facts.CanSend = coreclient.Fact(true), coreclient.Fact(true), coreclient.Fact(true)

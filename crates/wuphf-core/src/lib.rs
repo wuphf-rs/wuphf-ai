@@ -15,6 +15,7 @@ mod ingest;
 mod notes;
 mod notify;
 mod profile;
+mod refusal;
 mod reply_reaction;
 mod resolve;
 mod router;

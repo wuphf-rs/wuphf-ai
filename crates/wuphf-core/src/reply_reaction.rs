@@ -113,7 +113,7 @@ where
                 }
             }
         }
-        let (dispatches, blocked) = self.save_dispatches(routed).await?;
+        let (dispatches, blocked) = self.save_dispatches(routing, routed).await?;
         Ok(IngestOutcome::Routed {
             message_id: reply.id,
             dispatches,

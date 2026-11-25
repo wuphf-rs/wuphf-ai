@@ -10,9 +10,10 @@
 # thread, write `#` as `%23` and `%` as `%25`. Connector ids may not contain
 # `:`, `#`, `%` or spaces.
 #
-# Runtime settings (`notify`, `rules`, `chat_state`) can also be changed while
-# the core runs, from a settings panel or `wuphf-server settings`: stored
-# overrides win over this file, and unsetting one goes back to it.
+# Runtime settings (`notify`, `receive_only`, `mirror_deletes_kept`, `rules`,
+# `chat_state`) can also be changed while the core runs, from a settings panel
+# or `wuphf-server settings`: stored overrides win over this file, and unsetting
+# one goes back to it.
 
 # The address the core's gRPC services listen on (connectors, providers, the
 # observer, the settings service).
@@ -49,6 +50,20 @@ database_url = "sqlite://wuphf.sqlite"
 # this out to keep notices in the log only.
 # Default: [].
 notify = ["telegram-main:telegram:user:704338780"]
+
+# Chats nothing is sent into from their mirror topic (plan 083), on top of the
+# ones the connectors report as receive-only (WhatsApp: Status, channels you
+# don't own or admin, admin-only groups where you're not admin). Name the source
+# chat or its mirror topic. A message or edit typed in the mirror is refused
+# with a note; reactions still go.
+# Default: [].
+receive_only = ["whatsapp-main:120363000000000000@g.us"]
+
+# Source connectors whose chats keep a message when you delete its copy in a
+# mirror (plan 083). By default deleting your own message's mirror copy deletes
+# it on the source too (a story included).
+# Default: [].
+mirror_deletes_kept = ["whatsapp-main"]
 
 # The connectors the core accepts.
 #

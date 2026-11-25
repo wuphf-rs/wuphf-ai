@@ -119,4 +119,14 @@ pub trait Sender: Send + Sync + 'static {
     ) -> impl Future<Output = Result<String, Failure>> + Send {
         async move { Ok(dispatch.target_chat_id) }
     }
+
+    /// Surface that the bridge did not send a copy on (plan 083): mark it and
+    /// post the reason as a reply note. Returns the copy's platform message
+    /// id unchanged. This default acknowledges without surfacing anything.
+    fn refuse_message(
+        &self,
+        dispatch: pb::MessageRefusedDispatch,
+    ) -> impl Future<Output = Result<String, Failure>> + Send {
+        async move { Ok(dispatch.target_platform_message_id) }
+    }
 }

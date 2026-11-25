@@ -174,6 +174,7 @@ fn wa_event(native_id: &str, text: &str) -> Event {
             timestamp_ms: 1,
             disappearing: None,
             author_account: None,
+            reply_to_chat_id: None,
         }),
     }
 }
@@ -378,6 +379,7 @@ async fn inbound_event_frames_are_forwarded_to_the_core() {
                     sender_name: None,
                     disappearing: None,
                     sender_account: None,
+                    reply_to_chat_id: None,
                 },
             )),
         })

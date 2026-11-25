@@ -168,6 +168,11 @@ pub struct ReplyContext {
     /// participant alongside the quoted id) attribute it wrongly without this.
     #[serde(default)]
     pub authored_by_bridge: bool,
+    /// The chat the quoted copy lives in at the target platform, when it is
+    /// not the target chat (plan 083: a group message quoted in a DM, a story
+    /// quoted in its poster's chat).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub chat_id: Option<String>,
 }
 
 impl ReplyContext {
@@ -184,6 +189,7 @@ impl ReplyContext {
             text: parent.text,
             attachments: parent.attachments,
             authored_by_bridge,
+            chat_id: None,
         }
     }
 }
@@ -224,6 +230,11 @@ pub struct NewMessage {
     /// `owner_ids`; not kept on the stored message.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub author_account: Option<String>,
+    /// The chat the quoted message lives in, when it is not this message's
+    /// own chat (a Telegram reply to a message in another chat). A quote in
+    /// another thread of the same chat names no chat.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reply_to_chat_id: Option<String>,
 }
 
 /// The kind of inbound event a connector reports for a chat.

@@ -22,6 +22,12 @@ pub struct RoutingConfig {
     /// The owner's platform user ids on each connector (`owner_ids`): whose
     /// reactions are the owner's own.
     owners: HashMap<ConnectorId, HashSet<String>>,
+    /// Chats the owner marked receive-only (plan 083): a conversation's
+    /// source chat or its mirror topic. Nothing is sent into the source.
+    receive_only: Vec<ChatRef>,
+    /// Source connectors whose chats keep a message when its mirror copy is
+    /// deleted (plan 083).
+    mirror_deletes_kept: HashSet<ConnectorId>,
 }
 
 /// The `chat_state` settings: a global policy, and overrides that each name a
@@ -47,6 +53,8 @@ pub enum RoutingConfigError {
     UnknownNoticeConnector(ConnectorId),
     #[error("a chat_state override names connector {0}, which is not configured")]
     UnknownChatStateConnector(ConnectorId),
+    #[error("receive_only or mirror_deletes_kept names connector {0}, which is not configured")]
+    UnknownReceiveOnlyConnector(ConnectorId),
 }
 
 /// The end of a rule that an inbound address matched.
@@ -66,6 +74,8 @@ impl RoutingConfig {
             notice_targets: Vec::new(),
             chat_state: ChatStateSettings::default(),
             owners: HashMap::new(),
+            receive_only: Vec::new(),
+            mirror_deletes_kept: HashSet::new(),
         }
     }
 
@@ -112,6 +122,36 @@ impl RoutingConfig {
             Some((_, override_)) => self.chat_state.global.with(override_),
             None => self.chat_state.global,
         }
+    }
+
+    /// Declare the chats the owner marked receive-only (plan 083).
+    pub fn with_receive_only(mut self, chats: Vec<ChatRef>) -> Self {
+        self.receive_only = chats;
+        self
+    }
+
+    /// Declare the source connectors whose chats keep a message when its
+    /// mirror copy is deleted (plan 083).
+    pub fn with_mirror_deletes_kept(
+        mut self,
+        connectors: impl IntoIterator<Item = ConnectorId>,
+    ) -> Self {
+        self.mirror_deletes_kept = connectors.into_iter().collect();
+        self
+    }
+
+    /// Whether the owner marked this conversation receive-only, naming its
+    /// source chat or one of its endpoints (as `chat_state` overrides do).
+    pub fn marked_receive_only(&self, conversation: &Conversation, endpoints: &[ChatRef]) -> bool {
+        self.receive_only
+            .iter()
+            .any(|chat| *chat == conversation.source || endpoints.contains(chat))
+    }
+
+    /// Whether deleting a mirror copy leaves the message in place on this
+    /// source connector's chats.
+    pub fn keeps_mirror_deletes(&self, connector: &ConnectorId) -> bool {
+        self.mirror_deletes_kept.contains(connector)
     }
 
     /// Declare where owner notices are delivered. Separate from [`Self::new`] so
@@ -175,6 +215,17 @@ impl RoutingConfig {
         {
             return Err(RoutingConfigError::UnknownChatStateConnector(
                 chat.connector_id.clone(),
+            ));
+        }
+        if let Some(connector) = self
+            .receive_only
+            .iter()
+            .map(|chat| &chat.connector_id)
+            .chain(&self.mirror_deletes_kept)
+            .find(|connector| !self.connectors.contains_key(*connector))
+        {
+            return Err(RoutingConfigError::UnknownReceiveOnlyConnector(
+                connector.clone(),
             ));
         }
         Ok(())

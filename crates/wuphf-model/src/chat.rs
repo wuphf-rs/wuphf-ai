@@ -62,6 +62,10 @@ pub struct ChatProfile {
     pub mute: Option<MuteState>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub archived: Option<bool>,
+    /// What this account may do in the chat, as its connector reports it
+    /// (plan 083). `None` until reported: the chat is then open.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub posting: Option<ChatPosting>,
 }
 
 impl ChatProfile {
@@ -78,11 +82,54 @@ impl ChatProfile {
             pinned: None,
             mute: None,
             archived: None,
+            posting: None,
         }
+    }
+
+    /// Whether this account may post new messages here: false only when the
+    /// connector reported it may not.
+    pub fn accepts_messages(&self) -> bool {
+        self.posting.is_none_or(|posting| posting.messages)
+    }
+
+    /// Whether this account may react here.
+    pub fn accepts_reactions(&self) -> bool {
+        self.posting.is_none_or(|posting| posting.reactions)
+    }
+
+    /// Whether a message here may be quoted only in its author's direct
+    /// chat (a story).
+    pub fn private_replies(&self) -> bool {
+        self.posting.is_some_and(|posting| posting.private_replies)
     }
 }
 
-/// A chat's mute: 0 not muted, [`MuteState::FOREVER`] muted forever,
+/// What an account may do in a chat (plan 083), as its connector reports it:
+/// a WhatsApp story feed takes reactions only, and a story may be quoted only
+/// in its poster's chat; an admin-only group takes no messages from a
+/// member.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ChatPosting {
+    /// The account may post new messages (and edit its own).
+    pub messages: bool,
+    /// The account may react to messages.
+    pub reactions: bool,
+    /// A message here may be quoted only in a reply to its author's direct
+    /// chat.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub private_replies: bool,
+}
+
+impl ChatPosting {
+    /// A chat open to everything.
+    pub const OPEN: Self = Self {
+        messages: true,
+        reactions: true,
+        private_replies: false,
+    };
+}
+
+/// A chat's mute): 0 not muted, [`MuteState::FOREVER`] muted forever,
 /// otherwise the end in Unix seconds. A mute whose end has passed is 0.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct MuteState {
@@ -225,6 +272,9 @@ pub struct ChatUpdate {
     /// WhatsApp: archived. Telegram topic: closed.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub archived: Option<bool>,
+    /// What this account may do in the chat (plan 083).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub posting: Option<ChatPosting>,
 }
 
 impl ChatUpdate {

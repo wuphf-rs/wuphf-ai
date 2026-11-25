@@ -330,6 +330,7 @@ mod tests {
                 timestamp_ms: 100,
                 disappearing: None,
                 author_account: None,
+                reply_to_chat_id: None,
             }),
         }
     }

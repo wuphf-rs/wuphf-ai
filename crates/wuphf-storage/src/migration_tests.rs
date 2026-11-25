@@ -876,6 +876,7 @@ fn sample_dispatches() -> Vec<Dispatch> {
                 text: Some("parent".into()),
                 attachments: Vec::new(),
                 authored_by_bridge: true,
+                chat_id: None,
             }),
             disappearing: None,
         },

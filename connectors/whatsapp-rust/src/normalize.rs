@@ -410,6 +410,9 @@ fn normalize(
             disappearing: message_timer(info, message),
             // WhatsApp names its owner as the session account, not by owner_ids.
             sender_account: None,
+            // A quote of another chat (a reply to a story) is not mirrored as
+            // one yet (plan 083, out of scope).
+            reply_to_chat_id: None,
         },
     )))
 }

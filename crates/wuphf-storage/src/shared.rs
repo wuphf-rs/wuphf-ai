@@ -53,6 +53,9 @@ fn bind_native_parent(dispatch: &mut Dispatch, parent: Message, native_id: Strin
         }
         | Action::Receipt {
             native_id: target, ..
+        }
+        | Action::Refuse {
+            native_id: target, ..
         } => *target = native_id,
         // A rename is never blocked on a parent message, so it is never
         // released with one.

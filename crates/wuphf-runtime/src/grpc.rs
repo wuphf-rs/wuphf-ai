@@ -10,11 +10,11 @@ use tokio_stream::{Stream, wrappers::ReceiverStream};
 use tonic::{Request, Response, Status};
 use uuid::Uuid;
 use wuphf_model::{
-    Action, Attachment, AttachmentKind, ChatAddress, ChatUpdate, Connector, ConnectorCapabilities,
-    ConnectorId, ConnectorInput, ConnectorOutput, DisappearingTimer, DispatchAck, DispatchFailed,
-    Event, EventKind, InboundWork, MediaId, MuteState, NewMessage, NoticeKind, ParticipantChange,
-    ParticipantChangeKind, Platform, ReactorReaction, ReceiptKind, ReplyContext, ReportedAvatar,
-    SourceAddress,
+    Action, Attachment, AttachmentKind, ChatAddress, ChatPosting, ChatUpdate, Connector,
+    ConnectorCapabilities, ConnectorId, ConnectorInput, ConnectorOutput, DisappearingTimer,
+    DispatchAck, DispatchFailed, Event, EventKind, InboundWork, MediaId, MuteState, NewMessage,
+    NoticeKind, ParticipantChange, ParticipantChangeKind, Platform, ReactorReaction, ReceiptKind,
+    ReplyContext, ReportedAvatar, SourceAddress,
 };
 use wuphf_proto::connector as pb;
 use wuphf_proto::connector::connector_transport_server::ConnectorTransport;
@@ -264,6 +264,7 @@ fn input_from_proto(
                 timestamp_ms: event.timestamp_ms,
                 disappearing: event.disappearing.map(timer_from_proto),
                 author_account: event.sender_account,
+                reply_to_chat_id: event.reply_to_chat_id.filter(|chat| !chat.is_empty()),
             }),
         })),
         Some(pb::client_frame::Body::MessageEdit(event)) => Ok(ConnectorInput::event(Event {
@@ -575,6 +576,19 @@ fn output_to_proto(output: ConnectorOutput) -> pb::ServerFrame {
                     target_participant: target_author.participant,
                     target_authored_by_bridge: target_author.authored_by_bridge,
                 }),
+                Action::Refuse {
+                    native_id,
+                    reason,
+                    note_ttl_secs,
+                    ..
+                } => pb::server_frame::Body::Refused(pb::MessageRefusedDispatch {
+                    dispatch_id,
+                    target_chat_id: target.address.chat_id,
+                    target_thread_id: target.address.thread_id,
+                    target_platform_message_id: native_id,
+                    reason,
+                    note_ttl_secs,
+                }),
                 Action::Receipt {
                     native_id,
                     kind: ReceiptKind::Delivered,
@@ -617,6 +631,7 @@ fn reply_context_to_proto(context: ReplyContext) -> pb::ReplyContext {
             .map(attachment_to_proto)
             .collect(),
         authored_by_bridge: context.authored_by_bridge,
+        chat_id: context.chat_id,
     }
 }
 
@@ -650,6 +665,11 @@ fn chat_update_from_proto(update: pb::ChatUpdate) -> Result<ChatUpdate, WireErro
             muted_until: mute.muted_until,
         }),
         archived: update.archived,
+        posting: update.posting.map(|posting| ChatPosting {
+            messages: posting.messages,
+            reactions: posting.reactions,
+            private_replies: posting.private_replies,
+        }),
     })
 }
 
@@ -1245,6 +1265,7 @@ mod tests {
                 setting_timestamp: None,
             }),
             sender_account: None,
+            reply_to_chat_id: None,
         });
         let InboundWork::Event(event) = work(frame) else {
             panic!("a create is an event");

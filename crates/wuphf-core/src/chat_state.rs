@@ -139,7 +139,7 @@ where
                 .await?
             }
         };
-        let (pending, _) = self.save_dispatches(dispatches).await?;
+        let (pending, _) = self.save_dispatches(routing, dispatches).await?;
         Ok(pending)
     }
 

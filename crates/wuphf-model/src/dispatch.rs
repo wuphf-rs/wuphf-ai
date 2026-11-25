@@ -44,7 +44,8 @@ impl Dispatch {
             Action::Send { message, .. } | Action::Edit { message, .. } => Some(message.id),
             Action::Delete { message_id, .. }
             | Action::React { message_id, .. }
-            | Action::Receipt { message_id, .. } => Some(*message_id),
+            | Action::Receipt { message_id, .. }
+            | Action::Refuse { message_id, .. } => Some(*message_id),
             Action::RenameThread { .. } | Action::Note { .. } | Action::SetChatState { .. } => None,
         }
     }
@@ -138,6 +139,16 @@ pub enum Action {
         message_id: MessageId,
         native_id: String,
         kind: ReceiptKind,
+    },
+    /// Tell the origin copy that the bridge did not send it on (plan 083): a
+    /// message into a receive-only chat, a story quoted outside its poster's
+    /// chat. The connector marks the copy and posts `reason` as a reply note
+    /// it deletes after `note_ttl_secs`. Records no copy.
+    Refuse {
+        message_id: MessageId,
+        native_id: String,
+        reason: String,
+        note_ttl_secs: u32,
     },
     /// Rename an already-provisioned mirror thread when its source
     /// conversation's title changes. Carries no message because a rename is a
@@ -346,6 +357,15 @@ mod tests {
                     message_id: message.id,
                     native_id: String::new(),
                     kind: ReceiptKind::Delivered,
+                },
+                false,
+            ),
+            (
+                Action::Refuse {
+                    message_id: message.id,
+                    native_id: "n".into(),
+                    reason: "no".into(),
+                    note_ttl_secs: 30,
                 },
                 false,
             ),

@@ -151,6 +151,15 @@ type SeenReceiptMarker interface {
 	MarkSeen(context.Context, *wuphfpb.SeenReceiptDispatch) (messageID string, err error)
 }
 
+// MessageRefuser is implemented by senders that surface a copy the bridge did
+// not send on (plan 083): a mark on it and the reason as a reply note. Without
+// it, a Refused dispatch is acknowledged unchanged.
+type MessageRefuser interface {
+	// RefuseMessage marks the target copy and posts the reason, returning the
+	// target copy's platform message id unchanged.
+	RefuseMessage(context.Context, *wuphfpb.MessageRefusedDispatch) (messageID string, err error)
+}
+
 // ChatStateApplier is implemented by senders that apply pin, mute and archive
 // to a chat or thread. Without it, a ChatState dispatch is acknowledged
 // unchanged (with its target chat id). Applying a state emits nothing: the
@@ -376,6 +385,18 @@ func (c Client) runSession(
 				if marker, ok := sender.(SeenReceiptMarker); ok {
 					op = func(ctx context.Context) (string, string, error) {
 						messageID, err := marker.MarkSeen(ctx, dispatch)
+						return messageID, "", err
+					}
+				}
+				if err := c.deliver(ctx, stream, dispatch.DispatchId, op); err != nil {
+					return err
+				}
+			case *wuphfpb.ServerFrame_Refused:
+				dispatch := body.Refused
+				op := ackOnly(dispatch.TargetPlatformMessageId)
+				if refuser, ok := sender.(MessageRefuser); ok {
+					op = func(ctx context.Context) (string, string, error) {
+						messageID, err := refuser.RefuseMessage(ctx, dispatch)
 						return messageID, "", err
 					}
 				}

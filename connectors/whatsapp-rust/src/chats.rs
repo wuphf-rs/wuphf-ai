@@ -34,6 +34,8 @@ use crate::groups::GroupFacts;
 use crate::identity::Identity;
 use crate::names::{ChatTitles, Person, dm_title, number_of, tagged};
 use crate::normalize::bare_id;
+use crate::posting;
+use crate::probe::own_users;
 
 /// Handles group notifications, picture changes, contact syncs and history
 /// syncs. Cheap to clone: every handle shares the one frame sink, namer and
@@ -66,6 +68,13 @@ impl ChatEvents {
             Event::GroupUpdate(update) => {
                 // The subject, description, members or timer may have changed.
                 self.titles.groups().forget(&update.group_jid);
+                // So may what this account may post there (plan 083): a
+                // snapshot of its own, since it is current state.
+                if posting::affects_posting(&update.action, &own_users(&client))
+                    && let Some(posting) = posting::group(&client, &update.group_jid).await
+                {
+                    self.send(&client, vec![posting], true).await;
+                }
                 (self.group_update(&client, update).await, false)
             }
             Event::PictureUpdate(update) => (self.picture_update(&client, update).await, false),
@@ -88,6 +97,13 @@ impl ChatEvents {
             _ => return,
         };
         self.send(&client, updates, snapshot).await;
+    }
+
+    /// Tell the core what this account may do in its chats (plan 083): the
+    /// story feed, every group, every channel. Run on each connect.
+    pub async fn report_posting(&self, client: Arc<Client>) {
+        let updates = posting::snapshot(&client).await;
+        self.send(&client, updates, true).await;
     }
 
     /// Every update goes out under its chat's canonical id, once per chat.

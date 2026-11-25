@@ -8,6 +8,7 @@ import (
 	"mime"
 	"path"
 	"strconv"
+	"time"
 	"unicode/utf16"
 
 	"github.com/gotd/td/telegram/message"
@@ -42,6 +43,9 @@ type Sender struct {
 	// stickers sends a user session's labelled stickers through the helper
 	// bot, when there is one (see sendSticker).
 	stickers *InlineStickers
+	// after runs f once d has passed (time.AfterFunc when nil): the refusal
+	// note's self-deletion, replaced in tests.
+	after func(d time.Duration, f func())
 }
 
 func NewSender(api *tg.Client, peers *PeerCache, media MediaBroker, converter StickerConverter, runtime *settings.Live[config.Runtime], bot bool) Sender {
@@ -193,20 +197,8 @@ func (s Sender) DeleteMessage(ctx context.Context, dispatch *wuphfpb.MessageDele
 		}
 		return dispatch.TargetPlatformMessageId, nil
 	}
-	switch input := peer.(type) {
-	case *tg.InputPeerChannel:
-		_, err = s.api.ChannelsDeleteMessages(ctx, &tg.ChannelsDeleteMessagesRequest{
-			Channel: &tg.InputChannel{ChannelID: input.ChannelID, AccessHash: input.AccessHash},
-			ID:      []int{messageID},
-		})
-	default:
-		_, err = s.api.MessagesDeleteMessages(ctx, &tg.MessagesDeleteMessagesRequest{
-			Revoke: true,
-			ID:     []int{messageID},
-		})
-	}
-	if err != nil {
-		return "", fmt.Errorf("delete Telegram message: %w", err)
+	if err := s.deleteMessages(ctx, peer, messageID); err != nil {
+		return "", err
 	}
 	return dispatch.TargetPlatformMessageId, nil
 }
@@ -779,4 +771,25 @@ func messageIDFromUpdates(updates []tg.UpdateClass) (int, error) {
 		}
 	}
 	return 0, errors.New("Telegram send response contains no created message")
+}
+
+// deleteMessages revokes messages in peer for everyone.
+func (s Sender) deleteMessages(ctx context.Context, peer tg.InputPeerClass, ids ...int) error {
+	var err error
+	switch input := peer.(type) {
+	case *tg.InputPeerChannel:
+		_, err = s.api.ChannelsDeleteMessages(ctx, &tg.ChannelsDeleteMessagesRequest{
+			Channel: &tg.InputChannel{ChannelID: input.ChannelID, AccessHash: input.AccessHash},
+			ID:      ids,
+		})
+	default:
+		_, err = s.api.MessagesDeleteMessages(ctx, &tg.MessagesDeleteMessagesRequest{
+			Revoke: true,
+			ID:     ids,
+		})
+	}
+	if err != nil {
+		return fmt.Errorf("delete Telegram message: %w", err)
+	}
+	return nil
 }

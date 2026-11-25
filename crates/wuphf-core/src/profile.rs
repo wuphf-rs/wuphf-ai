@@ -160,6 +160,14 @@ pub(crate) fn apply(
         }
     }
 
+    // What this account may do there: stored, never a note (plan 083).
+    if let Some(posting) = update.posting
+        && profile.posting != Some(posting)
+    {
+        profile.posting = Some(posting);
+        changes.stored = true;
+    }
+
     changes.participants = update.participant_changes.clone();
     changes
 }
@@ -181,6 +189,7 @@ fn fill_unknown(into: &mut ChatProfile, from: ChatProfile) {
     into.description = into.description.take().or(from.description);
     into.avatar = into.avatar.take().or(from.avatar);
     into.participant_count = into.participant_count.or(from.participant_count);
+    into.posting = into.posting.or(from.posting);
 }
 
 impl<S> Core<S>
@@ -352,7 +361,7 @@ where
                 );
             }
         }
-        let (pending, _) = self.save_dispatches(routed).await?;
+        let (pending, _) = self.save_dispatches(routing, routed).await?;
         Ok(pending)
     }
 

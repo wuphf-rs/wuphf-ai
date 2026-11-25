@@ -1564,6 +1564,13 @@ fn the_runtime_settings_are_the_described_ones() {
         [
             ("rules", Some("Rules"), &rules, true),
             ("notify", Some("Notice targets"), &notify, false),
+            ("receive_only", Some("Receive-only chats"), &notify, false),
+            (
+                "mirror_deletes_kept",
+                Some("Mirror deletes kept on"),
+                &Kind::reference(crate::domains::CONNECTOR, true),
+                false
+            ),
             ("chat_state.pin", Some("Pin"), &DIRECTION, false),
             ("chat_state.mute", Some("Mute"), &DIRECTION, false),
             ("chat_state.archive", Some("Archive"), &DIRECTION, false),

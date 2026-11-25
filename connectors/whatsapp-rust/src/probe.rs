@@ -8,6 +8,7 @@ use wuphf_connector::Prober;
 use wuphf_connector::commands::BoxFuture;
 use wuphf_proto::connector as pb;
 
+use crate::posting::is_status_broadcast;
 use crate::session::LinkedClient;
 
 pub struct WhatsAppProber {
@@ -26,11 +27,7 @@ impl Prober for WhatsAppProber {
             let Ok(client) = self.linked.get() else {
                 return Vec::new();
             };
-            let own: Vec<String> = [client.get_pn(), client.get_lid()]
-                .into_iter()
-                .flatten()
-                .map(|jid| jid.user.to_string())
-                .collect();
+            let own = own_users(&client);
             let mut answers = Vec::with_capacity(chat_ids.len());
             for chat_id in chat_ids {
                 let mut facts = pb::ChatFacts {
@@ -41,6 +38,17 @@ impl Prober for WhatsAppProber {
                 };
                 match chat_id.parse::<Jid>() {
                     Err(error) => facts.detail = error.to_string(),
+                    Ok(jid) if is_status_broadcast(&jid) => {
+                        // The story feed takes no messages from the bridge
+                        // (plan 083).
+                        facts.exists = fact(true);
+                        facts.member = fact(true);
+                        facts.can_send = fact(false);
+                        facts.detail = "WhatsApp Status takes no messages".to_owned();
+                    }
+                    // Whether a channel takes posts depends on this account's
+                    // role, which the posting facts report.
+                    Ok(jid) if jid.server == Server::Newsletter => {}
                     Ok(jid) if jid.server != Server::Group => {
                         // A direct chat is always there to write to.
                         facts.exists = fact(true);
@@ -67,16 +75,33 @@ fn fact(yes: bool) -> i32 {
     }
 }
 
-/// What a group's metadata says of this account (`own`: the users of its
-/// phone number and LID).
-fn group_facts(facts: &mut pb::ChatFacts, metadata: &GroupMetadata, own: &[String]) {
+/// The users of this account's phone number and LID.
+pub(crate) fn own_users(client: &whatsapp_rust::client::Client) -> Vec<String> {
+    [client.get_pn(), client.get_lid()]
+        .into_iter()
+        .flatten()
+        .map(|jid| jid.user.to_string())
+        .collect()
+}
+
+/// Whether this account (`own`: the users of its phone number and LID) is in
+/// the group, and whether it is an admin there.
+pub(crate) fn membership(metadata: &GroupMetadata, own: &[String]) -> (bool, bool) {
     let me = metadata.participants.iter().find(|participant| {
         std::iter::once(&participant.jid)
             .chain(participant.phone_number.as_ref())
             .any(|jid| own.iter().any(|user| *user == jid.user.as_str()))
     });
-    let member = me.is_some();
-    let admin = me.is_some_and(|participant| participant.is_admin());
+    (
+        me.is_some(),
+        me.is_some_and(|participant| participant.is_admin()),
+    )
+}
+
+/// What a group's metadata says of this account (`own`: the users of its
+/// phone number and LID).
+fn group_facts(facts: &mut pb::ChatFacts, metadata: &GroupMetadata, own: &[String]) {
+    let (member, admin) = membership(metadata, own);
     facts.exists = fact(true);
     facts.member = fact(member);
     facts.can_send = fact(member && (!metadata.is_announcement || admin));

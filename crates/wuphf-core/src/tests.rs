@@ -112,6 +112,7 @@ fn event_in(
             timestamp_ms: 1,
             disappearing: None,
             author_account: None,
+            reply_to_chat_id: None,
         }),
     }
 }
@@ -4274,4 +4275,207 @@ async fn a_reaction_set_never_clears_a_reply_reaction() {
         .await
         .unwrap();
     assert_eq!(set, IngestOutcome::Ignored(IgnoreReason::RedundantReaction));
+}
+
+// ---- Plan 083: receive-only chats ----
+
+/// The mirror rule's core with its topic provisioned (thread 777), built on
+/// `config`.
+async fn provisioned_mirror(config: RoutingConfig) -> Core<InMemoryStorage> {
+    let core = Core::new(Arc::new(InMemoryStorage::default()), Arc::new(config));
+    let (dispatches, _) = routed(
+        core.ingest(event(WHATSAPP, GROUP, "wa-1", None))
+            .await
+            .unwrap(),
+    );
+    core.acknowledge_dispatch(DispatchAck {
+        dispatch_id: dispatches[0].id,
+        native_id: "tg-card".into(),
+        thread_id: Some("777".into()),
+    })
+    .await
+    .unwrap();
+    core
+}
+
+/// The group reported as one this account may not post in (an admin-only
+/// group as a member).
+async fn report_receive_only(core: &Core<InMemoryStorage>) {
+    core.update_chats(
+        &ConnectorId(WHATSAPP.into()),
+        vec![ChatUpdate {
+            posting: Some(wuphf_model::ChatPosting {
+                messages: false,
+                reactions: true,
+                private_replies: false,
+            }),
+            ..ChatUpdate::new(GROUP)
+        }],
+        true,
+    )
+    .await
+    .unwrap();
+}
+
+/// The refusal note on the owner's copy in the topic, and nothing else.
+fn assert_refused(dispatches: &[Dispatch], native_id: &str) {
+    assert_eq!(dispatches.len(), 1, "{dispatches:#?}");
+    let refusal = &dispatches[0];
+    assert_eq!(refusal.to.connector_id, ConnectorId(TELEGRAM.into()));
+    assert_eq!(refusal.to.address.thread_id.as_deref(), Some("777"));
+    match &refusal.action {
+        Action::Refuse {
+            native_id: refused,
+            reason,
+            note_ttl_secs,
+            ..
+        } => {
+            assert_eq!(refused, native_id);
+            assert!(reason.contains("receive-only"), "{reason}");
+            assert_eq!(*note_ttl_secs, 30);
+        }
+        other => panic!("expected a refusal, got {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn a_message_into_a_receive_only_chat_is_refused_with_a_note() {
+    let core = provisioned_mirror(RoutingConfig::new(vec![mirror_rule()], connectors())).await;
+    report_receive_only(&core).await;
+
+    let (dispatches, blocked) = routed(
+        core.ingest(event_in(TELEGRAM, MIRROR_CHAT, Some("777"), "tg-9", None))
+            .await
+            .unwrap(),
+    );
+    assert_eq!(blocked, 0);
+    assert_refused(&dispatches, "tg-9");
+    // The refusal records no copy: nothing reached WhatsApp.
+    let refusal = &dispatches[0];
+    core.acknowledge_dispatch(DispatchAck {
+        dispatch_id: refusal.id,
+        native_id: "tg-9".into(),
+        thread_id: None,
+    })
+    .await
+    .unwrap();
+
+    // An edit of it is refused too.
+    let (dispatches, _) = routed(
+        core.ingest(edit_event(
+            TELEGRAM,
+            MIRROR_CHAT,
+            Some("777"),
+            "tg-9",
+            Some("again"),
+        ))
+        .await
+        .unwrap(),
+    );
+    assert_refused(&dispatches, "tg-9");
+}
+
+#[tokio::test]
+async fn a_receive_only_chat_still_mirrors_into_its_topic() {
+    let core = provisioned_mirror(RoutingConfig::new(vec![mirror_rule()], connectors())).await;
+    report_receive_only(&core).await;
+    let (dispatches, _) = routed(
+        core.ingest(event(WHATSAPP, GROUP, "wa-2", None))
+            .await
+            .unwrap(),
+    );
+    assert_eq!(dispatches.len(), 1);
+    assert!(matches!(dispatches[0].action, Action::Send { .. }));
+    assert_eq!(dispatches[0].to.connector_id, ConnectorId(TELEGRAM.into()));
+}
+
+#[tokio::test]
+async fn the_owner_can_mark_a_chat_receive_only_by_its_topic() {
+    let topic = ChatRef {
+        connector_id: ConnectorId(TELEGRAM.into()),
+        address: ChatAddress::new(MIRROR_CHAT, Some("777".into())),
+    };
+    let core = provisioned_mirror(
+        RoutingConfig::new(vec![mirror_rule()], connectors()).with_receive_only(vec![topic]),
+    )
+    .await;
+    let (dispatches, _) = routed(
+        core.ingest(event_in(TELEGRAM, MIRROR_CHAT, Some("777"), "tg-9", None))
+            .await
+            .unwrap(),
+    );
+    assert_refused(&dispatches, "tg-9");
+}
+
+#[tokio::test]
+async fn an_open_chat_takes_the_owners_message() {
+    let core = provisioned_mirror(RoutingConfig::new(vec![mirror_rule()], connectors())).await;
+    let (dispatches, _) = routed(
+        core.ingest(event_in(TELEGRAM, MIRROR_CHAT, Some("777"), "tg-9", None))
+            .await
+            .unwrap(),
+    );
+    assert_eq!(dispatches.len(), 1);
+    assert_eq!(dispatches[0].to.connector_id, ConnectorId(WHATSAPP.into()));
+    assert!(matches!(dispatches[0].action, Action::Send { .. }));
+}
+
+/// A delete of a mirror copy, with and without `mirror_deletes_kept`.
+async fn mirror_delete(keep: bool) -> Vec<Dispatch> {
+    let mut config = RoutingConfig::new(vec![mirror_rule()], connectors());
+    if keep {
+        config = config.with_mirror_deletes_kept([ConnectorId(WHATSAPP.into())]);
+    }
+    let core = provisioned_mirror(config).await;
+    let (dispatches, _) = routed(
+        core.ingest(event_in(TELEGRAM, MIRROR_CHAT, Some("777"), "tg-9", None))
+            .await
+            .unwrap(),
+    );
+    core.acknowledge_dispatch(DispatchAck {
+        dispatch_id: dispatches[0].id,
+        native_id: "wa-9".into(),
+        thread_id: None,
+    })
+    .await
+    .unwrap();
+    let delete = Event {
+        source: SourceAddress {
+            connector_id: ConnectorId(TELEGRAM.into()),
+            address: ChatAddress::new(MIRROR_CHAT, Some("777".into())),
+            chat_title: None,
+        },
+        payload: EventKind::Delete {
+            native_id: "tg-9".into(),
+        },
+    };
+    routed(core.ingest(delete).await.unwrap()).0
+}
+
+#[tokio::test]
+async fn deleting_a_mirror_copy_deletes_the_source_message_by_default() {
+    let dispatches = mirror_delete(false).await;
+    assert_eq!(dispatches.len(), 1);
+    assert!(
+        matches!(&dispatches[0].action, Action::Delete { native_id, .. } if native_id == "wa-9")
+    );
+}
+
+#[tokio::test]
+async fn mirror_deletes_kept_leaves_the_source_message() {
+    assert!(mirror_delete(true).await.is_empty());
+}
+
+#[test]
+fn receive_only_settings_must_name_configured_connectors() {
+    let unknown = ChatRef {
+        connector_id: ConnectorId("nope".into()),
+        address: ChatAddress::new("x", None),
+    };
+    let config =
+        RoutingConfig::new(vec![mirror_rule()], connectors()).with_receive_only(vec![unknown]);
+    assert!(matches!(
+        config.validate(),
+        Err(crate::RoutingConfigError::UnknownReceiveOnlyConnector(_))
+    ));
 }

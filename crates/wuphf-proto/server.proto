@@ -20,6 +20,10 @@ message ReplyContext {
   // when false. Platforms that address a quote by author, as WhatsApp does,
   // attribute it to the wrong person without this.
   bool authored_by_bridge = 7;
+  // The chat the quoted copy lives in at this platform, when it is not the
+  // target chat (plan 083: a group message quoted in a member's DM, a story
+  // quoted in its poster's chat). WhatsApp puts it in ContextInfo.remoteJid.
+  optional string chat_id = 8;
 }
 
 // Instruction to create a thread/topic in a container before sending, used when
@@ -138,6 +142,20 @@ message SeenReceiptDispatch {
   string target_platform_message_id = 4;
 }
 
+// The bridge did not send this copy on (plan 083): a message into a
+// receive-only chat, a story quoted outside its poster's chat. Addresses the
+// origin copy by its native id. The connector marks it (Telegram: a 👎
+// reaction) and posts `reason` as a reply note, which it deletes after
+// `note_ttl_secs` (0: keep it). Acknowledged like any dispatch.
+message MessageRefusedDispatch {
+  string dispatch_id = 1;
+  string target_chat_id = 2;
+  optional string target_thread_id = 3;
+  string target_platform_message_id = 4;
+  string reason = 5;
+  uint32 note_ttl_secs = 6;
+}
+
 message Rejected {
   string reason = 1;
 }
@@ -155,6 +173,7 @@ message ServerFrame {
     ChatStateDispatch chat_state = 9;
     RunCommand run_command = 10;
     ProbeChats probe = 11;
+    MessageRefusedDispatch refused = 12;
   }
 }
 

@@ -21,6 +21,7 @@ mod media;
 mod names;
 mod normalize;
 mod outbound;
+mod posting;
 mod presence;
 mod probe;
 mod qr_png;

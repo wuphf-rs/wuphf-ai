@@ -27,6 +27,9 @@ use crate::config::Runtime;
 use crate::disappearing::{TimerFallback, stamp};
 use crate::identity::Identity;
 use crate::outbound::{optional, outbound_media, quoted_body, text_exceeds_limit, text_file_media};
+// The sender never posts to the story feed for a dispatch (plan 083): the core
+// keeps it receive-only, and this is the backstop if it ever does not.
+use crate::posting::is_status_broadcast;
 use crate::stickermeta::apply_sticker_metadata;
 use crate::wa_client::{ChatAction, LiveClient, OutboundMedia, StickerOptions, WaClient};
 
@@ -382,14 +385,6 @@ fn group_failure(error: Failure, index: usize) -> Failure {
         "attachment {} of a multi-attachment message failed after {index} were sent: {error}",
         index + 1
     ))
-}
-
-/// WhatsApp's story feed (Go `isStatusBroadcast`). A send to it is posted as
-/// a story to every contact the status privacy allows, so the sender never
-/// does that for a dispatch (plan 083): the core keeps the chat receive-only,
-/// and this is the backstop if it ever does not.
-fn is_status_broadcast(jid: &Jid) -> bool {
-    jid.server == Server::Broadcast && jid.user == "status"
 }
 
 /// The permanent failure for a dispatch that would post to status@broadcast.

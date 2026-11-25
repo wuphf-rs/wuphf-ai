@@ -2,6 +2,7 @@
 //! logical message and the dispatches that fan it out, including mirror-thread
 //! provisioning and source-rename retitling.
 
+use crate::refusal::Screened;
 use crate::reply_reaction::lone_emoji;
 use crate::{Core, CoreError, RoutingConfig, notes};
 use std::collections::HashMap;
@@ -210,7 +211,7 @@ where
             .with_routing(routing)
             .route_retitle(&conversation, new_title)
             .await?;
-        let (pending, _) = self.save_dispatches(dispatches).await?;
+        let (pending, _) = self.save_dispatches(routing, dispatches).await?;
         Ok(pending)
     }
 
@@ -245,13 +246,23 @@ where
     /// direction are held (plan 079) and counted as blocked.
     pub(crate) async fn save_dispatches(
         &self,
+        routing: &Arc<RoutingConfig>,
         dispatches: Vec<Dispatch>,
     ) -> Result<(Vec<Dispatch>, usize), CoreError> {
         let pauses = self.health_pauses();
         let mut conversations = std::collections::HashMap::new();
+        let mut policies = std::collections::HashMap::new();
         let mut pending = Vec::new();
         let mut blocked = 0;
+        let mut screened = Vec::with_capacity(dispatches.len());
         for dispatch in dispatches {
+            match self.screen(routing, dispatch, &mut policies).await? {
+                Screened::Pass(dispatch) => screened.push(dispatch),
+                Screened::Refused(note) => screened.extend(note),
+                Screened::Dropped => {}
+            }
+        }
+        for dispatch in screened {
             if dispatch.is_pending()
                 && let Some(pause) = self
                     .pause_for(&pauses, &dispatch, &mut conversations)
@@ -297,7 +308,7 @@ where
             Introduction::Card(cards) => cards,
             Introduction::NotNeeded(routed) => routed,
         };
-        let (dispatches, blocked) = self.save_dispatches(routed).await?;
+        let (dispatches, blocked) = self.save_dispatches(routing, routed).await?;
         // Only ready dispatches register: a blocked one provisions nothing until
         // it is released.
         let provisioning_ids: Vec<_> = dispatches
@@ -432,7 +443,7 @@ where
             .with_routing(routing)
             .route_edit(&message, origin_endpoint)
             .await?;
-        let (dispatches, blocked) = self.save_dispatches(routed).await?;
+        let (dispatches, blocked) = self.save_dispatches(routing, routed).await?;
         Ok(IngestOutcome::Routed {
             message_id,
             dispatches,
@@ -479,7 +490,7 @@ where
             .with_routing(routing)
             .route_delete(&message, origin_endpoint)
             .await?;
-        let (dispatches, blocked) = self.save_dispatches(routed).await?;
+        let (dispatches, blocked) = self.save_dispatches(routing, routed).await?;
         Ok(IngestOutcome::Routed {
             message_id,
             dispatches,
@@ -517,7 +528,7 @@ where
         let routed = self
             .reaction_changed(routing, origin, &message, change)
             .await?;
-        let (dispatches, blocked) = self.save_dispatches(routed).await?;
+        let (dispatches, blocked) = self.save_dispatches(routing, routed).await?;
         Ok(IngestOutcome::Routed {
             message_id,
             dispatches,
@@ -591,7 +602,7 @@ where
                     .await?,
             );
         }
-        let (dispatches, blocked) = self.save_dispatches(routed).await?;
+        let (dispatches, blocked) = self.save_dispatches(routing, routed).await?;
         Ok(IngestOutcome::Routed {
             message_id,
             dispatches,
@@ -702,7 +713,7 @@ where
             .with_routing(routing)
             .route_receipt(&message, observer_endpoint, kind)
             .await?;
-        let (dispatches, blocked) = self.save_dispatches(routed).await?;
+        let (dispatches, blocked) = self.save_dispatches(routing, routed).await?;
         Ok(IngestOutcome::Routed {
             message_id,
             dispatches,

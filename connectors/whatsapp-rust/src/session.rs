@@ -168,6 +168,7 @@ async fn run_once(shared: &Shared, cancel: &CancellationToken) -> anyhow::Result
         Arc::clone(&shared.avatars),
         Arc::clone(&shared.identity),
     );
+    let posting_events = chat_events.clone();
     let health = Health::new(inputs.clone());
     let receipts = Receipts::new(inputs.clone(), Arc::clone(&shared.identity));
     let resync = Resync::open(
@@ -222,7 +223,11 @@ async fn run_once(shared: &Shared, cancel: &CancellationToken) -> anyhow::Result
         )
         .on_connected(move |client| {
             connected_linking.linked();
-            resync.connected(client);
+            resync.connected(Arc::clone(&client));
+            // What this account may post where (plan 083), off the event
+            // path: it asks WhatsApp for every group and channel.
+            let posting_events = posting_events.clone();
+            tokio::spawn(async move { posting_events.report_posting(client).await });
             async {
                 info!("connected to WhatsApp");
             }

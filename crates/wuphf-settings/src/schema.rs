@@ -114,6 +114,19 @@ impl botconf::Schema for WuphfSchema {
         let routing = RoutingConfig::new(rules(config)?, connectors.clone())
             .with_notice_targets(notice_targets)
             .with_chat_state(chat_state(config)?)
+            .with_receive_only(
+                config
+                    .receive_only
+                    .iter()
+                    .map(|chat| chat.0.clone())
+                    .collect(),
+            )
+            .with_mirror_deletes_kept(
+                config
+                    .mirror_deletes_kept
+                    .iter()
+                    .map(|id| ConnectorId(id.clone())),
+            )
             .with_owners(owners.clone());
         routing.validate().map_err(|error| error.to_string())?;
         let routing = Arc::new(routing);

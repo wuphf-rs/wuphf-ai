@@ -181,6 +181,16 @@ func (c Connector) runSession(ctx context.Context, deps sessionDeps) error {
 	namer := newChatNamer(client)
 	profiles := newChatProfiler(client, httpFetch, deps.media, namer, c.logger)
 	normalizer := NewNormalizer(inputs, NewMediaCodec(deps.media, client), namer, identity, client, addresses).WithProfiles(profiles)
+	posting := postingReporter{normalizer: normalizer, directory: whatsmeowProbe{client}, logger: c.logger}
+	// reportPosting runs off the event goroutine: it makes WhatsApp calls,
+	// and whatsmeow delivers events one at a time.
+	reportPosting := func(report func(context.Context) error) {
+		go func() {
+			if err := report(ctx); err != nil {
+				c.logger.Warn().Err(err).Msg("could not report WhatsApp posting rights")
+			}
+		}()
+	}
 	eventErrors := make(chan error, 1)
 	loggedOut := make(chan struct{}, 1)
 	client.AddEventHandler(func(raw any) {
@@ -192,6 +202,7 @@ func (c Connector) runSession(ctx context.Context, deps sessionDeps) error {
 			err = normalizer.HandleReceipt(ctx, evt)
 		case *events.GroupInfo:
 			err = normalizer.HandleGroupInfo(ctx, evt)
+			reportPosting(func(ctx context.Context) error { return posting.GroupChanged(ctx, evt) })
 		case *events.HistorySync:
 			err = normalizer.HandleHistorySync(ctx, evt)
 		case *events.Picture:
@@ -227,6 +238,7 @@ func (c Connector) runSession(ctx context.Context, deps sessionDeps) error {
 				}
 			case *events.Connected:
 				deps.linking.Linked()
+				reportPosting(posting.Snapshot)
 			}
 			return
 		}

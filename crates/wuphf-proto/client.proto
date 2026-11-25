@@ -32,6 +32,11 @@ message MessageCreateEvent {
   // telegram:user:N). The core checks it against owner_ids, for instance to
   // turn the owner's lone-emoji reply into a reaction (plan 081).
   optional string sender_account = 13;
+  // The chat the quoted message lives in, when it is not this message's
+  // own chat (a Telegram reply to a message in another chat, plan 083). A
+  // quote of another thread of the same chat names no chat: the core looks
+  // for it on every thread of this chat.
+  optional string reply_to_chat_id = 14;
 }
 
 // One chat's properties as the platform reported them. An absent field was not
@@ -58,6 +63,22 @@ message ChatUpdate {
   optional MuteState mute = 10;
   // WhatsApp: archived. Telegram topic: closed.
   optional bool archived = 11;
+  // What this account may do in the chat (plan 083). Absent: unknown, open.
+  optional ChatPosting posting = 12;
+}
+
+// What an account may do in a chat. The core refuses to send messages (and
+// edits) into a chat that takes none, and reactions into one that takes
+// none, and tells the sender why.
+message ChatPosting {
+  // The account may post new messages (WhatsApp: not into status@broadcast,
+  // an admin-only group as a member, a channel it does not own or admin).
+  bool messages = 1;
+  // The account may react to messages.
+  bool reactions = 2;
+  // A message here may be quoted only in a reply to its author's direct
+  // chat (a story).
+  bool private_replies = 3;
 }
 
 // The chat's picture. `id` is the platform's picture id; empty means the

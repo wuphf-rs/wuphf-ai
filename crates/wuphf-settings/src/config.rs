@@ -24,7 +24,7 @@ const FILE_DESCRIPTION: &str = "Every key can be overridden by an environment va
      (`telegram-main:telegram:channel:2060340733#12`). The connector is everything before \
      the first `:`, so chat ids may contain `:`. Inside the chat and the thread, write `#` \
      as `%23` and `%` as `%25`. Connector ids may not contain `:`, `#`, `%` or spaces.\n\n\
-     Runtime settings (`notify`, `rules`, `chat_state`) can also be changed while the core \
+     Runtime settings (`notify`, `receive_only`, `mirror_deletes_kept`, `rules`, `chat_state`) can also be changed while the core \
      runs, from a settings panel or `wuphf-server settings`: stored overrides win over this \
      file, and unsetting one goes back to it.";
 
@@ -144,6 +144,30 @@ pub struct Configuration {
         example = ["telegram-main:telegram:user:704338780"],
     )]
     pub notify: Vec<ChatTarget>,
+    /// Chats nothing is sent into from their mirror topic (plan 083), on top
+    /// of the ones the connectors report as receive-only (WhatsApp: Status,
+    /// channels you don't own or admin, admin-only groups where you're not
+    /// admin). Name the source chat or its mirror topic. A message or edit
+    /// typed in the mirror is refused with a note; reactions still go.
+    #[serde(default)]
+    #[botconf(
+        runtime,
+        title = "Receive-only chats",
+        domain = "wuphf.chat",
+        example = ["whatsapp-main:120363000000000000@g.us"],
+    )]
+    pub receive_only: Vec<ChatTarget>,
+    /// Source connectors whose chats keep a message when you delete its copy
+    /// in a mirror (plan 083). By default deleting your own message's mirror
+    /// copy deletes it on the source too (a story included).
+    #[serde(default)]
+    #[botconf(
+        runtime,
+        title = "Mirror deletes kept on",
+        domain = "wuphf.connector",
+        example = ["whatsapp-main"],
+    )]
+    pub mirror_deletes_kept: Vec<String>,
     /// Pin, mute and archive sync between a source chat and its mirror topic
     /// (Telegram: a pinned topic, the topic's notifications, a closed topic).
     /// Muting a topic needs a Telegram user session (a bot's notify settings

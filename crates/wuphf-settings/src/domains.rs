@@ -133,6 +133,8 @@ mod tests {
                 "rules.many-to-one.only_chats",
                 "rules.many-to-one.except_chats",
                 "notify",
+                "receive_only",
+                "mirror_deletes_kept",
                 "chat_state.chats.chat",
             ]
         );

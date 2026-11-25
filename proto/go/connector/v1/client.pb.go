@@ -259,7 +259,7 @@ func (x ParticipantChange_Kind) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use ParticipantChange_Kind.Descriptor instead.
 func (ParticipantChange_Kind) EnumDescriptor() ([]byte, []int) {
-	return file_client_proto_rawDescGZIP(), []int{3, 0}
+	return file_client_proto_rawDescGZIP(), []int{4, 0}
 }
 
 // Raw origin coordinates for an inbound message. The connector id is taken from
@@ -289,6 +289,11 @@ type MessageCreateEvent struct {
 	// telegram:user:N). The core checks it against owner_ids, for instance to
 	// turn the owner's lone-emoji reply into a reaction (plan 081).
 	SenderAccount *string `protobuf:"bytes,13,opt,name=sender_account,json=senderAccount,proto3,oneof" json:"sender_account,omitempty"`
+	// The chat the quoted message lives in, when it is not this message's
+	// own chat (a Telegram reply to a message in another chat, plan 083). A
+	// quote of another thread of the same chat names no chat: the core looks
+	// for it on every thread of this chat.
+	ReplyToChatId *string `protobuf:"bytes,14,opt,name=reply_to_chat_id,json=replyToChatId,proto3,oneof" json:"reply_to_chat_id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -414,6 +419,13 @@ func (x *MessageCreateEvent) GetSenderAccount() string {
 	return ""
 }
 
+func (x *MessageCreateEvent) GetReplyToChatId() string {
+	if x != nil && x.ReplyToChatId != nil {
+		return *x.ReplyToChatId
+	}
+	return ""
+}
+
 // One chat's properties as the platform reported them. An absent field was not
 // reported and leaves what the core knows unchanged.
 type ChatUpdate struct {
@@ -438,7 +450,9 @@ type ChatUpdate struct {
 	Pinned   *bool      `protobuf:"varint,9,opt,name=pinned,proto3,oneof" json:"pinned,omitempty"`
 	Mute     *MuteState `protobuf:"bytes,10,opt,name=mute,proto3,oneof" json:"mute,omitempty"`
 	// WhatsApp: archived. Telegram topic: closed.
-	Archived      *bool `protobuf:"varint,11,opt,name=archived,proto3,oneof" json:"archived,omitempty"`
+	Archived *bool `protobuf:"varint,11,opt,name=archived,proto3,oneof" json:"archived,omitempty"`
+	// What this account may do in the chat (plan 083). Absent: unknown, open.
+	Posting       *ChatPosting `protobuf:"bytes,12,opt,name=posting,proto3,oneof" json:"posting,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -550,6 +564,81 @@ func (x *ChatUpdate) GetArchived() bool {
 	return false
 }
 
+func (x *ChatUpdate) GetPosting() *ChatPosting {
+	if x != nil {
+		return x.Posting
+	}
+	return nil
+}
+
+// What an account may do in a chat. The core refuses to send messages (and
+// edits) into a chat that takes none, and reactions into one that takes
+// none, and tells the sender why.
+type ChatPosting struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The account may post new messages (WhatsApp: not into status@broadcast,
+	// an admin-only group as a member, a channel it does not own or admin).
+	Messages bool `protobuf:"varint,1,opt,name=messages,proto3" json:"messages,omitempty"`
+	// The account may react to messages.
+	Reactions bool `protobuf:"varint,2,opt,name=reactions,proto3" json:"reactions,omitempty"`
+	// A message here may be quoted only in a reply to its author's direct
+	// chat (a story).
+	PrivateReplies bool `protobuf:"varint,3,opt,name=private_replies,json=privateReplies,proto3" json:"private_replies,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
+}
+
+func (x *ChatPosting) Reset() {
+	*x = ChatPosting{}
+	mi := &file_client_proto_msgTypes[2]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ChatPosting) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ChatPosting) ProtoMessage() {}
+
+func (x *ChatPosting) ProtoReflect() protoreflect.Message {
+	mi := &file_client_proto_msgTypes[2]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ChatPosting.ProtoReflect.Descriptor instead.
+func (*ChatPosting) Descriptor() ([]byte, []int) {
+	return file_client_proto_rawDescGZIP(), []int{2}
+}
+
+func (x *ChatPosting) GetMessages() bool {
+	if x != nil {
+		return x.Messages
+	}
+	return false
+}
+
+func (x *ChatPosting) GetReactions() bool {
+	if x != nil {
+		return x.Reactions
+	}
+	return false
+}
+
+func (x *ChatPosting) GetPrivateReplies() bool {
+	if x != nil {
+		return x.PrivateReplies
+	}
+	return false
+}
+
 // The chat's picture. `id` is the platform's picture id; empty means the
 // picture was removed. `media_id` is the uploaded picture in the core's media
 // store, absent when removed or when the connector could not fetch it.
@@ -563,7 +652,7 @@ type ChatAvatar struct {
 
 func (x *ChatAvatar) Reset() {
 	*x = ChatAvatar{}
-	mi := &file_client_proto_msgTypes[2]
+	mi := &file_client_proto_msgTypes[3]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -575,7 +664,7 @@ func (x *ChatAvatar) String() string {
 func (*ChatAvatar) ProtoMessage() {}
 
 func (x *ChatAvatar) ProtoReflect() protoreflect.Message {
-	mi := &file_client_proto_msgTypes[2]
+	mi := &file_client_proto_msgTypes[3]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -588,7 +677,7 @@ func (x *ChatAvatar) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ChatAvatar.ProtoReflect.Descriptor instead.
 func (*ChatAvatar) Descriptor() ([]byte, []int) {
-	return file_client_proto_rawDescGZIP(), []int{2}
+	return file_client_proto_rawDescGZIP(), []int{3}
 }
 
 func (x *ChatAvatar) GetId() string {
@@ -626,7 +715,7 @@ type ParticipantChange struct {
 
 func (x *ParticipantChange) Reset() {
 	*x = ParticipantChange{}
-	mi := &file_client_proto_msgTypes[3]
+	mi := &file_client_proto_msgTypes[4]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -638,7 +727,7 @@ func (x *ParticipantChange) String() string {
 func (*ParticipantChange) ProtoMessage() {}
 
 func (x *ParticipantChange) ProtoReflect() protoreflect.Message {
-	mi := &file_client_proto_msgTypes[3]
+	mi := &file_client_proto_msgTypes[4]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -651,7 +740,7 @@ func (x *ParticipantChange) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ParticipantChange.ProtoReflect.Descriptor instead.
 func (*ParticipantChange) Descriptor() ([]byte, []int) {
-	return file_client_proto_rawDescGZIP(), []int{3}
+	return file_client_proto_rawDescGZIP(), []int{4}
 }
 
 func (x *ParticipantChange) GetKind() ParticipantChange_Kind {
@@ -705,7 +794,7 @@ type ChatUpdateEvent struct {
 
 func (x *ChatUpdateEvent) Reset() {
 	*x = ChatUpdateEvent{}
-	mi := &file_client_proto_msgTypes[4]
+	mi := &file_client_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -717,7 +806,7 @@ func (x *ChatUpdateEvent) String() string {
 func (*ChatUpdateEvent) ProtoMessage() {}
 
 func (x *ChatUpdateEvent) ProtoReflect() protoreflect.Message {
-	mi := &file_client_proto_msgTypes[4]
+	mi := &file_client_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -730,7 +819,7 @@ func (x *ChatUpdateEvent) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ChatUpdateEvent.ProtoReflect.Descriptor instead.
 func (*ChatUpdateEvent) Descriptor() ([]byte, []int) {
-	return file_client_proto_rawDescGZIP(), []int{4}
+	return file_client_proto_rawDescGZIP(), []int{5}
 }
 
 func (x *ChatUpdateEvent) GetUpdates() []*ChatUpdate {
@@ -762,7 +851,7 @@ type MessageEditEvent struct {
 
 func (x *MessageEditEvent) Reset() {
 	*x = MessageEditEvent{}
-	mi := &file_client_proto_msgTypes[5]
+	mi := &file_client_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -774,7 +863,7 @@ func (x *MessageEditEvent) String() string {
 func (*MessageEditEvent) ProtoMessage() {}
 
 func (x *MessageEditEvent) ProtoReflect() protoreflect.Message {
-	mi := &file_client_proto_msgTypes[5]
+	mi := &file_client_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -787,7 +876,7 @@ func (x *MessageEditEvent) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MessageEditEvent.ProtoReflect.Descriptor instead.
 func (*MessageEditEvent) Descriptor() ([]byte, []int) {
-	return file_client_proto_rawDescGZIP(), []int{5}
+	return file_client_proto_rawDescGZIP(), []int{6}
 }
 
 func (x *MessageEditEvent) GetChatId() string {
@@ -832,7 +921,7 @@ type MessageDeleteEvent struct {
 
 func (x *MessageDeleteEvent) Reset() {
 	*x = MessageDeleteEvent{}
-	mi := &file_client_proto_msgTypes[6]
+	mi := &file_client_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -844,7 +933,7 @@ func (x *MessageDeleteEvent) String() string {
 func (*MessageDeleteEvent) ProtoMessage() {}
 
 func (x *MessageDeleteEvent) ProtoReflect() protoreflect.Message {
-	mi := &file_client_proto_msgTypes[6]
+	mi := &file_client_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -857,7 +946,7 @@ func (x *MessageDeleteEvent) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MessageDeleteEvent.ProtoReflect.Descriptor instead.
 func (*MessageDeleteEvent) Descriptor() ([]byte, []int) {
-	return file_client_proto_rawDescGZIP(), []int{6}
+	return file_client_proto_rawDescGZIP(), []int{7}
 }
 
 func (x *MessageDeleteEvent) GetChatId() string {
@@ -895,7 +984,7 @@ type IdentityMigrated struct {
 
 func (x *IdentityMigrated) Reset() {
 	*x = IdentityMigrated{}
-	mi := &file_client_proto_msgTypes[7]
+	mi := &file_client_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -907,7 +996,7 @@ func (x *IdentityMigrated) String() string {
 func (*IdentityMigrated) ProtoMessage() {}
 
 func (x *IdentityMigrated) ProtoReflect() protoreflect.Message {
-	mi := &file_client_proto_msgTypes[7]
+	mi := &file_client_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -920,7 +1009,7 @@ func (x *IdentityMigrated) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use IdentityMigrated.ProtoReflect.Descriptor instead.
 func (*IdentityMigrated) Descriptor() ([]byte, []int) {
-	return file_client_proto_rawDescGZIP(), []int{7}
+	return file_client_proto_rawDescGZIP(), []int{8}
 }
 
 func (x *IdentityMigrated) GetOldChatId() string {
@@ -964,7 +1053,7 @@ type Acknowledgement struct {
 
 func (x *Acknowledgement) Reset() {
 	*x = Acknowledgement{}
-	mi := &file_client_proto_msgTypes[8]
+	mi := &file_client_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -976,7 +1065,7 @@ func (x *Acknowledgement) String() string {
 func (*Acknowledgement) ProtoMessage() {}
 
 func (x *Acknowledgement) ProtoReflect() protoreflect.Message {
-	mi := &file_client_proto_msgTypes[8]
+	mi := &file_client_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -989,7 +1078,7 @@ func (x *Acknowledgement) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Acknowledgement.ProtoReflect.Descriptor instead.
 func (*Acknowledgement) Descriptor() ([]byte, []int) {
-	return file_client_proto_rawDescGZIP(), []int{8}
+	return file_client_proto_rawDescGZIP(), []int{9}
 }
 
 func (x *Acknowledgement) GetDispatchId() string {
@@ -1027,7 +1116,7 @@ type DispatchFailed struct {
 
 func (x *DispatchFailed) Reset() {
 	*x = DispatchFailed{}
-	mi := &file_client_proto_msgTypes[9]
+	mi := &file_client_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1039,7 +1128,7 @@ func (x *DispatchFailed) String() string {
 func (*DispatchFailed) ProtoMessage() {}
 
 func (x *DispatchFailed) ProtoReflect() protoreflect.Message {
-	mi := &file_client_proto_msgTypes[9]
+	mi := &file_client_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1052,7 +1141,7 @@ func (x *DispatchFailed) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DispatchFailed.ProtoReflect.Descriptor instead.
 func (*DispatchFailed) Descriptor() ([]byte, []int) {
-	return file_client_proto_rawDescGZIP(), []int{9}
+	return file_client_proto_rawDescGZIP(), []int{10}
 }
 
 func (x *DispatchFailed) GetDispatchId() string {
@@ -1092,7 +1181,7 @@ type ReactionEvent struct {
 
 func (x *ReactionEvent) Reset() {
 	*x = ReactionEvent{}
-	mi := &file_client_proto_msgTypes[10]
+	mi := &file_client_proto_msgTypes[11]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1104,7 +1193,7 @@ func (x *ReactionEvent) String() string {
 func (*ReactionEvent) ProtoMessage() {}
 
 func (x *ReactionEvent) ProtoReflect() protoreflect.Message {
-	mi := &file_client_proto_msgTypes[10]
+	mi := &file_client_proto_msgTypes[11]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1117,7 +1206,7 @@ func (x *ReactionEvent) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ReactionEvent.ProtoReflect.Descriptor instead.
 func (*ReactionEvent) Descriptor() ([]byte, []int) {
-	return file_client_proto_rawDescGZIP(), []int{10}
+	return file_client_proto_rawDescGZIP(), []int{11}
 }
 
 func (x *ReactionEvent) GetChatId() string {
@@ -1188,7 +1277,7 @@ type ReactionsEvent struct {
 
 func (x *ReactionsEvent) Reset() {
 	*x = ReactionsEvent{}
-	mi := &file_client_proto_msgTypes[11]
+	mi := &file_client_proto_msgTypes[12]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1200,7 +1289,7 @@ func (x *ReactionsEvent) String() string {
 func (*ReactionsEvent) ProtoMessage() {}
 
 func (x *ReactionsEvent) ProtoReflect() protoreflect.Message {
-	mi := &file_client_proto_msgTypes[11]
+	mi := &file_client_proto_msgTypes[12]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1213,7 +1302,7 @@ func (x *ReactionsEvent) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ReactionsEvent.ProtoReflect.Descriptor instead.
 func (*ReactionsEvent) Descriptor() ([]byte, []int) {
-	return file_client_proto_rawDescGZIP(), []int{11}
+	return file_client_proto_rawDescGZIP(), []int{12}
 }
 
 func (x *ReactionsEvent) GetChatId() string {
@@ -1256,7 +1345,7 @@ type ReactorReaction struct {
 
 func (x *ReactorReaction) Reset() {
 	*x = ReactorReaction{}
-	mi := &file_client_proto_msgTypes[12]
+	mi := &file_client_proto_msgTypes[13]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1268,7 +1357,7 @@ func (x *ReactorReaction) String() string {
 func (*ReactorReaction) ProtoMessage() {}
 
 func (x *ReactorReaction) ProtoReflect() protoreflect.Message {
-	mi := &file_client_proto_msgTypes[12]
+	mi := &file_client_proto_msgTypes[13]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1281,7 +1370,7 @@ func (x *ReactorReaction) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ReactorReaction.ProtoReflect.Descriptor instead.
 func (*ReactorReaction) Descriptor() ([]byte, []int) {
-	return file_client_proto_rawDescGZIP(), []int{12}
+	return file_client_proto_rawDescGZIP(), []int{13}
 }
 
 func (x *ReactorReaction) GetSender() string {
@@ -1328,7 +1417,7 @@ type ReceiptEvent struct {
 
 func (x *ReceiptEvent) Reset() {
 	*x = ReceiptEvent{}
-	mi := &file_client_proto_msgTypes[13]
+	mi := &file_client_proto_msgTypes[14]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1340,7 +1429,7 @@ func (x *ReceiptEvent) String() string {
 func (*ReceiptEvent) ProtoMessage() {}
 
 func (x *ReceiptEvent) ProtoReflect() protoreflect.Message {
-	mi := &file_client_proto_msgTypes[13]
+	mi := &file_client_proto_msgTypes[14]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1353,7 +1442,7 @@ func (x *ReceiptEvent) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ReceiptEvent.ProtoReflect.Descriptor instead.
 func (*ReceiptEvent) Descriptor() ([]byte, []int) {
-	return file_client_proto_rawDescGZIP(), []int{13}
+	return file_client_proto_rawDescGZIP(), []int{14}
 }
 
 func (x *ReceiptEvent) GetChatId() string {
@@ -1421,7 +1510,7 @@ type OwnerNotice struct {
 
 func (x *OwnerNotice) Reset() {
 	*x = OwnerNotice{}
-	mi := &file_client_proto_msgTypes[14]
+	mi := &file_client_proto_msgTypes[15]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1433,7 +1522,7 @@ func (x *OwnerNotice) String() string {
 func (*OwnerNotice) ProtoMessage() {}
 
 func (x *OwnerNotice) ProtoReflect() protoreflect.Message {
-	mi := &file_client_proto_msgTypes[14]
+	mi := &file_client_proto_msgTypes[15]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1446,7 +1535,7 @@ func (x *OwnerNotice) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use OwnerNotice.ProtoReflect.Descriptor instead.
 func (*OwnerNotice) Descriptor() ([]byte, []int) {
-	return file_client_proto_rawDescGZIP(), []int{14}
+	return file_client_proto_rawDescGZIP(), []int{15}
 }
 
 func (x *OwnerNotice) GetKind() NoticeKind {
@@ -1495,7 +1584,7 @@ type ClientFrame struct {
 
 func (x *ClientFrame) Reset() {
 	*x = ClientFrame{}
-	mi := &file_client_proto_msgTypes[15]
+	mi := &file_client_proto_msgTypes[16]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1507,7 +1596,7 @@ func (x *ClientFrame) String() string {
 func (*ClientFrame) ProtoMessage() {}
 
 func (x *ClientFrame) ProtoReflect() protoreflect.Message {
-	mi := &file_client_proto_msgTypes[15]
+	mi := &file_client_proto_msgTypes[16]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1520,7 +1609,7 @@ func (x *ClientFrame) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ClientFrame.ProtoReflect.Descriptor instead.
 func (*ClientFrame) Descriptor() ([]byte, []int) {
-	return file_client_proto_rawDescGZIP(), []int{15}
+	return file_client_proto_rawDescGZIP(), []int{16}
 }
 
 func (x *ClientFrame) GetBody() isClientFrame_Body {
@@ -1757,7 +1846,7 @@ type ProbeResult struct {
 
 func (x *ProbeResult) Reset() {
 	*x = ProbeResult{}
-	mi := &file_client_proto_msgTypes[16]
+	mi := &file_client_proto_msgTypes[17]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1769,7 +1858,7 @@ func (x *ProbeResult) String() string {
 func (*ProbeResult) ProtoMessage() {}
 
 func (x *ProbeResult) ProtoReflect() protoreflect.Message {
-	mi := &file_client_proto_msgTypes[16]
+	mi := &file_client_proto_msgTypes[17]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1782,7 +1871,7 @@ func (x *ProbeResult) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ProbeResult.ProtoReflect.Descriptor instead.
 func (*ProbeResult) Descriptor() ([]byte, []int) {
-	return file_client_proto_rawDescGZIP(), []int{16}
+	return file_client_proto_rawDescGZIP(), []int{17}
 }
 
 func (x *ProbeResult) GetRequestId() string {
@@ -1833,7 +1922,7 @@ type ChatFacts struct {
 
 func (x *ChatFacts) Reset() {
 	*x = ChatFacts{}
-	mi := &file_client_proto_msgTypes[17]
+	mi := &file_client_proto_msgTypes[18]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1845,7 +1934,7 @@ func (x *ChatFacts) String() string {
 func (*ChatFacts) ProtoMessage() {}
 
 func (x *ChatFacts) ProtoReflect() protoreflect.Message {
-	mi := &file_client_proto_msgTypes[17]
+	mi := &file_client_proto_msgTypes[18]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1858,7 +1947,7 @@ func (x *ChatFacts) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ChatFacts.ProtoReflect.Descriptor instead.
 func (*ChatFacts) Descriptor() ([]byte, []int) {
-	return file_client_proto_rawDescGZIP(), []int{17}
+	return file_client_proto_rawDescGZIP(), []int{18}
 }
 
 func (x *ChatFacts) GetChatId() string {
@@ -1937,7 +2026,7 @@ type CommandResult struct {
 
 func (x *CommandResult) Reset() {
 	*x = CommandResult{}
-	mi := &file_client_proto_msgTypes[18]
+	mi := &file_client_proto_msgTypes[19]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1949,7 +2038,7 @@ func (x *CommandResult) String() string {
 func (*CommandResult) ProtoMessage() {}
 
 func (x *CommandResult) ProtoReflect() protoreflect.Message {
-	mi := &file_client_proto_msgTypes[18]
+	mi := &file_client_proto_msgTypes[19]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1962,7 +2051,7 @@ func (x *CommandResult) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CommandResult.ProtoReflect.Descriptor instead.
 func (*CommandResult) Descriptor() ([]byte, []int) {
-	return file_client_proto_rawDescGZIP(), []int{18}
+	return file_client_proto_rawDescGZIP(), []int{19}
 }
 
 func (x *CommandResult) GetRequestId() string {
@@ -1990,7 +2079,7 @@ var File_client_proto protoreflect.FileDescriptor
 
 const file_client_proto_rawDesc = "" +
 	"\n" +
-	"\fclient.proto\x12\x12wuphf.connector.v1\x1a\fcommon.proto\"\xd2\x05\n" +
+	"\fclient.proto\x12\x12wuphf.connector.v1\x1a\fcommon.proto\"\x95\x06\n" +
 	"\x12MessageCreateEvent\x12\x17\n" +
 	"\achat_id\x18\x01 \x01(\tR\x06chatId\x12 \n" +
 	"\tthread_id\x18\x02 \x01(\tH\x00R\bthreadId\x88\x01\x01\x12\"\n" +
@@ -2007,7 +2096,8 @@ const file_client_proto_rawDesc = "" +
 	"\vsender_name\x18\v \x01(\tH\x05R\n" +
 	"senderName\x88\x01\x01\x12N\n" +
 	"\fdisappearing\x18\f \x01(\v2%.wuphf.connector.v1.DisappearingTimerH\x06R\fdisappearing\x88\x01\x01\x12*\n" +
-	"\x0esender_account\x18\r \x01(\tH\aR\rsenderAccount\x88\x01\x01B\f\n" +
+	"\x0esender_account\x18\r \x01(\tH\aR\rsenderAccount\x88\x01\x01\x12,\n" +
+	"\x10reply_to_chat_id\x18\x0e \x01(\tH\bR\rreplyToChatId\x88\x01\x01B\f\n" +
 	"\n" +
 	"_thread_idB\r\n" +
 	"\v_chat_titleB\x0e\n" +
@@ -2016,7 +2106,8 @@ const file_client_proto_rawDesc = "" +
 	"\x1d_reply_to_platform_message_idB\x0e\n" +
 	"\f_sender_nameB\x0f\n" +
 	"\r_disappearingB\x11\n" +
-	"\x0f_sender_account\"\x91\x05\n" +
+	"\x0f_sender_accountB\x13\n" +
+	"\x11_reply_to_chat_id\"\xdd\x05\n" +
 	"\n" +
 	"ChatUpdate\x12\x17\n" +
 	"\achat_id\x18\x01 \x01(\tR\x06chatId\x12N\n" +
@@ -2030,7 +2121,8 @@ const file_client_proto_rawDesc = "" +
 	"\x06pinned\x18\t \x01(\bH\x06R\x06pinned\x88\x01\x01\x126\n" +
 	"\x04mute\x18\n" +
 	" \x01(\v2\x1d.wuphf.connector.v1.MuteStateH\aR\x04mute\x88\x01\x01\x12\x1f\n" +
-	"\barchived\x18\v \x01(\bH\bR\barchived\x88\x01\x01B\x0f\n" +
+	"\barchived\x18\v \x01(\bH\bR\barchived\x88\x01\x01\x12>\n" +
+	"\aposting\x18\f \x01(\v2\x1f.wuphf.connector.v1.ChatPostingH\tR\aposting\x88\x01\x01B\x0f\n" +
 	"\r_disappearingB\b\n" +
 	"\x06_titleB\x0e\n" +
 	"\f_descriptionB\t\n" +
@@ -2040,7 +2132,13 @@ const file_client_proto_rawDesc = "" +
 	"_thread_idB\t\n" +
 	"\a_pinnedB\a\n" +
 	"\x05_muteB\v\n" +
-	"\t_archived\"I\n" +
+	"\t_archivedB\n" +
+	"\n" +
+	"\b_posting\"p\n" +
+	"\vChatPosting\x12\x1a\n" +
+	"\bmessages\x18\x01 \x01(\bR\bmessages\x12\x1c\n" +
+	"\treactions\x18\x02 \x01(\bR\treactions\x12'\n" +
+	"\x0fprivate_replies\x18\x03 \x01(\bR\x0eprivateReplies\"I\n" +
 	"\n" +
 	"ChatAvatar\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x1e\n" +
@@ -2205,7 +2303,7 @@ func file_client_proto_rawDescGZIP() []byte {
 }
 
 var file_client_proto_enumTypes = make([]protoimpl.EnumInfo, 4)
-var file_client_proto_msgTypes = make([]protoimpl.MessageInfo, 19)
+var file_client_proto_msgTypes = make([]protoimpl.MessageInfo, 20)
 var file_client_proto_goTypes = []any{
 	(ReceiptKind)(0),            // 0: wuphf.connector.v1.ReceiptKind
 	(NoticeKind)(0),             // 1: wuphf.connector.v1.NoticeKind
@@ -2213,69 +2311,71 @@ var file_client_proto_goTypes = []any{
 	(ParticipantChange_Kind)(0), // 3: wuphf.connector.v1.ParticipantChange.Kind
 	(*MessageCreateEvent)(nil),  // 4: wuphf.connector.v1.MessageCreateEvent
 	(*ChatUpdate)(nil),          // 5: wuphf.connector.v1.ChatUpdate
-	(*ChatAvatar)(nil),          // 6: wuphf.connector.v1.ChatAvatar
-	(*ParticipantChange)(nil),   // 7: wuphf.connector.v1.ParticipantChange
-	(*ChatUpdateEvent)(nil),     // 8: wuphf.connector.v1.ChatUpdateEvent
-	(*MessageEditEvent)(nil),    // 9: wuphf.connector.v1.MessageEditEvent
-	(*MessageDeleteEvent)(nil),  // 10: wuphf.connector.v1.MessageDeleteEvent
-	(*IdentityMigrated)(nil),    // 11: wuphf.connector.v1.IdentityMigrated
-	(*Acknowledgement)(nil),     // 12: wuphf.connector.v1.Acknowledgement
-	(*DispatchFailed)(nil),      // 13: wuphf.connector.v1.DispatchFailed
-	(*ReactionEvent)(nil),       // 14: wuphf.connector.v1.ReactionEvent
-	(*ReactionsEvent)(nil),      // 15: wuphf.connector.v1.ReactionsEvent
-	(*ReactorReaction)(nil),     // 16: wuphf.connector.v1.ReactorReaction
-	(*ReceiptEvent)(nil),        // 17: wuphf.connector.v1.ReceiptEvent
-	(*OwnerNotice)(nil),         // 18: wuphf.connector.v1.OwnerNotice
-	(*ClientFrame)(nil),         // 19: wuphf.connector.v1.ClientFrame
-	(*ProbeResult)(nil),         // 20: wuphf.connector.v1.ProbeResult
-	(*ChatFacts)(nil),           // 21: wuphf.connector.v1.ChatFacts
-	(*CommandResult)(nil),       // 22: wuphf.connector.v1.CommandResult
-	(*Attachment)(nil),          // 23: wuphf.connector.v1.Attachment
-	(*DisappearingTimer)(nil),   // 24: wuphf.connector.v1.DisappearingTimer
-	(*MuteState)(nil),           // 25: wuphf.connector.v1.MuteState
-	(*Registration)(nil),        // 26: wuphf.connector.v1.Registration
-	(*ToolStatus)(nil),          // 27: wuphf.connector.v1.ToolStatus
+	(*ChatPosting)(nil),         // 6: wuphf.connector.v1.ChatPosting
+	(*ChatAvatar)(nil),          // 7: wuphf.connector.v1.ChatAvatar
+	(*ParticipantChange)(nil),   // 8: wuphf.connector.v1.ParticipantChange
+	(*ChatUpdateEvent)(nil),     // 9: wuphf.connector.v1.ChatUpdateEvent
+	(*MessageEditEvent)(nil),    // 10: wuphf.connector.v1.MessageEditEvent
+	(*MessageDeleteEvent)(nil),  // 11: wuphf.connector.v1.MessageDeleteEvent
+	(*IdentityMigrated)(nil),    // 12: wuphf.connector.v1.IdentityMigrated
+	(*Acknowledgement)(nil),     // 13: wuphf.connector.v1.Acknowledgement
+	(*DispatchFailed)(nil),      // 14: wuphf.connector.v1.DispatchFailed
+	(*ReactionEvent)(nil),       // 15: wuphf.connector.v1.ReactionEvent
+	(*ReactionsEvent)(nil),      // 16: wuphf.connector.v1.ReactionsEvent
+	(*ReactorReaction)(nil),     // 17: wuphf.connector.v1.ReactorReaction
+	(*ReceiptEvent)(nil),        // 18: wuphf.connector.v1.ReceiptEvent
+	(*OwnerNotice)(nil),         // 19: wuphf.connector.v1.OwnerNotice
+	(*ClientFrame)(nil),         // 20: wuphf.connector.v1.ClientFrame
+	(*ProbeResult)(nil),         // 21: wuphf.connector.v1.ProbeResult
+	(*ChatFacts)(nil),           // 22: wuphf.connector.v1.ChatFacts
+	(*CommandResult)(nil),       // 23: wuphf.connector.v1.CommandResult
+	(*Attachment)(nil),          // 24: wuphf.connector.v1.Attachment
+	(*DisappearingTimer)(nil),   // 25: wuphf.connector.v1.DisappearingTimer
+	(*MuteState)(nil),           // 26: wuphf.connector.v1.MuteState
+	(*Registration)(nil),        // 27: wuphf.connector.v1.Registration
+	(*ToolStatus)(nil),          // 28: wuphf.connector.v1.ToolStatus
 }
 var file_client_proto_depIdxs = []int32{
-	23, // 0: wuphf.connector.v1.MessageCreateEvent.attachments:type_name -> wuphf.connector.v1.Attachment
-	24, // 1: wuphf.connector.v1.MessageCreateEvent.disappearing:type_name -> wuphf.connector.v1.DisappearingTimer
-	24, // 2: wuphf.connector.v1.ChatUpdate.disappearing:type_name -> wuphf.connector.v1.DisappearingTimer
-	6,  // 3: wuphf.connector.v1.ChatUpdate.avatar:type_name -> wuphf.connector.v1.ChatAvatar
-	7,  // 4: wuphf.connector.v1.ChatUpdate.participant_changes:type_name -> wuphf.connector.v1.ParticipantChange
-	25, // 5: wuphf.connector.v1.ChatUpdate.mute:type_name -> wuphf.connector.v1.MuteState
-	3,  // 6: wuphf.connector.v1.ParticipantChange.kind:type_name -> wuphf.connector.v1.ParticipantChange.Kind
-	5,  // 7: wuphf.connector.v1.ChatUpdateEvent.updates:type_name -> wuphf.connector.v1.ChatUpdate
-	16, // 8: wuphf.connector.v1.ReactionsEvent.reactions:type_name -> wuphf.connector.v1.ReactorReaction
-	0,  // 9: wuphf.connector.v1.ReceiptEvent.kind:type_name -> wuphf.connector.v1.ReceiptKind
-	1,  // 10: wuphf.connector.v1.OwnerNotice.kind:type_name -> wuphf.connector.v1.NoticeKind
-	26, // 11: wuphf.connector.v1.ClientFrame.registration:type_name -> wuphf.connector.v1.Registration
-	4,  // 12: wuphf.connector.v1.ClientFrame.message_create:type_name -> wuphf.connector.v1.MessageCreateEvent
-	12, // 13: wuphf.connector.v1.ClientFrame.acknowledgement:type_name -> wuphf.connector.v1.Acknowledgement
-	11, // 14: wuphf.connector.v1.ClientFrame.identity_migrated:type_name -> wuphf.connector.v1.IdentityMigrated
-	13, // 15: wuphf.connector.v1.ClientFrame.dispatch_failed:type_name -> wuphf.connector.v1.DispatchFailed
-	9,  // 16: wuphf.connector.v1.ClientFrame.message_edit:type_name -> wuphf.connector.v1.MessageEditEvent
-	10, // 17: wuphf.connector.v1.ClientFrame.message_delete:type_name -> wuphf.connector.v1.MessageDeleteEvent
-	14, // 18: wuphf.connector.v1.ClientFrame.reaction:type_name -> wuphf.connector.v1.ReactionEvent
-	17, // 19: wuphf.connector.v1.ClientFrame.receipt:type_name -> wuphf.connector.v1.ReceiptEvent
-	18, // 20: wuphf.connector.v1.ClientFrame.owner_notice:type_name -> wuphf.connector.v1.OwnerNotice
-	8,  // 21: wuphf.connector.v1.ClientFrame.chat_update:type_name -> wuphf.connector.v1.ChatUpdateEvent
-	22, // 22: wuphf.connector.v1.ClientFrame.command_result:type_name -> wuphf.connector.v1.CommandResult
-	20, // 23: wuphf.connector.v1.ClientFrame.probe_result:type_name -> wuphf.connector.v1.ProbeResult
-	15, // 24: wuphf.connector.v1.ClientFrame.reactions_set:type_name -> wuphf.connector.v1.ReactionsEvent
-	21, // 25: wuphf.connector.v1.ProbeResult.chats:type_name -> wuphf.connector.v1.ChatFacts
-	27, // 26: wuphf.connector.v1.ProbeResult.tools:type_name -> wuphf.connector.v1.ToolStatus
-	2,  // 27: wuphf.connector.v1.ChatFacts.exists:type_name -> wuphf.connector.v1.Fact
-	2,  // 28: wuphf.connector.v1.ChatFacts.member:type_name -> wuphf.connector.v1.Fact
-	2,  // 29: wuphf.connector.v1.ChatFacts.can_send:type_name -> wuphf.connector.v1.Fact
-	2,  // 30: wuphf.connector.v1.ChatFacts.forum:type_name -> wuphf.connector.v1.Fact
-	2,  // 31: wuphf.connector.v1.ChatFacts.can_create_topics:type_name -> wuphf.connector.v1.Fact
-	2,  // 32: wuphf.connector.v1.ChatFacts.can_pin:type_name -> wuphf.connector.v1.Fact
-	2,  // 33: wuphf.connector.v1.ChatFacts.can_delete_others:type_name -> wuphf.connector.v1.Fact
-	34, // [34:34] is the sub-list for method output_type
-	34, // [34:34] is the sub-list for method input_type
-	34, // [34:34] is the sub-list for extension type_name
-	34, // [34:34] is the sub-list for extension extendee
-	0,  // [0:34] is the sub-list for field type_name
+	24, // 0: wuphf.connector.v1.MessageCreateEvent.attachments:type_name -> wuphf.connector.v1.Attachment
+	25, // 1: wuphf.connector.v1.MessageCreateEvent.disappearing:type_name -> wuphf.connector.v1.DisappearingTimer
+	25, // 2: wuphf.connector.v1.ChatUpdate.disappearing:type_name -> wuphf.connector.v1.DisappearingTimer
+	7,  // 3: wuphf.connector.v1.ChatUpdate.avatar:type_name -> wuphf.connector.v1.ChatAvatar
+	8,  // 4: wuphf.connector.v1.ChatUpdate.participant_changes:type_name -> wuphf.connector.v1.ParticipantChange
+	26, // 5: wuphf.connector.v1.ChatUpdate.mute:type_name -> wuphf.connector.v1.MuteState
+	6,  // 6: wuphf.connector.v1.ChatUpdate.posting:type_name -> wuphf.connector.v1.ChatPosting
+	3,  // 7: wuphf.connector.v1.ParticipantChange.kind:type_name -> wuphf.connector.v1.ParticipantChange.Kind
+	5,  // 8: wuphf.connector.v1.ChatUpdateEvent.updates:type_name -> wuphf.connector.v1.ChatUpdate
+	17, // 9: wuphf.connector.v1.ReactionsEvent.reactions:type_name -> wuphf.connector.v1.ReactorReaction
+	0,  // 10: wuphf.connector.v1.ReceiptEvent.kind:type_name -> wuphf.connector.v1.ReceiptKind
+	1,  // 11: wuphf.connector.v1.OwnerNotice.kind:type_name -> wuphf.connector.v1.NoticeKind
+	27, // 12: wuphf.connector.v1.ClientFrame.registration:type_name -> wuphf.connector.v1.Registration
+	4,  // 13: wuphf.connector.v1.ClientFrame.message_create:type_name -> wuphf.connector.v1.MessageCreateEvent
+	13, // 14: wuphf.connector.v1.ClientFrame.acknowledgement:type_name -> wuphf.connector.v1.Acknowledgement
+	12, // 15: wuphf.connector.v1.ClientFrame.identity_migrated:type_name -> wuphf.connector.v1.IdentityMigrated
+	14, // 16: wuphf.connector.v1.ClientFrame.dispatch_failed:type_name -> wuphf.connector.v1.DispatchFailed
+	10, // 17: wuphf.connector.v1.ClientFrame.message_edit:type_name -> wuphf.connector.v1.MessageEditEvent
+	11, // 18: wuphf.connector.v1.ClientFrame.message_delete:type_name -> wuphf.connector.v1.MessageDeleteEvent
+	15, // 19: wuphf.connector.v1.ClientFrame.reaction:type_name -> wuphf.connector.v1.ReactionEvent
+	18, // 20: wuphf.connector.v1.ClientFrame.receipt:type_name -> wuphf.connector.v1.ReceiptEvent
+	19, // 21: wuphf.connector.v1.ClientFrame.owner_notice:type_name -> wuphf.connector.v1.OwnerNotice
+	9,  // 22: wuphf.connector.v1.ClientFrame.chat_update:type_name -> wuphf.connector.v1.ChatUpdateEvent
+	23, // 23: wuphf.connector.v1.ClientFrame.command_result:type_name -> wuphf.connector.v1.CommandResult
+	21, // 24: wuphf.connector.v1.ClientFrame.probe_result:type_name -> wuphf.connector.v1.ProbeResult
+	16, // 25: wuphf.connector.v1.ClientFrame.reactions_set:type_name -> wuphf.connector.v1.ReactionsEvent
+	22, // 26: wuphf.connector.v1.ProbeResult.chats:type_name -> wuphf.connector.v1.ChatFacts
+	28, // 27: wuphf.connector.v1.ProbeResult.tools:type_name -> wuphf.connector.v1.ToolStatus
+	2,  // 28: wuphf.connector.v1.ChatFacts.exists:type_name -> wuphf.connector.v1.Fact
+	2,  // 29: wuphf.connector.v1.ChatFacts.member:type_name -> wuphf.connector.v1.Fact
+	2,  // 30: wuphf.connector.v1.ChatFacts.can_send:type_name -> wuphf.connector.v1.Fact
+	2,  // 31: wuphf.connector.v1.ChatFacts.forum:type_name -> wuphf.connector.v1.Fact
+	2,  // 32: wuphf.connector.v1.ChatFacts.can_create_topics:type_name -> wuphf.connector.v1.Fact
+	2,  // 33: wuphf.connector.v1.ChatFacts.can_pin:type_name -> wuphf.connector.v1.Fact
+	2,  // 34: wuphf.connector.v1.ChatFacts.can_delete_others:type_name -> wuphf.connector.v1.Fact
+	35, // [35:35] is the sub-list for method output_type
+	35, // [35:35] is the sub-list for method input_type
+	35, // [35:35] is the sub-list for extension type_name
+	35, // [35:35] is the sub-list for extension extendee
+	0,  // [0:35] is the sub-list for field type_name
 }
 
 func init() { file_client_proto_init() }
@@ -2286,17 +2386,17 @@ func file_client_proto_init() {
 	file_common_proto_init()
 	file_client_proto_msgTypes[0].OneofWrappers = []any{}
 	file_client_proto_msgTypes[1].OneofWrappers = []any{}
-	file_client_proto_msgTypes[2].OneofWrappers = []any{}
 	file_client_proto_msgTypes[3].OneofWrappers = []any{}
-	file_client_proto_msgTypes[5].OneofWrappers = []any{}
+	file_client_proto_msgTypes[4].OneofWrappers = []any{}
 	file_client_proto_msgTypes[6].OneofWrappers = []any{}
 	file_client_proto_msgTypes[7].OneofWrappers = []any{}
 	file_client_proto_msgTypes[8].OneofWrappers = []any{}
-	file_client_proto_msgTypes[10].OneofWrappers = []any{}
+	file_client_proto_msgTypes[9].OneofWrappers = []any{}
 	file_client_proto_msgTypes[11].OneofWrappers = []any{}
 	file_client_proto_msgTypes[12].OneofWrappers = []any{}
 	file_client_proto_msgTypes[13].OneofWrappers = []any{}
-	file_client_proto_msgTypes[15].OneofWrappers = []any{
+	file_client_proto_msgTypes[14].OneofWrappers = []any{}
+	file_client_proto_msgTypes[16].OneofWrappers = []any{
 		(*ClientFrame_Registration)(nil),
 		(*ClientFrame_MessageCreate)(nil),
 		(*ClientFrame_Acknowledgement)(nil),
@@ -2318,7 +2418,7 @@ func file_client_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_client_proto_rawDesc), len(file_client_proto_rawDesc)),
 			NumEnums:      4,
-			NumMessages:   19,
+			NumMessages:   20,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

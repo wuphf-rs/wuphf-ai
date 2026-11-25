@@ -688,6 +688,7 @@ async fn grpc_transport_delivers_dispatch_to_registered_connector() {
                     sender_name: None,
                     disappearing: None,
                     sender_account: None,
+                    reply_to_chat_id: None,
                 },
             )),
         })
@@ -772,6 +773,7 @@ fn source_event(
             timestamp_ms: 1,
             disappearing: None,
             author_account: None,
+            reply_to_chat_id: None,
         }),
     }
 }
@@ -1019,6 +1021,7 @@ async fn observer_service_sends_media_ids_and_tags_the_client() {
                     timestamp_ms: 50,
                     disappearing: None,
                     author_account: None,
+                    reply_to_chat_id: None,
                 }),
             },
             Platform::WhatsApp,
@@ -1561,6 +1564,7 @@ async fn a_reported_timer_reaches_the_whatsapp_send_over_grpc() {
                     sender_name: None,
                     disappearing: None,
                     sender_account: None,
+                    reply_to_chat_id: None,
                 },
             )),
         })

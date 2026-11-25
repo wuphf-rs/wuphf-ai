@@ -36,8 +36,12 @@ type ReplyContext struct {
 	// when false. Platforms that address a quote by author, as WhatsApp does,
 	// attribute it to the wrong person without this.
 	AuthoredByBridge bool `protobuf:"varint,7,opt,name=authored_by_bridge,json=authoredByBridge,proto3" json:"authored_by_bridge,omitempty"`
-	unknownFields    protoimpl.UnknownFields
-	sizeCache        protoimpl.SizeCache
+	// The chat the quoted copy lives in at this platform, when it is not the
+	// target chat (plan 083: a group message quoted in a member's DM, a story
+	// quoted in its poster's chat). WhatsApp puts it in ContextInfo.remoteJid.
+	ChatId        *string `protobuf:"bytes,8,opt,name=chat_id,json=chatId,proto3,oneof" json:"chat_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *ReplyContext) Reset() {
@@ -117,6 +121,13 @@ func (x *ReplyContext) GetAuthoredByBridge() bool {
 		return x.AuthoredByBridge
 	}
 	return false
+}
+
+func (x *ReplyContext) GetChatId() string {
+	if x != nil && x.ChatId != nil {
+		return *x.ChatId
+	}
+	return ""
 }
 
 // Instruction to create a thread/topic in a container before sending, used when
@@ -849,6 +860,95 @@ func (x *SeenReceiptDispatch) GetTargetPlatformMessageId() string {
 	return ""
 }
 
+// The bridge did not send this copy on (plan 083): a message into a
+// receive-only chat, a story quoted outside its poster's chat. Addresses the
+// origin copy by its native id. The connector marks it (Telegram: a 👎
+// reaction) and posts `reason` as a reply note, which it deletes after
+// `note_ttl_secs` (0: keep it). Acknowledged like any dispatch.
+type MessageRefusedDispatch struct {
+	state                   protoimpl.MessageState `protogen:"open.v1"`
+	DispatchId              string                 `protobuf:"bytes,1,opt,name=dispatch_id,json=dispatchId,proto3" json:"dispatch_id,omitempty"`
+	TargetChatId            string                 `protobuf:"bytes,2,opt,name=target_chat_id,json=targetChatId,proto3" json:"target_chat_id,omitempty"`
+	TargetThreadId          *string                `protobuf:"bytes,3,opt,name=target_thread_id,json=targetThreadId,proto3,oneof" json:"target_thread_id,omitempty"`
+	TargetPlatformMessageId string                 `protobuf:"bytes,4,opt,name=target_platform_message_id,json=targetPlatformMessageId,proto3" json:"target_platform_message_id,omitempty"`
+	Reason                  string                 `protobuf:"bytes,5,opt,name=reason,proto3" json:"reason,omitempty"`
+	NoteTtlSecs             uint32                 `protobuf:"varint,6,opt,name=note_ttl_secs,json=noteTtlSecs,proto3" json:"note_ttl_secs,omitempty"`
+	unknownFields           protoimpl.UnknownFields
+	sizeCache               protoimpl.SizeCache
+}
+
+func (x *MessageRefusedDispatch) Reset() {
+	*x = MessageRefusedDispatch{}
+	mi := &file_server_proto_msgTypes[9]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *MessageRefusedDispatch) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*MessageRefusedDispatch) ProtoMessage() {}
+
+func (x *MessageRefusedDispatch) ProtoReflect() protoreflect.Message {
+	mi := &file_server_proto_msgTypes[9]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use MessageRefusedDispatch.ProtoReflect.Descriptor instead.
+func (*MessageRefusedDispatch) Descriptor() ([]byte, []int) {
+	return file_server_proto_rawDescGZIP(), []int{9}
+}
+
+func (x *MessageRefusedDispatch) GetDispatchId() string {
+	if x != nil {
+		return x.DispatchId
+	}
+	return ""
+}
+
+func (x *MessageRefusedDispatch) GetTargetChatId() string {
+	if x != nil {
+		return x.TargetChatId
+	}
+	return ""
+}
+
+func (x *MessageRefusedDispatch) GetTargetThreadId() string {
+	if x != nil && x.TargetThreadId != nil {
+		return *x.TargetThreadId
+	}
+	return ""
+}
+
+func (x *MessageRefusedDispatch) GetTargetPlatformMessageId() string {
+	if x != nil {
+		return x.TargetPlatformMessageId
+	}
+	return ""
+}
+
+func (x *MessageRefusedDispatch) GetReason() string {
+	if x != nil {
+		return x.Reason
+	}
+	return ""
+}
+
+func (x *MessageRefusedDispatch) GetNoteTtlSecs() uint32 {
+	if x != nil {
+		return x.NoteTtlSecs
+	}
+	return 0
+}
+
 type Rejected struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Reason        string                 `protobuf:"bytes,1,opt,name=reason,proto3" json:"reason,omitempty"`
@@ -858,7 +958,7 @@ type Rejected struct {
 
 func (x *Rejected) Reset() {
 	*x = Rejected{}
-	mi := &file_server_proto_msgTypes[9]
+	mi := &file_server_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -870,7 +970,7 @@ func (x *Rejected) String() string {
 func (*Rejected) ProtoMessage() {}
 
 func (x *Rejected) ProtoReflect() protoreflect.Message {
-	mi := &file_server_proto_msgTypes[9]
+	mi := &file_server_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -883,7 +983,7 @@ func (x *Rejected) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Rejected.ProtoReflect.Descriptor instead.
 func (*Rejected) Descriptor() ([]byte, []int) {
-	return file_server_proto_rawDescGZIP(), []int{9}
+	return file_server_proto_rawDescGZIP(), []int{10}
 }
 
 func (x *Rejected) GetReason() string {
@@ -908,6 +1008,7 @@ type ServerFrame struct {
 	//	*ServerFrame_ChatState
 	//	*ServerFrame_RunCommand
 	//	*ServerFrame_Probe
+	//	*ServerFrame_Refused
 	Body          isServerFrame_Body `protobuf_oneof:"body"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -915,7 +1016,7 @@ type ServerFrame struct {
 
 func (x *ServerFrame) Reset() {
 	*x = ServerFrame{}
-	mi := &file_server_proto_msgTypes[10]
+	mi := &file_server_proto_msgTypes[11]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -927,7 +1028,7 @@ func (x *ServerFrame) String() string {
 func (*ServerFrame) ProtoMessage() {}
 
 func (x *ServerFrame) ProtoReflect() protoreflect.Message {
-	mi := &file_server_proto_msgTypes[10]
+	mi := &file_server_proto_msgTypes[11]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -940,7 +1041,7 @@ func (x *ServerFrame) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ServerFrame.ProtoReflect.Descriptor instead.
 func (*ServerFrame) Descriptor() ([]byte, []int) {
-	return file_server_proto_rawDescGZIP(), []int{10}
+	return file_server_proto_rawDescGZIP(), []int{11}
 }
 
 func (x *ServerFrame) GetBody() isServerFrame_Body {
@@ -1049,6 +1150,15 @@ func (x *ServerFrame) GetProbe() *ProbeChats {
 	return nil
 }
 
+func (x *ServerFrame) GetRefused() *MessageRefusedDispatch {
+	if x != nil {
+		if x, ok := x.Body.(*ServerFrame_Refused); ok {
+			return x.Refused
+		}
+	}
+	return nil
+}
+
 type isServerFrame_Body interface {
 	isServerFrame_Body()
 }
@@ -1097,6 +1207,10 @@ type ServerFrame_Probe struct {
 	Probe *ProbeChats `protobuf:"bytes,11,opt,name=probe,proto3,oneof"`
 }
 
+type ServerFrame_Refused struct {
+	Refused *MessageRefusedDispatch `protobuf:"bytes,12,opt,name=refused,proto3,oneof"`
+}
+
 func (*ServerFrame_MessageCreate) isServerFrame_Body() {}
 
 func (*ServerFrame_Rejected) isServerFrame_Body() {}
@@ -1119,6 +1233,8 @@ func (*ServerFrame_RunCommand) isServerFrame_Body() {}
 
 func (*ServerFrame_Probe) isServerFrame_Body() {}
 
+func (*ServerFrame_Refused) isServerFrame_Body() {}
+
 // Report what this account can do in these chats (plan 079): the core checks
 // its rules against the answers. Not a dispatch: never stored or redelivered.
 // Answer with a ProbeResult carrying the same request_id, within 20 s (the
@@ -1134,7 +1250,7 @@ type ProbeChats struct {
 
 func (x *ProbeChats) Reset() {
 	*x = ProbeChats{}
-	mi := &file_server_proto_msgTypes[11]
+	mi := &file_server_proto_msgTypes[12]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1146,7 +1262,7 @@ func (x *ProbeChats) String() string {
 func (*ProbeChats) ProtoMessage() {}
 
 func (x *ProbeChats) ProtoReflect() protoreflect.Message {
-	mi := &file_server_proto_msgTypes[11]
+	mi := &file_server_proto_msgTypes[12]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1159,7 +1275,7 @@ func (x *ProbeChats) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ProbeChats.ProtoReflect.Descriptor instead.
 func (*ProbeChats) Descriptor() ([]byte, []int) {
-	return file_server_proto_rawDescGZIP(), []int{11}
+	return file_server_proto_rawDescGZIP(), []int{12}
 }
 
 func (x *ProbeChats) GetRequestId() string {
@@ -1190,7 +1306,7 @@ type RunCommand struct {
 
 func (x *RunCommand) Reset() {
 	*x = RunCommand{}
-	mi := &file_server_proto_msgTypes[12]
+	mi := &file_server_proto_msgTypes[13]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1202,7 +1318,7 @@ func (x *RunCommand) String() string {
 func (*RunCommand) ProtoMessage() {}
 
 func (x *RunCommand) ProtoReflect() protoreflect.Message {
-	mi := &file_server_proto_msgTypes[12]
+	mi := &file_server_proto_msgTypes[13]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1215,7 +1331,7 @@ func (x *RunCommand) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RunCommand.ProtoReflect.Descriptor instead.
 func (*RunCommand) Descriptor() ([]byte, []int) {
-	return file_server_proto_rawDescGZIP(), []int{12}
+	return file_server_proto_rawDescGZIP(), []int{13}
 }
 
 func (x *RunCommand) GetRequestId() string {
@@ -1249,7 +1365,7 @@ type ChatStateDispatch struct {
 
 func (x *ChatStateDispatch) Reset() {
 	*x = ChatStateDispatch{}
-	mi := &file_server_proto_msgTypes[13]
+	mi := &file_server_proto_msgTypes[14]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1261,7 +1377,7 @@ func (x *ChatStateDispatch) String() string {
 func (*ChatStateDispatch) ProtoMessage() {}
 
 func (x *ChatStateDispatch) ProtoReflect() protoreflect.Message {
-	mi := &file_server_proto_msgTypes[13]
+	mi := &file_server_proto_msgTypes[14]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1274,7 +1390,7 @@ func (x *ChatStateDispatch) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ChatStateDispatch.ProtoReflect.Descriptor instead.
 func (*ChatStateDispatch) Descriptor() ([]byte, []int) {
-	return file_server_proto_rawDescGZIP(), []int{13}
+	return file_server_proto_rawDescGZIP(), []int{14}
 }
 
 func (x *ChatStateDispatch) GetDispatchId() string {
@@ -1323,7 +1439,7 @@ var File_server_proto protoreflect.FileDescriptor
 
 const file_server_proto_rawDesc = "" +
 	"\n" +
-	"\fserver.proto\x12\x12wuphf.connector.v1\x1a\fcommon.proto\"\xcd\x02\n" +
+	"\fserver.proto\x12\x12wuphf.connector.v1\x1a\fcommon.proto\"\xf7\x02\n" +
 	"\fReplyContext\x12,\n" +
 	"\x12logical_message_id\x18\x01 \x01(\tR\x10logicalMessageId\x12.\n" +
 	"\x13platform_message_id\x18\x02 \x01(\tR\x11platformMessageId\x12\x16\n" +
@@ -1331,9 +1447,12 @@ const file_server_proto_rawDesc = "" +
 	"\vparticipant\x18\x04 \x01(\tH\x00R\vparticipant\x88\x01\x01\x12\x17\n" +
 	"\x04text\x18\x05 \x01(\tH\x01R\x04text\x88\x01\x01\x12@\n" +
 	"\vattachments\x18\x06 \x03(\v2\x1e.wuphf.connector.v1.AttachmentR\vattachments\x12,\n" +
-	"\x12authored_by_bridge\x18\a \x01(\bR\x10authoredByBridgeB\x0e\n" +
+	"\x12authored_by_bridge\x18\a \x01(\bR\x10authoredByBridge\x12\x1c\n" +
+	"\achat_id\x18\b \x01(\tH\x02R\x06chatId\x88\x01\x01B\x0e\n" +
 	"\f_participantB\a\n" +
-	"\x05_text\"E\n" +
+	"\x05_textB\n" +
+	"\n" +
+	"\b_chat_id\"E\n" +
 	"\x0fProvisionThread\x12\x1c\n" +
 	"\tcontainer\x18\x01 \x01(\tR\tcontainer\x12\x14\n" +
 	"\x05title\x18\x02 \x01(\tR\x05title\"\xde\x06\n" +
@@ -1421,9 +1540,18 @@ const file_server_proto_rawDesc = "" +
 	"\x0etarget_chat_id\x18\x02 \x01(\tR\ftargetChatId\x12-\n" +
 	"\x10target_thread_id\x18\x03 \x01(\tH\x00R\x0etargetThreadId\x88\x01\x01\x12;\n" +
 	"\x1atarget_platform_message_id\x18\x04 \x01(\tR\x17targetPlatformMessageIdB\x13\n" +
+	"\x11_target_thread_id\"\x9c\x02\n" +
+	"\x16MessageRefusedDispatch\x12\x1f\n" +
+	"\vdispatch_id\x18\x01 \x01(\tR\n" +
+	"dispatchId\x12$\n" +
+	"\x0etarget_chat_id\x18\x02 \x01(\tR\ftargetChatId\x12-\n" +
+	"\x10target_thread_id\x18\x03 \x01(\tH\x00R\x0etargetThreadId\x88\x01\x01\x12;\n" +
+	"\x1atarget_platform_message_id\x18\x04 \x01(\tR\x17targetPlatformMessageId\x12\x16\n" +
+	"\x06reason\x18\x05 \x01(\tR\x06reason\x12\"\n" +
+	"\rnote_ttl_secs\x18\x06 \x01(\rR\vnoteTtlSecsB\x13\n" +
 	"\x11_target_thread_id\"\"\n" +
 	"\bRejected\x12\x16\n" +
-	"\x06reason\x18\x01 \x01(\tR\x06reason\"\xc1\x06\n" +
+	"\x06reason\x18\x01 \x01(\tR\x06reason\"\x89\a\n" +
 	"\vServerFrame\x12R\n" +
 	"\x0emessage_create\x18\x01 \x01(\v2).wuphf.connector.v1.MessageCreateDispatchH\x00R\rmessageCreate\x12:\n" +
 	"\brejected\x18\x02 \x01(\v2\x1c.wuphf.connector.v1.RejectedH\x00R\brejected\x12L\n" +
@@ -1438,7 +1566,8 @@ const file_server_proto_rawDesc = "" +
 	"\vrun_command\x18\n" +
 	" \x01(\v2\x1e.wuphf.connector.v1.RunCommandH\x00R\n" +
 	"runCommand\x126\n" +
-	"\x05probe\x18\v \x01(\v2\x1e.wuphf.connector.v1.ProbeChatsH\x00R\x05probeB\x06\n" +
+	"\x05probe\x18\v \x01(\v2\x1e.wuphf.connector.v1.ProbeChatsH\x00R\x05probe\x12F\n" +
+	"\arefused\x18\f \x01(\v2*.wuphf.connector.v1.MessageRefusedDispatchH\x00R\arefusedB\x06\n" +
 	"\x04body\"F\n" +
 	"\n" +
 	"ProbeChats\x12\x1d\n" +
@@ -1476,7 +1605,7 @@ func file_server_proto_rawDescGZIP() []byte {
 	return file_server_proto_rawDescData
 }
 
-var file_server_proto_msgTypes = make([]protoimpl.MessageInfo, 14)
+var file_server_proto_msgTypes = make([]protoimpl.MessageInfo, 15)
 var file_server_proto_goTypes = []any{
 	(*ReplyContext)(nil),           // 0: wuphf.connector.v1.ReplyContext
 	(*ProvisionThread)(nil),        // 1: wuphf.connector.v1.ProvisionThread
@@ -1487,38 +1616,40 @@ var file_server_proto_goTypes = []any{
 	(*ReactionDispatch)(nil),       // 6: wuphf.connector.v1.ReactionDispatch
 	(*DeliveryAckDispatch)(nil),    // 7: wuphf.connector.v1.DeliveryAckDispatch
 	(*SeenReceiptDispatch)(nil),    // 8: wuphf.connector.v1.SeenReceiptDispatch
-	(*Rejected)(nil),               // 9: wuphf.connector.v1.Rejected
-	(*ServerFrame)(nil),            // 10: wuphf.connector.v1.ServerFrame
-	(*ProbeChats)(nil),             // 11: wuphf.connector.v1.ProbeChats
-	(*RunCommand)(nil),             // 12: wuphf.connector.v1.RunCommand
-	(*ChatStateDispatch)(nil),      // 13: wuphf.connector.v1.ChatStateDispatch
-	(*Attachment)(nil),             // 14: wuphf.connector.v1.Attachment
-	(*DisappearingTimer)(nil),      // 15: wuphf.connector.v1.DisappearingTimer
-	(*MuteState)(nil),              // 16: wuphf.connector.v1.MuteState
+	(*MessageRefusedDispatch)(nil), // 9: wuphf.connector.v1.MessageRefusedDispatch
+	(*Rejected)(nil),               // 10: wuphf.connector.v1.Rejected
+	(*ServerFrame)(nil),            // 11: wuphf.connector.v1.ServerFrame
+	(*ProbeChats)(nil),             // 12: wuphf.connector.v1.ProbeChats
+	(*RunCommand)(nil),             // 13: wuphf.connector.v1.RunCommand
+	(*ChatStateDispatch)(nil),      // 14: wuphf.connector.v1.ChatStateDispatch
+	(*Attachment)(nil),             // 15: wuphf.connector.v1.Attachment
+	(*DisappearingTimer)(nil),      // 16: wuphf.connector.v1.DisappearingTimer
+	(*MuteState)(nil),              // 17: wuphf.connector.v1.MuteState
 }
 var file_server_proto_depIdxs = []int32{
-	14, // 0: wuphf.connector.v1.ReplyContext.attachments:type_name -> wuphf.connector.v1.Attachment
+	15, // 0: wuphf.connector.v1.ReplyContext.attachments:type_name -> wuphf.connector.v1.Attachment
 	1,  // 1: wuphf.connector.v1.MessageCreateDispatch.provision_thread:type_name -> wuphf.connector.v1.ProvisionThread
-	14, // 2: wuphf.connector.v1.MessageCreateDispatch.attachments:type_name -> wuphf.connector.v1.Attachment
+	15, // 2: wuphf.connector.v1.MessageCreateDispatch.attachments:type_name -> wuphf.connector.v1.Attachment
 	0,  // 3: wuphf.connector.v1.MessageCreateDispatch.reply_context:type_name -> wuphf.connector.v1.ReplyContext
-	15, // 4: wuphf.connector.v1.MessageCreateDispatch.disappearing:type_name -> wuphf.connector.v1.DisappearingTimer
+	16, // 4: wuphf.connector.v1.MessageCreateDispatch.disappearing:type_name -> wuphf.connector.v1.DisappearingTimer
 	2,  // 5: wuphf.connector.v1.ServerFrame.message_create:type_name -> wuphf.connector.v1.MessageCreateDispatch
-	9,  // 6: wuphf.connector.v1.ServerFrame.rejected:type_name -> wuphf.connector.v1.Rejected
+	10, // 6: wuphf.connector.v1.ServerFrame.rejected:type_name -> wuphf.connector.v1.Rejected
 	3,  // 7: wuphf.connector.v1.ServerFrame.message_edit:type_name -> wuphf.connector.v1.MessageEditDispatch
 	4,  // 8: wuphf.connector.v1.ServerFrame.message_delete:type_name -> wuphf.connector.v1.MessageDeleteDispatch
 	5,  // 9: wuphf.connector.v1.ServerFrame.message_retitle:type_name -> wuphf.connector.v1.MessageRetitleDispatch
 	6,  // 10: wuphf.connector.v1.ServerFrame.reaction:type_name -> wuphf.connector.v1.ReactionDispatch
 	7,  // 11: wuphf.connector.v1.ServerFrame.delivery_ack:type_name -> wuphf.connector.v1.DeliveryAckDispatch
 	8,  // 12: wuphf.connector.v1.ServerFrame.seen_receipt:type_name -> wuphf.connector.v1.SeenReceiptDispatch
-	13, // 13: wuphf.connector.v1.ServerFrame.chat_state:type_name -> wuphf.connector.v1.ChatStateDispatch
-	12, // 14: wuphf.connector.v1.ServerFrame.run_command:type_name -> wuphf.connector.v1.RunCommand
-	11, // 15: wuphf.connector.v1.ServerFrame.probe:type_name -> wuphf.connector.v1.ProbeChats
-	16, // 16: wuphf.connector.v1.ChatStateDispatch.mute:type_name -> wuphf.connector.v1.MuteState
-	17, // [17:17] is the sub-list for method output_type
-	17, // [17:17] is the sub-list for method input_type
-	17, // [17:17] is the sub-list for extension type_name
-	17, // [17:17] is the sub-list for extension extendee
-	0,  // [0:17] is the sub-list for field type_name
+	14, // 13: wuphf.connector.v1.ServerFrame.chat_state:type_name -> wuphf.connector.v1.ChatStateDispatch
+	13, // 14: wuphf.connector.v1.ServerFrame.run_command:type_name -> wuphf.connector.v1.RunCommand
+	12, // 15: wuphf.connector.v1.ServerFrame.probe:type_name -> wuphf.connector.v1.ProbeChats
+	9,  // 16: wuphf.connector.v1.ServerFrame.refused:type_name -> wuphf.connector.v1.MessageRefusedDispatch
+	17, // 17: wuphf.connector.v1.ChatStateDispatch.mute:type_name -> wuphf.connector.v1.MuteState
+	18, // [18:18] is the sub-list for method output_type
+	18, // [18:18] is the sub-list for method input_type
+	18, // [18:18] is the sub-list for extension type_name
+	18, // [18:18] is the sub-list for extension extendee
+	0,  // [0:18] is the sub-list for field type_name
 }
 
 func init() { file_server_proto_init() }
@@ -1534,7 +1665,8 @@ func file_server_proto_init() {
 	file_server_proto_msgTypes[6].OneofWrappers = []any{}
 	file_server_proto_msgTypes[7].OneofWrappers = []any{}
 	file_server_proto_msgTypes[8].OneofWrappers = []any{}
-	file_server_proto_msgTypes[10].OneofWrappers = []any{
+	file_server_proto_msgTypes[9].OneofWrappers = []any{}
+	file_server_proto_msgTypes[11].OneofWrappers = []any{
 		(*ServerFrame_MessageCreate)(nil),
 		(*ServerFrame_Rejected)(nil),
 		(*ServerFrame_MessageEdit)(nil),
@@ -1546,15 +1678,16 @@ func file_server_proto_init() {
 		(*ServerFrame_ChatState)(nil),
 		(*ServerFrame_RunCommand)(nil),
 		(*ServerFrame_Probe)(nil),
+		(*ServerFrame_Refused)(nil),
 	}
-	file_server_proto_msgTypes[13].OneofWrappers = []any{}
+	file_server_proto_msgTypes[14].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_server_proto_rawDesc), len(file_server_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   14,
+			NumMessages:   15,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

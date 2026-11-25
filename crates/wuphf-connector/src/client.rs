@@ -291,6 +291,15 @@ impl Client {
                 })
                 .await
             }
+            Some(pb::server_frame::Body::Refused(dispatch)) => {
+                let dispatch_id = dispatch.dispatch_id.clone();
+                self.deliver(outbound, &dispatch_id, move || {
+                    let sender = Arc::clone(sender);
+                    let dispatch = dispatch.clone();
+                    async move { Ok((sender.refuse_message(dispatch).await?, None)) }
+                })
+                .await
+            }
             // Answered in a task, so a slow command never holds up dispatches.
             Some(pb::server_frame::Body::RunCommand(command)) => {
                 let commands = self.opts.commands.clone();
