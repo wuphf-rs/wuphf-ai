@@ -41,12 +41,17 @@ impl Dispatch {
     /// delivered copy a later edit/delete revises.
     pub fn message_id(&self) -> Option<MessageId> {
         match &self.action {
-            Action::Send { message, .. } | Action::Edit { message, .. } => Some(message.id),
+            Action::Send { message, .. }
+            | Action::Edit { message, .. }
+            | Action::Post { message } => Some(message.id),
             Action::Delete { message_id, .. }
             | Action::React { message_id, .. }
             | Action::Receipt { message_id, .. }
             | Action::Refuse { message_id, .. } => Some(*message_id),
-            Action::RenameThread { .. } | Action::Note { .. } | Action::SetChatState { .. } => None,
+            Action::RenameThread { .. }
+            | Action::Note { .. }
+            | Action::SetChatState { .. }
+            | Action::OpenPanel { .. } => None,
         }
     }
 
@@ -58,7 +63,7 @@ impl Dispatch {
     pub fn records_copy(&self) -> bool {
         matches!(
             self.action,
-            Action::Send { .. } | Action::Edit { .. } | Action::Delete { .. }
+            Action::Send { .. } | Action::Edit { .. } | Action::Delete { .. } | Action::Post { .. }
         )
     }
 
@@ -140,6 +145,15 @@ pub enum Action {
         native_id: String,
         kind: ReceiptKind,
     },
+    /// Post `message` to the target on purpose (plan 084): a story, a
+    /// channel post. The only send a connector makes into a chat whose
+    /// posting takes posts but no messages (WhatsApp `status@broadcast`).
+    /// Records the copy like a send.
+    Post { message: Message },
+    /// Open the settings panel in the target chat (or thread) for `actor`, an
+    /// owner id there (plan 084: the preview of a pending post). Records no
+    /// copy.
+    OpenPanel { actor: String },
     /// Tell the origin copy that the bridge did not send it on (plan 083): a
     /// message into a receive-only chat, a story quoted outside its poster's
     /// chat. The connector marks the copy and posts `reason` as a reply note

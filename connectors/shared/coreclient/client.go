@@ -151,6 +151,14 @@ type SeenReceiptMarker interface {
 	MarkSeen(context.Context, *wuphfpb.SeenReceiptDispatch) (messageID string, err error)
 }
 
+// PanelOpener is implemented by senders that can open the settings panel in a
+// chat for one of its owners (plan 084: a pending post's preview). Without it,
+// an OpenPanel dispatch is acknowledged unchanged.
+type PanelOpener interface {
+	// OpenPanel opens the panel and returns the target chat id.
+	OpenPanel(context.Context, *wuphfpb.OpenPanelDispatch) (chatID string, err error)
+}
+
 // MessageRefuser is implemented by senders that surface a copy the bridge did
 // not send on (plan 083): a mark on it and the reason as a reply note. Without
 // it, a Refused dispatch is acknowledged unchanged.
@@ -386,6 +394,18 @@ func (c Client) runSession(
 					op = func(ctx context.Context) (string, string, error) {
 						messageID, err := marker.MarkSeen(ctx, dispatch)
 						return messageID, "", err
+					}
+				}
+				if err := c.deliver(ctx, stream, dispatch.DispatchId, op); err != nil {
+					return err
+				}
+			case *wuphfpb.ServerFrame_OpenPanel:
+				dispatch := body.OpenPanel
+				op := ackOnly(dispatch.TargetChatId)
+				if opener, ok := sender.(PanelOpener); ok {
+					op = func(ctx context.Context) (string, string, error) {
+						chatID, err := opener.OpenPanel(ctx, dispatch)
+						return chatID, "", err
 					}
 				}
 				if err := c.deliver(ctx, stream, dispatch.DispatchId, op); err != nil {

@@ -130,7 +130,7 @@ where
                                                 &*self.storage,
                                                 message.id,
                                                 message.conversation_id,
-                                                endpoint_id,
+                                                Some(endpoint_id),
                                                 reason.to_owned(),
                                             )
                                             .await?,

@@ -59,6 +59,22 @@ message MessageCreateDispatch {
   // it as plain text with any attachments; no sender label, no reply. The core
   // records no copy, so nothing can reply to it or bridge it back.
   bool system_note = 14;
+  // The owner posts this on purpose (plan 084): a story, a channel post. The
+  // only send a connector makes into a chat whose posting takes posts but no
+  // messages (WhatsApp status@broadcast); anything else sent there is
+  // refused.
+  bool post = 15;
+}
+
+// Open the settings panel in the target chat (or thread) for `actor`, an
+// owner id there (plan 084: the preview of a pending post, which the panel
+// opens on). Acknowledged with the target chat id; a connector without a
+// panel acknowledges it unchanged.
+message OpenPanelDispatch {
+  string dispatch_id = 1;
+  string target_chat_id = 2;
+  optional string target_thread_id = 3;
+  string actor = 4;
 }
 
 // Instruction to revise an already-delivered copy. `target_platform_message_id`
@@ -174,6 +190,7 @@ message ServerFrame {
     RunCommand run_command = 10;
     ProbeChats probe = 11;
     MessageRefusedDispatch refused = 12;
+    OpenPanelDispatch open_panel = 13;
   }
 }
 

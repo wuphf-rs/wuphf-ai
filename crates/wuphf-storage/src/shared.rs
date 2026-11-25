@@ -63,6 +63,9 @@ fn bind_native_parent(dispatch: &mut Dispatch, parent: Message, native_id: Strin
         // A note or a chat-state change is never blocked: it quotes nothing
         // and acts on no copy.
         Action::Note { .. } | Action::SetChatState { .. } => {}
+        // A post quotes nothing and is never blocked (plan 084); nor is
+        // opening the panel.
+        Action::Post { .. } | Action::OpenPanel { .. } => {}
     }
 }
 

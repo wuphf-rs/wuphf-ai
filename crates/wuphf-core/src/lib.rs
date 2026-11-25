@@ -14,6 +14,7 @@ mod hold;
 mod ingest;
 mod notes;
 mod notify;
+mod posts;
 mod profile;
 mod refusal;
 mod reply_reaction;
@@ -25,6 +26,7 @@ pub use config::{
     ChatStateSettings, MatchedRule, RoutingConfig, RoutingConfigError, RoutingSource,
 };
 pub use hold::Released;
+pub use posts::{PENDING_POST_TTL_MS, PendingPost, PostOutcome};
 use router::Router;
 pub use router::RouterError;
 
@@ -47,6 +49,10 @@ pub struct Core<S> {
     /// The directions of rules held by the health checks (plan 079), set by
     /// the runtime. See [`Core::set_health_pauses`].
     health_pauses: RwLock<Arc<BTreeSet<HealthPause>>>,
+    /// Posts waiting for the owner's ✅ on their preview (plan 084), by the
+    /// command message's id. In memory: a restart forgets them, and the owner
+    /// sends the command again.
+    posts: Mutex<HashMap<MessageId, PendingPost>>,
 }
 
 /// A conversation's in-flight thread provisioning: the dispatches whose
@@ -68,6 +74,7 @@ where
             provisioning: Mutex::new(HashMap::new()),
             notices: Mutex::new(HashMap::new()),
             health_pauses: RwLock::default(),
+            posts: Mutex::new(HashMap::new()),
         }
     }
 

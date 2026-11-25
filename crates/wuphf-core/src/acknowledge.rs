@@ -64,7 +64,11 @@ where
     /// how to surface it (Telegram reacts 👍; sources ignore it). Multiple
     /// mirrors each emit one; the signal is idempotent.
     async fn delivery_ack_for(&self, dispatch: &Dispatch) -> Result<Option<Dispatch>, CoreError> {
-        if !matches!(dispatch.action, wuphf_model::Action::Send { .. }) {
+        // A post (plan 084) is a delivery too: its 👍 says the story is up.
+        if !matches!(
+            dispatch.action,
+            wuphf_model::Action::Send { .. } | wuphf_model::Action::Post { .. }
+        ) {
             return Ok(None);
         }
         let Some(message_id) = dispatch.message_id() else {

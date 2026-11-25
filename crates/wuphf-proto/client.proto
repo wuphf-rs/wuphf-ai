@@ -79,6 +79,13 @@ message ChatPosting {
   // A message here may be quoted only in a reply to its author's direct
   // chat (a story).
   bool private_replies = 3;
+  // The account may post here on purpose (plan 084): a story to its
+  // contacts, a channel post to its followers. Only an explicit post
+  // (MessageCreateDispatch.post) goes there.
+  bool posts = 4;
+  // Who sees a post, as the platform's setting says ("My contacts", "My
+  // contacts except 3"), when known.
+  optional string audience = 5;
 }
 
 // The chat's picture. `id` is the platform's picture id; empty means the

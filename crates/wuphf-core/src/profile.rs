@@ -161,10 +161,10 @@ pub(crate) fn apply(
     }
 
     // What this account may do there: stored, never a note (plan 083).
-    if let Some(posting) = update.posting
-        && profile.posting != Some(posting)
+    if let Some(posting) = &update.posting
+        && profile.posting.as_ref() != Some(posting)
     {
-        profile.posting = Some(posting);
+        profile.posting = Some(posting.clone());
         changes.stored = true;
     }
 
@@ -189,7 +189,7 @@ fn fill_unknown(into: &mut ChatProfile, from: ChatProfile) {
     into.description = into.description.take().or(from.description);
     into.avatar = into.avatar.take().or(from.avatar);
     into.participant_count = into.participant_count.or(from.participant_count);
-    into.posting = into.posting.or(from.posting);
+    into.posting = into.posting.take().or(from.posting);
 }
 
 impl<S> Core<S>

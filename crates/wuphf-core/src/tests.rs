@@ -4308,6 +4308,8 @@ async fn report_receive_only(core: &Core<InMemoryStorage>) {
                 messages: false,
                 reactions: true,
                 private_replies: false,
+                posts: false,
+                audience: None,
             }),
             ..ChatUpdate::new(GROUP)
         }],
@@ -4562,6 +4564,8 @@ async fn story_feed() -> Core<InMemoryStorage> {
                 messages: false,
                 reactions: true,
                 private_replies: true,
+                posts: false,
+                audience: None,
             }),
             ..ChatUpdate::new(STATUS)
         }],
@@ -4648,4 +4652,207 @@ async fn a_quote_of_another_chat_named_by_the_event_resolves_there_only() {
         &dispatches[0].action,
         Action::Send { reply: None, .. }
     ));
+}
+
+// ---- Plan 084: posting stories ----
+
+/// The Status feed mirrored into topic 100, taking posts, with the owner's
+/// message "tg-mine" typed there (and refused, 083).
+async fn story_topic() -> Core<InMemoryStorage> {
+    let rule = Rule {
+        id: RuleId("wa-all".into()),
+        flow: RuleKind::ManyToOne {
+            source_connector: ConnectorId(WHATSAPP.into()),
+            source_chats_filter: ChatFilter::All,
+            destination_connector: ConnectorId(TELEGRAM.into()),
+            destination_chat: ChatAddress::new(MIRROR_CHAT, None),
+        },
+    };
+    let core = core_with_owner(vec![rule]);
+    core.update_chats(
+        &ConnectorId(WHATSAPP.into()),
+        vec![ChatUpdate {
+            posting: Some(wuphf_model::ChatPosting {
+                messages: false,
+                reactions: true,
+                private_replies: true,
+                posts: true,
+                audience: Some("My contacts".into()),
+            }),
+            ..ChatUpdate::new(STATUS)
+        }],
+        true,
+    )
+    .await
+    .unwrap();
+    mirror_into_topic(&core, STATUS, BOB, "wa-story", "100", "tg-story").await;
+    let refused = owner_in_topic(&core, "100", "tg-mine", "my story", None).await;
+    assert!(matches!(refused[0].action, Action::Refuse { .. }));
+    core
+}
+
+/// The owner's message `text` in topic `thread`, replying to `reply_to`.
+async fn owner_in_topic(
+    core: &Core<InMemoryStorage>,
+    thread: &str,
+    native_id: &str,
+    text: &str,
+    reply_to: Option<&str>,
+) -> Vec<Dispatch> {
+    let mut event = event_in(TELEGRAM, MIRROR_CHAT, Some(thread), native_id, reply_to);
+    if let EventKind::NewMessage(message) = &mut event.payload {
+        message.text = Some(text.into());
+        message.author_account = Some(OWNER.into());
+        message.timestamp_ms = 1_000;
+    }
+    routed(core.ingest(event).await.unwrap()).0
+}
+
+fn status_topic() -> ChatAddress {
+    ChatAddress::new(MIRROR_CHAT, Some("100".into()))
+}
+
+fn assert_post(dispatch: &Dispatch, text: &str) {
+    assert_eq!(dispatch.to.address.chat_id, STATUS);
+    match &dispatch.action {
+        Action::Post { message } => assert_eq!(message.text.as_deref(), Some(text)),
+        other => panic!("expected a post, got {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn status_replying_to_a_message_opens_its_preview_then_posts_it() {
+    let core = story_topic().await;
+    let dispatches = owner_in_topic(&core, "100", "tg-cmd", "/status", Some("tg-mine")).await;
+    assert_eq!(dispatches.len(), 1, "{dispatches:#?}");
+    assert_eq!(dispatches[0].to.address.thread_id.as_deref(), Some("100"));
+    assert!(matches!(&dispatches[0].action, Action::OpenPanel { actor } if actor == OWNER));
+
+    let telegram = ConnectorId(TELEGRAM.into());
+    let pending = core
+        .pending_post_at(&telegram, &status_topic(), 2_000)
+        .await
+        .unwrap()
+        .expect("a pending post in the topic");
+    assert_eq!(pending.audience.as_deref(), Some("My contacts"));
+    assert!(pending.caption.is_none());
+
+    let PostOutcome::Posted(posted) = core.confirm_post(pending.id, 3_000).await.unwrap() else {
+        panic!("confirmed");
+    };
+    assert_eq!(posted.len(), 1);
+    assert_post(&posted[0], "my story");
+    // Its acknowledgement marks the owner's message delivered (👍).
+    let after = core
+        .acknowledge_dispatch(DispatchAck {
+            dispatch_id: posted[0].id,
+            native_id: "wa-posted".into(),
+            thread_id: None,
+        })
+        .await
+        .unwrap();
+    assert!(after.iter().any(|dispatch| matches!(
+        &dispatch.action,
+        Action::Receipt { native_id, kind: ReceiptKind::Delivered, .. } if native_id == "tg-mine"
+    )));
+    // Confirmed once only.
+    assert!(core.pending_post(pending.id, 3_000).is_none());
+}
+
+#[tokio::test]
+async fn status_bang_posts_at_once_with_the_command_text_as_caption() {
+    let core = story_topic().await;
+    let dispatches = owner_in_topic(
+        &core,
+        "100",
+        "tg-cmd",
+        "/status! look at this",
+        Some("tg-mine"),
+    )
+    .await;
+    assert_eq!(dispatches.len(), 1, "{dispatches:#?}");
+    assert_post(&dispatches[0], "look at this");
+}
+
+#[tokio::test]
+async fn status_with_text_posts_the_text() {
+    let core = story_topic().await;
+    let dispatches = owner_in_topic(&core, "100", "tg-cmd", "/status! hello world", None).await;
+    assert_post(&dispatches[0], "hello world");
+}
+
+#[tokio::test]
+async fn a_post_command_with_nothing_to_post_is_refused() {
+    let core = story_topic().await;
+    let dispatches = owner_in_topic(&core, "100", "tg-cmd", "/status", None).await;
+    assert!(
+        matches!(&dispatches[0].action, Action::Refuse { native_id, reason, .. } if native_id == "tg-cmd" && reason.contains("Nothing to post"))
+    );
+}
+
+#[tokio::test]
+async fn a_post_command_where_nothing_takes_posts_is_refused() {
+    let core = story_topic().await;
+    mirror_into_topic(&core, BOB, BOB, "wa-bob", "200", "tg-bob").await;
+    let dispatches = owner_in_topic(&core, "200", "tg-cmd", "/status! hi", None).await;
+    assert_eq!(dispatches.len(), 1, "{dispatches:#?}");
+    assert!(
+        matches!(&dispatches[0].action, Action::Refuse { reason, .. } if reason.contains("takes no posts"))
+    );
+}
+
+#[tokio::test]
+async fn someone_elses_post_command_is_an_ordinary_refused_message() {
+    let core = story_topic().await;
+    let mut event = event_in(TELEGRAM, MIRROR_CHAT, Some("100"), "tg-cmd", None);
+    if let EventKind::NewMessage(message) = &mut event.payload {
+        message.text = Some("/status! hi".into());
+    }
+    let (dispatches, _) = routed(core.ingest(event).await.unwrap());
+    assert!(
+        matches!(&dispatches[0].action, Action::Refuse { reason, .. } if reason.contains("receive-only"))
+    );
+}
+
+#[tokio::test]
+async fn an_expired_pending_post_is_not_posted() {
+    let core = story_topic().await;
+    owner_in_topic(&core, "100", "tg-cmd", "/status", Some("tg-mine")).await;
+    let telegram = ConnectorId(TELEGRAM.into());
+    let late = 1_000 + PENDING_POST_TTL_MS + 1;
+    assert!(
+        core.pending_post_at(&telegram, &status_topic(), late)
+            .await
+            .unwrap()
+            .is_none()
+    );
+    let id = core
+        .pending_post_at(&telegram, &status_topic(), 2_000)
+        .await
+        .unwrap()
+        .unwrap()
+        .id;
+    assert!(matches!(
+        core.confirm_post(id, late).await.unwrap(),
+        PostOutcome::Refused(_)
+    ));
+}
+
+#[tokio::test]
+async fn a_post_composed_in_the_panel_goes_to_the_topic_and_the_story() {
+    let core = story_topic().await;
+    let telegram = ConnectorId(TELEGRAM.into());
+    let PostOutcome::Posted(dispatches) = core
+        .compose_post(&telegram, &status_topic(), "from the panel", 5_000)
+        .await
+        .unwrap()
+    else {
+        panic!("composed");
+    };
+    assert_eq!(dispatches.len(), 2, "{dispatches:#?}");
+    assert!(
+        matches!(&dispatches[0].action, Action::Send { message, .. } if message.text.as_deref() == Some("from the panel"))
+    );
+    assert_eq!(dispatches[0].to.address.thread_id.as_deref(), Some("100"));
+    assert_post(&dispatches[1], "from the panel");
 }

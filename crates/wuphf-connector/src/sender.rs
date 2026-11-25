@@ -123,6 +123,16 @@ pub trait Sender: Send + Sync + 'static {
     /// Surface that the bridge did not send a copy on (plan 083): mark it and
     /// post the reason as a reply note. Returns the copy's platform message
     /// id unchanged. This default acknowledges without surfacing anything.
+    /// Open the settings panel in the target chat for the dispatch's actor
+    /// (plan 084), returning the target chat id. This default acknowledges
+    /// without opening anything: a connector without a panel.
+    fn open_panel(
+        &self,
+        dispatch: pb::OpenPanelDispatch,
+    ) -> impl Future<Output = Result<String, Failure>> + Send {
+        async move { Ok(dispatch.target_chat_id) }
+    }
+
     fn refuse_message(
         &self,
         dispatch: pb::MessageRefusedDispatch,

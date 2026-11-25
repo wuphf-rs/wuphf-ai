@@ -367,6 +367,8 @@ fn dead_letter(letter: &Dispatch) -> String {
         Action::React { .. } => "reaction",
         Action::Receipt { .. } => "receipt",
         Action::Refuse { .. } => "refusal note",
+        Action::Post { .. } => "post",
+        Action::OpenPanel { .. } => "panel",
         Action::RenameThread { .. } => "topic rename",
         Action::Note { .. } => "note",
         Action::SetChatState { .. } => "chat state",

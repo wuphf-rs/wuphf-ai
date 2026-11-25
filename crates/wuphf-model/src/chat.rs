@@ -89,18 +89,28 @@ impl ChatProfile {
     /// Whether this account may post new messages here: false only when the
     /// connector reported it may not.
     pub fn accepts_messages(&self) -> bool {
-        self.posting.is_none_or(|posting| posting.messages)
+        self.posting.as_ref().is_none_or(|posting| posting.messages)
     }
 
     /// Whether this account may react here.
     pub fn accepts_reactions(&self) -> bool {
-        self.posting.is_none_or(|posting| posting.reactions)
+        self.posting
+            .as_ref()
+            .is_none_or(|posting| posting.reactions)
     }
 
     /// Whether a message here may be quoted only in its author's direct
     /// chat (a story).
     pub fn private_replies(&self) -> bool {
-        self.posting.is_some_and(|posting| posting.private_replies)
+        self.posting
+            .as_ref()
+            .is_some_and(|posting| posting.private_replies)
+    }
+
+    /// Whether this account may post here on purpose (plan 084): a story, a
+    /// channel post. Only when the connector reported it.
+    pub fn accepts_posts(&self) -> bool {
+        self.posting.as_ref().is_some_and(|posting| posting.posts)
     }
 }
 
@@ -108,7 +118,7 @@ impl ChatProfile {
 /// a WhatsApp story feed takes reactions only, and a story may be quoted only
 /// in its poster's chat; an admin-only group takes no messages from a
 /// member.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ChatPosting {
     /// The account may post new messages (and edit its own).
     pub messages: bool,
@@ -118,15 +128,28 @@ pub struct ChatPosting {
     /// chat.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub private_replies: bool,
+    /// The account may post here on purpose (plan 084): a story to its
+    /// contacts, a channel post to its followers. Only an explicit post
+    /// (`/status`, `/post`) does.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub posts: bool,
+    /// Who sees a post, as the platform's setting says ("My contacts",
+    /// "My contacts except 3"), when known.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub audience: Option<String>,
 }
 
 impl ChatPosting {
-    /// A chat open to everything.
-    pub const OPEN: Self = Self {
-        messages: true,
-        reactions: true,
-        private_replies: false,
-    };
+    /// A chat open to everything but posts.
+    pub fn open() -> Self {
+        Self {
+            messages: true,
+            reactions: true,
+            private_replies: false,
+            posts: false,
+            audience: None,
+        }
+    }
 }
 
 /// A chat's mute): 0 not muted, [`MuteState::FOREVER`] muted forever,

@@ -584,8 +584,15 @@ type ChatPosting struct {
 	// A message here may be quoted only in a reply to its author's direct
 	// chat (a story).
 	PrivateReplies bool `protobuf:"varint,3,opt,name=private_replies,json=privateReplies,proto3" json:"private_replies,omitempty"`
-	unknownFields  protoimpl.UnknownFields
-	sizeCache      protoimpl.SizeCache
+	// The account may post here on purpose (plan 084): a story to its
+	// contacts, a channel post to its followers. Only an explicit post
+	// (MessageCreateDispatch.post) goes there.
+	Posts bool `protobuf:"varint,4,opt,name=posts,proto3" json:"posts,omitempty"`
+	// Who sees a post, as the platform's setting says ("My contacts", "My
+	// contacts except 3"), when known.
+	Audience      *string `protobuf:"bytes,5,opt,name=audience,proto3,oneof" json:"audience,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *ChatPosting) Reset() {
@@ -637,6 +644,20 @@ func (x *ChatPosting) GetPrivateReplies() bool {
 		return x.PrivateReplies
 	}
 	return false
+}
+
+func (x *ChatPosting) GetPosts() bool {
+	if x != nil {
+		return x.Posts
+	}
+	return false
+}
+
+func (x *ChatPosting) GetAudience() string {
+	if x != nil && x.Audience != nil {
+		return *x.Audience
+	}
+	return ""
 }
 
 // The chat's picture. `id` is the platform's picture id; empty means the
@@ -2134,11 +2155,14 @@ const file_client_proto_rawDesc = "" +
 	"\x05_muteB\v\n" +
 	"\t_archivedB\n" +
 	"\n" +
-	"\b_posting\"p\n" +
+	"\b_posting\"\xb4\x01\n" +
 	"\vChatPosting\x12\x1a\n" +
 	"\bmessages\x18\x01 \x01(\bR\bmessages\x12\x1c\n" +
 	"\treactions\x18\x02 \x01(\bR\treactions\x12'\n" +
-	"\x0fprivate_replies\x18\x03 \x01(\bR\x0eprivateReplies\"I\n" +
+	"\x0fprivate_replies\x18\x03 \x01(\bR\x0eprivateReplies\x12\x14\n" +
+	"\x05posts\x18\x04 \x01(\bR\x05posts\x12\x1f\n" +
+	"\baudience\x18\x05 \x01(\tH\x00R\baudience\x88\x01\x01B\v\n" +
+	"\t_audience\"I\n" +
 	"\n" +
 	"ChatAvatar\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x1e\n" +
@@ -2386,6 +2410,7 @@ func file_client_proto_init() {
 	file_common_proto_init()
 	file_client_proto_msgTypes[0].OneofWrappers = []any{}
 	file_client_proto_msgTypes[1].OneofWrappers = []any{}
+	file_client_proto_msgTypes[2].OneofWrappers = []any{}
 	file_client_proto_msgTypes[3].OneofWrappers = []any{}
 	file_client_proto_msgTypes[4].OneofWrappers = []any{}
 	file_client_proto_msgTypes[6].OneofWrappers = []any{}

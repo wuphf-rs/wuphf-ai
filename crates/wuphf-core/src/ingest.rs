@@ -92,6 +92,26 @@ where
                 native_id: native_id.clone(),
             })
             .await?;
+        // The owner's post command (plan 084) is never routed: it posts, or
+        // opens the preview, or is refused.
+        if let Some(command) =
+            self.owner_post_command(routing, &origin, &message, author_account.as_deref())
+        {
+            let actor = author_account.as_deref().unwrap_or(&message.author_id);
+            if let Some(outcome) = self
+                .ingest_post_command(
+                    routing,
+                    origin_endpoint,
+                    &message,
+                    command,
+                    actor,
+                    message.timestamp_ms,
+                )
+                .await?
+            {
+                return Ok(outcome);
+            }
+        }
         if let (Some(parent), Some(emoji)) = (
             message.reply_to,
             self.reply_reaction_emoji(routing, &origin, &message, author_account.as_deref()),

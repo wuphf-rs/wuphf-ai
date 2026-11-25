@@ -291,6 +291,15 @@ impl Client {
                 })
                 .await
             }
+            Some(pb::server_frame::Body::OpenPanel(dispatch)) => {
+                let dispatch_id = dispatch.dispatch_id.clone();
+                self.deliver(outbound, &dispatch_id, move || {
+                    let sender = Arc::clone(sender);
+                    let dispatch = dispatch.clone();
+                    async move { Ok((sender.open_panel(dispatch).await?, None)) }
+                })
+                .await
+            }
             Some(pb::server_frame::Body::Refused(dispatch)) => {
                 let dispatch_id = dispatch.dispatch_id.clone();
                 self.deliver(outbound, &dispatch_id, move || {

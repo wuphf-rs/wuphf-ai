@@ -33,6 +33,7 @@ pub(crate) const REFUSAL_NOTE_TTL_SECS: u32 = 30;
 pub(crate) struct SourcePolicy {
     accepts_messages: bool,
     accepts_reactions: bool,
+    accepts_posts: bool,
     keeps_deletes: bool,
     title: String,
 }
@@ -66,6 +67,7 @@ where
                 | Action::Edit { .. }
                 | Action::React { .. }
                 | Action::Delete { .. }
+                | Action::Post { .. }
         ) {
             return Ok(Screened::Pass(dispatch));
         }
@@ -99,6 +101,12 @@ where
             }
             Action::React { .. } if !policy.accepts_reactions => Ok(Screened::Refused(None)),
             Action::Delete { .. } if policy.keeps_deletes => Ok(Screened::Dropped),
+            Action::Post { message } if !policy.accepts_posts => {
+                let reason = format!("Not posted: {} takes no posts.", policy.title);
+                Ok(Screened::Refused(
+                    self.refusal_for(message.id, &dispatch, reason).await?,
+                ))
+            }
             _ => Ok(Screened::Pass(dispatch)),
         }
     }
@@ -128,6 +136,9 @@ where
             accepts_reactions: profile
                 .as_ref()
                 .is_none_or(|profile| profile.accepts_reactions()),
+            accepts_posts: profile
+                .as_ref()
+                .is_some_and(|profile| profile.accepts_posts()),
             keeps_deletes: routing.keeps_mirror_deletes(&conversation.source.connector_id),
             title: conversation
                 .title
@@ -147,7 +158,7 @@ where
             &*self.storage,
             message_id,
             refused.conversation_id,
-            refused.to.endpoint_id,
+            Some(refused.to.endpoint_id),
             reason,
         )
         .await?)
@@ -157,18 +168,18 @@ where
 /// The refusal of a message the bridge did not send to `refused_at`, sent to
 /// the copy the message was received as: the owner's own message in the
 /// mirror. `None` when that copy is unknown (an owner send from the TUI) or is
-/// the refused endpoint itself.
+/// the refused endpoint itself; `refused_at` is none for a refused command.
 pub(crate) async fn refusal_dispatch<S: MessageStore + TopologyStore>(
     storage: &S,
     message_id: MessageId,
     conversation_id: ConversationId,
-    refused_at: EndpointId,
+    refused_at: Option<EndpointId>,
     reason: String,
 ) -> Result<Option<Dispatch>, StorageError> {
     let Some(origin) = storage.received_copy(message_id).await? else {
         return Ok(None);
     };
-    if origin.endpoint_id == refused_at {
+    if Some(origin.endpoint_id) == refused_at {
         return Ok(None);
     }
     let endpoint = storage.endpoint(origin.endpoint_id).await?;

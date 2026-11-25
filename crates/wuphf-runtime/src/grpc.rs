@@ -489,10 +489,44 @@ fn output_to_proto(output: ConnectorOutput) -> pb::ServerFrame {
                         sender_name: message.author_name,
                         disappearing: disappearing.map(timer_to_proto),
                         system_note: false,
+                        post: false,
                     }))
                 }
                 // A note is a plain create with no author, reply or timer; the
                 // connector renders it without a sender label.
+                // A post is a plain create flagged `post`: no quote, no timer
+                // (a story keeps its own 24 hours).
+                Action::Post { message } => {
+                    pb::server_frame::Body::MessageCreate(Box::new(pb::MessageCreateDispatch {
+                        dispatch_id,
+                        target_chat_id: target.address.chat_id,
+                        target_thread_id: target.address.thread_id,
+                        provision_thread: None,
+                        sender: message.author_id,
+                        participant: message.participant,
+                        text: message.text,
+                        attachments: message
+                            .attachments
+                            .into_iter()
+                            .map(attachment_to_proto)
+                            .collect(),
+                        reply_to_platform_message_id: None,
+                        timestamp_ms: message.timestamp_ms,
+                        reply_context: None,
+                        sender_name: message.author_name,
+                        disappearing: None,
+                        system_note: false,
+                        post: true,
+                    }))
+                }
+                Action::OpenPanel { actor } => {
+                    pb::server_frame::Body::OpenPanel(pb::OpenPanelDispatch {
+                        dispatch_id,
+                        target_chat_id: target.address.chat_id,
+                        target_thread_id: target.address.thread_id,
+                        actor,
+                    })
+                }
                 Action::Note { text, attachments } => {
                     let container = target.address.chat_id.clone();
                     pb::server_frame::Body::MessageCreate(Box::new(pb::MessageCreateDispatch {
@@ -512,6 +546,7 @@ fn output_to_proto(output: ConnectorOutput) -> pb::ServerFrame {
                         sender_name: None,
                         disappearing: None,
                         system_note: true,
+                        post: false,
                     }))
                 }
                 Action::Edit { message, native_id } => {
@@ -669,6 +704,8 @@ fn chat_update_from_proto(update: pb::ChatUpdate) -> Result<ChatUpdate, WireErro
             messages: posting.messages,
             reactions: posting.reactions,
             private_replies: posting.private_replies,
+            posts: posting.posts,
+            audience: posting.audience,
         }),
     })
 }
