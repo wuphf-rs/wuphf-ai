@@ -82,19 +82,23 @@ impl Normalizer {
         }
     }
 
-    pub async fn handle(&self, mut ctx: MessageContext) {
-        // A broadcast-list message belongs in the direct chat with the person
-        // (plan 085; Go `broadcastCopies`). whatsapp-rust does not say whom
-        // the owner's own broadcast went to, so that one is not placed.
-        let broadcast = is_broadcast_list(&ctx.info.source.chat);
-        if broadcast {
-            if ctx.info.source.is_from_me {
-                return;
-            }
-            ctx.info.source.chat = ctx.info.source.sender.to_non_ad();
-            ctx.info.source.is_group = false;
-            ctx.info.source.broadcast_list_owner = None;
+    /// A message, handled in each direct chat it belongs to (see
+    /// [`broadcast_copies`]).
+    pub async fn handle(&self, ctx: MessageContext) {
+        let (copies, broadcast) = broadcast_copies(&ctx.info);
+        for info in copies {
+            let copy = MessageContext {
+                message: Arc::clone(&ctx.message),
+                info,
+                client: Arc::clone(&ctx.client),
+            };
+            self.handle_copy(copy, broadcast).await;
         }
+    }
+
+    /// One copy of a message, in the chat it belongs to; `broadcast` tags its
+    /// sender as having come through a broadcast list.
+    async fn handle_copy(&self, ctx: MessageContext, broadcast: bool) {
         let (client, info) = (&*ctx.client, &ctx.info);
         // Before the title is resolved, so the newest push name names the chat.
         // The owner's own messages carry the owner's push name: never stored.
@@ -317,6 +321,41 @@ fn media_failure_detail(
 
 /// The device part stripped, nothing else: the key of the connector's own
 /// tables. Ids on the wire go through `Identity::canonical`.
+/// Where a broadcast-list message belongs (plan 085; Go `broadcastCopies`).
+/// WhatsApp shows a broadcast in the direct chat with each person, never as a
+/// chat of its own, so the bridge does too: one sent to the owner goes to the
+/// sender's DM; one the owner sent from the phone goes to the DM of each
+/// person it was sent to (the stanza's `<participants>`, none when it names
+/// none); anything else (status@broadcast is not a list) is itself. The
+/// bool says the copies came out of a broadcast list.
+pub(crate) fn broadcast_copies(info: &MessageInfo) -> (Vec<MessageInfo>, bool) {
+    if !is_broadcast_list(&info.source.chat) {
+        return (vec![info.clone()], false);
+    }
+    if !info.source.is_from_me {
+        return (vec![in_chat(info, info.source.sender.to_non_ad())], true);
+    }
+    let mut chats: Vec<Jid> = Vec::new();
+    for recipient in &info.bcl_participants {
+        let chat = recipient.to_non_ad();
+        if !chats.contains(&chat) {
+            chats.push(chat);
+        }
+    }
+    let copies = chats.into_iter().map(|chat| in_chat(info, chat)).collect();
+    (copies, true)
+}
+
+/// `info` moved to the direct chat `chat`.
+fn in_chat(info: &MessageInfo, chat: Jid) -> MessageInfo {
+    let mut moved = info.clone();
+    moved.source.chat = chat;
+    moved.source.is_group = false;
+    moved.source.broadcast_list_owner = None;
+    moved.bcl_participants.clear();
+    moved
+}
+
 pub fn bare_id(jid: &whatsapp_rust::Jid) -> String {
     jid.to_non_ad().to_string()
 }
@@ -1055,5 +1094,47 @@ mod tests {
             media_failure_detail(&voice, &own, "1555@s.whatsapp.net", &error),
             "an audio message from you in 1555@s.whatsapp.net: download from WhatsApp: media expired"
         );
+    }
+
+    fn broadcast_info(from_me: bool, recipients: &[&str]) -> MessageInfo {
+        let mut info = info(None);
+        info.source.chat = "1700000000@broadcast".parse().unwrap();
+        info.source.sender = "8888:3@lid".parse().unwrap();
+        info.source.is_from_me = from_me;
+        info.bcl_participants = recipients.iter().map(|jid| jid.parse().unwrap()).collect();
+        info
+    }
+
+    fn chats(copies: &[MessageInfo]) -> Vec<String> {
+        copies
+            .iter()
+            .map(|copy| copy.source.chat.to_string())
+            .collect()
+    }
+
+    #[test]
+    fn a_broadcast_to_the_owner_goes_to_the_senders_dm() {
+        let (copies, broadcast) = broadcast_copies(&broadcast_info(false, &[]));
+        assert!(broadcast);
+        assert_eq!(chats(&copies), ["8888@lid"]);
+        assert!(!copies[0].source.is_group);
+    }
+
+    #[test]
+    fn the_owners_broadcast_goes_to_each_recipients_dm() {
+        let sent = broadcast_info(true, &["111@lid", "222@s.whatsapp.net", "111:2@lid"]);
+        let (copies, broadcast) = broadcast_copies(&sent);
+        assert!(broadcast);
+        assert_eq!(chats(&copies), ["111@lid", "222@s.whatsapp.net"]);
+        assert!(copies.iter().all(|copy| copy.bcl_participants.is_empty()));
+        // WhatsApp naming nobody places it nowhere.
+        assert!(broadcast_copies(&broadcast_info(true, &[])).0.is_empty());
+    }
+
+    #[test]
+    fn anything_else_is_itself() {
+        let (copies, broadcast) = broadcast_copies(&info(None));
+        assert!(!broadcast);
+        assert_eq!(chats(&copies), ["1555@s.whatsapp.net"]);
     }
 }

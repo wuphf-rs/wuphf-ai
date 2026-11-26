@@ -108,9 +108,8 @@ group in it, including ones added later.
 
 Broadcast lists (plan 085): a broadcast someone sent you shows in their
 DM's topic, tagged `[broadcast]` after their name. Your own broadcast from
-the phone shows in the DM topic of each person it went to (`whatsapp-rust`
-cannot tell who, so it skips them). Nothing is ever sent to a broadcast
-list.
+the phone shows in the DM topic of each person it went to. Nothing is ever
+sent to a broadcast list.
 
 ### `[[connectors]]`: who may connect
 

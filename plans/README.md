@@ -2154,8 +2154,10 @@ From the 2026-10-22 remote-functions design:
     `GetNewsletterMessageUpdates(since)`, 100 posts per reading.
   - Deviations:
     - **whatsapp-rust** mirrors channels, communities and broadcasts but
-      posts to no channel and reads no counts (as with stories). It skips
-      the owner's own phone broadcasts: it does not name their recipients.
+      posts to no channel and reads no counts (as with stories). Its own
+      phone broadcasts first went nowhere (it was thought not to name the
+      recipients); fixed after the live test: they come from the stanza's
+      `<participants>` (`MessageInfo.bcl_participants`).
     - **No footer on a post written from Telegram**: its Telegram copy is
       the owner's own message, which the bridge does not edit.
     - `RefreshReactions` carries no `request_id` (decision 11 had one):
