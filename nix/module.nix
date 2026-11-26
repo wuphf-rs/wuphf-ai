@@ -7,6 +7,11 @@
 # entry and the connector's own connector_id, core_address, token variable
 # and the flags both sides must agree on. Its token lives in its own env file
 # only; the core reads every connector's and provider's.
+#
+# Parts can run on several machines: the core's host describes a connector or
+# provider that runs elsewhere with `remote = true` (the core gets its entry,
+# no unit starts), and the other host describes the same id with the core off
+# and `coreAddress` pointing at it (core.firewallInterfaces lets it in).
 packages:
 {
   config,
@@ -99,6 +104,33 @@ let
   secretFile =
     id: if cfg.secretsDirectory == null then null else "${cfg.secretsDirectory}/wuphf-${id}.env";
 
+  # The port of a `host:port` address (`0.0.0.0:50051`, `[::]:50051`).
+  portOf = address: lib.toInt (lib.last (lib.splitString ":" address));
+
+  # Whether only this machine can reach an address.
+  isLoopback =
+    address:
+    lib.any (prefix: lib.hasPrefix prefix address) [
+      "127."
+      "localhost:"
+      "[::1]:"
+    ];
+
+  # A connector or provider that runs on another machine.
+  remoteOption =
+    kind:
+    mkOption {
+      type = types.bool;
+      default = false;
+      description = ''
+        It runs on another machine, which describes the same ${kind} (same
+        id) with `core.enable = false` and `coreAddress` set to this core.
+        Here the core still gets its entry and reads its tokens from
+        `environmentFile` (the same values as on that machine), but no unit
+        is started.
+      '';
+    };
+
   # The options every unit has: its package, its config (as Nix, or a file)
   # and its env file (by default in secretsDirectory, when the unit has
   # secrets of its own).
@@ -159,6 +191,7 @@ let
           default = true;
           description = "Whether to run this connector.";
         };
+        remote = remoteOption "connector";
         type = mkOption {
           type = types.enum (lib.attrNames connectorTypes);
           description = "The connector's kind.";
@@ -233,6 +266,7 @@ let
           default = true;
           description = "Whether to run this provider.";
         };
+        remote = remoteOption "provider";
         type = mkOption {
           type = types.enum (lib.attrNames providerTypes);
           description = "The provider's kind.";
@@ -265,8 +299,12 @@ let
     }
   );
 
+  # What the core knows of (every enabled one, here or remote); `local` keeps
+  # those that run on this machine.
   connectors = lib.filterAttrs (_: connector: connector.enable) cfg.connectors;
   providers = lib.filterAttrs (_: provider: provider.enable) cfg.providers;
+  local = lib.filterAttrs (_: part: !part.remote);
+  remotes = lib.attrNames (lib.filterAttrs (_: part: part.remote) (connectors // providers));
 
   # Every running unit: its binary, arguments, env files and how it stops
   # (the connectors and providers save their sessions on SIGINT).
@@ -290,14 +328,14 @@ let
       inherit (connector) package configFile;
       binary = connectorTypes.${connector.type}.binary;
       environmentFiles = [ connector.environmentFile ];
-    }) connectors
+    }) (local connectors)
     // lib.mapAttrs (id: provider: {
       description = "wuphf ${providerTypes.${provider.type}.description} (${id})";
       inherit (provider) package configFile;
       binary = providerTypes.${provider.type}.binary;
       environmentFiles = [ provider.environmentFile ];
       writeExecute = providerTypes.${provider.type}.writeExecute or false;
-    }) providers
+    }) (local providers)
     // lib.optionalAttrs cfg.misc.enable {
       misc = {
         description = "wuphf features (wuphf-misc)";
@@ -451,7 +489,26 @@ in
       listen = mkOption {
         type = types.str;
         default = "127.0.0.1:50051";
-        description = "The address the core listens on.";
+        example = "0.0.0.0:50051";
+        description = ''
+          The address the core listens on. For connectors on other machines,
+          listen beyond loopback (`0.0.0.0:50051`) and open the port with
+          `firewallInterfaces`. Then give the core an observer token (its env
+          file's `WUPHF_CORE_OBSERVER_TOKEN`), or the observer is open to
+          whatever reaches the port; `functions.invoke_token_env` likewise
+          guards the function service.
+        '';
+      };
+      firewallInterfaces = mkOption {
+        type = types.listOf types.str;
+        default = [ ];
+        example = [ "tailscale0" ];
+        description = ''
+          The network interfaces on which the firewall lets in the port of
+          `listen`, for connectors and providers on other machines (over
+          Tailscale: `tailscale0`). They present their tokens, but the gRPC
+          is not encrypted: use an interface that is (a VPN).
+        '';
       };
     }
     // unitOptions {
@@ -519,10 +576,28 @@ in
         message = "services.wuphf.connectors: ${lib.concatStringsSep ", " badFunctions} cannot serve functions (only instagram does).";
       }
       {
+        assertion = remotes == [ ] || cfg.core.enable;
+        message = "services.wuphf: ${lib.concatStringsSep ", " remotes} is remote, which only means something on the core's machine (here services.wuphf.core is off). On the machine that runs it, leave remote off and set coreAddress.";
+      }
+      {
+        assertion = cfg.core.firewallInterfaces == [ ] || !isLoopback cfg.core.listen;
+        message = "services.wuphf.core.firewallInterfaces: the core listens on ${cfg.core.listen}, which other machines cannot reach; listen on 0.0.0.0:${toString (portOf cfg.core.listen)} (or this machine's address on that interface).";
+      }
+      {
         assertion = clashes == [ ];
         message = "services.wuphf: ${lib.concatStringsSep ", " clashes} names two units (ids are unique across connectors and providers, and core and misc are taken).";
       }
     ];
+
+    warnings =
+      lib.optional (!cfg.core.enable && isLoopback cfg.coreAddress)
+        "services.wuphf: the core is off on this machine, but coreAddress is ${cfg.coreAddress}; set it to the core's machine (its Tailscale name, e.g. `core-host:50051`) unless a core runs here outside the module.";
+
+    networking.firewall.interfaces = mkIf cfg.core.enable (
+      lib.genAttrs cfg.core.firewallInterfaces (_: {
+        allowedTCPPorts = [ (portOf cfg.core.listen) ];
+      })
+    );
 
     users.users = mkIf (cfg.user == "wuphf") {
       wuphf = {

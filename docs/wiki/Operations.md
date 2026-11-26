@@ -108,6 +108,46 @@ units:
 - Each unit is `wuphf-<id>` (`wuphf-core`, `wuphf-whatsapp-jio`, …), with its
   state in `/var/lib/wuphf/<id>`. Relative paths in its settings resolve
   there.
+- **Across machines** (a connector on a Raspberry Pi, the rest on a
+  server, over Tailscale): describe the connector on both, with the same id
+  and the same tokens in its env file on each.
+
+  ```nix
+  # The core's machine: everything else, and the core open on the tailnet.
+  services.wuphf = {
+    core = {
+      enable = true;
+      listen = "0.0.0.0:50051";
+      firewallInterfaces = [ "tailscale0" ];
+    };
+    connectors.instagram-main = {
+      type = "instagram";
+      functions = [ "instagram.fetch_media" ];
+      remote = true;   # the core gets its entries; no unit runs here
+    };
+  };
+
+  # The Pi: the connector alone, dialling the core by its Tailscale name.
+  services.wuphf = {
+    coreAddress = "server:50051";
+    connectors.instagram-main = {
+      type = "instagram";
+      functions = [ "instagram.fetch_media" ];
+      settings = { /* its config, as on one machine */ };
+    };
+  };
+  ```
+
+  The core reads the remote connector's `wuphf-<id>.env` for its tokens
+  (`WUPHF_CONNECTOR_<ID>_TOKEN`, and `WUPHF_PROVIDER_<ID>_TOKEN` with
+  `functions`); the Pi's copy holds the same values. Providers take `remote`
+  too. The gRPC is plaintext with bearer tokens, so keep it on the VPN
+  (`firewallInterfaces` opens the port only there). Once the core listens
+  beyond loopback, give it an observer token (`WUPHF_CORE_OBSERVER_TOKEN`)
+  and consider `functions.invoke_token_env`, which every function caller
+  (Telegram's `functions_token_env`) must then present. The module refuses `remote` where the core is off, and a
+  `firewallInterfaces` for a loopback `listen`; it warns when the core is
+  off and `coreAddress` is still local.
 - First logins: stop the unit, then run its binary's `setup` (Link account),
   or run it once by hand as `wuphf` in its state directory, as the
   [systemd guide](../../deploy/systemd/README.md#first-login) shows.

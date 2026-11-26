@@ -46,10 +46,14 @@
 
       # The module in a whole NixOS system: its units are built, so a broken
       # option or unit fails here.
-      checks = nixpkgs.lib.genAttrs linuxSystems (system: {
-        nixos-module =
-          let
-            machine = nixpkgs.lib.nixosSystem {
+      checks = nixpkgs.lib.genAttrs linuxSystems (
+        system:
+        let
+          inherit (nixpkgs) lib;
+          # A container system with services.wuphf set to `wuphf`.
+          machine =
+            wuphf:
+            nixpkgs.lib.nixosSystem {
               inherit system;
               modules = [
                 self.nixosModules.default
@@ -58,41 +62,58 @@
                   system.stateVersion = "25.05";
                   services.wuphf = {
                     secretsDirectory = "/run/secrets";
-                    core.enable = true;
-                    connectors = {
-                      telegram-main = {
-                        type = "telegram";
-                        threads = true;
-                        topicCreate = true;
-                        ownerIds = [ "704338780" ];
-                      };
-                      # Two copies of one kind.
-                      whatsapp-jio = {
-                        type = "whatsapp-rust";
-                        disappearingTimers = true;
-                      };
-                      whatsapp-airtel = {
-                        type = "whatsapp-rust";
-                        disappearingTimers = true;
-                      };
-                      instagram-main = {
-                        type = "instagram";
-                        functions = [ "instagram.fetch_media" ];
-                      };
-                    };
-                    providers.mediaconv.type = "mediaconv";
-                    misc.enable = true;
-                  };
+                  }
+                  // wuphf;
                 }
               ];
             };
-            units = machine.config.systemd.units;
-          in
-          nixpkgs.legacyPackages.${system}.linkFarm "wuphf-nixos-module" (
-            map
-              (name: {
-                inherit name;
-                path = units.${name}.unit;
+          # Its units, by name, as a store tree; a missing one fails. Its
+          # failed assertions fail too, as a rebuild would.
+          unitFiles =
+            name: system': units:
+            let
+              failed = lib.filter (assertion: !assertion.assertion) system'.config.assertions;
+              all = system'.config.systemd.units;
+            in
+            assert lib.assertMsg (failed == [ ]) (lib.concatMapStringsSep "\n" (a: a.message) failed);
+            nixpkgs.legacyPackages.${system}.linkFarm name (
+              map (unit: {
+                name = unit;
+                path = all.${unit}.unit;
+              }) units
+            );
+          instagram = {
+            type = "instagram";
+            threads = true;
+            topicCreate = true;
+            functions = [ "instagram.fetch_media" ];
+          };
+        in
+        {
+          nixos-module =
+            unitFiles "wuphf-nixos-module"
+              (machine {
+                core.enable = true;
+                connectors = {
+                  telegram-main = {
+                    type = "telegram";
+                    threads = true;
+                    topicCreate = true;
+                    ownerIds = [ "704338780" ];
+                  };
+                  # Two copies of one kind.
+                  whatsapp-jio = {
+                    type = "whatsapp-rust";
+                    disappearingTimers = true;
+                  };
+                  whatsapp-airtel = {
+                    type = "whatsapp-rust";
+                    disappearingTimers = true;
+                  };
+                  instagram-main = instagram;
+                };
+                providers.mediaconv.type = "mediaconv";
+                misc.enable = true;
               })
               [
                 "wuphf-core.service"
@@ -102,9 +123,71 @@
                 "wuphf-instagram-main.service"
                 "wuphf-mediaconv.service"
                 "wuphf-misc.service"
-              ]
-          );
-      });
+              ];
+
+          # Two machines over a VPN: the core's runs everything but Instagram,
+          # which the other runs against it.
+          nixos-module-split =
+            let
+              coreHost = machine {
+                core = {
+                  enable = true;
+                  listen = "0.0.0.0:50051";
+                  firewallInterfaces = [ "tailscale0" ];
+                };
+                connectors = {
+                  telegram-main = {
+                    type = "telegram";
+                    threads = true;
+                    topicCreate = true;
+                  };
+                  instagram-main = instagram // {
+                    remote = true;
+                  };
+                };
+                misc.enable = true;
+              };
+              instagramHost = machine {
+                coreAddress = "core-host:50051";
+                connectors.instagram-main = instagram;
+              };
+              core = coreHost.config.services.wuphf.core.settings;
+              coreUnits = coreHost.config.systemd.units;
+              instagramUnits = instagramHost.config.systemd.units;
+              coreService = coreHost.config.systemd.services.wuphf-core.serviceConfig;
+            in
+            assert lib.assertMsg (
+              lib.elem "instagram-main" (map (c: c.id) core.connectors)
+              && lib.elem "instagram-main" (map (p: p.id) core.functions.providers)
+            ) "the core's host lost the remote connector's [[connectors]] or [[functions.providers]] entry";
+            assert lib.assertMsg (lib.elem "/run/secrets/wuphf-instagram-main.env" coreService.EnvironmentFile)
+              "the core does not read the remote connector's tokens";
+            assert lib.assertMsg (
+              !(coreUnits ? "wuphf-instagram-main.service")
+            ) "the core's host runs the remote connector";
+            assert lib.assertMsg (
+              coreHost.config.networking.firewall.interfaces.tailscale0.allowedTCPPorts == [ 50051 ]
+            ) "the core's port is not open on tailscale0";
+            assert lib.assertMsg (
+              !(instagramUnits ? "wuphf-core.service") && !(instagramUnits ? "wuphf-misc.service")
+            ) "the Instagram host runs more than Instagram";
+            assert lib.assertMsg (
+              instagramHost.config.services.wuphf.connectors.instagram-main.settings.core_address
+              == "core-host:50051"
+            ) "the Instagram connector does not dial the core's host";
+            nixpkgs.legacyPackages.${system}.symlinkJoin {
+              name = "wuphf-nixos-module-split";
+              paths = [
+                (unitFiles "core-host" coreHost [
+                  "wuphf-core.service"
+                  "wuphf-telegram-main.service"
+                  "wuphf-misc.service"
+                ])
+                (unitFiles "instagram-host" instagramHost [ "wuphf-instagram-main.service" ])
+              ];
+            };
+        }
+      );
 
       overlays.default = final: _: {
         wuphf-packages = final.callPackage ./nix/packages.nix { };
